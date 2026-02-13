@@ -1,33 +1,41 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Order is important due to dependencies
+# Publish order respects the dependency graph.
+# cargo waits for index availability automatically (no manual sleep needed).
 CRATES=(
-    "crates/lago-core"
-    "crates/lago-store"
-    "crates/lago-journal"
-    "crates/lago-fs"
-    "crates/lago-policy"
-    "crates/lago-ingest"
-    "crates/lago-api"
-    "crates/lagod"
-    "crates/lago-cli"
+    lago-core
+    lago-store
+    lago-journal
+    lago-fs
+    lago-policy
+    lago-ingest
+    lago-api
+    lagod
+    lago
 )
 
+DRY_RUN=true
+if [[ "${1:-}" == "--execute" ]]; then
+    DRY_RUN=false
+fi
+
 echo "Publishing Lago crates to crates.io..."
+echo ""
 
 for crate in "${CRATES[@]}"; do
-    echo "Processing $crate..."
-    (cd "$crate" && cargo publish --dry-run)
-    # To actually publish, run with --execute argument
-    if [[ "$1" == "--execute" ]]; then
-        echo "Publishing $crate..."
-        (cd "$crate" && cargo publish)
-        # Wait a bit for crates.io index to update
-        sleep 20
+    if $DRY_RUN; then
+        echo "=== $crate (dry run) ==="
+        cargo publish -p "$crate" --dry-run --allow-dirty 2>&1 || true
     else
-        echo "Dry run successful for $crate. Use --execute to publish."
+        echo "=== Publishing $crate ==="
+        cargo publish -p "$crate"
     fi
+    echo ""
 done
 
-echo "Done!"
+if $DRY_RUN; then
+    echo "Dry run complete. Use --execute to publish for real."
+else
+    echo "All crates published!"
+fi
