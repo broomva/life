@@ -1,40 +1,30 @@
-# Lago - Unified Agent Persistence Layer
+# Lago - Event-Sourced Agent Persistence Layer
 
-## Project Overview
-Lago is the canonical storage and transport backbone for long-lived AI agents.
-All agent state changes (tool use, file writes, messages, memory) are consolidated
-into a single event-sourced, versioned system with streaming I/O.
+Event-sourced storage backbone for long-lived AI agents. All state changes
+(tool use, file writes, messages, memory) flow through an append-only journal.
 
-## Technology
-- **Language**: Rust (edition 2024)
-- **Storage**: redb v2 (embedded, ACID, pure Rust)
-- **gRPC**: tonic + prost
-- **HTTP/SSE**: axum + tower
-- **IDs**: ULID (time-sortable)
-- **Compression**: zstd for blob storage
-- **Hashing**: SHA-256 for content addressing
-
-## Build Commands
+## Build & Verify
 ```bash
-cargo build --workspace          # Build everything
-cargo test --workspace           # Run all tests
-cargo clippy --workspace         # Lint
-cargo fmt --check                # Format check
+cargo fmt && cargo clippy --workspace && cargo test --workspace
 ```
 
-## Workspace Layout
-- `crates/lago-core` - Foundation types, traits, errors (zero deps)
-- `crates/lago-journal` - Event journal (redb-backed)
-- `crates/lago-store` - Content-addressed blob storage
-- `crates/lago-fs` - Filesystem manifest + branching
-- `crates/lago-ingest` - gRPC streaming ingest
-- `crates/lago-api` - HTTP REST + SSE streaming
-- `crates/lago-policy` - Policy engine + security
-- `crates/lago-cli` - CLI tool
-- `crates/lagod` - Daemon binary
+## Stack
+Rust 2024 | redb v2 | tonic+prost (gRPC) | axum (HTTP/SSE) | ULID | SHA-256+zstd
 
-## Key Patterns
-- Event sourcing: all state derived from append-only event journal
-- Content-addressed blobs: SHA-256 hash as key, zstd compressed
-- SSE format trait: OpenAI, Anthropic, Vercel AI SDK compatibility
-- Policy engine: rule-based tool governance with RBAC
+## Crates
+- `lago-core` - Types, traits, errors (zero external deps)
+- `lago-journal` - Event journal (redb). Use `spawn_blocking` for all redb ops.
+- `lago-store` - Content-addressed blob storage (SHA-256 + zstd)
+- `lago-fs` - Filesystem manifest, branching, diffs
+- `lago-ingest` - gRPC streaming ingest (protobuf on wire, JSON in storage)
+- `lago-api` - REST + SSE (OpenAI/Anthropic/Vercel/Lago format adapters)
+- `lago-policy` - RBAC + rule-based tool governance (TOML config)
+- `lago-cli` / `lagod` - CLI and daemon binaries
+
+## Critical Patterns
+- Journal trait uses `BoxFuture` for dyn-compatibility (`Arc<dyn Journal>`)
+- Event compound key: session(26B) + branch(26B) + seq(8B BE) = 60 bytes
+- `use redb::ReadableTable` required for `.get()`, `.iter()`, `.range()`
+
+## Rules
+See `.claude/rules/` for detailed conventions: @.claude/rules/

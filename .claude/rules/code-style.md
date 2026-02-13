@@ -2,7 +2,7 @@
 
 ## Language & Runtime
 
-- **Rust 2021 Edition** — All code must target the 2021 edition.
+- **Rust 2024 Edition** — All code targets the 2024 edition (`rust-version = "1.85"`).
 - **Strict Clippy** — Address all clippy warnings.
 - **Safe Rust** — Avoid `unsafe` unless absolutely necessary (optimize hot paths, FFI).
 

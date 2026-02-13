@@ -5,8 +5,9 @@
 **`cargo test`** is the standard test runner.
 
 ```bash
-cargo test                  # Run all tests
-cargo test -p arcan-core    # Run specific crate tests
+cargo test --workspace          # Run all tests
+cargo test -p lago-core         # Run specific crate tests
+cargo test -p lago-journal      # Run journal tests
 ```
 
 ## Test Structure
@@ -28,11 +29,13 @@ cargo test -p arcan-core    # Run specific crate tests
 
 ## Mocking
 
-- Use traits (`Provider`, `ToolUser`) to allow dependency injection.
-- Implement mocks manually or use a crate like `mockall` if needed (currently manual mocks are preferred for simplicity).
+- Use traits (`Journal`, `SseFormat`) to allow dependency injection.
+- Implement mocks manually (preferred for simplicity over `mockall`).
+- Use `tokio::test` for async tests.
 
 ## Coverage Requirements
 
 - All new features require tests.
-- Core logic in `arcan-core` and `arcan-harness` must be well-tested.
-- Run `cargo test` before committing.
+- Core logic in `lago-core`, `lago-journal`, and `lago-store` must be well-tested.
+- Run `cargo test --workspace` before committing.
+- Use `#[tokio::test]` for async tests involving redb or network I/O.

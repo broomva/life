@@ -15,6 +15,7 @@ include = ["src/**/*", "proto/**/*", "build.rs", "Cargo.toml", "LICENSE"]
 lago-core.workspace = true
 lago-journal.workspace = true
 tonic.workspace = true
+tonic-prost.workspace = true
 prost.workspace = true
 prost-types.workspace = true
 tokio.workspace = true
@@ -26,3 +27,4 @@ serde_json.workspace = true
 
 [build-dependencies]
 tonic-build.workspace = true
+tonic-prost-build.workspace = true

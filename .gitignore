@@ -6,3 +6,6 @@
 *.db
 *.db.lock
 lago-data/
+
+# Claude Code local settings (personal, not shared)
+.claude/settings.local.json
