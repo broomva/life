@@ -1,0 +1,66 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/lago-core",
+    "crates/lago-journal",
+    "crates/lago-store",
+    "crates/lago-fs",
+    "crates/lago-ingest",
+    "crates/lago-api",
+    "crates/lago-policy",
+    "crates/lago-cli",
+    "crates/lagod",
+]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+description = "Lago — event-sourced agent runtime"
+repository = "https://github.com/broomva.tech/lago"
+authors = ["Broomva Tech <contact@broomva.tech>"]
+license = "MIT"
+
+[workspace.dependencies]
+# Core
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ulid = { version = "1", features = ["serde"] }
+sha2 = "0.10"
+thiserror = "2"
+
+# Storage
+redb = "2"
+zstd = "0.13"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = "0.3"
+
+# gRPC
+tonic = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+tonic-build = "0.12"
+
+# HTTP
+axum = { version = "0.8", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+toml = "0.8"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Internal crates
+lago-core = { path = "crates/lago-core" }
+lago-journal = { path = "crates/lago-journal" }
+lago-store = { path = "crates/lago-store" }
+lago-fs = { path = "crates/lago-fs" }
+lago-ingest = { path = "crates/lago-ingest" }
+lago-api = { path = "crates/lago-api" }
+lago-policy = { path = "crates/lago-policy" }

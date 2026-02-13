@@ -1,0 +1,255 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use axum::body::Bytes;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::Json;
+use serde::Serialize;
+
+use lago_core::event::{EventEnvelope, EventPayload};
+use lago_core::id::{BranchId, EventId, SessionId};
+use lago_core::{EventQuery, ManifestEntry};
+
+use crate::error::ApiError;
+use crate::state::AppState;
+
+// --- Response types
+
+#[derive(Serialize)]
+pub struct FileWriteResponse {
+    pub path: String,
+    pub blob_hash: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Serialize)]
+pub struct ManifestResponse {
+    pub session_id: String,
+    pub entries: Vec<ManifestEntry>,
+}
+
+// --- Handlers
+
+/// GET /v1/sessions/:id/files/*path
+///
+/// Reads a file from the session's virtual filesystem by replaying the
+/// manifest from journal events and fetching the blob from the store.
+pub async fn read_file(
+    State(state): State<Arc<AppState>>,
+    Path((session_id, file_path)): Path<(String, String)>,
+) -> Result<axum::http::Response<axum::body::Body>, ApiError> {
+    let session_id = SessionId::from_string(session_id.clone());
+    let file_path = normalize_path(&file_path);
+
+    // Verify session exists
+    state
+        .journal
+        .get_session(&session_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("session not found: {session_id}")))?;
+
+    // Build manifest from events
+    let manifest = build_manifest(&state, &session_id).await?;
+
+    let entry = manifest
+        .iter()
+        .find(|e| e.path == file_path)
+        .ok_or_else(|| ApiError::NotFound(format!("file not found: {file_path}")))?;
+
+    let data = state.blob_store.get(&entry.blob_hash).map_err(|e| {
+        ApiError::Internal(format!("failed to read blob: {e}"))
+    })?;
+
+    let content_type = entry
+        .content_type
+        .clone()
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+
+    Ok(axum::http::Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", content_type)
+        .header("x-blob-hash", entry.blob_hash.as_str())
+        .body(axum::body::Body::from(data))
+        .unwrap())
+}
+
+/// PUT /v1/sessions/:id/files/*path
+///
+/// Writes a file to the session's virtual filesystem. The file contents are
+/// stored as a blob and a `FileWrite` event is appended to the journal.
+pub async fn write_file(
+    State(state): State<Arc<AppState>>,
+    Path((session_id, file_path)): Path<(String, String)>,
+    body: Bytes,
+) -> Result<(StatusCode, Json<FileWriteResponse>), ApiError> {
+    let session_id = SessionId::from_string(session_id.clone());
+    let file_path = normalize_path(&file_path);
+
+    // Verify session exists
+    state
+        .journal
+        .get_session(&session_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("session not found: {session_id}")))?;
+
+    // Store the blob
+    let blob_hash = state.blob_store.put(&body).map_err(|e| {
+        ApiError::Internal(format!("failed to store blob: {e}"))
+    })?;
+
+    let size_bytes = body.len() as u64;
+    let branch_id = BranchId::from_string("main");
+
+    // Emit a FileWrite event
+    let event = EventEnvelope {
+        event_id: EventId::new(),
+        session_id: session_id.clone(),
+        branch_id,
+        run_id: None,
+        seq: 0, // Will be assigned by the journal
+        timestamp: EventEnvelope::now_micros(),
+        parent_id: None,
+        payload: EventPayload::FileWrite {
+            path: file_path.clone(),
+            blob_hash: blob_hash.clone(),
+            size_bytes,
+            content_type: None,
+        },
+        metadata: HashMap::new(),
+    };
+
+    state.journal.append(event).await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(FileWriteResponse {
+            path: file_path,
+            blob_hash: blob_hash.to_string(),
+            size_bytes,
+        }),
+    ))
+}
+
+/// DELETE /v1/sessions/:id/files/*path
+///
+/// Removes a file from the session's virtual filesystem by appending a
+/// `FileDelete` event.
+pub async fn delete_file(
+    State(state): State<Arc<AppState>>,
+    Path((session_id, file_path)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    let session_id = SessionId::from_string(session_id.clone());
+    let file_path = normalize_path(&file_path);
+
+    // Verify session exists
+    state
+        .journal
+        .get_session(&session_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("session not found: {session_id}")))?;
+
+    let branch_id = BranchId::from_string("main");
+
+    let event = EventEnvelope {
+        event_id: EventId::new(),
+        session_id: session_id.clone(),
+        branch_id,
+        run_id: None,
+        seq: 0,
+        timestamp: EventEnvelope::now_micros(),
+        parent_id: None,
+        payload: EventPayload::FileDelete {
+            path: file_path.clone(),
+        },
+        metadata: HashMap::new(),
+    };
+
+    state.journal.append(event).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// GET /v1/sessions/:id/manifest
+///
+/// Returns the full manifest (list of all files) for a session by replaying
+/// file events from the journal.
+pub async fn get_manifest(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+) -> Result<Json<ManifestResponse>, ApiError> {
+    let session_id = SessionId::from_string(session_id.clone());
+
+    // Verify session exists
+    state
+        .journal
+        .get_session(&session_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("session not found: {session_id}")))?;
+
+    let entries = build_manifest(&state, &session_id).await?;
+
+    Ok(Json(ManifestResponse {
+        session_id: session_id.to_string(),
+        entries,
+    }))
+}
+
+// --- Internal helpers
+
+/// Build a manifest by replaying file events from the journal.
+async fn build_manifest(
+    state: &Arc<AppState>,
+    session_id: &SessionId,
+) -> Result<Vec<ManifestEntry>, ApiError> {
+    let query = EventQuery::new().session(session_id.clone());
+    let events = state.journal.read(query).await?;
+
+    let mut manifest = lago_fs::Manifest::new();
+
+    for event in &events {
+        match &event.payload {
+            EventPayload::FileWrite {
+                path,
+                blob_hash,
+                size_bytes,
+                content_type,
+            } => {
+                manifest.apply_write(
+                    path.clone(),
+                    blob_hash.clone(),
+                    *size_bytes,
+                    content_type.clone(),
+                    event.timestamp,
+                );
+            }
+            EventPayload::FileDelete { path } => {
+                manifest.apply_delete(path);
+            }
+            EventPayload::FileRename {
+                old_path,
+                new_path,
+            } => {
+                manifest.apply_rename(old_path, new_path.clone());
+            }
+            _ => {}
+        }
+    }
+
+    let entries: Vec<ManifestEntry> = manifest
+        .entries()
+        .values()
+        .cloned()
+        .collect();
+
+    Ok(entries)
+}
+
+/// Ensure the path starts with '/' for consistency.
+fn normalize_path(path: &str) -> String {
+    if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    }
+}

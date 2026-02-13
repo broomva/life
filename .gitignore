@@ -1,0 +1,8 @@
+/target
+*.swp
+*.swo
+*~
+.DS_Store
+*.db
+*.db.lock
+lago-data/
