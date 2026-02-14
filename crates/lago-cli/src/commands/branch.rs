@@ -45,6 +45,7 @@ pub async fn create(
             name: name.to_string(),
         },
         metadata: std::collections::HashMap::new(),
+        schema_version: 1,
     };
 
     journal.append(event).await?;

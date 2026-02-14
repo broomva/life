@@ -12,6 +12,9 @@ message EventEnvelope {
   optional string parent_id = 7;
   string payload_json = 8;
   map<string, string> metadata = 9;
+  uint32 schema_version = 10;
+  // Reserved for future expansion
+  reserved 11 to 20;
 }
 
 message SessionConfig {

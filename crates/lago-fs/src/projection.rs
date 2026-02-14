@@ -114,6 +114,7 @@ mod tests {
             parent_id: None,
             payload,
             metadata: std::collections::HashMap::new(),
+            schema_version: 1,
         }
     }
 

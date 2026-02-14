@@ -89,6 +89,7 @@ pub async fn create_session(
             config: serde_json::to_value(&config).unwrap_or_default(),
         },
         metadata: HashMap::new(),
+        schema_version: 1,
     };
 
     state.journal.append(event).await?;

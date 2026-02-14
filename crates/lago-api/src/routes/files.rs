@@ -172,6 +172,7 @@ pub async fn patch_file(
             content_type: None,
         },
         metadata: HashMap::new(),
+        schema_version: 1,
     };
 
     state.journal.append(event).await?;
@@ -231,6 +232,7 @@ pub async fn write_file(
             content_type: None,
         },
         metadata: HashMap::new(),
+        schema_version: 1,
     };
 
     state.journal.append(event).await?;
@@ -278,6 +280,7 @@ pub async fn delete_file(
             path: file_path.clone(),
         },
         metadata: HashMap::new(),
+        schema_version: 1,
     };
 
     state.journal.append(event).await?;

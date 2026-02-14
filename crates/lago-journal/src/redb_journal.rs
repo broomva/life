@@ -574,6 +574,7 @@ mod tests {
                 token_usage: None,
             },
             metadata: HashMap::new(),
+            schema_version: 1,
         }
     }
 

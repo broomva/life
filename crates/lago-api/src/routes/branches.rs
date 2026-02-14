@@ -71,6 +71,7 @@ pub async fn create_branch(
             name: body.name.clone(),
         },
         metadata: HashMap::new(),
+        schema_version: 1,
     };
 
     state.journal.append(event).await?;

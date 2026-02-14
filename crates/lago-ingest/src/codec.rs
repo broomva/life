@@ -32,6 +32,7 @@ pub fn event_from_proto(proto: proto::EventEnvelope) -> Result<EventEnvelope, se
         parent_id: proto.parent_id.map(EventId::from_string),
         payload,
         metadata: proto.metadata,
+        schema_version: 1,
     })
 }
 
@@ -70,6 +71,7 @@ mod tests {
             parent_id: Some(EventId::from_string("EVT000")),
             payload,
             metadata: HashMap::from([("key".to_string(), "val".to_string())]),
+            schema_version: 1,
         }
     }
 
@@ -230,6 +232,7 @@ mod tests {
                 path: "/tmp/x".to_string(),
             },
             metadata: HashMap::new(),
+            schema_version: 1,
         };
         let proto = event_to_proto(&original);
         assert!(proto.run_id.is_none());

@@ -338,6 +338,10 @@ fn print_event(event: &EventEnvelope) {
             };
             println!("  data:   {preview}");
         }
+        // Forward compatibility: handle future EventPayload variants gracefully
+        _ => {
+            println!("  type:   (unknown event type)");
+        }
     }
 }
 

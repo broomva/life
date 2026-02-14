@@ -18,6 +18,13 @@ pub struct EventEnvelope {
     pub payload: EventPayload,
     #[serde(default)]
     pub metadata: HashMap<String, String>,
+    /// Schema version for forward compatibility. Defaults to 1.
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u8,
+}
+
+fn default_schema_version() -> u8 {
+    1
 }
 
 impl EventEnvelope {
@@ -30,7 +37,12 @@ impl EventEnvelope {
 }
 
 /// Discriminated union of all event types.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Forward-compatible: unknown `"type"` tags deserialize into
+/// `Custom { event_type, data }` instead of failing. This ensures
+/// older bridge code can read events from newer Lago versions.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 #[serde(tag = "type")]
 pub enum EventPayload {
     // --- Session lifecycle
@@ -189,6 +201,383 @@ pub enum EventPayload {
     },
 }
 
+/// Forward-compatible deserializer for EventPayload.
+///
+/// Tries the standard internally-tagged enum deserialization first.
+/// If the `"type"` tag is unknown, captures the raw JSON and stores it
+/// as `Custom { event_type, data }` — no data loss, no panics.
+impl<'de> Deserialize<'de> for EventPayload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = serde_json::Value::deserialize(deserializer)?;
+
+        // Try the standard tagged deserialization via a helper enum
+        // that derives Deserialize normally.
+        match serde_json::from_value::<EventPayloadKnown>(raw.clone()) {
+            Ok(known) => Ok(known.into()),
+            Err(_) => {
+                // Unknown variant — extract the type tag and preserve the rest
+                let event_type = raw
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown")
+                    .to_string();
+
+                // Remove the "type" key from the data to match Custom's shape
+                let mut data = raw;
+                if let Some(obj) = data.as_object_mut() {
+                    obj.remove("type");
+                }
+
+                Ok(EventPayload::Custom { event_type, data })
+            }
+        }
+    }
+}
+
+/// Internal helper enum with derived Deserialize. Mirrors EventPayload
+/// exactly but is private — only used inside the custom deserializer.
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum EventPayloadKnown {
+    SessionCreated {
+        name: String,
+        config: serde_json::Value,
+    },
+    SessionResumed {
+        from_snapshot: Option<SnapshotId>,
+    },
+    Message {
+        role: String,
+        content: String,
+        #[serde(default)]
+        model: Option<String>,
+        #[serde(default)]
+        token_usage: Option<TokenUsage>,
+    },
+    MessageDelta {
+        role: String,
+        delta: String,
+        index: u32,
+    },
+    FileWrite {
+        path: String,
+        blob_hash: BlobHash,
+        size_bytes: u64,
+        #[serde(default)]
+        content_type: Option<String>,
+    },
+    FileDelete {
+        path: String,
+    },
+    FileRename {
+        old_path: String,
+        new_path: String,
+    },
+    ToolInvoke {
+        call_id: String,
+        tool_name: String,
+        arguments: serde_json::Value,
+        #[serde(default)]
+        category: Option<String>,
+    },
+    ToolResult {
+        call_id: String,
+        tool_name: String,
+        result: serde_json::Value,
+        duration_ms: u64,
+        status: SpanStatus,
+    },
+    ApprovalRequested {
+        approval_id: ApprovalId,
+        call_id: String,
+        tool_name: String,
+        arguments: serde_json::Value,
+        risk: RiskLevel,
+    },
+    ApprovalResolved {
+        approval_id: ApprovalId,
+        decision: ApprovalDecision,
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    Snapshot {
+        snapshot_id: SnapshotId,
+        snapshot_type: SnapshotType,
+        covers_through_seq: SeqNo,
+        data_hash: BlobHash,
+    },
+    BranchCreated {
+        new_branch_id: BranchId,
+        fork_point_seq: SeqNo,
+        name: String,
+    },
+    BranchMerged {
+        source_branch_id: BranchId,
+        merge_seq: SeqNo,
+    },
+    PolicyEvaluated {
+        tool_name: String,
+        decision: PolicyDecisionKind,
+        #[serde(default)]
+        rule_id: Option<String>,
+        #[serde(default)]
+        explanation: Option<String>,
+    },
+    RunStarted {
+        provider: String,
+        max_iterations: u32,
+    },
+    RunFinished {
+        reason: String,
+        total_iterations: u32,
+        #[serde(default)]
+        final_answer: Option<String>,
+        #[serde(default)]
+        usage: Option<TokenUsage>,
+    },
+    StepStarted {
+        index: u32,
+    },
+    StepFinished {
+        index: u32,
+        stop_reason: String,
+        directive_count: usize,
+    },
+    StatePatched {
+        index: u32,
+        patch: serde_json::Value,
+        revision: u64,
+    },
+    Error {
+        error: String,
+    },
+    SandboxCreated {
+        sandbox_id: String,
+        tier: SandboxTier,
+        config: SandboxConfig,
+    },
+    SandboxExecuted {
+        sandbox_id: String,
+        command: String,
+        exit_code: i32,
+        duration_ms: u64,
+    },
+    SandboxViolation {
+        sandbox_id: String,
+        violation_type: String,
+        details: String,
+    },
+    SandboxDestroyed {
+        sandbox_id: String,
+    },
+    Custom {
+        event_type: String,
+        data: serde_json::Value,
+    },
+}
+
+impl From<EventPayloadKnown> for EventPayload {
+    fn from(known: EventPayloadKnown) -> Self {
+        match known {
+            EventPayloadKnown::SessionCreated { name, config } => {
+                EventPayload::SessionCreated { name, config }
+            }
+            EventPayloadKnown::SessionResumed { from_snapshot } => {
+                EventPayload::SessionResumed { from_snapshot }
+            }
+            EventPayloadKnown::Message {
+                role,
+                content,
+                model,
+                token_usage,
+            } => EventPayload::Message {
+                role,
+                content,
+                model,
+                token_usage,
+            },
+            EventPayloadKnown::MessageDelta { role, delta, index } => {
+                EventPayload::MessageDelta { role, delta, index }
+            }
+            EventPayloadKnown::FileWrite {
+                path,
+                blob_hash,
+                size_bytes,
+                content_type,
+            } => EventPayload::FileWrite {
+                path,
+                blob_hash,
+                size_bytes,
+                content_type,
+            },
+            EventPayloadKnown::FileDelete { path } => EventPayload::FileDelete { path },
+            EventPayloadKnown::FileRename { old_path, new_path } => {
+                EventPayload::FileRename { old_path, new_path }
+            }
+            EventPayloadKnown::ToolInvoke {
+                call_id,
+                tool_name,
+                arguments,
+                category,
+            } => EventPayload::ToolInvoke {
+                call_id,
+                tool_name,
+                arguments,
+                category,
+            },
+            EventPayloadKnown::ToolResult {
+                call_id,
+                tool_name,
+                result,
+                duration_ms,
+                status,
+            } => EventPayload::ToolResult {
+                call_id,
+                tool_name,
+                result,
+                duration_ms,
+                status,
+            },
+            EventPayloadKnown::ApprovalRequested {
+                approval_id,
+                call_id,
+                tool_name,
+                arguments,
+                risk,
+            } => EventPayload::ApprovalRequested {
+                approval_id,
+                call_id,
+                tool_name,
+                arguments,
+                risk,
+            },
+            EventPayloadKnown::ApprovalResolved {
+                approval_id,
+                decision,
+                reason,
+            } => EventPayload::ApprovalResolved {
+                approval_id,
+                decision,
+                reason,
+            },
+            EventPayloadKnown::Snapshot {
+                snapshot_id,
+                snapshot_type,
+                covers_through_seq,
+                data_hash,
+            } => EventPayload::Snapshot {
+                snapshot_id,
+                snapshot_type,
+                covers_through_seq,
+                data_hash,
+            },
+            EventPayloadKnown::BranchCreated {
+                new_branch_id,
+                fork_point_seq,
+                name,
+            } => EventPayload::BranchCreated {
+                new_branch_id,
+                fork_point_seq,
+                name,
+            },
+            EventPayloadKnown::BranchMerged {
+                source_branch_id,
+                merge_seq,
+            } => EventPayload::BranchMerged {
+                source_branch_id,
+                merge_seq,
+            },
+            EventPayloadKnown::PolicyEvaluated {
+                tool_name,
+                decision,
+                rule_id,
+                explanation,
+            } => EventPayload::PolicyEvaluated {
+                tool_name,
+                decision,
+                rule_id,
+                explanation,
+            },
+            EventPayloadKnown::RunStarted {
+                provider,
+                max_iterations,
+            } => EventPayload::RunStarted {
+                provider,
+                max_iterations,
+            },
+            EventPayloadKnown::RunFinished {
+                reason,
+                total_iterations,
+                final_answer,
+                usage,
+            } => EventPayload::RunFinished {
+                reason,
+                total_iterations,
+                final_answer,
+                usage,
+            },
+            EventPayloadKnown::StepStarted { index } => EventPayload::StepStarted { index },
+            EventPayloadKnown::StepFinished {
+                index,
+                stop_reason,
+                directive_count,
+            } => EventPayload::StepFinished {
+                index,
+                stop_reason,
+                directive_count,
+            },
+            EventPayloadKnown::StatePatched {
+                index,
+                patch,
+                revision,
+            } => EventPayload::StatePatched {
+                index,
+                patch,
+                revision,
+            },
+            EventPayloadKnown::Error { error } => EventPayload::Error { error },
+            EventPayloadKnown::SandboxCreated {
+                sandbox_id,
+                tier,
+                config,
+            } => EventPayload::SandboxCreated {
+                sandbox_id,
+                tier,
+                config,
+            },
+            EventPayloadKnown::SandboxExecuted {
+                sandbox_id,
+                command,
+                exit_code,
+                duration_ms,
+            } => EventPayload::SandboxExecuted {
+                sandbox_id,
+                command,
+                exit_code,
+                duration_ms,
+            },
+            EventPayloadKnown::SandboxViolation {
+                sandbox_id,
+                violation_type,
+                details,
+            } => EventPayload::SandboxViolation {
+                sandbox_id,
+                violation_type,
+                details,
+            },
+            EventPayloadKnown::SandboxDestroyed { sandbox_id } => {
+                EventPayload::SandboxDestroyed { sandbox_id }
+            }
+            EventPayloadKnown::Custom { event_type, data } => {
+                EventPayload::Custom { event_type, data }
+            }
+        }
+    }
+}
+
 // --- Supporting types
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -254,6 +643,7 @@ mod tests {
             parent_id: None,
             payload,
             metadata: HashMap::new(),
+            schema_version: 1,
         }
     }
 
@@ -434,6 +824,7 @@ mod tests {
                 token_usage: None,
             },
             metadata: HashMap::from([("key".to_string(), "val".to_string())]),
+            schema_version: 1,
         };
         let json = serde_json::to_string(&envelope).unwrap();
         let back: EventEnvelope = serde_json::from_str(&json).unwrap();
@@ -584,6 +975,137 @@ mod tests {
             assert_eq!(sandbox_id, "sbx-001");
         } else {
             panic!("wrong variant");
+        }
+    }
+
+    // --- Forward compatibility tests
+
+    #[test]
+    fn unknown_variant_deserializes_as_custom() {
+        let json = r#"{"type":"VisionResult","image_hash":"abc123","confidence":0.95}"#;
+        let payload: EventPayload = serde_json::from_str(json).unwrap();
+        if let EventPayload::Custom { event_type, data } = payload {
+            assert_eq!(event_type, "VisionResult");
+            assert_eq!(data["image_hash"], "abc123");
+            assert_eq!(data["confidence"], 0.95);
+        } else {
+            panic!("unknown variant should deserialize as Custom");
+        }
+    }
+
+    #[test]
+    fn unknown_variant_with_nested_objects() {
+        let json =
+            r#"{"type":"FutureAgent","config":{"model":"x","params":[1,2,3]},"active":true}"#;
+        let payload: EventPayload = serde_json::from_str(json).unwrap();
+        if let EventPayload::Custom { event_type, data } = payload {
+            assert_eq!(event_type, "FutureAgent");
+            assert_eq!(data["config"]["model"], "x");
+            assert_eq!(data["active"], true);
+        } else {
+            panic!("unknown variant should deserialize as Custom");
+        }
+    }
+
+    #[test]
+    fn unknown_variant_in_full_envelope() {
+        let json = r#"{
+            "event_id": "EVT999",
+            "session_id": "SESS001",
+            "branch_id": "main",
+            "seq": 100,
+            "timestamp": 1700000000000000,
+            "payload": {"type":"NewFeature","value":42},
+            "metadata": {}
+        }"#;
+        let envelope: EventEnvelope = serde_json::from_str(json).unwrap();
+        assert_eq!(envelope.event_id.as_str(), "EVT999");
+        assert_eq!(envelope.schema_version, 1); // default
+        if let EventPayload::Custom { event_type, data } = &envelope.payload {
+            assert_eq!(event_type, "NewFeature");
+            assert_eq!(data["value"], 42);
+        } else {
+            panic!("unknown variant in envelope should deserialize as Custom");
+        }
+    }
+
+    #[test]
+    fn known_variants_still_deserialize_correctly() {
+        // Verify the custom deserializer doesn't break normal operation
+        let json = r#"{"type":"FileDelete","path":"/tmp/test"}"#;
+        let payload: EventPayload = serde_json::from_str(json).unwrap();
+        assert!(matches!(payload, EventPayload::FileDelete { .. }));
+
+        let json = r#"{"type":"Message","role":"user","content":"hi"}"#;
+        let payload: EventPayload = serde_json::from_str(json).unwrap();
+        if let EventPayload::Message {
+            role,
+            content,
+            model,
+            token_usage,
+        } = payload
+        {
+            assert_eq!(role, "user");
+            assert_eq!(content, "hi");
+            assert!(model.is_none()); // default for missing optional
+            assert!(token_usage.is_none());
+        } else {
+            panic!("known variant should deserialize normally");
+        }
+    }
+
+    #[test]
+    fn schema_version_defaults_to_1() {
+        let json = r#"{
+            "event_id": "E1",
+            "session_id": "S1",
+            "branch_id": "main",
+            "seq": 0,
+            "timestamp": 100,
+            "payload": {"type":"Error","error":"boom"},
+            "metadata": {}
+        }"#;
+        let envelope: EventEnvelope = serde_json::from_str(json).unwrap();
+        assert_eq!(envelope.schema_version, 1);
+    }
+
+    #[test]
+    fn schema_version_roundtrips() {
+        let envelope = make_test_envelope(EventPayload::Error {
+            error: "test".to_string(),
+        });
+        let json = serde_json::to_string(&envelope).unwrap();
+        let back: EventEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.schema_version, 1);
+    }
+
+    #[test]
+    fn unknown_variant_preserves_all_fields() {
+        // Verify zero data loss through the unknown variant path
+        let json = r#"{"type":"X","a":1,"b":"two","c":[3],"d":{"e":true}}"#;
+        let payload: EventPayload = serde_json::from_str(json).unwrap();
+        if let EventPayload::Custom { event_type, data } = &payload {
+            assert_eq!(event_type, "X");
+            assert_eq!(data["a"], 1);
+            assert_eq!(data["b"], "two");
+            assert_eq!(data["c"][0], 3);
+            assert_eq!(data["d"]["e"], true);
+
+            // Re-serialize and verify the Custom event can be read back
+            let re_json = serde_json::to_string(&payload).unwrap();
+            let re_payload: EventPayload = serde_json::from_str(&re_json).unwrap();
+            if let EventPayload::Custom {
+                event_type: et2,
+                data: d2,
+            } = re_payload
+            {
+                assert_eq!(et2, "X");
+                assert_eq!(d2["a"], 1);
+            } else {
+                panic!("re-deserialized should still be Custom");
+            }
+        } else {
+            panic!("should be Custom");
         }
     }
 }

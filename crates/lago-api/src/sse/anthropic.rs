@@ -163,6 +163,7 @@ mod tests {
             parent_id: None,
             payload,
             metadata: HashMap::new(),
+            schema_version: 1,
         }
     }
 
