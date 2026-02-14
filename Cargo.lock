@@ -888,7 +888,7 @@ dependencies = [
 
 [[package]]
 name = "lago"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "lago-api",
@@ -910,7 +910,7 @@ dependencies = [
 
 [[package]]
 name = "lago-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "futures",
@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "lago-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures",
  "serde",
@@ -947,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "lago-fs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "lago-core",
  "lago-store",
@@ -959,7 +959,7 @@ dependencies = [
 
 [[package]]
 name = "lago-ingest"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures",
  "lago-core",
@@ -979,7 +979,7 @@ dependencies = [
 
 [[package]]
 name = "lago-journal"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures",
  "lago-core",
@@ -995,7 +995,7 @@ dependencies = [
 
 [[package]]
 name = "lago-policy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "lago-core",
  "serde",
@@ -1007,7 +1007,7 @@ dependencies = [
 
 [[package]]
 name = "lago-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "lago-core",
  "serde",
@@ -1021,7 +1021,7 @@ dependencies = [
 
 [[package]]
 name = "lagod"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "clap",

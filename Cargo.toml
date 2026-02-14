@@ -14,7 +14,7 @@ members = [
 
 [workspace.package]
 edition = "2024"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lago — event-sourced agent runtime"
 repository = "https://github.com/broomva/lago"
 homepage = "https://github.com/broomva/lago"
@@ -64,10 +64,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Internal crates
-lago-core = { version = "0.1.0", path = "crates/lago-core" }
-lago-journal = { version = "0.1.0", path = "crates/lago-journal" }
-lago-store = { version = "0.1.0", path = "crates/lago-store" }
-lago-fs = { version = "0.1.0", path = "crates/lago-fs" }
-lago-ingest = { version = "0.1.0", path = "crates/lago-ingest" }
-lago-api = { version = "0.1.0", path = "crates/lago-api" }
-lago-policy = { version = "0.1.0", path = "crates/lago-policy" }
+lago-core = { version = "0.2.0", path = "crates/lago-core" }
+lago-journal = { version = "0.2.0", path = "crates/lago-journal" }
+lago-store = { version = "0.2.0", path = "crates/lago-store" }
+lago-fs = { version = "0.2.0", path = "crates/lago-fs" }
+lago-ingest = { version = "0.2.0", path = "crates/lago-ingest" }
+lago-api = { version = "0.2.0", path = "crates/lago-api" }
+lago-policy = { version = "0.2.0", path = "crates/lago-policy" }
