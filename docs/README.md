@@ -6,11 +6,14 @@
 
 | Document | Description |
 |----------|-------------|
+| [Getting Started](getting-started.md) | Installation, quick start, CLI usage, library examples |
 | [Architecture](architecture.md) | System architecture, design decisions, crate structure |
 | [Type System & Schemas](type-system.md) | Core types, event model, ID system, trait definitions |
 | [Storage Engine](storage-engine.md) | redb journal, compound keys, blob store, snapshots |
+| [Filesystem & Branching](filesystem.md) | Virtual filesystem, manifest, branching, diffing, tree ops |
 | [API Reference](api-reference.md) | REST endpoints, gRPC service, SSE format adapters |
 | [Policy Engine](policy-engine.md) | Rule evaluation, RBAC, hooks, TOML configuration |
+| [Integration Guide](integration.md) | Using Lago as a persistence substrate for agent runtimes |
 | [AI-Native Design](ai-native-design.md) | Agent-first philosophy, tool spans, branching, streaming |
 | [Development Guide](development-guide.md) | Testing, CI/CD, release tooling, CLI reference |
 
