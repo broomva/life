@@ -15,6 +15,7 @@
 | [Policy Engine](policy-engine.md) | Rule evaluation, RBAC, hooks, TOML configuration |
 | [Integration Guide](integration.md) | Using Lago as a persistence substrate for agent runtimes |
 | [AI-Native Design](ai-native-design.md) | Agent-first philosophy, tool spans, branching, streaming |
+| [The Harness Problem](harness-problem.md) | Industry analysis, architectural comparison, and roadmap |
 | [Development Guide](development-guide.md) | Testing, CI/CD, release tooling, CLI reference |
 
 ## Quick Start
