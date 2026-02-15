@@ -1,0 +1,355 @@
+# Arcan + Lago: Testing Strategy
+
+## Current Coverage
+
+### By Crate
+
+| Crate             | Unit Tests | Integration | Total | Lines  | Coverage Estimate |
+|-------------------|-----------|-------------|-------|--------|-------------------|
+| arcan-core        | 3         | 0           | 3     | 1,764  | ~15%              |
+| arcan-harness     | 0         | 0           | 0     | 2,167  | 0%                |
+| arcan-store       | 7         | 0           | 7     | 390    | ~80%              |
+| arcan-provider    | 9         | 0           | 9     | 657    | ~60%              |
+| arcan-lago        | 25        | 0           | 25    | 1,498  | ~70%              |
+| arcand            | 0         | 0           | 0     | 288    | 0%                |
+| arcan (binary)    | 0         | 0           | 0     | 162    | 0%                |
+| **Arcan Total**   | **44**    | **0**       | **44**| **6,926** | **~35%**       |
+| lago-core         | 97        | 0           | 97    | 2,208  | ~90%              |
+| lago-journal      | 23        | 0           | 23    | 1,660  | ~70%              |
+| lago-store        | 17        | 0           | 17    | 680    | ~85%              |
+| lago-fs           | 26        | 0           | 26    | 1,046  | ~75%              |
+| lago-policy       | 33        | 0           | 33    | 856    | ~80%              |
+| lago-ingest       | 6         | 0           | 6     | 577    | ~40%              |
+| lago-api          | 37        | 17          | 54    | 2,100  | ~75%              |
+| lagod             | 0         | 0           | 0     | 282    | 0%                |
+| lago-cli          | 0         | 0           | 0     | 420    | 0%                |
+| **Lago Total**    | **239**   | **17**      | **256** | **9,829** | **~70%**    |
+| **Combined**      | **283**   | **17**      | **300** | **16,755** | **~55%** |
+
+### Coverage Gaps (Priority Order)
+
+1. **arcan-harness** (0 tests, 2,167 lines) — Sandbox enforcement, filesystem guardrails, hashline edits, MCP bridge, memory tools, skill loading
+2. **arcand** (0 tests, 288 lines) — Agent loop execution, HTTP server endpoints, SSE streaming
+3. **arcan-core** (3 tests, 1,764 lines) — Orchestrator loop, middleware pipeline, tool registry
+4. **lago-ingest** (6 tests, 577 lines) — gRPC server/client behavior, streaming, reconnection
+5. **arcan (binary)** (0 tests, 162 lines) — Initialization, CLI arg handling, Lago wiring
+
+---
+
+## Testing Layers
+
+### Layer 1: Unit Tests (per-module)
+
+Each module should have a `#[cfg(test)] mod tests` section testing its core logic in isolation.
+
+**Pattern**:
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn descriptive_test_name() {
+        // Arrange
+        let input = ...;
+
+        // Act
+        let result = function_under_test(input);
+
+        // Assert
+        assert_eq!(result, expected);
+    }
+}
+```
+
+**Conventions**:
+- Test names describe the behavior being verified (not the function name)
+- Use `tempdir` for filesystem tests (auto-cleanup)
+- Use `tokio::test` for async tests
+- Use mock providers/journals for isolated testing
+- Tests must not require environment variables or network access
+
+### Layer 2: Integration Tests (per-crate)
+
+Located in `tests/` directory at crate level. Test interactions between modules within a crate.
+
+**Existing**: `lago-api/tests/e2e_files.rs` — 17 tests covering full REST API workflow.
+
+**Needed**:
+- `arcan/tests/agent_loop.rs` — Full agent loop with mock provider and in-memory journal
+- `arcan/tests/session_replay.rs` — Run session, replay from journal, verify identical state
+- `lago/tests/journal_stress.rs` — High-volume event append/read consistency
+
+### Layer 3: End-to-End Tests (cross-crate)
+
+Test the full system from HTTP request to event persistence to SSE output.
+
+**Proposed**: `tests/e2e/` directory at root level or in `arcan/tests/`:
+
+```rust
+#[tokio::test]
+async fn full_session_lifecycle() {
+    // 1. Start Arcan server with mock provider + in-memory Lago
+    let server = start_test_server().await;
+
+    // 2. POST /chat with user message
+    let response = client.post("/chat")
+        .json(&json!({"session_id": "test-1", "message": "hello"}))
+        .send().await;
+
+    // 3. Consume SSE stream, collect events
+    let events: Vec<AgentEvent> = consume_sse_stream(response).await;
+
+    // 4. Verify event sequence: RunStarted → TextDelta+ → RunFinished
+    assert!(matches!(events[0], AgentEvent::RunStarted { .. }));
+    assert!(events.iter().any(|e| matches!(e, AgentEvent::TextDelta { .. })));
+    assert!(matches!(events.last().unwrap(), AgentEvent::RunFinished { .. }));
+
+    // 5. Replay session from journal
+    let replayed = session_repo.load_session("test-1")?;
+    assert_eq!(events.len(), replayed.len());
+
+    // 6. Verify state reconstruction matches
+    let state = project_state(replayed);
+    assert_eq!(state.messages.last().unwrap().content, "mock response");
+}
+```
+
+### Layer 4: Property-Based Tests
+
+For critical data structures where exhaustive testing is impractical.
+
+**Candidates**:
+- Event serialization round-trip (any `EventPayload` → JSON → back)
+- Hashline edit idempotency (apply same edit twice = same result)
+- Journal key encoding/decoding (any valid session+branch+seq → encode → decode = original)
+- Manifest operations (any sequence of write/delete/rename → consistent state)
+- Policy evaluation (rules are order-independent when priorities differ)
+
+**Tool**: `proptest` crate for Rust property-based testing.
+
+---
+
+## Test Categories
+
+### Correctness Tests
+
+| Category              | What to test                                          | Where         |
+|-----------------------|-------------------------------------------------------|---------------|
+| Event round-trip      | Arcan event → Lago envelope → Arcan event = identical | arcan-lago    |
+| Journal ACID          | Concurrent appends maintain ordering                  | lago-journal  |
+| Blob deduplication    | Same content → same hash → one blob on disk           | lago-store    |
+| Sandbox enforcement   | Disallowed paths → error, allowed paths → success     | arcan-harness |
+| Policy evaluation     | Rules match/deny correctly                            | lago-policy   |
+| State reconstruction  | Replay events → same AppState as original run         | arcan-lago    |
+| SSE format compliance | OpenAI/Anthropic/Vercel frames match spec             | lago-api      |
+
+### Safety Tests
+
+| Category                | What to test                                      | Where         |
+|-------------------------|---------------------------------------------------|---------------|
+| Path traversal          | `../` in file paths rejected                      | arcan-harness |
+| Sandbox escape          | Tool execution confined to allowed directories    | arcan-harness |
+| Policy denial           | Denied tool calls produce errors, not execution   | arcan-lago    |
+| Malformed input         | Invalid JSON, empty strings, oversized payloads   | arcan-core    |
+| Concurrent access       | Multiple sessions don't corrupt each other        | lago-journal  |
+
+### Performance Tests
+
+| Category              | What to test                                       | Target       |
+|-----------------------|----------------------------------------------------|--------------|
+| Journal append        | 10K events/second sustained                        | lago-journal |
+| Event read            | 100K events loaded in <1 second                    | lago-journal |
+| Blob throughput       | 1MB blob write + read in <100ms                    | lago-store   |
+| SSE latency           | Event to SSE frame in <10ms                        | lago-api     |
+| Session reconstruction| 1000-event session replayed in <500ms              | arcan-lago   |
+| Snapshot restore      | Restore from snapshot in <100ms                    | lago-journal |
+
+---
+
+## Testing Workflows
+
+### Developer Workflow (per-change)
+
+```bash
+# Quick check (< 30 seconds)
+cd arcan && cargo fmt && cargo clippy --workspace && cargo test --workspace
+cd ../lago && cargo fmt && cargo clippy --workspace && cargo test --workspace
+```
+
+### Full Validation (pre-commit)
+
+```bash
+# Cross-project validation (< 2 minutes)
+(cd arcan && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
+(cd lago && cargo fmt && cargo clippy --workspace && cargo test --workspace)
+```
+
+### Specific Crate Testing
+
+```bash
+# Test only the bridge
+cd arcan && cargo test -p arcan-lago
+
+# Test only the journal
+cd lago && cargo test -p lago-journal
+
+# Test with output
+cd arcan && cargo test -p arcan-lago -- --nocapture
+```
+
+### Integration Test Execution
+
+```bash
+# Run lago-api integration tests
+cd lago && cargo test -p lago-api --test e2e_files
+
+# Run with specific test
+cd lago && cargo test -p lago-api --test e2e_files -- test_name
+```
+
+---
+
+## Immediate Test Plan (Phase 1)
+
+### Week 1: arcan-harness Tests
+
+```
+arcan-harness/src/sandbox.rs:
+  - test_sandbox_none_allows_all_paths
+  - test_sandbox_basic_blocks_denied_paths
+  - test_sandbox_basic_allows_listed_paths
+  - test_sandbox_restricted_blocks_writes
+  - test_sandbox_restricted_allows_approved_writes
+  - test_fs_policy_glob_matching
+
+arcan-harness/src/fs.rs:
+  - test_read_file_within_sandbox
+  - test_read_file_outside_sandbox_denied
+  - test_write_file_within_sandbox
+  - test_write_file_outside_sandbox_denied
+  - test_list_directory_within_sandbox
+  - test_search_files_respects_sandbox
+
+arcan-harness/src/edit.rs:
+  - test_hashline_edit_applies_correctly
+  - test_hashline_edit_idempotent
+  - test_hashline_edit_stale_hash_fails
+  - test_hashline_edit_concurrent_safe
+
+arcan-harness/src/skills.rs:
+  - test_skill_discovery_finds_skill_md
+  - test_skill_parsing_valid_frontmatter
+  - test_skill_parsing_invalid_frontmatter_skipped
+  - test_skill_catalog_system_prompt
+
+arcan-harness/src/memory.rs:
+  - test_write_and_read_memory
+  - test_list_memory_keys
+  - test_search_memory_content
+
+arcan-harness/src/mcp.rs:
+  - test_mcp_tool_definition_conversion
+  - test_mcp_tool_annotation_mapping
+```
+
+### Week 2: arcand + End-to-End Tests
+
+```
+arcand/src/loop.rs:
+  - test_agent_loop_mock_provider_runs_to_completion
+  - test_agent_loop_persists_all_events
+  - test_agent_loop_respects_max_iterations
+  - test_agent_loop_handles_tool_calls
+
+arcand/src/server.rs:
+  - test_chat_endpoint_returns_sse
+  - test_health_endpoint
+  - test_concurrent_sessions
+
+End-to-end (arcan/tests/):
+  - test_full_session_lifecycle
+  - test_session_replay_matches_original
+  - test_tool_execution_with_sandbox
+  - test_policy_middleware_blocks_denied_tools
+```
+
+### Week 3: Performance + Stress Tests
+
+```
+lago-journal stress:
+  - test_append_10k_events_performance
+  - test_read_10k_events_performance
+  - test_concurrent_append_consistency
+
+lago-store stress:
+  - test_large_blob_roundtrip_1mb
+  - test_1000_blob_deduplication
+
+Session reconstruction:
+  - test_reconstruct_1000_event_session
+  - test_reconstruct_with_snapshot
+```
+
+---
+
+## Test Infrastructure
+
+### Helpers Needed
+
+```rust
+// Test server builder
+pub async fn start_test_server() -> TestServer {
+    // In-memory Lago journal + mock provider + random port
+}
+
+// SSE consumer
+pub async fn consume_sse_stream(url: &str) -> Vec<AgentEvent> {
+    // Connect to SSE, collect all events until RunFinished
+}
+
+// Session factory
+pub fn create_test_session(events: Vec<AgentEvent>) -> SessionId {
+    // Pre-populate a session with known events
+}
+
+// Assertion helpers
+pub fn assert_event_sequence(events: &[AgentEvent], expected: &[&str]) {
+    // Verify event type sequence matches expected pattern
+}
+```
+
+### CI Integration
+
+```yaml
+# .github/workflows/test.yml
+name: Test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+      - name: Test Arcan
+        run: cd arcan && cargo test --workspace
+      - name: Test Lago
+        run: cd lago && cargo test --workspace
+      - name: Clippy
+        run: |
+          cd arcan && cargo clippy --workspace -- -D warnings
+          cd ../lago && cargo clippy --workspace -- -D warnings
+```
+
+---
+
+## Test Quality Rules
+
+1. **Every new feature has tests** — No PR merged without tests for new functionality
+2. **Tests are deterministic** — No flaky tests, no time-dependent assertions, no network calls
+3. **Tests are fast** — Unit tests < 1s each, integration tests < 10s each
+4. **Tests document behavior** — Test names describe what behavior is being verified
+5. **Failed tests block merges** — CI must pass before merge
+6. **Coverage trends up** — Track coverage over time, never decrease
