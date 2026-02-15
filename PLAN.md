@@ -1,6 +1,6 @@
 # Arcan + Lago: Consolidated Development Plan
 
-**Last updated**: 2026-02-14
+**Last updated**: 2026-02-15
 **Version**: 0.2.0
 
 ## Progress Tracker
@@ -11,13 +11,17 @@
 | 0.2 | Integration Test Infrastructure | DONE | +18 (10 arcand + 8 lago) |
 | 0 | Stabilization & Test Coverage | **DONE** | +4 (1 policy test, 3 E2E integration) |
 | 1 | Memory & Context Compiler | **DONE** | +82 |
-| 2 | Self-Learning & Heartbeats | Planned | target: +40 |
-| 3 | Skills as Lago Artifacts + Multi-Provider | Planned | target: +50 |
-| 4 | Observability & Operational Tooling | Planned | target: +40 |
-| 5 | Governance & Security Hardening | Planned | target: +30 |
-| 6 | Universal Data Plane & Platform | Future | — |
+| 2.1 | Learning Capture | DONE | +8 |
+| 2.4 | Heartbeat Scheduler | DONE | +9 |
+| 2.6 | Approval Workflow | DONE | +14 |
+| 2 | Self-Learning & Heartbeats (remaining: 2.2, 2.3, 2.5) | Planned | target: +23 |
+| P1 | AI SDK v6 UI Message Stream Protocol | **DONE** | +10 (18 unit + 5 integration, net of replaced v5 tests) |
+| P2.2 | OpenAI + Ollama Provider + Retry Logic | **DONE** | +13 |
+| P2 | Safety & Multi-Provider (remaining: edits, sandbox) | Planned | target: +25 |
+| P3 | Session Management & Clients | Planned | target: +24 |
+| P4 | Advanced Runtime (subagents, web client, WASM) | Future | — |
 
-**Current test counts**: Arcan 186, Lago 286, Total 472
+**Current test counts**: Arcan 240, Lago 286, Total 526
 **Target**: 700+ tests by end of Phase 5
 
 ---
@@ -152,10 +156,13 @@ Created 3 `Tool` implementations in `arcan-lago`:
 - Steering at tool boundaries (safe preemption points)
 - Prevents concurrent state corruption
 
-### 2.6 Approval Workflow
-- `POST /approve` endpoint with approval queue
-- `RequireApproval` pauses run (tokio oneshot), resumes on approval
-- Auto-deny after configurable timeout (5min default)
+### 2.6 Approval Workflow ✅ DONE (2026-02-15)
+- ~~`POST /approve` endpoint with approval queue~~ DONE
+- ~~`RequireApproval` pauses run (tokio oneshot), resumes on approval~~ DONE
+- ~~Auto-deny after configurable timeout (5min default)~~ DONE
+- `ApprovalGate` in arcan-lago with `ApprovalGateHook`/`ApprovalResolver` traits in arcan-core
+- `POST /approve` + `GET /approvals` HTTP endpoints in arcand
+- 14 new tests (7 gate, 2 event-map, 2 middleware, 3 HTTP)
 
 **Validation**: Agent learns from mistakes via governed pipeline. Heartbeats fire.
 Approval workflow is interactive.
