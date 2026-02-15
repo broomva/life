@@ -1,6 +1,6 @@
 # Arcan + Lago: Implementation Status Report
 
-**Date**: 2026-02-14
+**Date**: 2026-02-15
 **Version**: 0.2.0 (both projects)
 **Rust Toolchain**: 1.93.0 (requires >= 1.85, Rust 2024 Edition)
 
@@ -12,7 +12,7 @@
 |---------------------|--------------|--------------|--------------|
 | Compilation         | CLEAN        | CLEAN        | CLEAN        |
 | Clippy warnings     | 0            | 0            | 0            |
-| Tests passing       | 186/186      | 286/286      | 472/472      |
+| Tests passing       | 240/240      | 286/286      | 526/526      |
 | Tests failing       | 0            | 0            | 0            |
 | Lines of Rust       | ~8,500       | ~12,200      | ~20,700      |
 | Workspace crates    | 7            | 9            | 16           |
@@ -29,7 +29,7 @@ Both projects compile cleanly, pass all tests, and have zero warnings.
 
 | Module                | Lines | Description                                    | Status |
 |-----------------------|-------|------------------------------------------------|--------|
-| `protocol.rs`         | 333   | AgentEvent enum, ToolCall, ToolResult, ChatMessage types | Done |
+| `protocol.rs`         | 355   | AgentEvent enum (incl. ApprovalRequested/Resolved), ToolCall, ToolResult, ChatMessage | Done |
 | `runtime.rs`          | 1,148 | Orchestrator, AgentLoop, Tool/Middleware traits, ToolRegistry | Done |
 | `state.rs`            | 288   | AppState, StatePatch (JSON merge-patch), revision tracking | Done |
 | `aisdk.rs`            | 416   | Vercel AI SDK streaming format (AiSdkPart), SSE wire format | Done |
@@ -329,10 +329,10 @@ User → POST /chat → AgentLoop.run()
 
 ### High (significantly limits use)
 
-3. **AI SDK v5 streaming missing boundary signals** — No text-start/end, step markers, reasoning-start/delta/end. Breaks Vercel AI SDK `useChat` compatibility for advanced features.
-4. **SSE has no event IDs** — No reconnection support or duplicate detection
-5. **Approval workflow incomplete** — `RequireApproval` policy decision returns error instead of pausing for user input
-6. **No OpenAI provider** — Only Anthropic and Mock implemented natively
+3. ~~**AI SDK v5 streaming missing boundary signals**~~ **DONE** — Full v6 UI Message Stream Protocol: UiStreamPart enum (18 variants), TextStart/End boundaries, StartStep/FinishStep, ReasoningStart/Delta/End, data-* extensions, x-vercel-ai-ui-message-stream: v1 header, monotonic SSE event IDs, [DONE] termination. 18 unit tests + 5 integration tests.
+4. ~~**SSE has no event IDs**~~ **DONE** — Monotonic id: field on every v6 SSE frame (per-stream counter)
+5. ~~**Approval workflow incomplete**~~ **DONE (M2.6)** — `ApprovalGate` blocks on oneshot, `POST /approve` resolves, `GET /approvals` lists pending, auto-timeout (5min default), full SSE+journal event persistence. 14 new tests.
+6. ~~**No OpenAI provider**~~ **DONE** — `OpenAiCompatibleProvider` supports OpenAI, Ollama, Together, Groq, and any OpenAI-compatible API. Built-in retry (429/5xx/timeout). `ARCAN_PROVIDER=openai|ollama|anthropic` env var + auto-detect. 13 tests.
 7. ~~**arcand has 0 tests**~~ **DONE** — 10 integration tests (5 agent loop + 5 HTTP/SSE server)
 
 ### Medium (quality/safety)
