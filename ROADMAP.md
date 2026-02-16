@@ -376,20 +376,20 @@ then advance to V2 (Phase 1 — memory) as the highest-leverage next step.
 ### Phase 7A: Contract Extraction (aiOS)
 **Priority**: CRITICAL | **Effort**: 2-3 sessions
 
-- [ ] Create `agent-kernel` crate in aiOS with canonical types
+- [ ] Create `aios-protocol` crate in aiOS with canonical types
 - [ ] Merge three event models (Lago 35+, Arcan 24, aiOS 40+) into canonical ~55-variant `EventKind`
 - [ ] Define `AgentStateVector`, `BudgetState`, `OperatingMode`, `GatingProfile`
 - [ ] Define minimal kernel traits (`Journal`, `PolicyGate`, `Harness`, `MemoryStore`, `AutonomicController`)
 - [ ] Add `BlobRef`, `Intent` lifecycle, `StatePatch` with `PatchOp`
 - [ ] Forward-compatible `Custom` variant for unknown event types
 - [ ] Conformance tests (schema roundtrip, provenance, replay)
-- [ ] Refactor remaining aiOS crates to depend on `agent-kernel`
+- [ ] Refactor remaining aiOS crates to depend on `aios-protocol`
 
 ### Phase 7B: Lago Alignment
 **Priority**: HIGH | **Effort**: 2-3 sessions
 
-- [ ] Add `agent-kernel` git dependency to Lago workspace
-- [ ] Align `lago-core::EventPayload` with `agent-kernel::EventKind`
+- [ ] Add `aios-protocol` git dependency to Lago workspace
+- [ ] Align `lago-core::EventPayload` with `aios-protocol::EventKind`
 - [ ] Update SSE format adapters for new event variants
 - [ ] Create `lago-memory` crate (MemoryStore impl, retrieval, decay, consolidation)
 - [ ] Update integration tests
@@ -397,7 +397,7 @@ then advance to V2 (Phase 1 — memory) as the highest-leverage next step.
 ### Phase 7C: Arcan Alignment
 **Priority**: HIGH | **Effort**: 2-3 sessions
 
-- [ ] Add `agent-kernel` git dependency to Arcan workspace
+- [ ] Add `aios-protocol` git dependency to Arcan workspace
 - [ ] Map `AgentEvent` to canonical `EventKind` at boundary
 - [ ] Wire `AgentStateVector` + `BudgetState` into orchestrator
 - [ ] Add homeostasis event emission (StateEstimated, BudgetUpdated, ModeChanged)
@@ -426,7 +426,7 @@ then advance to V2 (Phase 1 — memory) as the highest-leverage next step.
 ### Phase 7F: Conformance + Golden Tests
 **Priority**: MEDIUM | **Effort**: 1-2 sessions
 
-- [ ] Conformance test suite in `agent-kernel`
+- [ ] Conformance test suite in `aios-protocol`
 - [ ] Golden replay tests (curated session → deterministic verification)
 - [ ] Cross-project integration tests (Arcan → Lago → replay → verify)
 

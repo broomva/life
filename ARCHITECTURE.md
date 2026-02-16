@@ -30,7 +30,7 @@ The Agent OS is a four-project ecosystem forming a complete agentic operating sy
 ┌─────────▼──────────┐ ┌────────▼─────────┐ ┌──────────▼──────────┐
 │  aiOS (contract)    │ │  Lago (substrate) │ │  Autonomic (NEW)    │
 │                     │ │                   │ │                     │
-│  agent-kernel crate │ │  journal (redb)   │ │  controllers        │
+│ aiOS protocol crate │ │  journal (redb)   │ │  controllers        │
 │  - EventKind        │ │  blob store       │ │  heartbeat triggers │
 │  - StateVector      │ │  branching FS     │ │  simulation kernel  │
 │  - BudgetState      │ │  policy engine    │ │  gating profiles    │
@@ -54,9 +54,9 @@ The Agent OS is a four-project ecosystem forming a complete agentic operating sy
 
 ### Dependency Wiring (separate repos, git deps)
 
-All projects depend on `agent-kernel` (published by aiOS) via git dependency:
+All projects depend on `aios-protocol` (published by aiOS) via git dependency:
 ```toml
-agent-kernel = { git = "https://github.com/broomva/aiOS", package = "agent-kernel", rev = "<sha>" }
+aios-protocol = { git = "https://github.com/broomva/aiOS", package = "aios-protocol", rev = "<sha>" }
 ```
 
 ---
@@ -401,10 +401,10 @@ Future: Can switch to **gRPC** (lago-ingest) for distributed deployment.
 
 aiOS defines the canonical types and interfaces that all other projects implement.
 
-### `agent-kernel` Crate (canonical contract)
+### `aios-protocol` Crate (canonical contract)
 
 ```
-agent-kernel/src/
+aios-protocol/src/
   ids.rs          # SessionId, BranchId, EventId, RunId, BlobHash, SeqNo
   event.rs        # EventEnvelope + EventKind (~55 variants, forward-compatible)
   state.rs        # AgentStateVector, BudgetState, CanonicalState

@@ -1,10 +1,10 @@
 # Agent OS: Kernel Contract
 
-The `agent-kernel` crate (published by aiOS) defines the canonical types, event taxonomy, and interfaces that all Agent OS projects implement. This document is the reference for the contract.
+The `aios-protocol` crate (published by aiOS) defines the canonical types, event taxonomy, and interfaces that all Agent OS projects implement. This document is the reference for the contract.
 
 ## Schema Versioning
 
-- `agent-kernel` follows **semantic versioning**:
+- `aios-protocol` follows **semantic versioning**:
   - **patch**: additive optional fields, documentation
   - **minor**: new event variants (forward-compatible via `Custom`), new traits
   - **major**: breaking changes to existing types or trait signatures
@@ -13,7 +13,7 @@ The `agent-kernel` crate (published by aiOS) defines the canonical types, event 
 
 ## Compatibility Matrix
 
-| Arcan version | Lago version | agent-kernel version | Notes |
+| Arcan version | Lago version | aios-protocol version | Notes |
 |---------------|-------------|---------------------|-------|
 | (pre-unification) | (pre-unification) | N/A | Current: separate event models |
 | TBD | TBD | 0.1.0 | First unified release |
