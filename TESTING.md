@@ -356,9 +356,9 @@ jobs:
 
 ---
 
-## Conformance Test Suite (Planned — `agent-kernel`)
+## Conformance Test Suite (Planned — `aios-protocol`)
 
-Once the `agent-kernel` crate is extracted from aiOS, a conformance test suite will validate that all implementations (Arcan, Lago, aiOS reference) adhere to the kernel contract.
+Once the `aios-protocol` crate is extracted from aiOS, a conformance test suite will validate that all implementations (Arcan, Lago, aiOS reference) adhere to the kernel contract.
 
 ### Schema Conformance
 

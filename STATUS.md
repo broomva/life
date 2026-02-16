@@ -350,7 +350,7 @@ User → POST /chat → AgentLoop.run()
 
 | Integration Point | Status | Notes |
 |-------------------|--------|-------|
-| Canonical event taxonomy (`agent-kernel`) | PLANNED | Three separate models need merging (~55 canonical variants) |
+| Canonical event taxonomy (`aios-protocol`) | PLANNED | Three separate models need merging (~55 canonical variants) |
 | aiOS ↔ Arcan integration | NOT STARTED | aiOS currently standalone |
 | aiOS ↔ Lago integration | NOT STARTED | aiOS has evaluation doc (`FILESYSTEM_EVALUATION.md`) |
 | Homeostasis in Arcan | NOT STARTED | aiOS has types; Arcan lacks them |
