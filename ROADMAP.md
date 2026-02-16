@@ -1,4 +1,4 @@
-# Arcan + Lago: Development Roadmap
+# Agent OS: Development Roadmap
 
 ## Guiding Principles
 
@@ -8,6 +8,8 @@
 4. **Single-user first** — Prove the core loop before multi-tenancy or distribution
 5. **Vertical slice** — End-to-end functionality beats horizontal layer completeness
 6. **Memory is the unlock** — Without persistence and context, agents are stateless toys
+7. **Contract-first unification** — One canonical event model across all projects (aiOS defines, Arcan/Lago implement)
+8. **Homeostasis is a kernel service** — Agent stability is not optional; it's infrastructure
 
 ---
 
@@ -365,9 +367,75 @@ then advance to V2 (Phase 1 — memory) as the highest-leverage next step.
 
 ---
 
+---
+
+## Phase 7: Agent OS Unification (Ongoing — Parallel Track)
+
+**Goal**: Unify aiOS + Arcan + Lago + Autonomic into a cohesive Agent OS with one canonical contract, shared event model, and proper separation of concerns.
+
+### Phase 7A: Contract Extraction (aiOS)
+**Priority**: CRITICAL | **Effort**: 2-3 sessions
+
+- [ ] Create `agent-kernel` crate in aiOS with canonical types
+- [ ] Merge three event models (Lago 35+, Arcan 24, aiOS 40+) into canonical ~55-variant `EventKind`
+- [ ] Define `AgentStateVector`, `BudgetState`, `OperatingMode`, `GatingProfile`
+- [ ] Define minimal kernel traits (`Journal`, `PolicyGate`, `Harness`, `MemoryStore`, `AutonomicController`)
+- [ ] Add `BlobRef`, `Intent` lifecycle, `StatePatch` with `PatchOp`
+- [ ] Forward-compatible `Custom` variant for unknown event types
+- [ ] Conformance tests (schema roundtrip, provenance, replay)
+- [ ] Refactor remaining aiOS crates to depend on `agent-kernel`
+
+### Phase 7B: Lago Alignment
+**Priority**: HIGH | **Effort**: 2-3 sessions
+
+- [ ] Add `agent-kernel` git dependency to Lago workspace
+- [ ] Align `lago-core::EventPayload` with `agent-kernel::EventKind`
+- [ ] Update SSE format adapters for new event variants
+- [ ] Create `lago-memory` crate (MemoryStore impl, retrieval, decay, consolidation)
+- [ ] Update integration tests
+
+### Phase 7C: Arcan Alignment
+**Priority**: HIGH | **Effort**: 2-3 sessions
+
+- [ ] Add `agent-kernel` git dependency to Arcan workspace
+- [ ] Map `AgentEvent` to canonical `EventKind` at boundary
+- [ ] Wire `AgentStateVector` + `BudgetState` into orchestrator
+- [ ] Add homeostasis event emission (StateEstimated, BudgetUpdated, ModeChanged)
+- [ ] Add `GatingProfile` enforcement at harness boundary
+- [ ] Simplify `arcan-lago` bridge (both sides now canonical)
+- [ ] Update AI SDK v6 adapter for new event variants
+
+### Phase 7D: Autonomic MVP (NEW Project)
+**Priority**: MEDIUM | **Effort**: 2-3 sessions
+
+- [ ] Create `autonomic` repo with workspace
+- [ ] Rule-based controller with hysteresis (mode switching, budget throttles)
+- [ ] Heartbeat trigger handling (schedule + event-based)
+- [ ] `GatingProfile` output enforced at Arcan harness boundary
+- [ ] Memory maintenance triggers (consolidation, compaction, deprecation)
+
+### Phase 7E: Memory Service + Forgetting
+**Priority**: MEDIUM | **Effort**: 2-3 sessions
+
+- [ ] Decay scoring in `lago-memory`
+- [ ] Tombstone lifecycle (propose → approve → apply)
+- [ ] Consolidation pipeline (event window → observations → summaries)
+- [ ] Context assembly with token budgets + scope filtering
+- [ ] Wire consolidation triggers into autonomic heartbeat
+
+### Phase 7F: Conformance + Golden Tests
+**Priority**: MEDIUM | **Effort**: 1-2 sessions
+
+- [ ] Conformance test suite in `agent-kernel`
+- [ ] Golden replay tests (curated session → deterministic verification)
+- [ ] Cross-project integration tests (Arcan → Lago → replay → verify)
+
+---
+
 ## Design Reference
 
 The vision for the full platform architecture is documented in:
+- `docs/CONTRACT.md` — Canonical event taxonomy, schema versioning, invariants, replay rules
 - `docs/raw-dumps/lago-lakehouse-memory.md` — Comprehensive design notes covering:
   - Three planes model (data/compute/control)
   - Memory architecture (OM + semantic + graph)

@@ -1,8 +1,69 @@
-# Arcan + Lago: Technical Architecture
+# Agent OS: Technical Architecture
 
 ## System Overview
 
-Arcan + Lago form a two-layer agent operating system:
+The Agent OS is a four-project ecosystem forming a complete agentic operating system:
+
+- **aiOS** — Kernel contract: canonical types, event taxonomy, invariants, conformance tests
+- **Arcan** — Runtime: agent loop, providers, tool harness, daemon
+- **Lago** — Persistence substrate: event journal, blob store, branching FS, policy engine
+- **Autonomic** — Stability controller: homeostasis, heartbeats, simulation, gating (planned)
+
+### Ecosystem Architecture
+
+```
+                    ┌─────────────────────────┐
+                    │   Applications / UIs     │
+                    │  (chat, IDE, dashboards)  │
+                    └────────────┬─────────────┘
+                                 │ AI SDK v6 / SSE / WebSocket
+                    ┌────────────▼─────────────┐
+                    │     Arcan Runtime         │
+                    │  (loop, harness, tools,   │
+                    │   providers, daemon)       │
+                    ├───────────────────────────┤
+                    │   arcan-lago (bridge)      │
+                    └────────────┬──────────────┘
+                                 │ EventEnvelope (canonical)
+          ┌──────────────────────┼──────────────────────┐
+          │                      │                      │
+┌─────────▼──────────┐ ┌────────▼─────────┐ ┌──────────▼──────────┐
+│  aiOS (contract)    │ │  Lago (substrate) │ │  Autonomic (NEW)    │
+│                     │ │                   │ │                     │
+│  agent-kernel crate │ │  journal (redb)   │ │  controllers        │
+│  - EventKind        │ │  blob store       │ │  heartbeat triggers │
+│  - StateVector      │ │  branching FS     │ │  simulation kernel  │
+│  - BudgetState      │ │  policy engine    │ │  gating profiles    │
+│  - OperatingMode    │ │  SSE adapters     │ │  memory maintenance │
+│  - Capabilities     │ │  gRPC ingest      │ │  decay/forgetting   │
+│  - Soul/Memory      │ │  lago-memory (NEW)│ │                     │
+│  - Intent lifecycle │ │                   │ │                     │
+│  - GatingProfile    │ │                   │ │                     │
+│  - BlobRef          │ │                   │ │                     │
+└─────────────────────┘ └───────────────────┘ └─────────────────────┘
+```
+
+### Ownership Boundaries
+
+| Project | Owns | Does NOT own |
+|---------|------|-------------|
+| **aiOS** | Canonical types, event taxonomy, kernel traits, schema versioning, conformance tests | Runtime implementation, persistence engine, provider/tool details |
+| **Arcan** | Agent loop, providers, tool harness, sandbox, daemon HTTP/SSE, CLI | Event schema definition, persistence engine, policy rule storage |
+| **Lago** | Journal, blob store, branching FS, projections, policy engine, SSE adapters, memory store | Runtime behavior, model routing, homeostasis decisions |
+| **Autonomic** | Homeostasis controllers, heartbeat scheduling, simulation, gating profiles | Tool execution, persistence, streaming |
+
+### Dependency Wiring (separate repos, git deps)
+
+All projects depend on `agent-kernel` (published by aiOS) via git dependency:
+```toml
+agent-kernel = { git = "https://github.com/broomva/aiOS", package = "agent-kernel", rev = "<sha>" }
+```
+
+---
+
+## Arcan + Lago: Runtime + Persistence
+
+Arcan + Lago form the two-layer runtime core:
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -333,3 +394,140 @@ Future: Can switch to **gRPC** (lago-ingest) for distributed deployment.
 | YAML parsing   | serde_yaml    | 0.9     | Arcan |
 | File walking   | walkdir       | 2.x     | Arcan |
 | Glob matching  | glob          | 0.3     | Both  |
+
+---
+
+## aiOS: Kernel Contract
+
+aiOS defines the canonical types and interfaces that all other projects implement.
+
+### `agent-kernel` Crate (canonical contract)
+
+```
+agent-kernel/src/
+  ids.rs          # SessionId, BranchId, EventId, RunId, BlobHash, SeqNo
+  event.rs        # EventEnvelope + EventKind (~55 variants, forward-compatible)
+  state.rs        # AgentStateVector, BudgetState, CanonicalState
+  mode.rs         # OperatingMode, GatingProfile
+  intent.rs       # Intent, IntentKind, RiskLevel
+  tool.rs         # ToolCall, ToolResult, ToolDefinition, ToolAnnotations
+  policy.rs       # Capability, PolicyEvaluation, PolicyDecisionKind
+  memory.rs       # SoulProfile, Observation, Provenance, MemoryScope
+  checkpoint.rs   # CheckpointManifest
+  session.rs      # SessionManifest, ModelRouting
+  blob.rs         # BlobRef (for arbitrary payloads: tensors, audio, etc.)
+  patch.rs        # StatePatch, PatchOp (Set, Merge, Append, Tombstone, SetRef)
+  stream.rs       # UiMessage, UiPart (AI SDK data parts mapping)
+  traits.rs       # Journal, PolicyGate, Harness, MemoryStore, AutonomicController
+  error.rs        # KernelError
+```
+
+### Canonical Event Taxonomy (~55 variants)
+
+```
+Session:      SessionCreated, SessionResumed, SessionClosed
+Branch:       BranchCreated, BranchMerged
+Phase:        PhaseEntered (Perceive|Deliberate|Gate|Execute|Commit|Reflect|Sleep)
+Run:          RunStarted, RunFinished, RunErrored
+Step:         StepStarted, StepFinished
+Text:         TextDelta, MessageCommitted
+Tool:         ToolCallRequested, ToolCallStarted, ToolCallCompleted, ToolCallFailed
+File:         FileWrite, FileDelete, FileRename, FileMutated
+State:        StatePatched, ContextCompacted
+Policy:       PolicyEvaluated
+Approval:     ApprovalRequested, ApprovalResolved
+Sandbox:      SandboxCreated, SandboxExecuted, SandboxViolation, SandboxDestroyed
+Memory:       ObservationAppended, ReflectionCompacted, MemoryProposed, MemoryCommitted, MemoryTombstoned
+Homeostasis:  Heartbeat, StateEstimated, BudgetUpdated, ModeChanged, GatesUpdated, CircuitBreakerTripped
+Checkpoint:   CheckpointCreated, CheckpointRestored
+Voice:        VoiceSessionStarted, VoiceInputChunk, VoiceOutputChunk, VoiceSessionStopped
+World:        WorldModelObserved, WorldModelRollout, WorldModelDeltaApplied
+Intent:       IntentProposed, IntentEvaluated, IntentApproved, IntentRejected
+Error:        ErrorRaised
+Custom:       Custom { event_type, data }  (forward-compatible catch-all)
+```
+
+### Homeostasis State Vector
+
+```
+AgentStateVector:
+  progress:              f32  [0.0, 1.0]
+  uncertainty:           f32  [0.0, 1.0]
+  risk_level:            RiskLevel (Low|Medium|High|Critical)
+  budget:                BudgetState (tokens, time, cost, tool_calls, error_budget)
+  error_streak:          u32
+  context_pressure:      f32  [0.0, 1.0]
+  side_effect_pressure:  f32  [0.0, 1.0]
+  human_dependency:      f32  [0.0, 1.0]
+
+OperatingMode: Explore | Execute | Verify | Recover | AskHuman | Sleep
+
+GatingProfile:
+  allow_side_effects:        bool
+  require_approval_for_risk: RiskLevel
+  max_tool_calls_per_tick:   u32
+  max_file_mutations:        u32
+  allow_network:             bool
+  allow_shell:               bool
+```
+
+---
+
+## Autonomic: Homeostasis Controller (Planned)
+
+### Architecture
+
+```
+autonomic/crates/
+  autonomic-model/        # vitals, decisions, triggers, config
+  autonomic-core/         # rule-based controller with hysteresis
+  autonomic-heartbeat/    # trigger scheduling (time + event-based)
+  autonomic-sim/          # simulator trait + statistical rollout
+  autonomic-adapters/
+    autonomic-arcan/      # adapter: wire into Arcan daemon
+    autonomic-lago/       # adapter: replay from Lago journal
+```
+
+### Control Loop
+
+```
+Heartbeat fires (time-based or event-triggered)
+  │
+  ├── Read event window from journal
+  ├── Compute AgentStateVector
+  ├── Run homeostasis controllers:
+  │   ├── Uncertainty high → restrict action power (read-only tools)
+  │   ├── Error streak high → Recover mode (rollback, change strategy)
+  │   ├── Budget low → simplify (cheaper model, narrower plans)
+  │   ├── Context pressure high → externalize (write state, retrieve selectively)
+  │   └── Side-effect pressure high → transaction discipline
+  │
+  ├── Output GatingProfile (enforced at Arcan harness boundary)
+  ├── Output maintenance triggers (memory consolidation, compaction)
+  └── Emit events: StateEstimated, ModeChanged, GatesUpdated
+```
+
+---
+
+## Memory Service (Planned — `lago-memory`)
+
+### Layers
+
+```
+Raw event log (Lago journal) — truth, replay, never deleted
+  │
+  ├── Observations — extracted facts with provenance
+  ├── Reflections — compressed summaries over event ranges
+  ├── Soul — stable identity/preferences (governed writes)
+  ├── Decisions — key architectural choices with evidence
+  └── KG/Embeddings — entity graphs + semantic retrieval (future)
+```
+
+### Forgetting Model
+
+Memory is never deleted from the journal. "Forgetting" is achieved through:
+- **Tombstones**: mark items deprecated, stop returning in retrieval
+- **Decay scoring**: `score = salience * reliability * reinforcement / (1 + age_decay + conflict_penalty)`
+- **Compaction**: summarize old observations, link to event ranges
+- **Promotion/demotion**: session scratch → agent durable → OS knowledge (governed)
+- **Context assembly**: budget-aware, scope-filtered, trust-weighted retrieval
