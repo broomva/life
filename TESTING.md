@@ -1,4 +1,4 @@
-# Arcan + Lago: Testing Strategy
+# Agent OS: Testing Strategy
 
 ## Current Coverage
 
@@ -353,3 +353,71 @@ jobs:
 4. **Tests document behavior** — Test names describe what behavior is being verified
 5. **Failed tests block merges** — CI must pass before merge
 6. **Coverage trends up** — Track coverage over time, never decrease
+
+---
+
+## Conformance Test Suite (Planned — `agent-kernel`)
+
+Once the `agent-kernel` crate is extracted from aiOS, a conformance test suite will validate that all implementations (Arcan, Lago, aiOS reference) adhere to the kernel contract.
+
+### Schema Conformance
+
+| Test | What it validates |
+|------|-------------------|
+| Event roundtrip | `EventEnvelope` -> JSON -> `EventEnvelope` = identical for all ~55 variants |
+| Forward compatibility | Unknown event types deserialize to `Custom { event_type, data }` |
+| ID format | All IDs are valid ULIDs (26 chars, sortable) |
+| Sequence monotonicity | Per-branch sequences are strictly monotonic, no gaps |
+
+### Provenance Conformance
+
+| Test | What it validates |
+|------|-------------------|
+| Memory provenance | Every `ObservationAppended` references valid event IDs |
+| Checkpoint integrity | `checkpoint.state_hash` matches SHA-256 of reconstructed state |
+| Tombstone validity | `MemoryTombstoned` references existing `MemoryCommitted` |
+
+### Replay Conformance
+
+| Test | What it validates |
+|------|-------------------|
+| State reconstruction | Replaying events from seq 0 produces identical derived state |
+| Checkpoint restore | Restoring from checkpoint + replaying remaining events = same state |
+| Cross-project replay | Events stored in Lago, replayed in Arcan = consistent state |
+
+---
+
+## Golden Replay Tests (Planned)
+
+Curated sessions that serve as regression tests for the entire ecosystem:
+
+### Test Protocol
+
+1. **Record**: Run Arcan with a scripted session (mock provider, deterministic tool results)
+2. **Capture**: Store event log + tool results + workspace hashes in golden test data
+3. **Replay**: Re-run in "replay mode" (cached tool results, no LLM calls)
+4. **Assert**:
+   - Same derived state (AgentStateVector, BudgetState)
+   - Same artifact hashes
+   - Same event sequence class (within allowed nondeterminism bounds)
+
+### Golden Test Sessions (planned)
+
+| Session | What it tests |
+|---------|---------------|
+| `simple-chat` | Text-only conversation, no tools |
+| `file-edit` | Read file → edit with hashline → verify |
+| `tool-failure-recovery` | Tool fails → error streak → mode switch to Recover |
+| `approval-flow` | Risky tool → approval requested → approved → executed |
+| `memory-lifecycle` | Observe → reflect → propose → commit → tombstone |
+| `branch-fork` | Fork session → diverge → merge |
+
+### End-to-End Verification Command
+
+```bash
+# Full ecosystem verify (all 4 projects)
+(cd aiOS && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
+(cd arcan && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
+(cd lago && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
+(cd autonomic && cargo fmt && cargo clippy --workspace && cargo test --workspace)
+```

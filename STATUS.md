@@ -1,7 +1,7 @@
-# Arcan + Lago: Implementation Status Report
+# Agent OS: Implementation Status Report
 
-**Date**: 2026-02-15
-**Version**: 0.2.0 (both projects)
+**Date**: 2026-02-16
+**Version**: 0.2.0 (Arcan + Lago), pre-unification (aiOS standalone)
 **Rust Toolchain**: 1.93.0 (requires >= 1.85, Rust 2024 Edition)
 
 ---
@@ -315,6 +315,51 @@ User → POST /chat → AgentLoop.run()
   → Client receives formatted SSE stream
   → Session fully replayable from journal
 ```
+
+---
+
+## aiOS — Status
+
+**Status**: STANDALONE (not yet integrated with Arcan/Lago)
+
+| Crate | Status | Tests | Description |
+|-------|--------|-------|-------------|
+| `aios-model` | Done | ~20 | Core types: SessionManifest, EventRecord, AgentStateVector, BudgetState, OperatingMode, Capability, SoulProfile, Observation, Provenance |
+| `aios-events` | Done | ~15 | FileEventStore (JSONL), per-branch monotonic sequences |
+| `aios-policy` | Done | ~10 | StaticPolicyEngine, SessionPolicyEngine (capability-based) |
+| `aios-sandbox` | Done | ~5 | LocalSandboxRunner (process-level) |
+| `aios-tools` | Done | ~5 | Tool registry + dispatcher (fs.read, fs.write, shell.exec) |
+| `aios-memory` | Done | ~5 | WorkspaceMemoryStore (soul.json + observations.jsonl) |
+| `aios-runtime` | Done | ~10 | KernelRuntime with 8-phase tick lifecycle, homeostasis controllers |
+| `aios-kernel` | Done | ~5 | Composition root / builder |
+| `aiosd` | Done | 0 | Demo daemon |
+| `aios-api` | Done | 0 | HTTP control-plane + SSE (Vercel AI SDK v6) |
+
+**Key differentiators** (not present in Arcan/Lago):
+- `AgentStateVector` with homeostasis (progress, uncertainty, risk, budget, error_streak, context/side-effect pressure)
+- `OperatingMode` (Explore/Execute/Verify/Recover/AskHuman/Sleep) with estimation logic
+- `BudgetState` (tokens, time, cost, tool_calls, error_budget)
+- Circuit breaker logic (error_streak >= threshold → Recover)
+- 8-phase tick lifecycle (Perceive → Deliberate → Gate → Execute → Commit → Reflect → Heartbeat → Sleep)
+- Voice event types (VoiceSessionStarted, VoiceInputChunk, VoiceOutputChunk, etc.)
+- Canonical workspace layout matching Agent OS vision
+
+---
+
+## Unification Status
+
+| Integration Point | Status | Notes |
+|-------------------|--------|-------|
+| Canonical event taxonomy (`agent-kernel`) | PLANNED | Three separate models need merging (~55 canonical variants) |
+| aiOS ↔ Arcan integration | NOT STARTED | aiOS currently standalone |
+| aiOS ↔ Lago integration | NOT STARTED | aiOS has evaluation doc (`FILESYSTEM_EVALUATION.md`) |
+| Homeostasis in Arcan | NOT STARTED | aiOS has types; Arcan lacks them |
+| Autonomic project | NOT STARTED | Separate repo planned |
+| `lago-memory` crate | NOT STARTED | Memory forgetting/consolidation/decay |
+| Conformance test suite | NOT STARTED | Cross-project golden replay tests |
+
+See `docs/CONTRACT.md` for the canonical contract specification.
+See `docs/ROADMAP.md` Phase 7 for the unification implementation plan.
 
 ---
 
