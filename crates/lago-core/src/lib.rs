@@ -6,6 +6,7 @@ pub mod journal;
 pub mod mount;
 pub mod policy;
 pub mod projection;
+pub mod protocol_bridge;
 pub mod sandbox;
 pub mod session;
 pub mod tool_span;

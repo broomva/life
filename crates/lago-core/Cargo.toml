@@ -11,6 +11,7 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+aios-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ulid.workspace = true
