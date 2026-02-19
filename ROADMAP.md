@@ -32,6 +32,16 @@
 | Security | 4/10 | Soft sandbox, no auth |
 | Operational tooling | 2/10 | CLI stubs |
 
+### 2026-02-17 Execution Update
+
+- Phase 0 hard-cutover backbone items landed:
+  - branch-aware repository semantics in Arcan runtime paths
+  - Arcand canonical `/v1/sessions/{id}/{runs,signals,state,stream}` surface
+  - canonical SSE data-part naming + Vercel header compatibility
+  - Lago journal atomic sequence assignment per branch
+  - root conformance runner at `/Users/broomva/broomva.tech/live/conformance/run.sh`
+- Remaining Phase 0 work is now concentrated on deep taxonomy/runtime cutover cleanup and full conformance expansion.
+
 ---
 
 ## Phase 0: Stabilization & Test Coverage (Weeks 1-2)

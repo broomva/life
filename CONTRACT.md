@@ -2,6 +2,17 @@
 
 The `aios-protocol` crate (published by aiOS) defines the canonical types, event taxonomy, and interfaces that all Agent OS projects implement. This document is the reference for the contract.
 
+## 2026-02-17 MVP Cutover Update
+
+The hard-cutover MVP spine is now implemented across `aios-protocol` + `Arcan` + `Lago` with:
+
+- Strict envelope enrichment: `agent_id`, `actor`, `schema`, `trace_id`, `span_id`, `digest`.
+- Canonical state patch type in protocol (`StatePatch { base_version, ops, provenance }`) with typed ops (`set`, `merge`, `append`, `tombstone`, `set_ref`).
+- Branch-aware Arcan repository signatures (`append/load/head` are branch-explicit).
+- Arcand v1 API surface (`/runs`, `/signals`, `/state`, `/stream`).
+- Canonical data-part SSE naming (`state.patch`, `intent.*`, `tool.*`) with Vercel UI stream header compatibility.
+- Journal-assigned monotonic sequence numbers per `(session_id, branch_id)` in Lago.
+
 ## Schema Versioning
 
 - `aios-protocol` follows **semantic versioning**:
@@ -28,11 +39,17 @@ All events are wrapped in `EventEnvelope`:
 EventEnvelope {
     event_id:       EventId (ULID)
     session_id:     SessionId
+    agent_id:       AgentId
     branch_id:      BranchId
     run_id:         Option<RunId>
     seq:            SeqNo (u64, monotonic per branch)
-    timestamp:      u64 (microseconds since UNIX epoch)
+    ts_ms:          u64 (wire name; internal field is timestamp)
+    actor:          EventActor { type, component? }
+    schema:         EventSchema { name, version }
     parent_id:      Option<EventId> (causal chain)
+    trace_id:       Option<String>
+    span_id:        Option<String>
+    digest:         Option<String>
     kind:           EventKind (discriminated union)
     metadata:       HashMap<String, String>
     schema_version: u8 (default: 1)
@@ -111,6 +128,17 @@ read(query) -> Vec<EventEnvelope>
 head_seq(session, branch) -> SeqNo
 stream(session, branch, after_seq) -> EventStream
 ```
+
+### Arcand MVP API (runtime entrypoint)
+
+```
+POST /v1/sessions/{session_id}/runs
+POST /v1/sessions/{session_id}/signals
+GET  /v1/sessions/{session_id}/state?branch=
+GET  /v1/sessions/{session_id}/stream?branch=&from_version=
+```
+
+`/stream` supports resume via `Last-Event-ID` and emits keep-alive pings.
 
 ### PolicyGate (security)
 ```

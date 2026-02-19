@@ -1,6 +1,6 @@
 # Agent OS: Implementation Status Report
 
-**Date**: 2026-02-16
+**Date**: 2026-02-17
 **Version**: 0.2.0 (Arcan + Lago), pre-unification (aiOS standalone)
 **Rust Toolchain**: 1.93.0 (requires >= 1.85, Rust 2024 Edition)
 
@@ -12,12 +12,26 @@
 |---------------------|--------------|--------------|--------------|
 | Compilation         | CLEAN        | CLEAN        | CLEAN        |
 | Clippy warnings     | 0            | 0            | 0            |
-| Tests passing       | 240/240      | 286/286      | 526/526      |
+| Tests passing       | 255/255      | 295/295      | 550/550      |
 | Tests failing       | 0            | 0            | 0            |
 | Lines of Rust       | ~8,500       | ~12,200      | ~20,700      |
 | Workspace crates    | 7            | 9            | 16           |
 
 Both projects compile cleanly, pass all tests, and have zero warnings.
+
+### 2026-02-17 Hard-Cutover Delta
+
+- Branch-aware Arcan persistence is now explicit end-to-end (`append/load/head` require `branch_id`).
+- Arcand exposes canonical MVP v1 endpoints:
+  - `POST /v1/sessions/{session_id}/runs`
+  - `POST /v1/sessions/{session_id}/signals`
+  - `GET /v1/sessions/{session_id}/state`
+  - `GET /v1/sessions/{session_id}/stream`
+- Canonical SSE data-part naming is now emitted from Arcand (`state.patch`, `intent.*`, `tool.*`) with `x-vercel-ai-ui-message-stream: v1`.
+- Lago journal now assigns branch-local `seq` atomically at append-time (caller-provided sequence is ignored).
+- Lago API stream route now applies format-specific SSE headers and done frames.
+- Lago file routes now support explicit branch query semantics (default `main`), removing hardcoded branch writes.
+- Root conformance harness added at `/Users/broomva/broomva.tech/live/conformance/run.sh`.
 
 ---
 
