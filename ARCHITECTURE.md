@@ -9,6 +9,20 @@ The Agent OS is a four-project ecosystem forming a complete agentic operating sy
 - **Lago** — Persistence substrate: event journal, blob store, branching FS, policy engine
 - **Autonomic** — Stability controller: homeostasis, heartbeats, simulation, gating (planned)
 
+### 2026-02-17 Hard-Cutover Spine Additions
+
+- Arcand now exposes canonical runtime APIs under `/v1/sessions/{session_id}`:
+  - `POST /runs` (execute + stream)
+  - `POST /signals` (external signal ingress)
+  - `GET /state` (snapshot `{version,state}`)
+  - `GET /stream` (SSE replay stream)
+- Arcand streams canonical data-part events for UI sync:
+  - `state.patch`
+  - `intent.proposed|evaluated|approved|rejected`
+  - `tool.started|completed`
+- Arcan session persistence is branch-explicit (branch ID required in append/load/head paths).
+- Lago journal sequence numbers are assigned atomically at append-time per branch head (caller `seq` is non-authoritative).
+
 ### Ecosystem Architecture
 
 ```

@@ -1,5 +1,19 @@
 # Agent OS: Testing Strategy
 
+## 2026-02-17 Coverage Update
+
+- Arcan workspace: `255/255` tests passing.
+- Lago workspace: `295/295` tests passing.
+- Combined Arcan+Lago: `550/550` tests passing.
+- Added root cross-stack conformance entrypoint:
+  - `/Users/broomva/broomva.tech/live/conformance/run.sh`
+- Conformance runner validates:
+  - protocol model tests (`aios-protocol`)
+  - Arcand v1 API + canonical SSE parts
+  - Arcan-Lago bridge replay path
+  - Lago journal sequence assignment invariants
+  - Lago API session/SSE behavior
+
 ## Current Coverage
 
 ### By Crate
