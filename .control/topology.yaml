@@ -1,0 +1,35 @@
+version: 1
+zones:
+  arcan_runtime:
+    paths:
+      - arcan/
+    owner: agent-runtime-team
+    critical: true
+  lago_persistence:
+    paths:
+      - lago/
+    owner: persistence-team
+    critical: true
+  shared_docs:
+    paths:
+      - docs/
+  control_plane:
+    paths:
+      - .control/
+      - docs/control/
+      - scripts/control/
+      - evals/
+      - AGENTS.md
+      - PLANS.md
+      - METALAYER.md
+      - Makefile.control
+    owner: platform-engineering
+    immutable: true
+  git_infrastructure:
+    paths:
+      - .githooks/
+      - .github/workflows/control-harness.yml
+ownership:
+  policy_owner: engineering
+  command_owner: platform
+  observability_owner: sre
