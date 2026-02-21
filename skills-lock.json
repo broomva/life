@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "control-metalayer-loop": {
+      "source": "broomva/agent-control-metalayer-skill",
+      "sourceType": "github",
+      "computedHash": "c40b0fd329c5b11b438d6d6efb4e693fee88acbbc7b31a09d721dc93f7aee8ee"
+    }
+  }
+}
