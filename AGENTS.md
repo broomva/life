@@ -227,9 +227,18 @@ Audit failures block agent operations until resolved.
 
 The `docs/` directory is the **central source of truth** for project status, architecture, roadmap, and design philosophy. All agents must keep it synchronized with actual implementation.
 
+**Read order for agents (fast path):**
+1. `docs/NAVIGATION.md`
+2. `docs/STATUS.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/ROADMAP.md`
+
+**Canonicality rule:** if docs conflict, treat `docs/STATUS.md` as source of truth, then reconcile project-local docs.
+
 | Document | Purpose | Owner | Last Updated |
 |----------|---------|-------|--------------|
-| `docs/STATUS.md` | Crate-by-crate status, test counts (526/526), integration matrix, known gaps | Both projects | 2026-02-16 |
+| `docs/NAVIGATION.md` | Agent traversal map: where to start, precedence rules, deep-dive paths | Both projects | 2026-02-21 |
+| `docs/STATUS.md` | Canonical implementation state, test counts, integration matrix, known gaps | Both projects | 2026-02-17 |
 | `docs/ROADMAP.md` | 7 phases: stabilization → memory → learning → skills → observability → security → platform | Vision | Ongoing |
 | `docs/ARCHITECTURE.md` | System diagram, Arcan loop, Lago substrate, aiOS contract, Autonomic control | Both projects | v0.2.0 |
 | `docs/PLAN.md` | Implementation roadmap with phase dependencies | Planning | See ROADMAP |
