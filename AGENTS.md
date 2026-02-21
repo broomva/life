@@ -141,6 +141,52 @@ lago-core (zero external deps)
   → lago-cli, lagod (binaries — depend on all)
 ```
 
+## Control Metalayer (Governance & Safety)
+
+This workspace operates as a **control loop** for autonomous agent development. The metalayer provides governance primitives, observability hooks, and safety gates.
+
+### Key Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **Policy** | `.control/policy.yaml` | RBAC rules, capability gates, escalation conditions |
+| **Commands** | `.control/commands.yaml` | Canonical commands (smoke, check, test, recover) |
+| **Topology** | `.control/topology.yaml` | Repository structure and agent permissions |
+| **Control Loop** | `docs/control/CONTROL_LOOP.md` | Setpoints, sensors, actuators, feedback |
+| **Architecture** | `docs/control/ARCHITECTURE.md` | System design and dependencies |
+| **Observability** | `docs/control/OBSERVABILITY.md` | Metrics, tracing, and audit logs |
+
+### Core Commands
+
+All control commands are defined in `Makefile.control`:
+
+```bash
+make smoke              # Quick syntax/build check
+make check              # Format + clippy + test
+make test               # Full test suite
+make recover            # Recovery procedures
+make audit              # Validate control plane
+```
+
+### Git Hooks
+
+Pre-commit and pre-push hooks installed at `.githooks/` enforce:
+- Format checks
+- Lint compliance
+- Test validation before push
+
+Reinstall with: `bash scripts/control/install_hooks.sh`
+
+### Audit & Validation
+
+Run control audits to validate governance compliance:
+
+```bash
+python3 scripts/control_wizard.py audit . --strict
+```
+
+Audit failures block agent operations until resolved.
+
 ## Pre-Commit Workflow
 
 1. `cargo fmt` — auto-fix formatting
@@ -148,6 +194,7 @@ lago-core (zero external deps)
 3. `cargo clippy` — lint
 4. `cargo test --workspace` — run tests
 5. `cargo build --workspace` — full build (for larger changes)
+6. Control gates: smoke → check → test (see `Makefile.control`)
 
 ## Living Documentation (`docs/`)
 

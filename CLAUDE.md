@@ -148,6 +148,87 @@ lago-core (zero external deps)
 3. `cargo clippy` — lint
 4. `cargo test --workspace` — run tests
 5. `cargo build --workspace` — full build (for larger changes)
+6. Control gates via `Makefile.control`: smoke → check → test
+
+## Control Metalayer (Governance & Safety)
+
+This workspace operates as a **control loop for autonomous agent development** using the `control-metalayer-loop` skill. The metalayer provides governance primitives, observability hooks, safety gates, and self-healing capabilities.
+
+### Architecture
+
+The control plane consists of:
+
+- **Policy** (`.control/policy.yaml`): RBAC rules, capability gates, escalation conditions
+- **Commands** (`.control/commands.yaml`): Canonical commands with setpoints and actuators
+- **Topology** (`.control/topology.yaml`): Repository structure, agent roles, permission matrix
+- **Control Loop** (`docs/control/CONTROL_LOOP.md`): Feedback system with sensors and actuators
+- **Observability** (`docs/control/OBSERVABILITY.md`): Metrics, traces, audit logs
+
+### Canonical Commands
+
+All control flows use these stable commands (defined in `Makefile.control`):
+
+```bash
+make smoke              # Quick format/syntax/build check (~10s)
+make check              # Full check: format + clippy + test (~60s)
+make test               # Comprehensive test suite
+make recover            # Recovery/reset procedures
+make audit              # Validate governance compliance
+```
+
+### Safety Gates
+
+Control gates enforce a deterministic sequence:
+
+```
+smoke (syntax/build) → check (lint + test) → test (full suite)
+                    ↓
+              audit (governance)
+```
+
+Failing any gate blocks the next stage. No agent can bypass gates without explicit policy escalation.
+
+### Git Hooks
+
+Pre-commit and pre-push hooks installed at `.githooks/`:
+- Pre-commit: `smoke` gate (fast fail on syntax errors)
+- Pre-push: `check` gate (format + lint + test)
+
+Reinstall hooks if missing:
+```bash
+bash scripts/control/install_hooks.sh
+```
+
+### Validation & Auditing
+
+Audit the control plane to ensure governance compliance:
+
+```bash
+python3 scripts/control_wizard.py audit . --strict
+```
+
+Audit failures are **blocking**. All detected gaps must be resolved before agent operations resume.
+
+### Setpoints & Metrics
+
+Current control setpoints are defined in `METALAYER.md` and `evals/control-metrics.yaml`:
+
+- **pass_at_1**: Primary test success rate (target: 100%)
+- **merge_cycle_time**: Time from push to merge (tracks velocity)
+- **revert_rate**: Reverted commits (tracks stability)
+- **human_intervention_rate**: Manual escalations (tracks autonomy)
+
+Monitor these metrics during development. Degradation triggers recovery actions.
+
+### Living Documentation (`docs/control/`)
+
+Control-specific documentation:
+
+| Document | Purpose |
+|----------|---------|
+| `docs/control/ARCHITECTURE.md` | System design, dependencies, component roles |
+| `docs/control/CONTROL_LOOP.md` | Feedback mechanism: measure → compare → decide → act → verify |
+| `docs/control/OBSERVABILITY.md` | Metrics, logging, tracing, audit trail |
 
 ## Living Documentation (`docs/`)
 
