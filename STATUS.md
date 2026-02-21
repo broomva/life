@@ -4,6 +4,10 @@
 **Version**: 0.2.0 (Arcan + Lago), pre-unification (aiOS standalone)
 **Rust Toolchain**: 1.93.0 (requires >= 1.85, Rust 2024 Edition)
 
+This is the **canonical implementation-state document** for `/live`.
+For traversal/read order, start at `docs/NAVIGATION.md`.
+If project-local status files conflict with this file, treat this file as source of truth and open a doc-drift follow-up.
+
 ---
 
 ## Health Summary
