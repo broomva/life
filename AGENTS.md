@@ -141,6 +141,33 @@ lago-core (zero external deps)
   → lago-cli, lagod (binaries — depend on all)
 ```
 
+## Harness Commands
+
+The harness provides deterministic, scriptable commands for autonomous agent operations. All harness commands are defined in `Makefile.harness`:
+
+```bash
+make smoke              # Fast syntax/build validation (agents run frequently)
+make test               # Comprehensive test suite (validates correctness)
+make lint               # Format + static analysis (enforces code quality)
+make typecheck          # Type checking (validates type safety)
+make ci                 # Full CI sequence: smoke → test → lint → typecheck
+make audit              # Governance audit (validates control plane compliance)
+```
+
+These commands are deterministic, reproducible, and designed to work in fresh CI environments without setup drift.
+
+## Execution Plans
+
+Multi-step, multi-hour tasks should be planned explicitly. Use `PLANS.md` for:
+
+1. **Scope definition** — What problem are we solving?
+2. **Constraint capture** — What are the hard limits?
+3. **Checkpoint markers** — Where can we pause/resume safely?
+4. **Durable context** — What context survives process restarts?
+5. **Acceptance criteria** — How do we verify success?
+
+Plans are stored in `PLANS.md` and kept in sync with actual implementation in `AGENTS.md` and project-specific documentation.
+
 ## Control Metalayer (Governance & Safety)
 
 This workspace operates as a **control loop** for autonomous agent development. The metalayer provides governance primitives, observability hooks, and safety gates.
