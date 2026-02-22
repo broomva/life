@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.4.5",
+  "checkpoint_id": "b1a6fcf27168",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "Makefile.control",
+    "aiOS",
+    "lago",
+    "scripts/audit_control.sh"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b1/a6fcf27168/0/metadata.json",
+      "transcript": "/b1/a6fcf27168/0/full.jsonl",
+      "context": "/b1/a6fcf27168/0/context.md",
+      "content_hash": "/b1/a6fcf27168/0/content_hash.txt",
+      "prompt": "/b1/a6fcf27168/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 528,
+    "cache_creation_tokens": 81643,
+    "cache_read_tokens": 3884538,
+    "output_tokens": 10620,
+    "api_call_count": 65
+  }
+}
