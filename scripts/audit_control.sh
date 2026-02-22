@@ -140,6 +140,15 @@ if [ "$strict" -eq 1 ]; then
   check_hooks_path
 fi
 
+if [ -x "$repo_path/scripts/architecture/verify_dependencies.sh" ]; then
+  echo
+  if (cd "$repo_path" && ./scripts/architecture/verify_dependencies.sh); then
+    ok "architecture dependency audit"
+  else
+    fail "architecture dependency audit"
+  fi
+fi
+
 echo
 if [ "$failures" -gt 0 ]; then
   echo "Control audit failed: $failures issue(s)."

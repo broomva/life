@@ -11,7 +11,7 @@ This directory contains the cross-stack MVP conformance runner for the hard-cuto
 ## What it validates
 
 - Protocol/envelope + canonical patch model (`aios-protocol`).
-- Arcan API surface (`/v1/sessions/{id}/runs|signals|state|stream`) and canonical SSE parts.
+- Arcand canonical API surface (`/sessions/{id}/runs|state|events|events/stream|branches|approvals`) and canonical SSE parts.
 - Branch-aware repository behavior in Arcan-Lago bridge.
 - Journal-assigned sequence semantics in Lago.
 - SSE replay endpoint behavior in Lago API.
