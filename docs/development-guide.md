@@ -15,17 +15,20 @@ cargo build --release --workspace
 
 ## Test Coverage
 
-**187 tests** across all 9 crates, all passing:
+**295 tests** across all 10 crates, all passing:
 
 | Crate | Tests | Coverage |
 |-------|-------|----------|
-| `lago-core` | 48 | IDs, events, errors, journal query, session, policy, tool_span |
-| `lago-api` | 32 | SSE formats (OpenAI, Anthropic, Vercel, Lago), error mapping |
+| `lago-core` | 118 | IDs, events, errors, journal query, session, policy, tool_span, canonical protocol alignment |
+| `lago-api` | 62 | SSE formats (OpenAI, Anthropic, Vercel, Lago), REST/session APIs, error mapping |
 | `lago-fs` | 30 | Manifest, branch, diff, projection, tree operations |
-| `lago-policy` | 27 | Engine rules, RBAC, hooks, TOML config parsing |
-| `lago-journal` | 23 | Key encoding, redb CRUD, sessions, snapshots, notifications |
+| `lago-policy` | 34 | Engine rules, RBAC, hooks, TOML config parsing |
+| `lago-journal` | 24 | Key encoding, redb CRUD, sessions, snapshots, notifications |
 | `lago-store` | 17 | Blob put/get, SHA-256 hashing, zstd compression |
 | `lago-ingest` | 10 | Proto codec roundtrips, ack/heartbeat construction |
+| `lago-aios-eventstore-adapter` | 0 | Canonical adapter is covered through cross-project conformance and integration paths |
+| `lago-cli` | 0 | Primarily validated via integration flows and manual CLI verification |
+| `lagod` | 0 | Primarily validated via API/integration and daemon smoke paths |
 
 ### Test Patterns
 

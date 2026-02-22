@@ -77,7 +77,7 @@ curl -N http://localhost:3000/v1/sessions/<id>/events
 # Build
 cargo build --workspace
 
-# Test (187 tests)
+# Test (295 tests)
 cargo test --workspace
 
 # Lint
@@ -101,6 +101,7 @@ cargo deny check
 | [`lago-ingest`](crates/lago-ingest) | gRPC streaming ingest service |
 | [`lago-api`](crates/lago-api) | HTTP REST API + SSE streaming |
 | [`lago-policy`](crates/lago-policy) | Policy engine with rule-based tool governance |
+| [`lago-aios-eventstore-adapter`](crates/lago-aios-eventstore-adapter) | aiOS canonical event-store adapter |
 | [`lago`](crates/lago-cli) | CLI tool |
 | [`lagod`](crates/lagod) | Daemon binary |
 

@@ -24,7 +24,7 @@
 # Build the entire workspace
 cargo build --workspace
 
-# Run all tests (187 tests across 9 crates)
+# Run all tests (295 tests across 10 crates)
 cargo test --workspace
 
 # Full validation pipeline

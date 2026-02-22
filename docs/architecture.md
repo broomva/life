@@ -37,7 +37,7 @@ This separation allows each layer to optimize independently. The gRPC ingest lay
 
 ## Workspace Structure
 
-The project is organized as a Cargo workspace with 9 crates following a strict dependency hierarchy:
+The project is organized as a Cargo workspace with 10 crates following a strict dependency hierarchy:
 
 ```
 lago-core        (zero deps — foundation types, traits, errors)
