@@ -6,8 +6,8 @@ ROOT="/Users/broomva/broomva.tech/live"
 echo "[conformance] protocol checks"
 (cd "$ROOT/aiOS/crates/aios-protocol" && cargo test)
 
-echo "[conformance] arcan api + stream/state sync checks"
-(cd "$ROOT/arcan" && cargo test -p arcand --test sse_server)
+echo "[conformance] arcand canonical session API checks"
+(cd "$ROOT/arcan" && cargo test -p arcand --test canonical_api)
 
 echo "[conformance] arcan-lago replay/bridge checks"
 (cd "$ROOT/arcan" && cargo test -p arcan-lago --test end_to_end)
