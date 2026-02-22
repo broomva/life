@@ -1,10 +1,12 @@
 # Agent OS: Testing Strategy
 
-## 2026-02-17 Coverage Update
+## 2026-02-22 Coverage Update
 
-- Arcan workspace: `255/255` tests passing.
+- Arcan workspace: `236/236` tests passing (`+1 ignored`).
 - Lago workspace: `295/295` tests passing.
-- Combined Arcan+Lago: `550/550` tests passing.
+- Combined Arcan+Lago: `531/531` tests passing (`+1 ignored`).
+- Combined crate count (Arcan+Lago): `19`.
+- Combined Rust LOC (Arcan+Lago): `~27.8K`.
 - Added root cross-stack conformance entrypoint:
   - `/Users/broomva/broomva.tech/live/conformance/run.sh`
 - Conformance runner validates:
@@ -16,37 +18,40 @@
 
 ## Current Coverage
 
-### By Crate
+### By Crate (Declared Tests + LOC)
 
-| Crate             | Unit Tests | Integration | Total | Lines  | Coverage Estimate |
-|-------------------|-----------|-------------|-------|--------|-------------------|
-| arcan-core        | 3         | 0           | 3     | 1,764  | ~15%              |
-| arcan-harness     | 0         | 0           | 0     | 2,167  | 0%                |
-| arcan-store       | 7         | 0           | 7     | 390    | ~80%              |
-| arcan-provider    | 9         | 0           | 9     | 657    | ~60%              |
-| arcan-lago        | 25        | 0           | 25    | 1,498  | ~70%              |
-| arcand            | 0         | 0           | 0     | 288    | 0%                |
-| arcan (binary)    | 0         | 0           | 0     | 162    | 0%                |
-| **Arcan Total**   | **44**    | **0**       | **44**| **6,926** | **~35%**       |
-| lago-core         | 97        | 0           | 97    | 2,208  | ~90%              |
-| lago-journal      | 23        | 0           | 23    | 1,660  | ~70%              |
-| lago-store        | 17        | 0           | 17    | 680    | ~85%              |
-| lago-fs           | 26        | 0           | 26    | 1,046  | ~75%              |
-| lago-policy       | 33        | 0           | 33    | 856    | ~80%              |
-| lago-ingest       | 6         | 0           | 6     | 577    | ~40%              |
-| lago-api          | 37        | 17          | 54    | 2,100  | ~75%              |
-| lagod             | 0         | 0           | 0     | 282    | 0%                |
-| lago-cli          | 0         | 0           | 0     | 420    | 0%                |
-| **Lago Total**    | **239**   | **17**      | **256** | **9,829** | **~70%**    |
-| **Combined**      | **283**   | **17**      | **300** | **16,755** | **~55%** |
+| Crate | Declared Tests | Rust LOC |
+|---|---:|---:|
+| arcan-core | 67 | 3,450 |
+| arcan-harness | 39 | 2,519 |
+| arcan-aios-adapters | 0 | 327 |
+| arcan-store | 7 | 428 |
+| arcan-provider | 23 | 1,270 |
+| arcan-tui | 14 | 1,432 |
+| arcand | 3 | 790 |
+| arcan-lago | 80 | 4,471 |
+| arcan | 4 | 547 |
+| **Arcan Total** | **237** | **15,234** |
+| lago-core | 118 | 2,893 |
+| lago-journal | 24 | 1,520 |
+| lago-store | 17 | 322 |
+| lago-fs | 30 | 1,049 |
+| lago-ingest | 10 | 588 |
+| lago-api | 62 | 3,218 |
+| lago-policy | 34 | 1,339 |
+| lago-aios-eventstore-adapter | 0 | 145 |
+| lago-cli | 0 | 1,156 |
+| lagod | 0 | 311 |
+| **Lago Total** | **295** | **12,541** |
+| **Combined Total** | **532 declared** (`531 passing`, `1 ignored`) | **27,775** |
 
 ### Coverage Gaps (Priority Order)
 
-1. **arcan-harness** (0 tests, 2,167 lines) — Sandbox enforcement, filesystem guardrails, hashline edits, MCP bridge, memory tools, skill loading
-2. **arcand** (0 tests, 288 lines) — Agent loop execution, HTTP server endpoints, SSE streaming
-3. **arcan-core** (3 tests, 1,764 lines) — Orchestrator loop, middleware pipeline, tool registry
-4. **lago-ingest** (6 tests, 577 lines) — gRPC server/client behavior, streaming, reconnection
-5. **arcan (binary)** (0 tests, 162 lines) — Initialization, CLI arg handling, Lago wiring
+1. **arcan-harness** (39 tests, 2,519 lines) — Sandbox enforcement, filesystem guardrails, hashline edits, MCP bridge, memory tools, skill loading
+2. **arcand** (3 tests, 790 lines) — Agent loop execution, HTTP server endpoints, SSE streaming
+3. **arcan-tui** (14 tests, 1,432 lines) — Canonical API client flows and stream handling paths
+4. **lago-cli** (0 tests, 1,156 lines) — Command parsing, formatting, and end-to-end command behavior
+5. **lago-aios-eventstore-adapter** (0 tests, 145 lines) — Canonical adapter behavior and conversion edge cases
 
 ---
 

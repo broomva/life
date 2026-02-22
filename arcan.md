@@ -24,7 +24,7 @@ The industry faces what practitioners call the **security-performance-simplicity
 
 ## Arcan’s architecture: the orchestrator, harness, and typed event system
 
-Arcan is structured as a **seven-crate Rust workspace** with strict separation of concerns. The dependency graph flows from the thin CLI binary (`arcan`) through the daemon logic (`arcand`) down to foundational crates for protocol definitions, sandbox isolation, persistence, provider abstraction, and the Lago bridge.
+Arcan is structured as a **nine-crate Rust workspace** with strict separation of concerns. The dependency graph flows from the thin CLI binary (`arcan`) through the daemon logic (`arcand`) down to foundational crates for protocol definitions, sandbox isolation, persistence, provider abstraction, canonical runtime adapters, TUI client flows, and the Lago bridge.
 
 ### The orchestrator loop
 

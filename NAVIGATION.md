@@ -65,6 +65,9 @@ After fast path, expand by concern:
 - `docs/control/CONTROL_LOOP.md`
 - `docs/control/OBSERVABILITY.md`
 
+### Planned feature tracks
+- `docs/FEATURE_CONWAY_ACTUATION.md` (economic actuation plane, Conway-compatible)
+
 ---
 
 ## 4) Question → Where to look
@@ -74,6 +77,7 @@ After fast path, expand by concern:
 - “What contract/invariants must hold?” → `docs/CONTRACT.md`
 - “What should we build next?” → `docs/ROADMAP.md` + `PLANS.md`
 - “How does Arcan talk to Lago?” → `arcan/docs/lago-integration.md`
+- “How do Conway-style economic ideas map to Agent OS?” → `docs/FEATURE_CONWAY_ACTUATION.md`
 - “How do I run safe checks quickly?” → `make smoke`, `make check`, `make ci`
 - “What is failing in governance/harness?” → `make audit` + control docs
 
@@ -91,6 +95,7 @@ After fast path, expand by concern:
     ARCHITECTURE.md          # cross-project architecture + boundaries
     CONTRACT.md              # canonical protocol/schema invariants
     ROADMAP.md               # phase plan and sequencing
+    FEATURE_CONWAY_ACTUATION.md  # planned economic actuation track
     TESTING.md               # test strategy and quality expectations
     control/*                # governance/control-loop docs
   arcan/docs/*               # runtime-specific deep docs

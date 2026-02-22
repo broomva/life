@@ -1,6 +1,6 @@
 # Arcan + Lago: Consolidated Development Plan
 
-**Last updated**: 2026-02-15
+**Last updated**: 2026-02-22
 **Version**: 0.2.0
 
 ## Progress Tracker
@@ -21,7 +21,7 @@
 | P3 | Session Management & Clients | Planned | target: +24 |
 | P4 | Advanced Runtime (subagents, web client, WASM) | Future | — |
 
-**Current test counts**: Arcan 240, Lago 286, Total 526
+**Current test counts**: Arcan 236 passing (+1 ignored), Lago 295 passing, Total 531 passing (+1 ignored)
 **Target**: 700+ tests by end of Phase 5
 
 ---
@@ -30,7 +30,7 @@
 
 **What works end-to-end**: POST /chat -> agent loop -> tools -> Lago journal -> SSE stream.
 Core event sourcing, blob storage, FS branching, policy engine, gRPC ingest, multi-format SSE
-are all implemented and tested across 16 crates (~16.5K lines Rust).
+are all implemented and tested across 19 crates (~27.8K lines Rust).
 
 **Critical gaps vs the vision** (from `docs/raw-dumps/lago-lakehouse-memory.md`):
 1. **Memory**: Agents have basic key-value memory only; no observational memory, semantic recall, or graph memory
