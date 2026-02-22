@@ -82,17 +82,19 @@ A separate, fully-functional kernel implementation that parallels Arcan+Lago:
 
 ### 2.3 Arcan — Runtime `[IMPLEMENTED]`
 
-**7 crates** at `arcan/crates/`:
+**9 crates** at `arcan/crates/`:
 
 | Crate | LOC | Owns | Key Types |
 |---|---|---|---|
-| `arcan-core` | ~2,300 | Agent loop, traits, context | `Orchestrator`, `Tool`, `Middleware`, `Provider`, `ContextCompiler`, `AgentEvent` (23 variants), `AppState` |
-| `arcan-harness` | ~2,200 | Tools, sandbox, skills, MCP | `SandboxPolicy`, `FsPolicy`, `BashTool`, `SkillRegistry`, `McpTool`, hashline editing |
-| `arcan-provider` | ~660 | LLM backends | `AnthropicProvider`, `OpenAiCompatibleProvider`, `MockProvider` |
-| `arcan-store` | ~390 | Session repo trait | `SessionRepository`, `EventRecord` |
-| `arcand` | ~290 | HTTP server, heartbeat | `AgentLoop`, `HeartbeatScheduler`, axum routes |
-| `arcan-lago` | ~2,800 | Bridge to Lago | `LagoSessionRepository`, `LagoPolicyMiddleware`, `ApprovalGate`, `event_map`, `SseBridge`, memory modules |
-| `arcan` | ~160 | Binary entry point | CLI args, wiring |
+| `arcan-core` | ~3,450 | Agent loop, traits, context | `Orchestrator`, `Tool`, `Middleware`, `Provider`, `ContextCompiler`, `AgentEvent` (23 variants), `AppState` |
+| `arcan-harness` | ~2,520 | Tools, sandbox, skills, MCP | `SandboxPolicy`, `FsPolicy`, `BashTool`, `SkillRegistry`, `McpTool`, hashline editing |
+| `arcan-aios-adapters` | ~330 | Canonical runtime adapters | aiOS provider/tool/policy/approval/memory adapter implementations |
+| `arcan-provider` | ~1,270 | LLM backends | `AnthropicProvider`, `OpenAiCompatibleProvider`, `MockProvider` |
+| `arcan-store` | ~430 | Session repo trait | `SessionRepository`, `EventRecord` |
+| `arcan-tui` | ~1,430 | Terminal client | Canonical session + approval endpoint client integration |
+| `arcand` | ~790 | HTTP server, heartbeat | `AgentLoop`, `HeartbeatScheduler`, axum routes |
+| `arcan-lago` | ~4,470 | Bridge to Lago | `LagoSessionRepository`, `LagoPolicyMiddleware`, `ApprovalGate`, `event_map`, `SseBridge`, memory modules |
+| `arcan` | ~550 | Binary entry point | CLI args, wiring |
 
 **14 built-in tools**: read_file, write_file, list_dir, edit_file (hashline), glob, grep, bash, read_memory, write_memory, memory_query, memory_propose, memory_commit, MCP bridge tools, skill catalog
 
@@ -108,19 +110,20 @@ Tool invocation
 
 ### 2.4 Lago — Persistence Substrate `[IMPLEMENTED]`
 
-**9 crates** at `lago/crates/`:
+**10 crates** at `lago/crates/`:
 
 | Crate | LOC | Owns | Key Types |
 |---|---|---|---|
-| `lago-core` | ~2,500 | Types, traits | `EventEnvelope`, `EventPayload` (= `aios_protocol::EventKind`), `Journal` trait (BoxFuture), `Projection` trait, `Mount` trait |
-| `lago-journal` | ~1,660 | Event persistence | `RedbJournal` — compound key: session(26B) + branch(26B) + seq(8B BE) = 60B, tables: EVENTS, EVENT_INDEX, BRANCH_HEADS, SESSIONS, SNAPSHOTS |
-| `lago-store` | ~680 | Blob storage | `BlobStore` — SHA-256 + zstd, shard layout `{root}/{hash[0:2]}/{hash[2:]}.zst`, atomic writes |
+| `lago-core` | ~2,890 | Types, traits | `EventEnvelope`, `EventPayload` (= `aios_protocol::EventKind`), `Journal` trait (BoxFuture), `Projection` trait, `Mount` trait |
+| `lago-journal` | ~1,520 | Event persistence | `RedbJournal` — compound key: session(26B) + branch(26B) + seq(8B BE) = 60B, tables: EVENTS, EVENT_INDEX, BRANCH_HEADS, SESSIONS, SNAPSHOTS |
+| `lago-store` | ~320 | Blob storage | `BlobStore` — SHA-256 + zstd, shard layout `{root}/{hash[0:2]}/{hash[2:]}.zst`, atomic writes |
 | `lago-fs` | ~1,050 | Filesystem | `Manifest` (BTreeMap), `BranchManager` (copy-on-write), `ManifestProjection`, `diff()` |
-| `lago-policy` | ~860 | Access control | `PolicyEngine` (priority rules), `RbacManager` (role→permissions), `HookRunner`, TOML config |
-| `lago-api` | ~2,100 | HTTP + SSE | REST routes (sessions, branches, files, blobs, events), SSE format adapters (OpenAI, Anthropic, Vercel, Lago) |
-| `lago-ingest` | ~580 | gRPC streaming | Bidirectional event streaming via tonic |
-| `lago-cli` | ~420 | CLI binary | init, serve, session, branch, log, cat |
-| `lagod` | ~280 | Daemon binary | gRPC (50051) + HTTP (8080), TOML config, graceful shutdown |
+| `lago-policy` | ~1,340 | Access control | `PolicyEngine` (priority rules), `RbacManager` (role→permissions), `HookRunner`, TOML config |
+| `lago-api` | ~3,220 | HTTP + SSE | REST routes (sessions, branches, files, blobs, events), SSE format adapters (OpenAI, Anthropic, Vercel, Lago) |
+| `lago-ingest` | ~590 | gRPC streaming | Bidirectional event streaming via tonic |
+| `lago-aios-eventstore-adapter` | ~145 | Canonical event store adapter | `EventStorePort` implementation over `lago_core::Journal` |
+| `lago-cli` | ~1,160 | CLI binary | init, serve, session, branch, log, cat |
+| `lagod` | ~310 | Daemon binary | gRPC (50051) + HTTP (8080), TOML config, graceful shutdown |
 
 ### 2.5 Autonomic — Homeostasis Controller `[FUTURE]`
 
