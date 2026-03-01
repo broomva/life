@@ -1,12 +1,13 @@
 # Agent OS: Testing Strategy
 
-## 2026-02-22 Coverage Update
+## 2026-02-28 Coverage Update
 
+- aiOS workspace: `61/61` tests passing.
 - Arcan workspace: `236/236` tests passing (`+1 ignored`).
-- Lago workspace: `295/295` tests passing.
-- Combined Arcan+Lago: `531/531` tests passing (`+1 ignored`).
-- Combined crate count (Arcan+Lago): `19`.
-- Combined Rust LOC (Arcan+Lago): `~27.8K`.
+- Lago workspace: `299/299` tests passing.
+- Combined aiOS+Arcan+Lago: `596/596` tests passing (`+1 ignored`).
+- Combined crate count (aiOS+Arcan+Lago): `19`.
+- Combined Rust LOC (aiOS+Arcan+Lago): `~27.8K`.
 - Added root cross-stack conformance entrypoint:
   - `/Users/broomva/broomva.tech/live/conformance/run.sh`
 - Conformance runner validates:
@@ -35,15 +36,15 @@
 | lago-core | 118 | 2,893 |
 | lago-journal | 24 | 1,520 |
 | lago-store | 17 | 322 |
-| lago-fs | 30 | 1,049 |
+| lago-fs | 34 | 1,049 |
 | lago-ingest | 10 | 588 |
-| lago-api | 62 | 3,218 |
+| lago-api | 62 (37 unit + 17 e2e-files + 8 e2e-sessions) | 3,218 |
 | lago-policy | 34 | 1,339 |
 | lago-aios-eventstore-adapter | 0 | 145 |
 | lago-cli | 0 | 1,156 |
 | lagod | 0 | 311 |
-| **Lago Total** | **295** | **12,541** |
-| **Combined Total** | **532 declared** (`531 passing`, `1 ignored`) | **27,775** |
+| **Lago Total** | **299** | **12,541** |
+| **Combined Total** | **597 declared** (`596 passing`, `1 ignored`) | **27,775** |
 
 ### Coverage Gaps (Priority Order)
 
