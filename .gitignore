@@ -3,3 +3,5 @@
 /.aios-*/
 .venv/
 .DS_Store
+/.arcan
+/.lake
