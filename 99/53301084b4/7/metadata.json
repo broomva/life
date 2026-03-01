@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "9953301084b4",
+  "session_id": "f70b0bdb-55bf-4844-9752-1bab8ad30b62",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-01T22:29:40.657237Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "METALAYER.md",
+    "PLANS.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "b888124d8670",
+  "token_usage": {
+    "input_tokens": 75,
+    "cache_creation_tokens": 40262,
+    "cache_read_tokens": 2589148,
+    "output_tokens": 3995,
+    "api_call_count": 61
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-01T22:29:40.591272Z",
+    "agent_lines": 136,
+    "human_added": 712,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 848,
+    "agent_percentage": 16.037735849056602
+  }
+}
