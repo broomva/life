@@ -19,7 +19,7 @@ jobs:
           git submodule update --depth 1 aiOS arcan lago
 
       - name: Install protoc
-        run: sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - uses: dtolnay/rust-toolchain@stable
         with:
