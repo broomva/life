@@ -11,3 +11,4 @@ lago-data/
 .claude/settings.local.json
 
 .env
+.entire/
