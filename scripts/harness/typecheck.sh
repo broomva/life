@@ -9,11 +9,17 @@ if [ -n "${HARNESS_TYPECHECK_CMD:-}" ]; then
   exit 0
 fi
 
-# Dual-workspace monorepo: Arcan + Lago
-if [ -d "$root_dir/arcan" ] && [ -d "$root_dir/lago" ] && command -v cargo >/dev/null 2>&1; then
+# Multi-workspace monorepo: aiOS + Arcan + Lago
+if command -v cargo >/dev/null 2>&1; then
   cd "$root_dir"
-  (cd arcan && cargo check --quiet) && (cd lago && cargo check --quiet)
-  exit 0
+  ran=0
+  for ws in aiOS arcan lago; do
+    if [ -f "$ws/Cargo.toml" ]; then
+      (cd "$ws" && cargo check --quiet)
+      ran=1
+    fi
+  done
+  [ "$ran" -eq 1 ] && exit 0
 fi
 
 if [ -f "$root_dir/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
