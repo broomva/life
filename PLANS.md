@@ -1,6 +1,6 @@
 # PLANS.md
 
-## Active Plan A: Docs Traversal + Canonicality (Harness Alignment)
+## Completed Plan A: Docs Traversal + Canonicality (Harness Alignment)
 
 ### Objective
 

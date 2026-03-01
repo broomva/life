@@ -4,10 +4,11 @@ This repository operates as a control loop for autonomous agent development.
 
 ## Setpoints
 
-- pass_at_1 target:
-- merge_cycle_time target:
-- revert_rate target:
-- human_intervention_rate target:
+- pass_at_1 target: 0.70 (alert below 0.55)
+- retry_rate target: 0.20 (alert above 0.40)
+- merge_cycle_time target: 24h (alert above 48h)
+- revert_rate target: 0.03 (alert above 0.08)
+- human_intervention_rate target: 0.20 (alert above 0.40)
 
 ## Sensors
 
@@ -21,8 +22,8 @@ This repository operates as a control loop for autonomous agent development.
 ## Controller Policy
 
 - Gate sequence: smoke -> check -> test
-- Retry budget:
-- Escalation conditions:
+- Retry budget: 2 (per gate, per run)
+- Escalation conditions: retry_budget_exhausted -> human_oncall
 
 ## Actuators
 
