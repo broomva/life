@@ -1,6 +1,6 @@
 # Agent OS: Implementation Status
 
-**Date**: 2026-02-28
+**Date**: 2026-03-01
 **Version**: 0.2.0 (canonical baseline)  
 **Rust**: edition 2024, MSRV 1.85+
 
@@ -74,7 +74,6 @@ Validation gates currently pass:
   - `ToolHarnessPort`
   - `PolicyGatePort`
   - `ApprovalPort`
-  - `MemoryPort`
 
 ### Runtime
 
@@ -147,6 +146,8 @@ Current suite validates:
 3. Arcan-Lago replay/bridge behavior.
 4. Lago journal sequence assignment semantics.
 5. Lago API session/SSE behavior.
+6. Lago-aiOS eventstore adapter bridge checks.
+7. Lago journal golden replay tests.
 
 ---
 
@@ -154,10 +155,22 @@ Current suite validates:
 
 The baseline runtime architecture is in place and validated. Remaining work is additive:
 
-1. Cross-project golden fixture expansion for replay determinism breadth.
-2. Observability depth expansion (metrics/traces across runtime and adapters).
-3. Security hardening beyond current software-level sandbox controls.
-4. Continued documentation depth upgrades in non-status reference documents.
+1. Cross-project golden fixture expansion for replay determinism breadth (R1, ACTIVE).
+2. Observability depth expansion (metrics/traces across runtime and adapters) (R2, PLANNED).
+3. Security hardening beyond current software-level sandbox controls (R3, PLANNED).
+4. Memory and learning depth (R4, PLANNED).
+5. Controller plane / Autonomic integration (R5, PLANNED).
+
+### Infrastructure (2026-03-01)
+
+- [x] Root PLANS.md created for execution tracking.
+- [x] docs/control/ARCHITECTURE.md expanded (was stub).
+- [x] docs/control/OBSERVABILITY.md expanded (was stub).
+- [x] Recovery script (scripts/control/recover.sh) upgraded with diagnostics.
+- [x] CLI E2E tests wired (scripts/control/cli_e2e.sh exercises lago-cli, lagod, arcan).
+- [x] Web E2E tests wired (scripts/control/web_e2e.sh exercises arcand HTTP API).
+- [x] CI workflows updated for CLI and Web E2E pipelines.
+- [x] MemoryPort removed from canonical port list (was removed from aios-protocol 2026-02-28).
 
 ---
 

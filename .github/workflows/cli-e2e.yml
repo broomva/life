@@ -7,9 +7,6 @@ on:
 jobs:
   cli-e2e:
     runs-on: ubuntu-latest
-    env:
-      APP_CLI_BIN: ${{ vars.APP_CLI_BIN }}
-      APP_CLI_VERSION_ARG: ${{ vars.APP_CLI_VERSION_ARG }}
     steps:
       - uses: actions/checkout@v4
 
@@ -25,13 +22,12 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Build CLI binaries
-        run: |
-          for ws in aiOS arcan lago; do
-            if [ -f "$ws/Cargo.toml" ]; then
-              (cd "$ws" && cargo build --workspace --quiet)
-            fi
-          done
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aiOS
+            arcan
+            lago
 
-      - name: Run CLI e2e wrapper
+      - name: Run CLI E2E tests
         run: ./scripts/control/cli_e2e.sh
