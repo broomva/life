@@ -1,6 +1,6 @@
 # PLANS.md
 
-## Active Plan: Docs Traversal + Canonicality (Harness Alignment)
+## Active Plan A: Docs Traversal + Canonicality (Harness Alignment)
 
 ### Objective
 
@@ -32,3 +32,39 @@
 - 2026-02-21 — Root `docs/STATUS.md` is canonical for `/live`; project-local status docs are detailed but subordinate when conflicting.
 - 2026-02-21 — Added `docs/NAVIGATION.md` as mandatory first-stop for agents.
 - 2026-02-21 — Deferred full cross-repo doc reconciliation to a dedicated cleanup pass.
+
+---
+
+## Active Plan B: Economic Actuation Track (Conway-Compatible)
+
+### Objective
+
+- **Outcome**: Define how Conway-style ideas integrate into aiOS/Arcan/Lago without breaking contract, replay, or governance guarantees.
+- **Scope**: Planned feature documentation and roadmap anchoring only (no runtime implementation yet).
+- **Non-goals**: Shipping Conway integration code in this pass.
+
+### Constraints
+
+- **Technical**: Contract-first; no direct vendor lock-in at kernel boundary.
+- **Policy**: No paid side effects outside policy + approval paths.
+- **Risk**: Economic actions without replay-grade provenance or budget limits.
+
+### Steps
+
+1. Create planned feature spec in `docs/FEATURE_CONWAY_ACTUATION.md`.
+2. Add navigation link and question mapping in `docs/NAVIGATION.md`.
+3. Anchor track in `docs/ROADMAP.md` as planned cross-cutting feature.
+4. Surface in `AGENTS.md` docs index.
+
+### Verification
+
+- `test -f docs/FEATURE_CONWAY_ACTUATION.md`
+- `grep -n "Conway" docs/NAVIGATION.md`
+- `grep -n "Economic Actuation" docs/ROADMAP.md`
+- `grep -n "FEATURE_CONWAY_ACTUATION" AGENTS.md`
+
+### Decisions
+
+- 2026-02-21 — Economic actuation is modeled as a provider-agnostic core feature with Conway as first adapter.
+- 2026-02-21 — Payment/resource lifecycle events are required for auditability and replay.
+- 2026-02-21 — Budget-aware policy and approval gates are mandatory before write access expansion.
