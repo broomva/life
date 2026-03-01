@@ -1,7 +1,7 @@
 # Broomva Live — Monorepo Root
 
 **Version**: 0.2.0 | **Date**: 2026-02-16 | **Status**: V1.5 (Stabilization Phase)
-**Metrics**: 526/526 tests passing | 16 crates | ~20.7K LOC | Rust 2024 Edition (MSRV 1.85)
+**Metrics**: 531/531 tests passing (+1 ignored) | 19 crates | ~27.8K LOC | Rust 2024 Edition (MSRV 1.85)
 
 This workspace contains Rust projects that together form an **Agent Operating System** with event-sourced persistence, homeostatic regulation, and a canonical kernel contract.
 
@@ -18,7 +18,7 @@ Kernel contract and reference implementation for the Agent OS.
 Rust-based agent runtime daemon — the primary implementation of the aiOS kernel contract.
 - **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
 - **Entry point**: `cargo run -p arcan` (daemon on `localhost:3000`)
-- **Workspace crates**: `arcan-core`, `arcan-harness`, `arcan-store`, `arcan-provider`, `arcand`, `arcan-lago`, `arcan` (binary)
+- **Workspace crates**: `arcan-core`, `arcan-harness`, `arcan-aios-adapters`, `arcan-store`, `arcan-provider`, `arcan-tui`, `arcand`, `arcan-lago`, `arcan` (binary)
 - **Key concepts**: Agent loop (reconstruct → provider call → execute → stream), Hashline editing (content-hash–addressed line edits), policy-driven sandboxing
 - **Design philosophy**: The agent's message history IS the application state. Every action produces immutable events.
 - **Bridge**: `arcan-lago` connects Arcan to Lago's event-sourced persistence
@@ -27,7 +27,7 @@ Rust-based agent runtime daemon — the primary implementation of the aiOS kerne
 Event-sourced persistence substrate for the Agent OS.
 - **Language**: Rust 2024 Edition (`rust-version = "1.85"`)
 - **Stack**: redb v2 | tonic+prost (gRPC) | axum (HTTP/SSE) | ULID | SHA-256+zstd
-- **Workspace crates**: `lago-core`, `lago-journal`, `lago-store`, `lago-fs`, `lago-ingest`, `lago-api`, `lago-policy`, `lago-cli`, `lagod`
+- **Workspace crates**: `lago-core`, `lago-journal`, `lago-store`, `lago-fs`, `lago-ingest`, `lago-api`, `lago-policy`, `lago-aios-eventstore-adapter`, `lago-cli`, `lagod`
 - **Key concepts**: Append-only event journal, content-addressed blob storage, filesystem manifests with branching, SSE format adapters (OpenAI/Anthropic/Vercel/Lago), RBAC policy
 - **Critical pattern**: redb is synchronous — always use `spawn_blocking`; Journal trait uses `BoxFuture` for dyn-compatibility
 
@@ -236,7 +236,7 @@ The `docs/` directory is the **central source of truth** for project status, arc
 
 | Document | Purpose | Owner | Last Updated |
 |----------|---------|-------|--------------|
-| `docs/STATUS.md` | Crate-by-crate status, test counts (526/526), integration matrix, known gaps | Both projects | 2026-02-16 |
+| `docs/STATUS.md` | Canonical implementation state, test status, integration matrix, known gaps | Both projects | 2026-02-22 |
 | `docs/ROADMAP.md` | 7 phases: stabilization → memory → learning → skills → observability → security → platform | Vision | Ongoing |
 | `docs/ARCHITECTURE.md` | System diagram, Arcan loop, Lago substrate, aiOS contract, Autonomic control | Both projects | v0.2.0 |
 | `docs/PLAN.md` | Implementation roadmap with phase dependencies | Planning | See ROADMAP |
