@@ -9,14 +9,21 @@ jobs:
   harness:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
 
-      # Add language/runtime setup steps as needed for this repository.
-      # Examples:
-      # - actions/setup-node@v4
-      # - actions/setup-python@v5
-      # - dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+          components: clippy, rustfmt
 
-      - name: Run harness pipeline
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aiOS
+            arcan
+            lago
+
+      - name: Run harness pipeline (smoke → check → test)
         run: make ci
