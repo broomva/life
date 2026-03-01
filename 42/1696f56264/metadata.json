@@ -3,7 +3,7 @@
   "checkpoint_id": "421696f56264",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 3,
+  "checkpoints_count": 4,
   "files_touched": [
     "docs",
     "docs/ARCHITECTURE.md",
@@ -31,13 +31,20 @@
       "context": "/42/1696f56264/0/context.md",
       "content_hash": "/42/1696f56264/0/content_hash.txt",
       "prompt": "/42/1696f56264/0/prompt.txt"
+    },
+    {
+      "metadata": "/42/1696f56264/1/metadata.json",
+      "transcript": "/42/1696f56264/1/full.jsonl",
+      "context": "/42/1696f56264/1/context.md",
+      "content_hash": "/42/1696f56264/1/content_hash.txt",
+      "prompt": "/42/1696f56264/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 117,
-    "cache_creation_tokens": 312180,
-    "cache_read_tokens": 9768439,
-    "output_tokens": 13788,
-    "api_call_count": 107
+    "input_tokens": 1156,
+    "cache_creation_tokens": 848275,
+    "cache_read_tokens": 34586119,
+    "output_tokens": 30481,
+    "api_call_count": 366
   }
 }
