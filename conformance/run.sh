@@ -18,4 +18,10 @@ echo "[conformance] lago journal sequence assignment checks"
 echo "[conformance] lago api sse/session checks"
 (cd "$ROOT/lago" && cargo test -p lago-api --test e2e_sessions)
 
+echo "[conformance] lago-aios-eventstore-adapter bridge checks"
+(cd "$ROOT/lago" && cargo test -p lago-aios-eventstore-adapter)
+
+echo "[conformance] golden fixture replay tests"
+(cd "$ROOT/lago" && cargo test -p lago-journal --test golden_replay)
+
 echo "[conformance] OK"
