@@ -1,6 +1,6 @@
 # /live Documentation Navigation (Agent-First)
 
-Last updated: 2026-02-21
+Last updated: 2026-02-28
 
 This file is the **entrypoint for agents**. It explains where to start, which docs are canonical, and how to traverse to deeper project detail without guessing.
 
@@ -61,9 +61,9 @@ After fast path, expand by concern:
 - `scripts/harness/*.sh`
 
 ### Governance / control system
-- `docs/control/ARCHITECTURE.md`
-- `docs/control/CONTROL_LOOP.md`
-- `docs/control/OBSERVABILITY.md`
+- `docs/control/CONTROL_LOOP.md` (consolidated: loop, sensors, setpoints, actuators, stability, observability)
+- `docs/control/ARCHITECTURE.md` (boundaries and ownership)
+- `docs/control/OBSERVABILITY.md` (event taxonomy for instrumentation)
 
 ### Planned feature tracks
 - `docs/FEATURE_CONWAY_ACTUATION.md` (economic actuation plane, Conway-compatible)
@@ -97,7 +97,12 @@ After fast path, expand by concern:
     ROADMAP.md               # phase plan and sequencing
     FEATURE_CONWAY_ACTUATION.md  # planned economic actuation track
     TESTING.md               # test strategy and quality expectations
-    control/*                # governance/control-loop docs
+    PLATFORM.md              # OS analogy, crate roles, SaaS trajectory
+    arcan.md                 # executive vision and positioning
+    control/
+      CONTROL_LOOP.md        # consolidated control reference (loop, sensors, setpoints, actuators, stability)
+      ARCHITECTURE.md        # control-aware boundaries and ownership
+      OBSERVABILITY.md       # required event types and fields
   arcan/docs/*               # runtime-specific deep docs
   lago/docs/*                # persistence/policy deep docs
   aiOS/docs/*                # kernel contract deep docs
