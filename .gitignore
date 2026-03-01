@@ -3,3 +3,4 @@
 /.aios-*/
 .venv/
 .DS_Store
+.entire/
