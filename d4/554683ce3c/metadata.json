@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "d4554683ce3c",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "lago"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d4/554683ce3c/0/metadata.json",
+      "transcript": "/d4/554683ce3c/0/full.jsonl",
+      "context": "/d4/554683ce3c/0/context.md",
+      "content_hash": "/d4/554683ce3c/0/content_hash.txt",
+      "prompt": "/d4/554683ce3c/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 934,
+    "cache_creation_tokens": 168664,
+    "cache_read_tokens": 17222597,
+    "output_tokens": 8298,
+    "api_call_count": 170
+  }
+}
