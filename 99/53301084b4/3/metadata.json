@@ -1,0 +1,47 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "9953301084b4",
+  "session_id": "61e034af-afc5-4135-8170-7e62692a9d30",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-01T22:29:25.438289Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".github/workflows/web-e2e.yml",
+    "METALAYER.md",
+    "docs/control/ARCHITECTURE.md",
+    "lago",
+    "tests/e2e/web/smoke.spec.ts",
+    ".github/workflows/cli-e2e.yml",
+    ".gitignore",
+    "aiOS",
+    "docs/STATUS.md",
+    "docs/control/OBSERVABILITY.md",
+    "tests/e2e/cli/smoke.sh",
+    "scripts/control/recover.sh",
+    "scripts/control/web_e2e.sh",
+    "PLANS.md",
+    "arcan",
+    "scripts/control/cli_e2e.sh"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "98390b969625",
+  "checkpoint_transcript_start": 4796,
+  "transcript_lines_at_start": 4796,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-01T22:29:23.810055Z",
+    "agent_lines": 846,
+    "human_added": 2,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 848,
+    "agent_percentage": 99.76415094339622
+  }
+}
