@@ -5,6 +5,7 @@
   "branch": "main",
   "checkpoints_count": 4,
   "files_touched": [
+    "CLAUDE.md",
     "docs",
     "docs/ARCHITECTURE.md",
     "docs/CONTRACT.md",
@@ -38,6 +39,13 @@
       "context": "/42/1696f56264/1/context.md",
       "content_hash": "/42/1696f56264/1/content_hash.txt",
       "prompt": "/42/1696f56264/1/prompt.txt"
+    },
+    {
+      "metadata": "/42/1696f56264/2/metadata.json",
+      "transcript": "/42/1696f56264/2/full.jsonl",
+      "context": "/42/1696f56264/2/context.md",
+      "content_hash": "/42/1696f56264/2/content_hash.txt",
+      "prompt": "/42/1696f56264/2/prompt.txt"
     }
   ],
   "token_usage": {
