@@ -211,7 +211,7 @@ Audit failures are **blocking**. All detected gaps must be resolved before agent
 
 ### Setpoints & Metrics
 
-Current control setpoints are defined in `METALAYER.md` and `evals/control-metrics.yaml`:
+Current control setpoints are defined in `docs/METALAYER.md` and `evals/control-metrics.yaml`:
 
 - **pass_at_1**: Primary test success rate (target: 100%)
 - **merge_cycle_time**: Time from push to merge (tracks velocity)
