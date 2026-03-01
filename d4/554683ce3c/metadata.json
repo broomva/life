@@ -5,6 +5,7 @@
   "branch": "main",
   "checkpoints_count": 1,
   "files_touched": [
+    "docs",
     "lago"
   ],
   "sessions": [
@@ -14,13 +15,20 @@
       "context": "/d4/554683ce3c/0/context.md",
       "content_hash": "/d4/554683ce3c/0/content_hash.txt",
       "prompt": "/d4/554683ce3c/0/prompt.txt"
+    },
+    {
+      "metadata": "/d4/554683ce3c/1/metadata.json",
+      "transcript": "/d4/554683ce3c/1/full.jsonl",
+      "context": "/d4/554683ce3c/1/context.md",
+      "content_hash": "/d4/554683ce3c/1/content_hash.txt",
+      "prompt": "/d4/554683ce3c/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 934,
-    "cache_creation_tokens": 168664,
-    "cache_read_tokens": 17222597,
-    "output_tokens": 8298,
-    "api_call_count": 170
+    "input_tokens": 952,
+    "cache_creation_tokens": 214509,
+    "cache_read_tokens": 17909733,
+    "output_tokens": 10888,
+    "api_call_count": 184
   }
 }
