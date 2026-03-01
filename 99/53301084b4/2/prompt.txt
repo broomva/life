@@ -1,0 +1,346 @@
+Implement the following plan:
+
+# Plan: R1 Conformance Expansion + Adapter Tests
+
+## Context
+
+The canonical baseline unification is complete, but conformance coverage is thin: no golden fixture files exist, and `lago-aios-eventstore-adapter` (the critical canonical persistence bridge) has 0 tests. Phase R1 (Conformance Expansion) is the active roadmap phase. This work solidifies the baseline with deterministic replay tests and closes the adapter test gap.
+
+## Part 1: lago-aios-eventstore-adapter Tests
+
+**Why first**: Self-contained, simpler, validates the bridge before we build golden fixtures on top of it.
+
+### Files to modify
+
+- `lago/crates/lago-aios-eventstore-adapter/Cargo.toml` — add dev-dependencies
+- `lago/crates/lago-aios-eventstore-adapter/src/lib.rs` — add `#[cfg(test)] mod tests`
+
+### Dev-dependencies to add
+
+```toml
+[dev-dependencies]
+lago-journal = { workspace = true }
+tempfile = "3"
+```
+
+(`tokio` and `futures-util` are already runtime deps; `tokio` needs `features = ["full"]` only for test — check if workspace already provides it)
+
+### Test setup helper
+
+```rust
+fn setup() -> (TempDir, LagoAiosEventStoreAdapter) {
+    let dir = TempDir::new().unwrap();
+    let journal = Arc::new(RedbJournal::open(&dir.path().join("test.redb")).unwrap());
+    (dir, LagoAiosEventStoreAdapter::new(journal))
+}
+
+fn make_record(session: &str, branch: &str, kind: EventKind) -> EventRecord {
+    EventRecord::new(
+        ProtocolSessionId::from_string(session),
+        ProtocolBranchId::from_string(branch),
+        0, // seq ignored by journal
+        kind,
+    )
+}
+```
+
+### Tests (~10)
+
+| Test | Validates |
+|------|-----------|
+| `append_returns_assigned_sequence` | Journal assigns seq, adapter returns it |
+| `append_and_read_round_trip` | Message event survives full conversion pipeline |
+| `append_multiple_sequences_monotonic` | Sequences are 1, 2, 3 for 3 appends |
+| `read_with_from_sequence_filter` | `from_sequence` correctly maps to `after(from-1)` |
+| `read_with_limit` | Limit caps returned events |
+| `read_empty_session_returns_empty` | No error for missing session |
+| `head_returns_zero_for_new_session` | Default head is 0 |
+| `head_tracks_appends` | Head matches last append sequence |
+| `subscribe_replays_existing_events` | Stream returns events appended before subscribe |
+| `tool_call_event_survives_round_trip` | ToolCallRequested with args/tool_name preserved |
+| `custom_event_survives_round_trip` | Forward-compat: Custom variant preserved through adapter |
+
+## Part 2: Golden Fixtures & Replay Tests
+
+### Files to create
+
+- `conformance/fixtures/simple-chat.json` — 4-event text-only session
+- `conformance/fixtures/tool-round-trip.json` — 6-event tool lifecycle session
+- `conformance/fixtures/branch-fork.json` — multi-branch session (~7 events)
+- `conformance/fixtures/forward-compat.json` — session with Custom event type
+- `lago/crates/lago-journal/tests/golden_replay.rs` — integration test loading fixtures
+
+### Files to modify
+
+- `conformance/run.sh` — add golden replay step
+
+### Fixture format
+
+Each file is a JSON array of Lago `EventEnvelope` objects (the canonical storage format):
+
+```json
+[
+  {
+    "event_id": "EVT-SC-001",
+    "session_id": "GOLDEN-SIMPLE-CHAT",
+    "branch_id": "main",
+    "seq": 0,
+    "timestamp": 1700000000000000,
+    "payload": { "type": "SessionCreated", "name": "simple-chat", "config": {} },
+    "metadata": {},
+    "schema_version": 1
+  }
+]
+```
+
+Key: `seq: 0` because journal assigns monotonic sequences, overriding caller values.
+
+### Fixture loading
+
+```rust
+const FIXTURES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../conformance/fixtures");
+```
+
+### Tests (~8)
+
+| Test | Validates |
+|------|-----------|
+| `golden_simple_chat_replay_deterministic` | 4 events round-trip, payload types and content match |
+| `golden_simple_chat_head_seq` | head_seq == event count after append |
+| `golden_tool_round_trip_replay` | Tool lifecycle events (ToolCallRequested, ToolCallCompleted) survive storage |
+| `golden_tool_round_trip_event_by_id` | Each event retrievable by event_id via get_event() |
+| `golden_branch_fork_isolation` | Read main → only main events; read feature-x → only its events |
+| `golden_branch_fork_cursor_replay` | Read from cursor mid-branch returns only later events |
+| `golden_forward_compat_custom_survives` | Custom event type + data preserved through journal |
+| `golden_forward_compat_known_events_unaffected` | Known events next to Custom still deserialize correctly |
+
+### conformance/run.sh addition
+
+```bash
+echo "[conformance] golden fixture replay tests"
+(cd "$ROOT/lago" && cargo test -p lago-journal --test golden_replay)
+```
+
+## Verification
+
+1. `cd lago && cargo test -p lago-aios-eventstore-adapter` — adapter tests pass
+2. `cd lago && cargo test -p lago-journal --test golden_replay` — golden tests pass
+3. `./conformance/run.sh` — full conformance suite green
+4. `cd lago && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace` — full Lago validation
+5. Update `docs/TESTING.md` and `docs/STATUS.md` with new test counts
+
+## Estimated impact
+
+- ~18 new tests (10 adapter + 8 golden)
+- 4 golden fixture files
+- Closes "lago-aios-eventstore-adapter: 0 tests" gap
+- Closes R1 golden fixture gap
+- Total tests: ~614 (from 596)
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-live/9b42ce14-b290-4a7f-b248-2a7c67578a96.jsonl
+
+---
+
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Analysis:
+Let me chronologically analyze the conversation:
+
+1. The user provided a detailed plan for "R1 Conformance Expansion + Adapter Tests" with two parts:
+   - Part 1: lago-aios-eventstore-adapter tests (~10 tests)
+   - Part 2: Golden fixtures & replay tests (~8 tests)
+
+2. I created task tracking items and began reading key files to understand the codebase.
+
+3. Key files read:
+   - lago-aios-eventstore-adapter/src/lib.rs - the adapter implementing EventStorePort
+   - lago-aios-eventstore-adapter/Cargo.toml - dependencies
+   - lago/Cargo.toml - workspace config
+   - lago-journal/Cargo.toml - journal dependencies
+   - lago-core/src/lib.rs - core module exports
+   - lago-core/src/event.rs - EventEnvelope, EventPayload types
+   - lago-core/src/journal.rs - Journal trait, EventQuery
+   - lago-core/src/protocol_bridge.rs - conversion between Lago and protocol types
+   - lago-journal/src/redb_journal.rs - RedbJournal implementation
+   - conformance/run.sh - existing conformance suite
+   - aiOS protocol types (via Explore agent)
+
+4. Part 1 Implementation:
+   - Added dev-dependencies to adapter Cargo.toml
+   - Added 11 tests to adapter lib.rs
+   - First error: missing serde_json dep (fixed by adding to dev-deps)
+   - Second error: subscribe test hanging (fixed with tokio::time::timeout)
+   - All 11 adapter tests passed
+
+5. Part 2 Implementation:
+   - Created 4 golden fixture JSON files
+   - Created golden_replay.rs integration test with 8 tests
+   - First compile error: EventPayload variants not found (ToolCallRequested, ToolCallCompleted, SessionClosed) - this was due to CWD issues causing wrong workspace version to compile
+   - Fixed by switching to JSON-based verification (serde_json::to_value) instead of pattern matching
+   - Second error: forward-compat test - Custom variant serializes as {"type": "Custom", "event_type": "VisionResult"} not {"type": "VisionResult"}
+   - Fixed by updating assertion to check Custom wrapper format
+   - File reversion issue: linter/system reverted adapter Cargo.toml and lib.rs changes, had to re-add them
+   - Final run: all tests pass
+
+6. Doc updates:
+   - conformance/run.sh - added adapter and golden replay steps
+   - docs/TESTING.md - updated test counts, coverage gaps, golden test section
+   - docs/STATUS.md - updated conformance coverage and persistence sections
+
+7. Final validation: Full Lago fmt+clippy+test (318 tests) and conformance/run.sh all green.
+
+Let me list all user messages and the specific files/code involved.
+
+Summary:
+1. Primary Request and Intent:
+   The user asked to implement a detailed plan for "R1 Conformance Expansion + Adapter Tests" consisting of two parts:
+   - **Part 1**: Add ~10 tests to `lago-aios-eventstore-adapter` (the canonical persistence bridge that had 0 tests)
+   - **Part 2**: Create 4 golden fixture JSON files and 8 golden replay integration tests for `lago-journal`
+   - Update `conformance/run.sh` with new test steps
+   - Update `docs/TESTING.md` and `docs/STATUS.md` with new test counts
+   - Run full validation to verify everything passes
+
+2. Key Technical Concepts:
+   - **Event-sourced architecture**: Lago stores all state as append-only events in a redb journal
+   - **EventStorePort**: The canonical aios-protocol trait that `LagoAiosEventStoreAdapter` implements (append, read, head, subscribe)
+   - **EventRecord vs EventEnvelope**: Protocol uses EventRecord (chrono timestamps), Lago uses EventEnvelope (u64 micros timestamps). The adapter converts between them via `protocol_bridge`
+   - **EventPayload/EventKind**: `lago_core::event::EventPayload` is a type alias for `aios_protocol::EventKind` — the canonical event taxonomy
+   - **Custom variant forward-compat**: Unknown event types deserialize to `Custom { event_type, data }`. After storage round-trip, they serialize as `{"type": "Custom", "event_type": "...", "data": {...}}`
+   - **Journal sequence assignment**: The journal ignores caller-provided `seq` values and assigns monotonic sequences per session+branch
+   - **redb**: Synchronous embedded DB — all operations wrapped in `spawn_blocking`
+   - **BoxFuture**: Used for dyn-compatibility in the Journal trait (`Arc<dyn Journal>`)
+   - **Submodule state**: The lago directory is a git submodule. CWD matters — running cargo from root vs lago directory resolves different workspace versions (v0.1.0 old vs v0.2.0 canonical)
+   - **Rust 2024 Edition**: `gen` reserved, `set_var` unsafe, edition = "2024", rust-version = "1.85"
+
+3. Files and Code Sections:
+
+   - **`lago/crates/lago-aios-eventstore-adapter/Cargo.toml`**
+     - Added dev-dependencies for testing. Had to be re-added after system reversion.
+     ```toml
+     [dev-dependencies]
+     lago-journal = { workspace = true }
+     serde_json.workspace = true
+     tempfile = "3"
+     ```
+
+   - **`lago/crates/lago-aios-eventstore-adapter/src/lib.rs`**
+     - Added `#[cfg(test)] mod tests` with 11 tests. Had to be re-added after system reversion. Key test setup:
+     ```rust
+     #[cfg(test)]
+     mod tests {
+         use super::*;
+         use aios_protocol::EventKind;
+         use futures_util::StreamExt;
+         use lago_journal::RedbJournal;
+         use tempfile::TempDir;
+
+         fn setup() -> (TempDir, LagoAiosEventStoreAdapter) {
+             let dir = TempDir::new().unwrap();
+             let journal = Arc::new(RedbJournal::open(&dir.path().join("test.redb")).unwrap());
+             (dir, LagoAiosEventStoreAdapter::new(journal))
+         }
+
+         fn make_record(session: &str, branch: &str, kind: EventKind) -> EventRecord {
+             EventRecord::new(
+                 ProtocolSessionId::from_string(session),
+                 ProtocolBranchId::from_string(branch),
+                 0, // seq ignored — journal assigns monotonic sequences
+                 kind,
+             )
+         }
+     ```
+     - Tests: append_returns_assigned_sequence, append_and_read_round_trip, append_multiple_sequences_monotonic, read_with_from_sequence_filter, read_with_limit, read_empty_session_returns_empty, head_returns_zero_for_new_session, head_tracks_appends, subscribe_replays_existing_events (with timeout), tool_call_event_survives_round_trip, custom_event_survives_round_trip
+
+   - **`conformance/fixtures/simple-chat.json`** — 4 events: SessionCreated + 3 Messages (user/assistant/user). Tests basic text-only session with token_usage.
+
+   - **`conformance/fixtures/tool-round-trip.json`** — 6 events: SessionCreated, user Message, ToolCallRequested, ToolCallCompleted, assistant Message, SessionClosed. Tests tool lifecycle.
+
+   - **`conformance/fixtures/branch-fork.json`** — 7 events across "main" (5) and "feature-x" (2) branches. Tests branch isolation and BranchCreated event.
+
+   - **`conformance/fixtures/forward-compat.json`** — 4 events including unknown "VisionResult" type. Tests Custom variant preservation.
+
+   - **`lago/crates/lago-journal/tests/golden_replay.rs`**
+     - 8 integration tests using JSON-based verification (serde_json::to_value) for payload assertions. Key helpers:
+     ```rust
+     const FIXTURES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../conformance/fixtures");
+
+     fn load_fixture(name: &str) -> Vec<EventEnvelope> {
+         let path = format!("{FIXTURES_DIR}/{name}");
+         let data = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+         serde_json::from_str(&data).unwrap_or_else(|e| panic!("parse {path}: {e}"))
+     }
+
+     fn payload_json(envelope: &EventEnvelope) -> serde_json::Value {
+         serde_json::to_value(&envelope.payload).unwrap()
+     }
+     ```
+     - Tests: golden_simple_chat_replay_deterministic, golden_simple_chat_head_seq, golden_tool_round_trip_replay, golden_tool_round_trip_event_by_id, golden_branch_fork_isolation, golden_branch_fork_cursor_replay, golden_forward_compat_custom_survives, golden_forward_compat_known_events_unaffected
+
+   - **`conformance/run.sh`** — Added two new steps:
+     ```bash
+     echo "[conformance] lago-aios-eventstore-adapter bridge checks"
+     (cd "$ROOT/lago" && cargo test -p lago-aios-eventstore-adapter)
+
+     echo "[conformance] golden fixture replay tests"
+     (cd "$ROOT/lago" && cargo test -p lago-journal --test golden_replay)
+     ```
+
+   - **`docs/TESTING.md`** — Updated lago-journal test count (24→32), adapter test count (0→11), total Lago (299→318), combined (596→615→616 declared), removed adapter from coverage gaps, rewrote Golden Replay Tests section from "Planned" to documenting implemented fixtures and tests, added conformance runner entries.
+
+   - **`docs/STATUS.md`** — Updated conformance coverage list (added items 6 and 7), updated Lago canonical persistence section to note adapter tests and golden fixtures, updated remaining work item 1.
+
+4. Errors and Fixes:
+   - **Missing serde_json dev-dependency**: Adapter tests used `serde_json::json!()` macro but serde_json wasn't in dev-deps. Fixed by adding `serde_json.workspace = true` to `[dev-dependencies]`.
+   - **Subscribe test hanging**: The `subscribe_replays_existing_events` test called `stream.next().await` which blocks indefinitely after replaying existing events (tailing stream). Fixed by wrapping each `.next()` call with `tokio::time::timeout(Duration::from_secs(5), ...)`.
+   - **CWD drift causing wrong workspace version**: Running `cargo test --workspace` from root (`/Users/broomva/broomva.tech/live`) instead of lago directory caused compilation against v0.1.0 (old Lago types with `ToolInvoke`/`ToolResult` instead of canonical `ToolCallRequested`/`ToolCallCompleted`). The lago submodule was uninitialized. Fixed by always running from the correct directory (`cd /Users/broomva/broomva.tech/live/lago`).
+   - **EventPayload variant resolution in integration tests**: Initially wrote golden_replay.rs using direct pattern matching (`EventPayload::ToolCallRequested`, `EventPayload::SessionClosed`). These failed to compile when the workspace resolved differently. Fixed by switching entirely to JSON-based verification using `serde_json::to_value()` and checking `p["type"]`, `p["field"]` etc.
+   - **Forward-compat Custom wrapper serialization**: Test asserted `p2["type"] == "VisionResult"` but after storage round-trip, the Custom variant serializes as `{"type": "Custom", "event_type": "VisionResult", "data": {...}}`. Fixed by changing assertion to check `p2["type"] == "Custom"` and `p2["event_type"] == "VisionResult"` and `p2["data"]["image_hash"]` etc.
+   - **File reversion by linter/system**: Both `lago-aios-eventstore-adapter/Cargo.toml` and `lago-aios-eventstore-adapter/src/lib.rs` were reverted to their original state (dev-deps removed, test module removed). Had to re-add both changes identically.
+
+5. Problem Solving:
+   - All problems were resolved. The plan is fully implemented.
+   - Final validation: `cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace` from lago dir passes with 318 tests. `conformance/run.sh` from root passes all 7 conformance steps including the 2 new ones.
+   - Key insight: Always run lago commands from `/Users/broomva/broomva.tech/live/lago/` directory, not from the root. The lago submodule is uninitialized and CWD determines which workspace version is used.
+
+6. All User Messages:
+   - Message 1: "Implement the following plan: [detailed R1 Conformance Expansion + Adapter Tests plan with Part 1 (adapter tests) and Part 2 (golden fixtures & replay tests)]" — with a reference to a plan transcript at `/Users/broomva/.claude/projects/-Users-broomva-broomva-tech-live/9b42ce14-b290-4a7f-b248-2a7c67578a96.jsonl`
+
+7. Pending Tasks:
+   - All 5 tracked tasks are completed:
+     - ✅ Task #1: Implement lago-aios-eventstore-adapter tests (11 tests)
+     - ✅ Task #2: Create golden fixture files (4 JSON files)
+     - ✅ Task #3: Implement golden replay integration tests (8 tests)
+     - ✅ Task #4: Update conformance/run.sh and docs
+     - ✅ Task #5: Run full validation and verify all tests pass
+
+8. Current Work:
+   The implementation is fully complete. The final validation has passed:
+   - `cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace` — 318 Lago tests passing
+   - `conformance/run.sh` — all 7 conformance steps green (protocol, arcand API, arcan-lago bridge, journal sequence, lago API, adapter bridge, golden replay)
+   - New test total: 615 passing (+1 ignored) across aiOS+Arcan+Lago (up from 596)
+   - Docs updated with accurate counts
+
+9. Optional Next Step:
+   The plan is fully implemented and validated. No remaining tasks. The user may want to commit the changes. The modified/created files are:
+   - `lago/crates/lago-aios-eventstore-adapter/Cargo.toml` (modified)
+   - `lago/crates/lago-aios-eventstore-adapter/src/lib.rs` (modified)
+   - `lago/crates/lago-journal/tests/golden_replay.rs` (new)
+   - `conformance/fixtures/simple-chat.json` (new)
+   - `conformance/fixtures/tool-round-trip.json` (new)
+   - `conformance/fixtures/branch-fork.json` (new)
+   - `conformance/fixtures/forward-compat.json` (new)
+   - `conformance/run.sh` (modified)
+   - `docs/TESTING.md` (modified)
+   - `docs/STATUS.md` (modified)
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-live/5e2ee240-8e6d-4a60-9770-4cb7c5effe38.jsonl
+Please continue the conversation from where we left off without asking the user any further questions. Continue with the last task that you were asked to work on.
+
+---
+
+good, is it all ready?
+
+---
+
+please commit and push
