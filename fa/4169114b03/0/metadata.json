@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "fa4169114b03",
+  "session_id": "9b42ce14-b290-4a7f-b248-2a7c67578a96",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-01T02:09:10.765045Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".github/workflows/control-harness.yml",
+    ".github/workflows/harness.yml"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "dbca722bd7e0",
+  "token_usage": {
+    "input_tokens": 101,
+    "cache_creation_tokens": 88115,
+    "cache_read_tokens": 6211285,
+    "output_tokens": 3801,
+    "api_call_count": 83
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-01T02:09:10.430205Z",
+    "agent_lines": 10,
+    "human_added": 15,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 25,
+    "agent_percentage": 40
+  }
+}
