@@ -3,7 +3,7 @@
   "checkpoint_id": "85618ad3cb58",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 3,
+  "checkpoints_count": 6,
   "files_touched": [
     ".github/workflows/cli-e2e.yml",
     ".github/workflows/control-harness.yml",
@@ -20,13 +20,20 @@
       "context": "/85/618ad3cb58/0/context.md",
       "content_hash": "/85/618ad3cb58/0/content_hash.txt",
       "prompt": "/85/618ad3cb58/0/prompt.txt"
+    },
+    {
+      "metadata": "/85/618ad3cb58/1/metadata.json",
+      "transcript": "/85/618ad3cb58/1/full.jsonl",
+      "context": "/85/618ad3cb58/1/context.md",
+      "content_hash": "/85/618ad3cb58/1/content_hash.txt",
+      "prompt": "/85/618ad3cb58/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 830,
-    "cache_creation_tokens": 78651,
-    "cache_read_tokens": 4840934,
-    "output_tokens": 4185,
-    "api_call_count": 68
+    "input_tokens": 927,
+    "cache_creation_tokens": 165246,
+    "cache_read_tokens": 10828085,
+    "output_tokens": 7958,
+    "api_call_count": 149
   }
 }
