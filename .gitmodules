@@ -1,0 +1,12 @@
+[submodule "arcan"]
+	path = arcan
+	url = https://github.com/broomva/arcan.git
+	branch = main
+[submodule "lago"]
+	path = lago
+	url = https://github.com/broomva/lago.git
+	branch = main
+[submodule "aiOS"]
+	path = aiOS
+	url = https://github.com/broomva/aiOS.git
+	branch = main

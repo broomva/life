@@ -9,11 +9,16 @@ if [ -n "${CONTROL_CHECK_CMD:-}" ]; then
   exit 0
 fi
 
-# Dual-workspace monorepo: Arcan + Lago (format + lint)
-if [ -d arcan ] && [ -d lago ] && command -v cargo >/dev/null 2>&1; then
-  (cd arcan && cargo fmt --check && cargo clippy --workspace -- -D warnings) && \
-  (cd lago && cargo fmt --check && cargo clippy --workspace -- -D warnings)
-  exit 0
+# Multi-workspace monorepo: aiOS + Arcan + Lago (format + lint)
+if command -v cargo >/dev/null 2>&1; then
+  ran=0
+  for ws in aiOS arcan lago; do
+    if [ -f "$ws/Cargo.toml" ]; then
+      (cd "$ws" && cargo fmt --check && cargo clippy --workspace -- -D warnings)
+      ran=1
+    fi
+  done
+  [ "$ran" -eq 1 ] && exit 0
 fi
 
 if [ -f Cargo.toml ] && command -v cargo >/dev/null 2>&1; then
