@@ -3,7 +3,7 @@
   "checkpoint_id": "9953301084b4",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 2,
+  "checkpoints_count": 6,
   "files_touched": [
     ".github/workflows/cli-e2e.yml",
     ".github/workflows/web-e2e.yml",
@@ -25,13 +25,20 @@
       "context": "/99/53301084b4/0/context.md",
       "content_hash": "/99/53301084b4/0/content_hash.txt",
       "prompt": "/99/53301084b4/0/prompt.txt"
+    },
+    {
+      "metadata": "/99/53301084b4/1/metadata.json",
+      "transcript": "/99/53301084b4/1/full.jsonl",
+      "context": "/99/53301084b4/1/context.md",
+      "content_hash": "/99/53301084b4/1/content_hash.txt",
+      "prompt": "/99/53301084b4/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 4197,
-    "cache_creation_tokens": 76448,
-    "cache_read_tokens": 3862642,
-    "output_tokens": 8154,
-    "api_call_count": 50
+    "input_tokens": 4970,
+    "cache_creation_tokens": 178595,
+    "cache_read_tokens": 11787525,
+    "output_tokens": 13107,
+    "api_call_count": 137
   }
 }
