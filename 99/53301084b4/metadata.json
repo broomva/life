@@ -1,0 +1,37 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "9953301084b4",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    ".github/workflows/cli-e2e.yml",
+    ".github/workflows/web-e2e.yml",
+    "METALAYER.md",
+    "PLANS.md",
+    "docs/STATUS.md",
+    "docs/control/ARCHITECTURE.md",
+    "docs/control/OBSERVABILITY.md",
+    "scripts/control/cli_e2e.sh",
+    "scripts/control/recover.sh",
+    "scripts/control/web_e2e.sh",
+    "tests/e2e/cli/smoke.sh",
+    "tests/e2e/web/smoke.spec.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/99/53301084b4/0/metadata.json",
+      "transcript": "/99/53301084b4/0/full.jsonl",
+      "context": "/99/53301084b4/0/context.md",
+      "content_hash": "/99/53301084b4/0/content_hash.txt",
+      "prompt": "/99/53301084b4/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 4197,
+    "cache_creation_tokens": 76448,
+    "cache_read_tokens": 3862642,
+    "output_tokens": 8154,
+    "api_call_count": 50
+  }
+}
