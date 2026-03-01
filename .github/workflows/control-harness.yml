@@ -10,5 +10,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run control CI
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aiOS
+            arcan
+            lago
+
+      - name: Run control CI (smoke → check → test)
         run: make ci
+
+      - name: Run control audit
+        if: always()
+        run: make audit
+
+      - name: Capture control state
+        if: always()
+        run: |
+          echo "## Control Harness Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Gate | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          make -f Makefile.control smoke 2>&1 && echo "| smoke | PASS |" >> $GITHUB_STEP_SUMMARY || echo "| smoke | FAIL |" >> $GITHUB_STEP_SUMMARY
+          make -f Makefile.control check 2>&1 && echo "| check | PASS |" >> $GITHUB_STEP_SUMMARY || echo "| check | FAIL |" >> $GITHUB_STEP_SUMMARY
+          make -f Makefile.control test 2>&1 && echo "| test | PASS |" >> $GITHUB_STEP_SUMMARY || echo "| test | FAIL |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload control artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-state
+          path: .control/state.json
+          retention-days: 30

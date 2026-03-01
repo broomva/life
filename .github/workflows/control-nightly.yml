@@ -10,7 +10,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+          components: clippy, rustfmt
+
       - name: Baseline audit
         run: scripts/audit_control.sh .
+
       - name: Strict audit
         run: scripts/audit_control.sh . --strict
+
+      - name: Capture audit results
+        if: always()
+        run: |
+          echo "## Nightly Audit Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          scripts/audit_control.sh . 2>&1 | sed 's/^/    /' >> $GITHUB_STEP_SUMMARY || true
+          echo "" >> $GITHUB_STEP_SUMMARY
+          scripts/audit_control.sh . --strict 2>&1 | sed 's/^/    /' >> $GITHUB_STEP_SUMMARY || true
