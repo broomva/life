@@ -1,6 +1,6 @@
 # Agent OS: Implementation Status
 
-**Date**: 2026-02-22  
+**Date**: 2026-02-28
 **Version**: 0.2.0 (canonical baseline)  
 **Rust**: edition 2024, MSRV 1.85+
 
