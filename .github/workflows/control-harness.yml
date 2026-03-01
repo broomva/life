@@ -10,8 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
+
+      - name: Checkout submodules with remotes
+        run: |
+          git submodule init aiOS arcan lago
+          git submodule update --depth 1 aiOS arcan lago
 
       - uses: dtolnay/rust-toolchain@stable
         with:

@@ -12,8 +12,11 @@ jobs:
       APP_CLI_VERSION_ARG: ${{ vars.APP_CLI_VERSION_ARG }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
+
+      - name: Checkout submodules with remotes
+        run: |
+          git submodule init aiOS arcan lago
+          git submodule update --depth 1 aiOS arcan lago
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -21,8 +24,11 @@ jobs:
 
       - name: Build CLI binaries
         run: |
-          if [ -d arcan ]; then (cd arcan && cargo build --workspace --quiet); fi
-          if [ -d lago ]; then (cd lago && cargo build --workspace --quiet); fi
+          for ws in aiOS arcan lago; do
+            if [ -f "$ws/Cargo.toml" ]; then
+              (cd "$ws" && cargo build --workspace --quiet)
+            fi
+          done
 
       - name: Run CLI e2e wrapper
         run: ./scripts/control/cli_e2e.sh
