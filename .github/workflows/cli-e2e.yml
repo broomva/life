@@ -1,0 +1,17 @@
+name: CLI E2E
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  cli-e2e:
+    runs-on: ubuntu-latest
+    env:
+      APP_CLI_BIN: ${{ vars.APP_CLI_BIN }}
+      APP_CLI_VERSION_ARG: ${{ vars.APP_CLI_VERSION_ARG }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run CLI e2e wrapper
+        run: ./scripts/control/cli_e2e.sh

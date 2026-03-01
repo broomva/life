@@ -1,7 +1,7 @@
 # Broomva Live — Monorepo Root
 
-**Version**: 0.2.0 | **Date**: 2026-02-16 | **Status**: V1.5 (Stabilization Phase)
-**Metrics**: 531/531 tests passing (+1 ignored) | 19 crates | ~27.8K LOC | Rust 2024 Edition (MSRV 1.85)
+**Version**: 0.2.0 | **Date**: 2026-02-28 | **Status**: V1.5 (Stabilization Phase)
+**Metrics**: 596/596 tests passing (+1 ignored) | 19 crates | ~27.8K LOC | Rust 2024 Edition (MSRV 1.85)
 
 This workspace contains Rust projects that together form an **Agent Operating System** with event-sourced persistence, homeostatic regulation, and a canonical kernel contract.
 
@@ -143,18 +143,16 @@ lago-core (zero external deps)
 
 ## Harness Commands
 
-The harness provides deterministic, scriptable commands for autonomous agent operations. All harness commands are defined in `Makefile.harness`:
+The harness provides deterministic, scriptable commands for autonomous agent operations. Harness-only targets are defined in `Makefile.harness`:
 
 ```bash
-make smoke              # Fast syntax/build validation (agents run frequently)
-make test               # Comprehensive test suite (validates correctness)
 make lint               # Format + static analysis (enforces code quality)
 make typecheck          # Type checking (validates type safety)
-make ci                 # Full CI sequence: smoke → test → lint → typecheck
-make audit              # Governance audit (validates control plane compliance)
 ```
 
 These commands are deterministic, reproducible, and designed to work in fresh CI environments without setup drift.
+
+> **Makefile precedence**: The root `Makefile` includes both `Makefile.control` (first) and `Makefile.harness` (second). For overlapping targets (`smoke`, `check`, `test`, `ci`), **Makefile.control wins** (GNU Make first-definition precedence). Harness-only targets (`lint`, `typecheck`) are additive and have no conflict. Both script sets (`scripts/control/` and `scripts/harness/`) are functionally equivalent for shared targets.
 
 ## Execution Plans
 

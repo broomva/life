@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "last_audit_at": "2026-02-28T00:00:00Z",
+  "last_entropy_review_at": null,
+  "controller_mode": "autonomous",
+  "notes": [
+    "2026-02-28: Upgraded from governed to autonomous profile. Strict audit passing."
+  ]
+}

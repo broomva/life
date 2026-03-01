@@ -1,0 +1,35 @@
+name: Web E2E
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  web-e2e:
+    runs-on: ubuntu-latest
+    env:
+      APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+      PLAYWRIGHT_BASE_URL: ${{ vars.PLAYWRIGHT_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Node dependencies (if present)
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install
+          fi
+
+      - name: Install Playwright browser deps (if configured)
+        run: |
+          if [ -f playwright.config.ts ] || [ -f playwright.config.js ]; then
+            npx playwright install --with-deps
+          fi
+
+      - name: Run web e2e wrapper
+        run: ./scripts/control/web_e2e.sh
