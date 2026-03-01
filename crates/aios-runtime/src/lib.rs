@@ -213,6 +213,15 @@ impl KernelRuntime {
         self.sessions.lock().contains_key(session_id.as_str())
     }
 
+    /// List all in-memory sessions with summary metadata.
+    pub fn list_sessions(&self) -> Vec<SessionManifest> {
+        let sessions = self.sessions.lock();
+        sessions
+            .values()
+            .map(|state| state.manifest.clone())
+            .collect()
+    }
+
     pub fn root_path(&self) -> &Path {
         &self.config.root
     }
@@ -796,6 +805,12 @@ impl KernelRuntime {
 
     pub fn subscribe_events(&self) -> tokio::sync::broadcast::Receiver<EventRecord> {
         self.stream.subscribe()
+    }
+
+    /// Get a clone of the broadcast sender for injecting ephemeral events
+    /// (e.g., streaming text deltas from the provider).
+    pub fn event_sender(&self) -> broadcast::Sender<EventRecord> {
+        self.stream.clone()
     }
 
     pub async fn record_external_event(
