@@ -1,0 +1,128 @@
+Implement the following plan:
+
+# Plan: Publish aiOS crates to crates.io to fix `cargo install arcan`
+
+## Context
+
+`cargo install arcan` (and `cargo install --git`) fails because 7 dependency crates aren't on crates.io. Arcan's Cargo.toml already uses the correct Rust pattern (`path + version` dual-spec), but the `version` fallback can't resolve because the crates don't exist in the registry. The Lago crates are already published; only aiOS crates and one lago adapter are missing.
+
+## What needs to happen
+
+### Step 1: Prepare aiOS workspace metadata
+
+**File: `aiOS/Cargo.toml`** — Add `repository` to `[workspace.package]`:
+```toml
+repository = "https://github.com/broomva/aiOS"
+```
+
+### Step 2: Add missing `description` fields to 5 aiOS crates
+
+Each crate's `Cargo.toml` needs a `description`:
+- `aiOS/crates/aios-runtime/Cargo.toml` — "Canonical Agent OS runtime engine"
+- `aiOS/crates/aios-events/Cargo.toml` — "Event types and streaming for the Agent OS"
+- `aiOS/crates/aios-policy/Cargo.toml` — "Policy engine and capability-based authorization for Agent OS"
+- `aiOS/crates/aios-sandbox/Cargo.toml` — "Execution sandboxing for Agent OS tool invocation"
+- `aiOS/crates/aios-tools/Cargo.toml` — "Tool registry and governance for Agent OS"
+
+### Step 3: Add `version` to all aiOS internal path deps
+
+Currently all aiOS internal deps use `path`-only (e.g., `aios-protocol = { path = "../aios-protocol" }`). For crates.io publishing, Cargo requires `version` alongside `path`:
+- `aios-protocol = { path = "../aios-protocol", version = "0.1.0" }` (in 6 crates)
+- `aios-policy = { path = "../aios-policy", version = "0.1.0" }` (in aios-tools, aios-kernel)
+- `aios-sandbox = { path = "../aios-sandbox", version = "0.1.0" }` (in aios-tools)
+- And all other cross-refs in aios-kernel
+
+### Step 4: Publish aiOS crates in dependency order
+
+```
+1. aios-protocol        (no internal deps)
+2. aios-runtime         (depends on aios-protocol)
+3. aios-events          (depends on aios-protocol)
+4. aios-policy          (depends on aios-protocol)
+5. aios-sandbox         (depends on aios-protocol)
+6. aios-tools           (depends on aios-protocol, aios-policy, aios-sandbox)
+```
+
+Publish with `cargo publish -p <crate>` from `aiOS/`, waiting ~30s between each for indexing.
+
+### Step 5: Publish lago-aios-eventstore-adapter
+
+**File: `lago/Cargo.toml`** already has `aios-protocol = { version = "0.1.0", path = "..." }` — once Step 4 is done, publish:
+```
+cargo publish -p lago-aios-eventstore-adapter
+```
+
+### Step 6: Fix non-workspace path deps in arcan
+
+Two arcan crates use raw path deps without version fallback:
+
+**`arcan/crates/arcan-aios-adapters/Cargo.toml`** (line 20):
+```toml
+# Change from:
+aios-policy = { path = "../../../aiOS/crates/aios-policy" }
+# To:
+aios-policy = { workspace = true }
+```
+
+**`arcan/crates/arcand/Cargo.toml`** (lines 34-38 dev-deps):
+```toml
+# Change from path-only to workspace:
+aios-events = { workspace = true }
+aios-policy = { workspace = true }
+aios-sandbox = { workspace = true }
+aios-tools = { workspace = true }
+```
+
+**`arcan/Cargo.toml`** workspace deps — add the 4 missing crates:
+```toml
+aios-events = { path = "../aiOS/crates/aios-events", version = "0.1.0" }
+aios-policy = { path = "../aiOS/crates/aios-policy", version = "0.1.0" }
+aios-sandbox = { path = "../aiOS/crates/aios-sandbox", version = "0.1.0" }
+aios-tools = { path = "../aiOS/crates/aios-tools", version = "0.1.0" }
+```
+
+## Verification
+
+1. `cargo check --workspace` from `aiOS/` — all crates compile
+2. `cargo publish --dry-run -p aios-protocol` from `aiOS/` — validates publishability
+3. After publishing: `cargo install --git https://github.com/broomva/arcan.git arcan` — resolves all deps from crates.io
+4. `cargo test --workspace` from `arcan/` — all 264 tests pass
+
+## Files modified
+
+- `aiOS/Cargo.toml` (workspace metadata)
+- `aiOS/crates/aios-runtime/Cargo.toml` (description + version on path deps)
+- `aiOS/crates/aios-events/Cargo.toml` (same)
+- `aiOS/crates/aios-policy/Cargo.toml` (same)
+- `aiOS/crates/aios-sandbox/Cargo.toml` (same)
+- `aiOS/crates/aios-tools/Cargo.toml` (same)
+- `aiOS/crates/aios-protocol/Cargo.toml` (version on path deps if any)
+- `aiOS/crates/aios-kernel/Cargo.toml` (version on path deps)
+- `arcan/Cargo.toml` (add 4 workspace deps)
+- `arcan/crates/arcan-aios-adapters/Cargo.toml` (use workspace dep)
+- `arcan/crates/arcand/Cargo.toml` (use workspace deps)
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-live/61e034af-afc5-4135-8170-7e62692a9d30.jsonl
+
+---
+
+<task-notification>
+<task-id>b6d28ac</task-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-tech-live/tasks/b6d28ac.output</output-file>
+<status>completed</status>
+<summary>Background command "Final verification: cargo install arcan from crates.io" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-broomva-broomva-tech-live/tasks/b6d28ac.output
+
+---
+
+good, installing it from cargo and running it works?
+
+---
+
+do it with ollama provider
+
+---
+
+try again
