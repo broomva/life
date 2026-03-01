@@ -1,0 +1,1 @@
+does arcan has a cli/tui so that we can interact with it and test it?
