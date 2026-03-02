@@ -1,8 +1,9 @@
 # Agent OS: Implementation Status
 
 **Date**: 2026-03-01
-**Version**: 0.2.0 (canonical baseline)  
+**Version**: 0.2.0 (canonical baseline)
 **Rust**: edition 2024, MSRV 1.85+
+**Tests**: 657 passing (+1 ignored) across 19 crates
 
 This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/live`.
 If another status document conflicts with this one, treat this file as source of truth.
@@ -141,13 +142,13 @@ Conformance harness entrypoint:
 
 Current suite validates:
 
-1. Protocol contract checks.
-2. Arcand canonical session API behavior.
-3. Arcan-Lago replay/bridge behavior.
-4. Lago journal sequence assignment semantics.
-5. Lago API session/SSE behavior.
-6. Lago-aiOS eventstore adapter bridge checks.
-7. Lago journal golden replay tests.
+1. Protocol contract checks (35 tests).
+2. Arcand canonical session API behavior (9 tests: lifecycle, auto-create, streaming, cursor invariants, branch isolation, merge round-trip).
+3. Arcan-Lago replay/bridge behavior (3 tests).
+4. Lago journal sequence assignment semantics (1 test).
+5. Lago API session/SSE behavior (8 tests).
+6. Lago-aiOS eventstore adapter bridge checks (11 tests).
+7. Lago journal golden replay tests (14 tests: simple-chat, tool-round-trip, branch-fork, branch-merge, forward-compat, forward-compat-evolution).
 
 ---
 
@@ -155,7 +156,7 @@ Current suite validates:
 
 The baseline runtime architecture is in place and validated. Remaining work is additive:
 
-1. Cross-project golden fixture expansion for replay determinism breadth (R1, ACTIVE).
+1. ~~Cross-project golden fixture expansion for replay determinism breadth~~ (R1, COMPLETE — branch-merge, forward-compat-evolution, stream cursor/replay invariants).
 2. Observability depth expansion (metrics/traces across runtime and adapters) (R2, PLANNED).
 3. Security hardening beyond current software-level sandbox controls (R3, PLANNED).
 4. Memory and learning depth (R4, PLANNED).
