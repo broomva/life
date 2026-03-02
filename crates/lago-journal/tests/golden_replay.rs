@@ -25,7 +25,7 @@ fn load_fixture(name: &str) -> Vec<EventEnvelope> {
 
 fn setup() -> (TempDir, RedbJournal) {
     let dir = TempDir::new().unwrap();
-    let journal = RedbJournal::open(&dir.path().join("golden.redb")).unwrap();
+    let journal = RedbJournal::open(dir.path().join("golden.redb")).unwrap();
     (dir, journal)
 }
 
