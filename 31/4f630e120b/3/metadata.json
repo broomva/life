@@ -1,0 +1,39 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "314f630e120b",
+  "session_id": "61e034af-afc5-4135-8170-7e62692a9d30",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-02T01:02:53.591355Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "docs/STATUS.md",
+    "lago",
+    "CLAUDE.md",
+    "PLANS.md",
+    "arcan",
+    "conformance/fixtures/branch-merge.json",
+    "conformance/fixtures/forward-compat-evolution.json",
+    "docs/PLAN.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "98390b969625",
+  "checkpoint_transcript_start": 4796,
+  "transcript_lines_at_start": 4796,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-02T01:02:52.13968Z",
+    "agent_lines": 27,
+    "human_added": 192,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 219,
+    "agent_percentage": 12.32876712328767
+  }
+}
