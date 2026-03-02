@@ -6,36 +6,30 @@ Active and recent execution plans for the `/live` monorepo.
 
 ---
 
-## Active: R1 Conformance Expansion
+## Completed: R1 Conformance Expansion
 
-**Status**: IN PROGRESS
+**Status**: COMPLETE
 **Started**: 2026-02-22
+**Completed**: 2026-03-01
 **Scope**: Raise confidence from baseline correctness to stronger determinism guarantees.
 
-### Completed
+### Tasks
 
 - [x] Golden fixture suite for canonical run lifecycle
 - [x] Adapter round-trip tests (lago-aios-eventstore-adapter)
 - [x] Lago journal sequence assignment conformance
 - [x] Lago API session/SSE behavior conformance
 - [x] Protocol contract checks in conformance harness
+- [x] Branch-heavy replay/merge deterministic fixtures (branch-merge.json + 3 golden tests)
+- [x] Protocol forward-compat fixtures (forward-compat-evolution.json + 3 golden tests)
+- [x] Stream cursor/replay invariants in canonical API tests (4 tests: cursor past head, cursor zero, branch isolation, merge round-trip)
 
-### Remaining
+### Results
 
-- [ ] Branch-heavy replay/merge deterministic fixtures
-- [ ] Protocol forward-compat fixtures (unknown/custom event evolution)
-- [ ] Stream cursor/replay invariants in canonical API tests
-
-### Acceptance Criteria
-
-- Golden fixture suite covers: run lifecycle, branch lifecycle, approval flow, replay parity across adapters
-- Determinism checks pass in CI/conformance without flaky tolerance
-
-### Checkpoints
-
-1. Each new fixture set lands with passing `conformance/run.sh`
-2. No regressions in existing 596 tests
-3. STATUS.md updated after each fixture batch
+- 657 tests passing (+1 ignored) — up from 596 at baseline
+- Conformance suite: 81 tests across 7 suites
+- Golden fixtures: 6 fixture files, 14 replay tests
+- No regressions, all gates green
 
 ---
 
@@ -68,7 +62,7 @@ Active and recent execution plans for the `/live` monorepo.
 
 ## Planned: R2 Observability Maturity
 
-**Status**: PLANNED (blocked on R1 completion)
+**Status**: PLANNED (R1 complete, unblocked)
 **Scope**: Structured telemetry across runtime and adapter boundaries.
 
 ### Key Deliverables
@@ -91,4 +85,4 @@ Active and recent execution plans for the `/live` monorepo.
 - Lago-backed canonical persistence adapter active
 - Canonical session API active and tested
 - Architecture dependency gate + conformance harness green
-- 596 tests passing (+1 ignored)
+- 657 tests passing (+1 ignored)

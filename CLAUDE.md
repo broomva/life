@@ -1,7 +1,7 @@
 # Broomva Live — Monorepo Root
 
-**Version**: 0.2.0 | **Date**: 2026-02-28 | **Status**: V1.5 (Stabilization Phase)
-**Metrics**: 596/596 tests passing (+1 ignored) | 19 crates | ~27.8K LOC | Rust 2024 Edition (MSRV 1.85)
+**Version**: 0.2.0 | **Date**: 2026-03-01 | **Status**: V1.5 (Stabilization Phase)
+**Metrics**: 657/657 tests passing (+1 ignored) | 19 crates | ~27.8K LOC | Rust 2024 Edition (MSRV 1.85)
 
 This workspace contains Rust projects that together form an **Agent Operating System** with event-sourced persistence, homeostatic regulation, and a canonical kernel contract.
 
