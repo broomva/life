@@ -1,11 +1,12 @@
 {
   "cli_version": "0.4.8",
   "checkpoint_id": "7fe17b2d02e3",
+  "session_id": "c9c21c03-8452-4e9f-ae49-185f0be6d8e8",
   "strategy": "manual-commit",
+  "created_at": "2026-03-03T23:48:57.97937Z",
   "branch": "main",
-  "checkpoints_count": 3,
+  "checkpoints_count": 1,
   "files_touched": [
-    "praxis/CLAUDE.md",
     "praxis/Cargo.lock",
     "praxis/Cargo.toml",
     "praxis/crates/praxis-core/Cargo.toml",
@@ -28,27 +29,22 @@
     "praxis/crates/praxis-tools/src/memory.rs",
     "praxis/crates/praxis-tools/src/shell.rs"
   ],
-  "sessions": [
-    {
-      "metadata": "/7f/e17b2d02e3/0/metadata.json",
-      "transcript": "/7f/e17b2d02e3/0/full.jsonl",
-      "context": "/7f/e17b2d02e3/0/context.md",
-      "content_hash": "/7f/e17b2d02e3/0/content_hash.txt",
-      "prompt": "/7f/e17b2d02e3/0/prompt.txt"
-    },
-    {
-      "metadata": "/7f/e17b2d02e3/1/metadata.json",
-      "transcript": "/7f/e17b2d02e3/1/full.jsonl",
-      "context": "/7f/e17b2d02e3/1/context.md",
-      "content_hash": "/7f/e17b2d02e3/1/content_hash.txt",
-      "prompt": "/7f/e17b2d02e3/1/prompt.txt"
-    }
-  ],
+  "agent": "Claude Code",
+  "turn_id": "843c0c91208c",
   "token_usage": {
-    "input_tokens": 929,
-    "cache_creation_tokens": 538447,
-    "cache_read_tokens": 32004438,
-    "output_tokens": 63079,
-    "api_call_count": 290
+    "input_tokens": 772,
+    "cache_creation_tokens": 313663,
+    "cache_read_tokens": 15905071,
+    "output_tokens": 39006,
+    "api_call_count": 145
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-03T23:48:57.145947Z",
+    "agent_lines": 4440,
+    "human_added": 80,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 4520,
+    "agent_percentage": 98.23008849557522
   }
 }
