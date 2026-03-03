@@ -1,4 +1,5 @@
 /target
+/.target
 /.aios
 /.aios-*/
 .venv/
