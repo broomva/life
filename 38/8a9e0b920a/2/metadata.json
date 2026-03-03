@@ -1,0 +1,45 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "388a9e0b920a",
+  "session_id": "5bcdd9d0-629c-40a6-9eda-e5a8ed1e58de",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-03T20:15:43.300149Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".control/topology.yaml",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "PLANS.md",
+    "docs/ARCHITECTURE.md",
+    "docs/NAVIGATION.md",
+    "docs/ROADMAP.md",
+    "docs/STATUS.md",
+    "docs/control/ARCHITECTURE.md",
+    "scripts/control/check.sh",
+    "scripts/control/smoke.sh",
+    "scripts/control/test.sh",
+    "scripts/harness/lint.sh",
+    "scripts/harness/smoke.sh",
+    "scripts/harness/test.sh",
+    "scripts/harness/typecheck.sh"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "03ce66afbc39",
+  "token_usage": {
+    "input_tokens": 3727,
+    "cache_creation_tokens": 75339,
+    "cache_read_tokens": 975179,
+    "output_tokens": 9476,
+    "api_call_count": 14
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-03T20:15:42.587762Z",
+    "agent_lines": 182,
+    "human_added": 3,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 185,
+    "agent_percentage": 98.37837837837839
+  }
+}

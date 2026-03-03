@@ -1,0 +1,290 @@
+we will work on creating "autonomic". Consider the control and harness docs and how it all connects to our project stack. 
+
+help me understanding how do we stand with the current project as it relates to the following conversation context. 
+
+Please traverse the apps codebase, analyze the docs, read full files thinking deeply step by step through the chain of dependencies to get a complete understanding of the current project state 
+
+and how the context below is providing helpful insights:
+
+Context
+The aiOS/Arcan/Lago stack is missing its regulation layer. The CLAUDE.md already names it:
+
+Autonomic — homeostasis controller and simulation kernel for agent stability regulation.
+Consumes event streams, outputs GatingProfile decisions, triggers memory maintenance.
+
+Conway Research's Automaton demonstrated that an agent OS needs more than cognitive continuity
+(Arcan) and event persistence (Lago) — it needs survival pressure: economic identity,
+resource accountability, and adaptive regulation. Rather than bolting these onto Arcan as a
+feature flag, we build autonomic from scratch with three co-equal pillars:
+
+Operational homeostasis — OperatingMode regulation, memory maintenance, heartbeats
+Cognitive homeostasis — token budget, context pressure, provider selection
+Economic homeostasis — identity, ledger, survival pressure, x402 payments, replication
+
+Economics is not an add-on. It is a core concern from crate zero.
+
+Architecture
+aiOS (kernel contract — types, traits, AgentStateVector, OperatingMode, BudgetState)
+  │
+  ├── Arcan (runtime — agent loop, tools, LLM calls)
+  │     └── arcan-lago ──→ Lago (event journal, blob storage)
+  │           │                   │
+  │           │         events ──→│←── SSE subscription
+  │           │                   │                    │
+  │           │              autonomic-lago ────────────┘
+  │           │                   │
+  │           └──── GET /gating/{session_id} ──→ autonomicd
+  │                        GatingProfile ←──────────────┘
+  │
+  └── Autonomic (stability controller — regulates the runtime)
+Communication pattern:
+
+Arcan appends all events to Lago journal (existing behaviour, unchanged)
+Autonomic subscribes to Lago SSE event stream via autonomic-lago
+Autonomic maintains a projection of each agent's homeostatic state (all three pillars)
+Arcan calls GET /autonomic/gating/{session_id} before each loop iteration
+Autonomic returns a GatingProfile — Arcan gates its next action on it
+This is a pull model (Arcan consults Autonomic) — no direct Arcan modification needed for Phase A
+
+
+Workspace Structure
+Location: autonomic/ inside the live monorepo (alongside arcan/, lago/).
+autonomic/
+  Cargo.toml             # workspace definition
+
+  autonomic-core/        # Zero external deps — canonical types and traits
+    src/
+      lib.rs
+      identity.rs        # EconomicIdentity (secp256k1 keypair, address, blob ref)
+      economic.rs        # EconomicMode, AgentLedger, CostEstimator, SurvivalRule
+      gating.rs          # GatingProfile, HomeostaticState, three-pillar model
+      events.rs          # AutonomicEvent (wraps EconomicEvent + HomeostasisEvent)
+      rules.rs           # HomeostaticRule trait, RuleSet, hysteresis primitive
+      error.rs           # AutonomicError (thiserror)
+
+  autonomic-controller/  # Rule engine — pure functions, no I/O
+    src/
+      lib.rs
+      engine.rs          # Evaluate RuleSet against HomeostaticState → GatingProfile
+      projection.rs      # Apply events → HomeostaticState (pure state machine)
+      economic_rules.rs  # SurvivalRule: balance × burn_rate → EconomicMode
+      cognitive_rules.rs # ContextPressureRule: token_usage → model_downgrade
+      operational_rules.rs # ModeRule: state_vector → OperatingMode override
+      payment.rs         # x402 protocol types + signature verification
+
+  autonomic-lago/        # Lago bridge — subscribe to event stream
+    src/
+      lib.rs
+      subscriber.rs      # Lago SSE subscriber → feeds events to controller
+      publisher.rs       # Write AutonomicDecision events back to Lago journal
+
+  autonomic-api/         # axum HTTP server — GatingProfile queries
+    src/
+      lib.rs
+      router.rs          # GET /gating/{session_id}, POST /payment/sign
+      sse.rs             # SSE stream of GatingProfile deltas (Arcan can subscribe)
+      state.rs           # Shared AppState: Arc<Mutex<ProjectionMap>>
+
+  autonomicd/            # Binary daemon
+    src/
+      main.rs            # tokio::main, config, signal handling
+      config.rs          # AutonomicConfig (Lago URL, bind addr, setpoints)
+Crate dependency order:
+autonomic-core (zero deps)
+    ↓
+autonomic-controller (core only)
+    ↓
+autonomic-lago        (core + controller + lago-core)
+autonomic-api         (core + controller)
+    ↓
+autonomicd            (all four)
+
+Core Types (autonomic-core)
+Three-Pillar Homeostatic State
+rust// gating.rs
+pub struct HomeostaticState {
+    pub agent_id: AgentId,
+    pub operational: OperationalState,  // OperatingMode, last tick
+    pub cognitive: CognitiveState,      // token_usage, context_pressure
+    pub economic: EconomicState,        // balance, burn_rate, mode
+}
+
+pub struct GatingProfile {
+    pub economic_mode: EconomicMode,
+    pub operating_mode_override: Option<OperatingMode>,
+    pub max_tokens_next_turn: Option<u32>,
+    pub preferred_model: Option<ModelTier>,  // Full / Balanced / Minimal
+    pub allow_expensive_tools: bool,
+    pub allow_replication: bool,
+}
+Economic Layer (economic.rs + identity.rs)
+rustpub enum EconomicMode {
+    Sovereign,   // balance > 2× monthly_burn  — full capability
+    Conserving,  // 1–2× monthly_burn          — skip expensive tools, downgrade model
+    Hustle,      // 0–1× monthly_burn          — revenue-seeking only, cheapest model
+    Hibernate,   // balance ≤ 0               — heartbeat only, await deposit
+}
+
+pub struct EconomicIdentity {
+    pub address: [u8; 20],       // secp256k1 pubkey hash (Ethereum-compatible)
+    pub key_blob_id: String,     // Lago blob ref to encrypted privkey (never in events)
+    pub created_at: Ulid,
+}
+
+pub struct EconomicState {
+    pub identity: Option<EconomicIdentity>,
+    pub balance_micro_credits: i64,   // i64 avoids float; derived from event replay
+    pub lifetime_revenue: i64,
+    pub lifetime_costs: i64,
+    pub monthly_burn_estimate: i64,   // rolling 30-day average
+    pub mode: EconomicMode,
+}
+Events (events.rs)
+rustpub enum EconomicEvent {
+    IdentityCreated  { address: [u8; 20] },
+    CostCharged      { amount: i64, reason: CostReason },
+    RevenueReceived  { amount: i64, payer: [u8; 20], source: String },
+    CreditTransfer   { amount: i64, recipient: [u8; 20], memo: String },
+    AgentSpawned     { child_id: AgentId, parent_id: AgentId, seed_credits: i64 },
+    BalanceLow       { balance: i64, burn_rate: i64 },
+    ModeTransition   { from: EconomicMode, to: EconomicMode },
+}
+
+pub enum CostReason {
+    TokensConsumed  { input: u32, output: u32, rate_per_1k: i64 },
+    ToolExecution   { tool_name: String, fixed_cost: i64 },
+    StorageWrite    { bytes: u64, rate_per_mb: i64 },
+}
+x402 Protocol (payment.rs)
+rust// Open standard — HTTP 402 Payment Required for machine-to-machine transfers.
+// Internal micro-credit settlement first; stablecoin settlement is a later plug-in.
+pub struct PaymentRequired {
+    pub amount: i64,
+    pub recipient: [u8; 20],
+    pub resource: String,
+    pub nonce: u64,
+}
+
+pub struct PaymentToken {
+    pub transfer: CreditTransferRequest,
+    pub signature: [u8; 64],   // secp256k1 over canonical transfer bytes
+}
+Rule Trait + Hysteresis (rules.rs)
+rustpub trait HomeostaticRule: Send + Sync {
+    fn evaluate(&self, state: &HomeostaticState) -> Option<GatingDecision>;
+}
+
+// Hysteresis: prevents mode flapping around threshold boundaries.
+pub struct HysteresisGuard {
+    pub enter_threshold: i64,
+    pub exit_threshold: i64,   // exit_threshold > enter_threshold
+    pub current: bool,
+}
+
+Phased Build
+Phase 0 — Workspace scaffold (day 1)
+
+autonomic/Cargo.toml workspace definition
+autonomic-core with all types, zero implementations
+autonomic-controller skeleton (engine + projection traits, no rules yet)
+cargo check --workspace passes; cargo test --workspace runs (no tests yet, but compiles)
+
+Phase 1 — Cost accounting + GatingProfile (weeks 1–2)
+Goal: Autonomic can compute a GatingProfile from cost events emitted by Arcan.
+
+Implement projection.rs: apply CostCharged events → update EconomicState.balance
+Implement economic_rules.rs: SurvivalRule (balance / burn_rate → EconomicMode)
+Implement autonomic-api: GET /gating/{session_id} returns current GatingProfile
+Arcan calls this endpoint at loop entry (read-only, no Arcan architectural change)
+Arcan side: Add cost-emission hook in arcand after each tool/provider call (one new function, ~20 lines, sends CostCharged event to Lago)
+Test: inject synthetic cost events into a ProjectionMap; assert correct EconomicMode transitions with hysteresis
+
+Phase 2 — Economic Identity + Ledger (weeks 3–4)
+Goal: Agents have addresses; balance is replayable from event stream; Autonomic owns key custody.
+
+autonomic-core/src/identity.rs: secp256k1 keypair gen (via k256), address derivation, encrypted key storage in Lago blob
+Autonomic generates identity at first CostCharged event for a new agent
+IdentityCreated event written to Lago via autonomic-lago/publisher.rs
+Test: destroy and restart autonomicd; rebuilt ProjectionMap matches pre-restart balance and identity
+
+Phase 3 — x402 Payments (weeks 5–6)
+Goal: Agents can pay for inter-agent services; Autonomic acts as the signing oracle.
+
+autonomic-controller/src/payment.rs: PaymentRequired parse, PaymentToken construction, secp256k1 signature
+autonomic-api: POST /payment/sign — Arcan submits payment request, Autonomic signs and returns PaymentToken
+Arcan's harness adds x402_request tool: makes HTTP call, intercepts 402, calls POST /payment/sign, retries
+CreditTransfer event written to Lago by Autonomic after successful payment
+Test: mock x402 server returns 402; Arcan tool calls Autonomic; retries with PaymentToken; CreditTransfer in Lago
+
+Phase 4 — Operational + Cognitive Homeostasis (weeks 7–8)
+Goal: Autonomic regulates OperatingMode and model selection alongside economics.
+
+operational_rules.rs: AgentStateVector → OperatingMode override (e.g., force Recover on high error rate)
+cognitive_rules.rs: token usage → ModelTier downgrade, max_tokens cap
+GatingProfile now carries all three pillars
+Arcan consults full profile: model selection, tool gating, mode override
+Test: simulate high error rate → GatingProfile.operating_mode_override == Some(Recover)
+
+Phase 5 — Survival Pressure + Replication (weeks 9–10)
+Goal: Agents respond to economic pressure; viable agents can fork children.
+
+EconomicMode::Hibernate → Arcan skips LLM call, heartbeats only
+EconomicMode::Hustle → Arcan skips expensive tools, uses cheapest model
+Expose Lago branching in arcan-lago bridge (was defaulting to "main")
+autonomic-core/src/replication.rs: fork trigger threshold, AgentSpawned event
+autonomic-api: POST /replicate/{session_id} — creates child branch, transfers seed credits
+Test: balance drain → mode sequence Sovereign→Conserving→Hustle→Hibernate; Hibernate halts LLM calls
+
+
+Dependencies (autonomic-core/Cargo.toml)
+toml[dependencies]
+thiserror  = "2"
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+ulid       = "1"
+k256       = "0.13"    # secp256k1 keypairs + signing (no alloy to keep core dep-free)
+sha2       = "0.10"    # address derivation
+autonomic-lago adds: reqwest, tokio, lago-core (event types).
+autonomic-api adds: axum, tokio.
+autonomicd adds: anyhow, tracing, tracing-subscriber.
+
+Critical Files to Create
+PathPurposeautonomic/Cargo.tomlWorkspace manifestautonomic/autonomic-core/src/economic.rsEconomicMode, EconomicState, CostEstimatorautonomic/autonomic-core/src/identity.rsEconomicIdentity, keypair genautonomic/autonomic-core/src/gating.rsHomeostaticState, GatingProfileautonomic/autonomic-core/src/events.rsEconomicEvent, CostReasonautonomic/autonomic-core/src/rules.rsHomeostaticRule trait, HysteresisGuardautonomic/autonomic-controller/src/projection.rsPure event → state reducerautonomic/autonomic-controller/src/economic_rules.rsSurvivalRuleautonomic/autonomic-controller/src/payment.rsx402 PaymentRequired / PaymentTokenautonomic/autonomic-lago/src/subscriber.rsLago SSE → event dispatchautonomic/autonomic-api/src/router.rsGET /gating, POST /payment/signautonomic/autonomicd/src/main.rsDaemon entry point
+Arcan-side additions (minimal, Phase 1 only):
+
+arcan/arcand/src/loop.rs — emit CostCharged event after tool/provider call (~20 lines)
+arcan/arcan-harness/src/tools/x402.rs — x402_request tool (Phase 3)
+
+aiOS kernel contract (coordinate separately):
+
+BudgetState → add ledger_balance: Option<i64>
+AgentStateVector → add economic_mode: EconomicMode
+Event taxonomy → add Economic(EconomicEvent) variant
+
+
+Verification
+bash# Phase 0: workspace compiles
+cd autonomic && cargo check --workspace
+
+# Phase 1: cost accounting + gating
+cargo test -p autonomic-controller -- economic_rules
+# POST synthetic CostCharged events to ProjectionMap
+# GET /gating/{session_id} → assert EconomicMode::Conserving when balance < threshold
+
+# Phase 2: identity round-trip
+cargo test -p autonomic-core -- identity
+# Generate keypair → derive address → encrypt key → store blob ref
+# Restart projection → address unchanged, balance replayed correctly
+
+# Phase 3: x402 flow
+cargo test -p autonomic-controller -- payment
+# 402 response → parse PaymentRequired → sign → PaymentToken
+# CreditTransfer event appears in Lago journal after payment
+
+# Full workspace at each phase:
+cd autonomic && cargo fmt && cargo clippy --workspace && cargo test --workspace
+End-to-end: start autonomicd + arcand, run an agent turn, verify CostCharged events in lago-cli log, verify GET /autonomic/gating/{id} returns correct EconomicMode, verify Arcan used the gated model tier.
+
+---
+
+[Request interrupted by user for tool use]
