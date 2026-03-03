@@ -3,7 +3,7 @@
 **Date**: 2026-03-03
 **Version**: 0.2.0 (canonical baseline)
 **Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)
-**Tests**: 657 passing (+1 ignored) across 19 crates + Spaces (21 crates total)
+**Tests**: 982 passing (+1 ignored) across 28 crates + Spaces (30 crates total)
 
 This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/life`.
 If another status document conflicts with this one, treat this file as source of truth.
@@ -22,19 +22,21 @@ The baseline unification is active and enforced in production paths:
 
 ## Health Summary
 
-| Area | aiOS | Arcan | Lago | Spaces |
-|---|---|---|---|---|
-| Build | PASS | PASS | PASS | PASS |
-| Tests | PASS | PASS | PASS | N/A (0 tests) |
-| Clippy (`-D warnings`) | PASS | PASS | PASS | PASS |
-| Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | STANDALONE |
-| Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | NETWORKING |
+| Area | aiOS | Arcan | Lago | Autonomic | Praxis | Spaces |
+|---|---|---|---|---|---|---|
+| Build | PASS | PASS | PASS | PASS | PASS | PASS |
+| Tests | PASS | PASS | PASS | PASS (69) | PASS (49) | N/A (0 tests) |
+| Clippy (`-D warnings`) | PASS | PASS | PASS | PASS | PASS | PASS |
+| Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | STANDALONE |
+| Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | NETWORKING |
 
 Validation gates currently pass:
 
 - `/Users/broomva/broomva.tech/life/aiOS`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
 - `/Users/broomva/broomva.tech/life/arcan`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
 - `/Users/broomva/broomva.tech/life/lago`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
+- `/Users/broomva/broomva.tech/life/autonomic`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
+- `/Users/broomva/broomva.tech/life/praxis`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
 - `/Users/broomva/broomva.tech/life/spaces`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo check` (WASM module: `cargo check --target wasm32-unknown-unknown --manifest-path spacetimedb/Cargo.toml`)
 - `/Users/broomva/broomva.tech/life`: `make audit`, `./scripts/architecture/verify_dependencies.sh`, `./conformance/run.sh`
 
@@ -151,6 +153,56 @@ Current suite validates:
 6. Lago-aiOS eventstore adapter bridge checks (11 tests).
 7. Lago journal golden replay tests (14 tests: simple-chat, tool-round-trip, branch-fork, branch-merge, forward-compat, forward-compat-evolution).
 
+## Autonomic
+
+### Homeostasis Controller
+
+- Three-pillar regulation: operational, cognitive, economic homeostasis.
+- 5 crates: `autonomic-core` (24 tests), `autonomic-controller` (31 tests), `autonomic-lago` (8 tests), `autonomic-api` (4 tests), `autonomicd` (2 tests).
+- Pure rule engine with deterministic projection fold over events.
+- Economic modes: Sovereign, Conserving, Hustle, Hibernate — with hysteresis-gated transitions.
+- Advisory architecture: Arcan consults via HTTP GET `/gating/{session_id}`; failures are non-fatal.
+- Lago journal integration via `--lago-data-dir` flag; on-demand session bootstrapping.
+
+### Integration Points
+
+- Depends on `aios-protocol` (canonical contract) and `lago-core`/`lago-journal` (persistence).
+- Events use `EventKind::Custom` with `"autonomic."` prefix for forward-compatible Lago persistence.
+- Does not depend on Arcan crates — standalone advisory service.
+
+### Known Gaps
+
+- Not yet consulted by Arcan agent loop (HTTP client integration pending).
+- No observability (metrics/traces) yet.
+- Identity system is placeholder.
+
+## Praxis
+
+### Canonical Tool Execution Engine
+
+- Standalone tool execution and sandbox engine extracted from `arcan-harness`.
+- 4 crates: `praxis-core` (12 tests), `praxis-tools` (24 tests), `praxis-skills` (11 tests), `praxis-mcp` (2 tests).
+- Depends only on `aios-protocol` — no dependency on Arcan, Lago, or Autonomic.
+- Implements canonical `Tool` trait from `aios-protocol::tool`.
+
+### Components
+
+- **praxis-core**: Sandbox policy enforcement, workspace boundary checks (FsPolicy), command runner abstraction.
+- **praxis-tools**: ReadFile, WriteFile, ListDir, Glob, Grep, EditFile (hashline/Blake3), Bash, ReadMemory, WriteMemory.
+- **praxis-skills**: SKILL.md frontmatter parser, skill registry with discovery and activation.
+- **praxis-mcp**: MCP server connection management, McpTool bridge wrapping external tools via rmcp 0.15.
+
+### Integration Points
+
+- Depends on `aios-protocol` (canonical tool contract).
+- Will be consumed by Arcan as the tool execution backend (Phase 4 — pending).
+- Architecture dependency audit enforces isolation from Arcan/Lago/Autonomic.
+
+### Known Gaps
+
+- Not yet wired into Arcan (still uses arcan-harness tools directly).
+- No integration tests with live MCP servers.
+
 ## Spaces
 
 ### Distributed Agent Networking
@@ -184,7 +236,7 @@ The baseline runtime architecture is in place and validated. Remaining work is a
 2. Observability depth expansion (metrics/traces across runtime and adapters) (R2, PLANNED).
 3. Security hardening beyond current software-level sandbox controls (R3, PLANNED).
 4. Memory and learning depth (R4, PLANNED).
-5. Controller plane / Autonomic integration (R5, PLANNED).
+5. Controller plane / Autonomic integration — Phase 0 COMPLETE (5 crates, 69 tests, Lago wired, hysteresis active); Arcan HTTP client for gating queries remaining (R5, ACTIVE).
 
 ### Infrastructure (2026-03-01)
 

@@ -13,3 +13,6 @@
 [submodule "spaces"]
 	path = spaces
 	url = https://github.com/broomva/spaces.git
+[submodule "autonomic"]
+	path = autonomic
+	url = https://github.com/broomva/autonomic.git

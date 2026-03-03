@@ -21,8 +21,8 @@
 | P3 | Session Management & Clients | Planned | target: +24 |
 | P4 | Advanced Runtime (subagents, web client, WASM) | Future | — |
 
-**Current test counts**: aiOS 61 passing, Arcan 272 passing (+1 ignored), Lago 324 passing, Total 657 passing (+1 ignored)
-**Target**: 700+ tests by end of Phase 5
+**Current test counts**: aiOS 96, Arcan 462 (+1 ignored), Lago 324, Autonomic 69, Total 951 passing (+1 ignored)
+**Target**: 1000+ tests by end of Phase 5
 
 ---
 

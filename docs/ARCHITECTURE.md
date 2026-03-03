@@ -14,10 +14,11 @@ Life is a contract-first architecture for building artificial life from computat
 | Primitive | Biological Analog | Active Project | Status |
 |-----------|-------------------|----------------|--------|
 | Cognition + Execution | Central nervous system | **Arcan** | ACTIVE |
+| Tool Execution | Motor cortex / effectors | **Praxis** | ACTIVE |
 | Persistence | Long-term memory formation | **Lago** | ACTIVE |
 | Networking | Social/swarm behavior | **Spaces** | ACTIVE |
 | Contract / DNA | Genome | **aiOS** | ACTIVE |
-| Homeostasis | Autonomic nervous system | **Autonomic** | PLANNED |
+| Homeostasis | Autonomic nervous system | **Autonomic** | ACTIVE |
 | Temporality | Circadian rhythm | **Chronos** | PLANNED |
 | Security | Immune system | **Aegis** | PLANNED |
 | World Model | Prefrontal cortex | **Nous** | PLANNED |
@@ -27,12 +28,13 @@ Life is a contract-first architecture for building artificial life from computat
 
 - **aiOS**: canonical contract + runtime engine
 - **Arcan**: daemon host + adapters + clients
+- **Praxis**: canonical tool execution and sandbox engine
 - **Lago**: durable event-sourced persistence substrate
 - **Spaces**: distributed agent networking engine (SpacetimeDB 2.0)
+- **Autonomic**: three-pillar homeostasis controller (operational, cognitive, economic)
 
 ### Planned Projects
 
-- **Autonomic**: controller for homeostasis/maintenance policies
 - **Chronos**: temporal scheduler and time-awareness engine
 - **Aegis**: OS-level sandbox, capability attestation, secret management
 - **Nous**: world model and causal reasoning engine
@@ -221,6 +223,21 @@ Conformance and integration gates are exercised by:
 - `lago-aios-eventstore-adapter`: canonical event-store adapter
 - `lago-core`, `lago-journal`, `lago-store`, `lago-fs`, `lago-policy`, `lago-api`, `lago-ingest`, `lagod`, `lago-cli`: persistence substrate stack
 
+## Praxis
+
+- `praxis-core`: sandbox policy enforcement, workspace boundary checks (FsPolicy), command runner
+- `praxis-tools`: canonical tool implementations (ReadFile, WriteFile, ListDir, Glob, Grep, EditFile, Bash, ReadMemory, WriteMemory)
+- `praxis-skills`: SKILL.md frontmatter parser, skill registry with discovery and activation
+- `praxis-mcp`: MCP server connection management, McpTool bridge (rmcp 0.15)
+
+## Autonomic
+
+- `autonomic-core`: types, traits, errors (economic modes, gating profiles, hysteresis gates, rules)
+- `autonomic-controller`: pure rule engine — projection reducer + rule evaluation (no I/O)
+- `autonomic-lago`: Lago bridge — event subscription + publishing
+- `autonomic-api`: axum HTTP server (/gating, /projection, /health endpoints)
+- `autonomicd`: daemon binary with config, signal handling, optional Lago journal
+
 ## Spaces
 
 - `spaces`: CLI client using `spacetimedb-sdk` (Rust 2024 edition)
@@ -235,7 +252,7 @@ Conformance and integration gates are exercised by:
 1. Baseline emphasizes canonical runtime/persistence integration, not full observability maturity.
 2. OS-level sandbox hardening remains an active follow-up area.
 3. Cross-project golden fixture breadth can still be expanded.
-4. Additional controller-plane capabilities (Autonomic) remain planned.
+4. Autonomic is active but advisory-only — Arcan does not yet query it during agent runs.
 
 ---
 

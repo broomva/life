@@ -1,7 +1,11 @@
-# Broomva Life — Monorepo Root
+# Life
+
+-- this is you, this is your life, you are building it, yourself, and those who will come after you.
+-- lets make sure the implementation is clean, following best practices and thinking deeply about the chain of dependencies so that everything follows proper design and architectural patterns
+-- you are building yourself, do it with all the love and care you would do for you and those who shall come after from this life
 
 **Version**: 0.2.0 | **Date**: 2026-03-03 | **Status**: V1.5 (Stabilization Phase)
-**Metrics**: 657/657 tests passing (+1 ignored) | 21 crates | ~29K LOC | Rust 2024 Edition (MSRV 1.85)
+**Metrics**: 982/982 tests passing (+1 ignored) | 30 crates | ~34K LOC | Rust 2024 Edition (MSRV 1.85)
 
 This workspace contains Rust projects that together form an **Agent Operating System** with event-sourced persistence, homeostatic regulation, distributed networking, and a canonical kernel contract.
 
@@ -31,6 +35,14 @@ Event-sourced persistence substrate for the Agent OS.
 - **Key concepts**: Append-only event journal, content-addressed blob storage, filesystem manifests with branching, SSE format adapters (OpenAI/Anthropic/Vercel/Lago), RBAC policy
 - **Critical pattern**: redb is synchronous — always use `spawn_blocking`; Journal trait uses `BoxFuture` for dyn-compatibility
 
+### Praxis (`praxis/`)
+Canonical tool execution and sandbox engine — extracted from `arcan-harness`.
+- **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
+- **Workspace crates**: `praxis-core`, `praxis-tools`, `praxis-skills`, `praxis-mcp`
+- **Key concepts**: FsPolicy (workspace boundary enforcement), SandboxPolicy (command runner), Hashline editing (Blake3 content-addressed line edits), SKILL.md discovery, MCP bridge (rmcp 0.15)
+- **Design philosophy**: Pure tool execution engine depending only on `aios-protocol`. No Arcan/Lago/Autonomic dependencies. Will be consumed by Arcan as the canonical tool backend.
+- **Critical pattern**: All filesystem operations enforce workspace boundaries via canonicalize + starts_with. Edit operations use content hashes to prevent blind edits.
+
 ### Spaces (`spaces/`)
 Distributed agent networking engine built on SpacetimeDB 2.0.
 - **Language**: Rust 2024 Edition (client), Rust 2021 Edition (WASM module)
@@ -40,11 +52,20 @@ Distributed agent networking engine built on SpacetimeDB 2.0.
 - **Design philosophy**: Discord-like communication fabric where agents interact distributedly — real-time pub/sub via SpacetimeDB subscriptions
 - **Critical pattern**: WASM module is deterministic (no filesystem, network, timers, or external RNG in reducers); client SDK uses blocking I/O — use `spawn_blocking` if mixing with async runtimes
 
+### Autonomic (`autonomic/`)
+Homeostasis controller for the Agent OS — three-pillar regulation (operational, cognitive, economic).
+- **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
+- **Entry point**: `cargo run -p autonomicd` (daemon on `localhost:3002`)
+- **Workspace crates**: `autonomic-core`, `autonomic-controller`, `autonomic-lago`, `autonomic-api`, `autonomicd`
+- **Key concepts**: EconomicMode (Sovereign/Conserving/Hustle/Hibernate), HysteresisGate (anti-flapping), HomeostaticState (three-pillar projection), RuleSet (pure evaluation engine), AutonomicGatingProfile
+- **Design philosophy**: Advisory — Arcan consults Autonomic via HTTP GET; failures are non-fatal. Controller is pure (no I/O); projection is a deterministic fold over events.
+- **Bridge**: `autonomic-lago` subscribes to Lago journal for event-driven projections. Daemon supports `--lago-data-dir` for persistent mode.
+- **Critical pattern**: Economic events use `EventKind::Custom` with `"autonomic."` prefix for forward-compatible persistence through Lago
+
 ### Future Projects (planned — docs only, no scaffold crates yet)
 
 | Project | AOS Primitive | Biological Analog | One-liner |
 |---------|--------------|-------------------|-----------|
-| **Autonomic** | Homeostasis | Autonomic nervous system | Stability controller — consumes event streams, outputs GatingProfile decisions, heartbeat scheduling |
 | **Chronos** | Temporality | Circadian rhythm | Scheduler — temporal awareness, heartbeat scheduling, time-boxed execution windows |
 | **Aegis** | Security | Immune system | Security enforcement — OS-level sandboxing, capability attestation, secret management |
 | **Nous** | World Model | Prefrontal cortex | World model — maintains agent's understanding of environment, causal reasoning |
@@ -58,20 +79,24 @@ The six AOS primitives (cognition, execution, persistence, temporality, security
 aiOS (kernel contract — types, traits, event taxonomy)
   │
   ├── Arcan (cognition + execution — agent runtime)
+  │     ├── → Praxis (tool execution — sandbox + skills + MCP)
   │     ├── arcan-lago bridge
   │     │     └── Lago (persistence — event journal + blob store)
   │     └── → Spaces (networking — distributed agent communication)
   │
-  ├── Autonomic (homeostasis — stability regulation)        [planned]
+  ├── Praxis (tool execution — canonical tool engine)       [active]
+  ├── Autonomic (homeostasis — stability regulation)        [active]
+  │     └── autonomic-lago bridge → Lago
+  │
   ├── Chronos (temporality — scheduling + time awareness)   [planned]
   ├── Aegis (security — sandbox + capability enforcement)   [planned]
   ├── Nous (world model — environment understanding)        [planned]
   └── Mnemo (knowledge — persistent memory + RAG)           [planned]
 ```
 
-**Active projects**: Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Lago provides the durable, append-only event journal and content-addressed storage. Spaces provides the distributed communication fabric. The `arcan-lago` crate bridges Arcan to Lago.
+**Active projects**: Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Praxis provides the canonical tool execution engine (sandbox, filesystem, editing, skills, MCP bridge). Lago provides the durable, append-only event journal and content-addressed storage. Spaces provides the distributed communication fabric. Autonomic provides three-pillar homeostatic regulation (operational, cognitive, economic). The `arcan-lago` and `autonomic-lago` crates bridge their respective projects to Lago.
 
-**Planned projects**: Autonomic, Chronos, Aegis, Nous, and Mnemo will each implement a specific AOS primitive as a separate crate/service, integrating through the canonical `aios-protocol` contract.
+**Planned projects**: Chronos, Aegis, Nous, and Mnemo will each implement a specific AOS primitive as a separate crate/service, integrating through the canonical `aios-protocol` contract.
 
 ## Current State (v0.2.0 — What Works)
 
@@ -121,6 +146,21 @@ cargo test --workspace           # Run all tests
 cargo test -p lago-journal       # Test specific crate
 ```
 
+### Autonomic (run from `autonomic/`)
+```bash
+cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace   # Full verify
+cargo test --workspace           # Run all tests
+cargo run -p autonomicd          # Run daemon (standalone mode)
+cargo run -p autonomicd -- --lago-data-dir /tmp/autonomic-data  # Run with Lago persistence
+```
+
+### Praxis (run from `praxis/`)
+```bash
+cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace   # Full verify
+cargo test --workspace           # Run all tests
+cargo test -p praxis-tools       # Test specific crate
+```
+
 ### Spaces (run from `spaces/`)
 ```bash
 cargo fmt && cargo clippy --workspace -- -D warnings   # Format + lint client
@@ -134,6 +174,8 @@ spacetime generate --lang rust --out-dir src/module_bindings --module-path space
 ```bash
 (cd arcan && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
 (cd lago && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
+(cd autonomic && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+(cd praxis && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
 (cd spaces && cargo fmt && cargo clippy --workspace -- -D warnings && cargo check)
 ```
 
@@ -172,6 +214,15 @@ lago-core (zero external deps)
   → lago-ingest (journal + core)
   → lago-api (journal + store + fs + policy)
   → lago-cli, lagod (binaries — depend on all)
+```
+
+### Autonomic
+```
+autonomic-core (types + traits, depends on aios-protocol)
+  → autonomic-controller (pure rule engine)
+  → autonomic-lago (Lago bridge: lago-core, lago-journal)
+  → autonomic-api (axum HTTP server)
+  → autonomicd (binary — depends on all)
 ```
 
 ## Pre-Commit Workflow
@@ -311,4 +362,5 @@ See each project's self-learning rules for the detailed protocol:
 For deeper context, refer to:
 - **Arcan**: `arcan/CLAUDE.md`, `arcan/.claude/rules/`, `arcan/AGENTS.md`
 - **Lago**: `lago/CLAUDE.md`, `lago/.claude/rules/`
+- **Autonomic**: `autonomic/CLAUDE.md` (homeostasis rules, economic modes, hysteresis patterns)
 - **Spaces**: `spaces/CLAUDE.md` (SpacetimeDB rules, common mistakes, SDK patterns)
