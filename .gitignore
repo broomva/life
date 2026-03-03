@@ -10,3 +10,6 @@
 
 # Local overrides
 spacetime.local.json
+
+# Claude Code user-specific settings
+.claude/settings.local.json
