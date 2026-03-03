@@ -184,7 +184,7 @@ Current labels:
 - R3 Security hardening: `PLANNED`
 - R4 Memory/learning depth: `PLANNED`
 - R5 Controller plane: `ACTIVE` (Phase 0 complete — 5 crates, 69 tests, Lago wired, hysteresis active; Arcan integration pending)
-- Spaces networking: `ACTIVE` (v0.1.0 — integration with Arcan pending)
+- Spaces networking: `ACTIVE` (v0.1.0 — arcan-spaces bridge implemented, concrete SDK adapter pending)
 - R6 Temporality (Chronos): `PLANNED`
 - R7 Security enforcement (Aegis): `PLANNED`
 - R8 World model (Nous): `PLANNED`

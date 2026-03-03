@@ -69,7 +69,6 @@ Life is a contract-first architecture for building artificial life from computat
 - `ToolHarnessPort`
 - `PolicyGatePort`
 - `ApprovalPort`
-- `MemoryPort`
 
 `aios-runtime` depends only on these ports and canonical protocol types.
 
@@ -216,6 +215,7 @@ Conformance and integration gates are exercised by:
 - `arcan`: daemon host binary
 - `arcand`: canonical session API router
 - `arcan-aios-adapters`: canonical port adapter implementations
+- `arcan-spaces`: Spaces networking bridge (port-based abstraction, tools, middleware)
 - `arcan-core`, `arcan-harness`, `arcan-provider`, `arcan-store`, `arcan-lago`, `arcan-tui`: supporting runtime/client layers
 
 ## Lago
@@ -243,7 +243,7 @@ Conformance and integration gates are exercised by:
 - `spaces`: CLI client using `spacetimedb-sdk` (Rust 2024 edition)
 - `spaces/spacetimedb`: WASM module using `spacetimedb` 2.0.2 (Rust 2021 edition, `cdylib`)
 - 11 tables, 20+ reducers, 5-tier RBAC, real-time pub/sub via SpacetimeDB
-- Standalone — no dependency on aiOS/Arcan/Lago crates; Arcan agents connect as SDK clients
+- Connected to Arcan via `arcan-spaces` bridge (port-based abstraction, mock-backed, concrete SDK adapter pending)
 
 ---
 

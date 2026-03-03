@@ -31,8 +31,9 @@
 | arcan-tui | 14 | 1,432 |
 | arcand | 3 | 790 |
 | arcan-lago | 80 | 4,471 |
+| arcan-spaces | 18 | 600 |
 | arcan | 4 | 547 |
-| **Arcan Total** | **237** | **15,234** |
+| **Arcan Total** | **255** | **15,834** |
 | lago-core | 118 | 2,893 |
 | lago-journal | 24 | 1,520 |
 | lago-store | 17 | 322 |
@@ -44,7 +45,7 @@
 | lago-cli | 0 | 1,156 |
 | lagod | 0 | 311 |
 | **Lago Total** | **299** | **12,541** |
-| **Combined Total** | **597 declared** (`596 passing`, `1 ignored`) | **27,775** |
+| **Combined Total** | **615 declared** (`614 passing`, `1 ignored`) | **28,375** |
 
 ### Coverage Gaps (Priority Order)
 
@@ -435,9 +436,11 @@ Curated sessions that serve as regression tests for the entire ecosystem:
 ### End-to-End Verification Command
 
 ```bash
-# Full ecosystem verify (all 4 projects)
-(cd aiOS && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
-(cd arcan && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
-(cd lago && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
-(cd autonomic && cargo fmt && cargo clippy --workspace && cargo test --workspace)
+# Full ecosystem verify (all 6 projects)
+(cd aiOS && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+(cd arcan && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+(cd lago && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+(cd autonomic && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+(cd praxis && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+(cd spaces && cargo fmt && cargo clippy --workspace -- -D warnings && cargo check)
 ```
