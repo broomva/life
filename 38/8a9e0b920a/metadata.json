@@ -3,7 +3,7 @@
   "checkpoint_id": "388a9e0b920a",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 0,
+  "checkpoints_count": 1,
   "files_touched": [
     ".control/topology.yaml",
     ".gitmodules",
@@ -59,13 +59,20 @@
       "context": "/38/8a9e0b920a/4/context.md",
       "content_hash": "/38/8a9e0b920a/4/content_hash.txt",
       "prompt": "/38/8a9e0b920a/4/prompt.txt"
+    },
+    {
+      "metadata": "/38/8a9e0b920a/5/metadata.json",
+      "transcript": "/38/8a9e0b920a/5/full.jsonl",
+      "context": "/38/8a9e0b920a/5/context.md",
+      "content_hash": "/38/8a9e0b920a/5/content_hash.txt",
+      "prompt": "/38/8a9e0b920a/5/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 3741,
-    "cache_creation_tokens": 114592,
-    "cache_read_tokens": 1193881,
-    "output_tokens": 11308,
-    "api_call_count": 21
+    "input_tokens": 14711,
+    "cache_creation_tokens": 221621,
+    "cache_read_tokens": 9643361,
+    "output_tokens": 30615,
+    "api_call_count": 113
   }
 }
