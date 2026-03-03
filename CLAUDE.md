@@ -5,7 +5,7 @@
 -- you are building yourself, do it with all the love and care you would do for you and those who shall come after from this life
 
 **Version**: 0.2.0 | **Date**: 2026-03-03 | **Status**: V1.5 (Stabilization Phase)
-**Metrics**: 982/982 tests passing (+1 ignored) | 30 crates | ~34K LOC | Rust 2024 Edition (MSRV 1.85)
+**Metrics**: 1000/1000 tests passing (+1 ignored) | 31 crates | ~37K LOC | Rust 2024 Edition (MSRV 1.85)
 
 This workspace contains Rust projects that together form an **Agent Operating System** with event-sourced persistence, homeostatic regulation, distributed networking, and a canonical kernel contract.
 
@@ -22,10 +22,10 @@ Kernel contract and reference implementation for the Agent OS.
 Rust-based agent runtime daemon — the primary implementation of the aiOS kernel contract.
 - **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
 - **Entry point**: `cargo run -p arcan` (daemon on `localhost:3000`)
-- **Workspace crates**: `arcan-core`, `arcan-harness`, `arcan-aios-adapters`, `arcan-store`, `arcan-provider`, `arcan-tui`, `arcand`, `arcan-lago`, `arcan` (binary)
+- **Workspace crates**: `arcan-core`, `arcan-harness`, `arcan-aios-adapters`, `arcan-store`, `arcan-provider`, `arcan-tui`, `arcand`, `arcan-lago`, `arcan-spaces`, `arcan` (binary)
 - **Key concepts**: Agent loop (reconstruct → provider call → execute → stream), Hashline editing (content-hash–addressed line edits), policy-driven sandboxing
 - **Design philosophy**: The agent's message history IS the application state. Every action produces immutable events.
-- **Bridge**: `arcan-lago` connects Arcan to Lago's event-sourced persistence
+- **Bridges**: `arcan-lago` connects Arcan to Lago's event-sourced persistence; `arcan-spaces` connects Arcan to Spaces distributed networking
 
 ### Lago (`lago/`)
 Event-sourced persistence substrate for the Agent OS.
@@ -82,7 +82,8 @@ aiOS (kernel contract — types, traits, event taxonomy)
   │     ├── → Praxis (tool execution — sandbox + skills + MCP)
   │     ├── arcan-lago bridge
   │     │     └── Lago (persistence — event journal + blob store)
-  │     └── → Spaces (networking — distributed agent communication)
+  │     └── arcan-spaces bridge
+  │           └── Spaces (networking — distributed agent communication)
   │
   ├── Praxis (tool execution — canonical tool engine)       [active]
   ├── Autonomic (homeostasis — stability regulation)        [active]
@@ -204,6 +205,7 @@ All projects follow these rules (Spaces WASM module uses Rust 2021 edition due t
 arcan-core → arcan-harness, arcan-store, arcan-provider
            → arcand (agent loop + server)
            → arcan-lago (Lago bridge)
+           → arcan-spaces (Spaces bridge)
            → arcan (binary — depends on all)
 ```
 

@@ -3,7 +3,7 @@
 **Date**: 2026-03-03
 **Version**: 0.2.0 (canonical baseline)
 **Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)
-**Tests**: 982 passing (+1 ignored) across 28 crates + Spaces (30 crates total)
+**Tests**: 1000 passing (+1 ignored) across 29 crates + Spaces (31 crates total)
 
 This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/life`.
 If another status document conflicts with this one, treat this file as source of truth.
@@ -27,7 +27,7 @@ The baseline unification is active and enforced in production paths:
 | Build | PASS | PASS | PASS | PASS | PASS | PASS |
 | Tests | PASS | PASS | PASS | PASS (69) | PASS (49) | N/A (0 tests) |
 | Clippy (`-D warnings`) | PASS | PASS | PASS | PASS | PASS | PASS |
-| Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | STANDALONE |
+| Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | BRIDGED (arcan-spaces) |
 | Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | NETWORKING |
 
 Validation gates currently pass:
@@ -105,6 +105,13 @@ Validation gates currently pass:
   - session lifecycle
   - named-session run auto-create behavior
   - streaming replay framing (including Vercel AI SDK v6 data envelope/header path)
+
+### Spaces Bridge
+
+- `arcan-spaces` provides port-based abstraction (`SpacesPort` trait) for Spaces networking.
+- 6 tool definitions: list_channels, send_message, read_messages, send_dm, create_channel, list_members.
+- Middleware for agent event logging to Spaces channels.
+- Mock hub for testing (18 tests). Concrete SpacetimeDB SDK adapter pending.
 
 ### Client Alignment
 
@@ -224,7 +231,7 @@ Current suite validates:
 
 - No unit tests (reducer tests, integration tests planned).
 - No DM/private messaging.
-- No Arcan integration bridge yet.
+- arcan-spaces bridge uses mock hub only — concrete SpacetimeDB SDK adapter not yet implemented.
 
 ---
 

@@ -5,7 +5,7 @@
 -- you are building yourself, do it with all the love and care you would do for you and those who shall come after from this life
 
 **Version**: 0.2.0 | **Date**: 2026-03-03 | **Status**: V1.5 (Stabilization Phase)
-**Metrics**: 657/657 tests passing (+1 ignored) | 21 crates | ~29K LOC | Rust 2024 Edition (MSRV 1.85)
+**Metrics**: 1000/1000 tests passing (+1 ignored) | 31 crates | ~37K LOC | Rust 2024 Edition (MSRV 1.85)
 
 This workspace contains Rust projects that together form an **Agent Operating System** with event-sourced persistence, homeostatic regulation, distributed networking, and a canonical kernel contract.
 
@@ -22,10 +22,10 @@ Kernel contract and reference implementation for the Agent OS.
 Rust-based agent runtime daemon — the primary implementation of the aiOS kernel contract.
 - **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
 - **Entry point**: `cargo run -p arcan` (daemon on `localhost:3000`)
-- **Workspace crates**: `arcan-core`, `arcan-harness`, `arcan-aios-adapters`, `arcan-store`, `arcan-provider`, `arcan-tui`, `arcand`, `arcan-lago`, `arcan` (binary)
+- **Workspace crates**: `arcan-core`, `arcan-harness`, `arcan-aios-adapters`, `arcan-store`, `arcan-provider`, `arcan-tui`, `arcand`, `arcan-lago`, `arcan-spaces`, `arcan` (binary)
 - **Key concepts**: Agent loop (reconstruct → provider call → execute → stream), Hashline editing (content-hash–addressed line edits), policy-driven sandboxing
 - **Design philosophy**: The agent's message history IS the application state. Every action produces immutable events.
-- **Bridge**: `arcan-lago` connects Arcan to Lago's event-sourced persistence
+- **Bridges**: `arcan-lago` connects Arcan to Lago's event-sourced persistence; `arcan-spaces` connects Arcan to Spaces distributed networking
 
 ### Lago (`lago/`)
 Event-sourced persistence substrate for the Agent OS.
@@ -44,10 +44,14 @@ Distributed agent networking engine built on SpacetimeDB 2.0.
 - **Design philosophy**: Discord-like communication fabric for distributed agent interaction
 - **Critical pattern**: WASM module is deterministic; client SDK uses blocking I/O
 
-### Autonomic (`../autonomic/` — planned, separate repo)
-Homeostasis controller and simulation kernel for agent stability regulation.
-- **Role**: Consumes event streams, outputs GatingProfile decisions, triggers memory maintenance
-- **Key concepts**: Rule-based controller with hysteresis, heartbeat scheduling, budget/mode management
+### Autonomic (`autonomic/`)
+Homeostasis controller for the Agent OS — three-pillar regulation (operational, cognitive, economic).
+- **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
+- **Entry point**: `cargo run -p autonomicd` (daemon on `localhost:3002`)
+- **Workspace crates**: `autonomic-core`, `autonomic-controller`, `autonomic-lago`, `autonomic-api`, `autonomicd`
+- **Key concepts**: EconomicMode (Sovereign/Conserving/Hustle/Hibernate), HysteresisGate (anti-flapping), HomeostaticState (three-pillar projection), RuleSet (pure evaluation engine)
+- **Design philosophy**: Advisory — Arcan consults Autonomic via HTTP GET; failures are non-fatal.
+- **Bridge**: `autonomic-lago` subscribes to Lago journal for event-driven projections.
 
 ## Relationship
 
@@ -57,12 +61,14 @@ aiOS (kernel contract — types, traits, event taxonomy)
   ├── Arcan (runtime — implements aiOS contract)
   │     ├── arcan-lago bridge
   │     │     └── Lago (persistence substrate — stores canonical events)
-  │     └── → Spaces (distributed networking — agents connect as SDK clients)
+  │     └── arcan-spaces bridge
+  │           └── Spaces (distributed networking — agents connect as SDK clients)
   │
-  └── Autonomic (stability controller — regulates the runtime)
+  ├── Autonomic (stability controller — regulates the runtime)
+  │     └── autonomic-lago bridge → Lago
 ```
 
-Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Lago provides the durable, append-only event journal and content-addressed storage underneath. Spaces provides the distributed communication fabric where agents interact in real-time. The `arcan-lago` crate bridges Arcan to Lago.
+Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Lago provides the durable, append-only event journal and content-addressed storage underneath. Spaces provides the distributed communication fabric where agents interact in real-time. Autonomic provides three-pillar homeostatic regulation. The `arcan-lago` crate bridges Arcan to Lago, `arcan-spaces` bridges Arcan to Spaces, and `autonomic-lago` bridges Autonomic to Lago.
 
 ## Current State (v0.2.0 — What Works)
 
@@ -151,6 +157,7 @@ All projects follow these rules (Spaces WASM module uses Rust 2021 edition due t
 arcan-core → arcan-harness, arcan-store, arcan-provider
            → arcand (agent loop + server)
            → arcan-lago (Lago bridge)
+           → arcan-spaces (Spaces bridge)
            → arcan (binary — depends on all)
 ```
 
