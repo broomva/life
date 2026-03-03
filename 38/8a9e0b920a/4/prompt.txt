@@ -1,0 +1,402 @@
+Implement the following plan:
+
+# Autonomic: Homeostasis Controller for the Agent OS
+
+## Context
+
+The aiOS/Arcan/Lago stack has cognitive continuity (Arcan) and event persistence (Lago) but lacks a **regulation layer**. The CLAUDE.md already names it: *Autonomic — homeostasis controller and simulation kernel for agent stability regulation*. Today, homeostasis is hardcoded in `aios-runtime::apply_homeostasis_controllers()` with magic numbers and no economic awareness. Autonomic externalizes this into a proper rule engine with three co-equal pillars: operational, cognitive, and economic homeostasis.
+
+The key insight from the Conway Research context is that **economics is a core concern from crate zero** — not a bolt-on. Agents need survival pressure: budget accountability, cost-aware model selection, and identity-based payments.
+
+---
+
+## Current State Assessment
+
+### What Already Exists
+
+| Component | Location | Status |
+|-----------|----------|--------|
+| `GatingProfile` (operational) | `aiOS/crates/aios-protocol/src/mode.rs:37-63` | Defined, NOT consumed by runtime |
+| `OperatingMode` (6 variants) | `aiOS/crates/aios-protocol/src/mode.rs:15-29` | Defined and used |
+| `AgentStateVector` + `BudgetState` | `aiOS/crates/aios-protocol/src/state.rs:398-445` | Defined, budget not actively decremented |
+| Homeostasis events (Heartbeat, StateEstimated, BudgetUpdated, ModeChanged, GatesUpdated, CircuitBreakerTripped) | `aiOS/crates/aios-protocol/src/event.rs` | In EventKind taxonomy |
+| `EventKind::Custom { event_type, data }` | `aiOS/crates/aios-protocol/src/event.rs` | Forward-compatible, round-trips through Lago |
+| `EventStorePort` trait | `aiOS/crates/aios-protocol/src/ports.rs:136-153` | Canonical, implemented by Lago adapter |
+| Lago `Journal.stream()` → `EventTailStream` | `lago/crates/lago-journal/src/stream.rs` | Tailing subscription via broadcast channel |
+| `lago-aios-eventstore-adapter` | `lago/crates/lago-aios-eventstore-adapter/src/lib.rs` | Bridges Lago → canonical EventStorePort |
+| Arcan middleware hooks (4 points) | `arcan/crates/arcan-core/src/runtime.rs` lines 304, 331, 391, 458 | `before_model`, `after_model`, `pre_tool`, `post_tool` |
+| `TokenUsage` tracking | `arcan-core` `ModelTurn.usage` → `RunOutput.total_usage` | Tokens tracked, cost NOT computed |
+| Hardcoded homeostasis | `aiOS/crates/aios-runtime/src/lib.rs:891-923` | Magic numbers, no hysteresis, no economics |
+
+### Key Gap: GatingProfile Divergence
+
+The existing `GatingProfile` (aios-protocol) has 6 **operational** fields. Autonomic needs **economic** fields: `economic_mode`, `max_tokens_next_turn`, `preferred_model`, `allow_expensive_tools`, `allow_replication`.
+
+**Decision**: Autonomic defines `AutonomicGatingProfile` which embeds the canonical `GatingProfile` and adds economic extensions. This respects the kernel contract boundary. Arcan can consume the canonical portion immediately and adopt economic fields incrementally.
+
+### Key Gap: Economic Events
+
+No economic event types exist in `EventKind`.
+
+**Decision**: Use `EventKind::Custom` with `event_type` prefixed `"autonomic."` (e.g., `"autonomic.CostCharged"`, `"autonomic.EconomicModeChanged"`). This is forward-compatible — the `custom_event_survives_round_trip` test in lago-aios-eventstore-adapter confirms Custom events round-trip through Lago. Promote to canonical EventKind variants once stabilized.
+
+---
+
+## Workspace Layout
+
+Location: `/Users/broomva/broomva.tech/live/autonomic/` — git submodule with its own GitHub repo (same pattern as arcan/lago/aiOS). Will init as a local git repo first, then push to GitHub and add as submodule to live.
+
+```
+autonomic/
+  Cargo.toml                        # workspace root
+  CLAUDE.md                         # project conventions
+  crates/
+    autonomic-core/                 # Types, traits, errors
+      Cargo.toml                    # deps: aios-protocol, thiserror, serde, chrono, k256, sha2
+      src/
+        lib.rs                      # module declarations + re-exports
+        error.rs                    # AutonomicError (thiserror)
+        economic.rs                 # EconomicMode, EconomicState, CostEstimator, SurvivalRule
+        identity.rs                 # EconomicIdentity (secp256k1 keypair, address)
+        gating.rs                   # AutonomicGatingProfile, EconomicGates, HomeostaticState
+        events.rs                   # AutonomicEvent constructors (build Custom EventKind)
+        rules.rs                    # HomeostaticRule trait, RuleSet
+        hysteresis.rs               # HysteresisGate primitive
+
+    autonomic-controller/           # Pure rule engine — no I/O
+      Cargo.toml                    # deps: autonomic-core
+      src/
+        lib.rs
+        engine.rs                   # ControllerEngine: rules × state → GatingProfile
+        projection.rs               # Apply events → HomeostaticState (pure fold)
+        economic_rules.rs           # SurvivalRule: balance × burn_rate → EconomicMode
+        cognitive_rules.rs          # ContextPressureRule: token usage → model downgrade
+        operational_rules.rs        # ModeRule: state_vector → OperatingMode override
+
+    autonomic-lago/                 # Lago bridge — event subscription + publishing
+      Cargo.toml                    # deps: autonomic-core, autonomic-controller, lago-core, lago-journal, tokio
+      src/
+        lib.rs
+        subscriber.rs               # Lago Journal.stream() → feed events to controller
+        publisher.rs                # Write AutonomicDecision events back to Lago
+
+    autonomic-api/                  # axum HTTP server
+      Cargo.toml                    # deps: autonomic-core, autonomic-controller, axum, tokio, serde_json
+      src/
+        lib.rs
+        router.rs                   # GET /gating/{session_id}, GET /health, GET /projection/{session_id}
+        state.rs                    # Shared AppState: Arc<RwLock<ProjectionMap>>
+
+    autonomicd/                     # Binary daemon
+      Cargo.toml                    # deps: all four crates + anyhow, tracing, clap
+      src/
+        main.rs                     # tokio::main, config, signal handling
+        config.rs                   # AutonomicConfig (Lago URL, bind addr, setpoints)
+```
+
+**Crate dependency order:**
+```
+aios-protocol (from ../aiOS/)
+    │
+    v
+autonomic-core (types + traits, zero Arcan/Lago deps)
+    │          \
+    v           v
+autonomic-controller    autonomic-lago (+ lago-core, lago-journal)
+    │          /
+    v         v
+autonomic-api (axum)
+    │
+    v
+autonomicd (binary)
+```
+
+---
+
+## Phased Build Plan
+
+### Phase 0+1 — Scaffold + Cost Accounting + GatingProfile (this session)
+
+**Goal**: Full 5-crate workspace with types, projection engine, rule evaluation, Lago subscriber, HTTP API, and stub daemon. `cargo check --workspace && cargo test --workspace` green with meaningful tests.
+
+**Files to create:**
+
+1. `autonomic/Cargo.toml` — workspace root with `[workspace.dependencies]` for shared deps
+2. `autonomic/CLAUDE.md` — project conventions (follow arcan/lago pattern)
+3. **autonomic-core** (7 source files):
+   - `lib.rs` — module tree + re-exports
+   - `error.rs` — `AutonomicError` enum with `thiserror`
+   - `economic.rs` — `EconomicMode` (4 variants: Sovereign/Conserving/Hustle/Hibernate), `EconomicState`, `CostEstimator` trait
+   - `identity.rs` — `EconomicIdentity` struct (address, key_blob_id, created_at)
+   - `gating.rs` — `AutonomicGatingProfile` (embeds canonical `GatingProfile` + `EconomicGates`), `HomeostaticState` (three-pillar: operational/cognitive/economic)
+   - `events.rs` — `EconomicEvent` enum, `CostReason` enum, helper constructors that produce `EventKind::Custom`
+   - `rules.rs` — `HomeostaticRule` trait, `RuleSet`, `RuleOutcome`
+   - `hysteresis.rs` — `HysteresisGate` struct with enter/exit thresholds and min-hold duration
+4. **autonomic-controller** (4 source files):
+   - `lib.rs`, `engine.rs` (stub), `projection.rs` (stub), `economic_rules.rs` (stub), `cognitive_rules.rs` (stub), `operational_rules.rs` (stub)
+5. **autonomic-lago** (3 source files):
+   - `lib.rs`, `subscriber.rs` (stub), `publisher.rs` (stub)
+6. **autonomic-api** (3 source files):
+   - `lib.rs`, `router.rs` (stub), `state.rs` (stub)
+7. **autonomicd** (2 source files):
+   - `main.rs`, `config.rs`
+
+**Key type definitions for Phase 0:**
+
+```rust
+// autonomic-core/src/gating.rs
+pub struct AutonomicGatingProfile {
+    pub operational: aios_protocol::GatingProfile,  // canonical gates
+    pub economic: EconomicGates,                    // new: economic regulation
+    pub rationale: Vec<String>,                     // why this profile was chosen
+}
+
+pub struct EconomicGates {
+    pub economic_mode: EconomicMode,
+    pub max_tokens_next_turn: Option<u32>,
+    pub preferred_model: Option<ModelTier>,
+    pub allow_expensive_tools: bool,
+    pub allow_replication: bool,
+}
+
+pub struct HomeostaticState {
+    pub agent_id: String,
+    pub operational: OperationalState,   // OperatingMode, last tick, error streak
+    pub cognitive: CognitiveState,       // token_usage, context_pressure
+    pub economic: EconomicState,         // balance, burn_rate, mode
+}
+```
+
+```rust
+// autonomic-core/src/economic.rs
+pub enum EconomicMode {
+    Sovereign,    // balance > 2× monthly_burn
+    Conserving,   // 1–2× monthly_burn
+    Hustle,       // 0–1× monthly_burn
+    Hibernate,    // balance ≤ 0
+}
+
+pub struct EconomicState {
+    pub identity: Option<EconomicIdentity>,
+    pub balance_micro_credits: i64,
+    pub lifetime_revenue: i64,
+    pub lifetime_costs: i64,
+    pub monthly_burn_estimate: i64,
+    pub mode: EconomicMode,
+}
+```
+
+```rust
+// autonomic-core/src/hysteresis.rs
+pub struct HysteresisGate {
+    pub threshold_enter: f64,
+    pub threshold_exit: f64,
+    pub min_hold_ms: u64,
+    pub active: bool,
+    pub last_transition_ms: u64,
+}
+
+impl HysteresisGate {
+    pub fn evaluate(&mut self, metric: f64, now_ms: u64) -> bool { ... }
+}
+```
+
+```rust
+// autonomic-core/src/rules.rs
+pub trait HomeostaticRule: Send + Sync {
+    fn evaluate(&self, state: &HomeostaticState) -> Option<GatingDecision>;
+}
+```
+
+**Implementation order within this session:**
+
+1. **Workspace scaffold** — Cargo.toml, CLAUDE.md, all crate Cargo.tomls
+2. **autonomic-core types** — all 8 source files with full type definitions + unit tests
+3. **autonomic-controller** — projection reducer, rule engine, 6 rules + tests
+4. **autonomic-lago** — Lago journal subscriber + event publisher
+5. **autonomic-api** — axum router with /gating, /projection, /health endpoints
+6. **autonomicd** — daemon binary with config, signal handling
+
+**Detailed steps:**
+
+**Step 1: Projection event reducer** (`autonomic-controller/src/projection.rs`)
+- Pure function: `fold(HomeostaticState, EventKind) → HomeostaticState`
+- Handle: `RunFinished` (token cost), `ToolCallCompleted` (tool cost), `ToolCallFailed`/`RunErrored` (error tracking), `BudgetUpdated`, `StateEstimated`, `ModeChanged`, `Custom("autonomic.*")`
+- Cost estimation: configurable per-model rates
+
+**Step 2: Economic rules** (`autonomic-controller/src/economic_rules.rs`)
+- `SurvivalRule`: balance / burn_rate → EconomicMode transitions with hysteresis
+- `SpendVelocityRule`: cost_last_5_min > threshold → tighten gates
+- `BudgetExhaustionRule`: cost_remaining < 20% → Conservative mode
+
+**Step 3: Operational + cognitive rules**
+- `ErrorStreakRule`: error_count/total > 30% → override to Verify mode
+- `TokenExhaustionRule`: tokens_remaining < 10% → reduce max_tool_calls to 2
+- `ContextPressureRule`: context_pressure > 0.8 → suggest model downgrade
+
+**Step 4: Lago subscriber** (`autonomic-lago/src/subscriber.rs`)
+- Subscribe to Lago journal via `Journal.stream(session_id, branch_id, 0)`
+- Spawn per-session tailing tasks
+- Feed events to controller engine, update shared projection state
+
+**Step 5: HTTP API** (`autonomic-api/src/router.rs`)
+- `GET /gating/{session_id}` → evaluate rules against projection → return `AutonomicGatingProfile`
+- `GET /projection/{session_id}` → return raw `HomeostaticState` for debugging
+- `GET /health` → daemon health check
+
+**Step 6: Daemon** (`autonomicd/src/main.rs`)
+- Config parsing (Lago URL, bind address, setpoints)
+- tokio::main, graceful shutdown, tracing
+
+**Tests (target: 30+ tests):**
+- `EconomicMode` serde roundtrip
+- `HysteresisGate` enter/exit/hold logic (3 tests)
+- `AutonomicGatingProfile` default + serde roundtrip
+- `EconomicEvent` → `EventKind::Custom` construction + roundtrip
+- Projection: apply sequence of events, verify accumulated state
+- Rules: each of 6 rules fires at correct thresholds with hysteresis
+- Integration: axum router returns correct responses
+- Determinism: same event sequence → identical GatingProfile
+
+**NOTE: Arcan integration deferred** — no changes to aiOS/Arcan in this session. Autonomic stands alone as an independent service. Arcan integration (calling GET /gating) will be a follow-up task.
+
+**Verification:**
+```bash
+cd autonomic && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace
+```
+
+---
+
+### Phase 2 — Economic Identity + Ledger (weeks 3–4)
+
+**Goal**: Agents have secp256k1 addresses; balance is replayable from event stream.
+
+- `identity.rs`: keypair generation via `k256`, address derivation via SHA-256, encrypted key storage as Lago blob
+- Auto-create identity on first CostCharged event for a new agent
+- `IdentityCreated` event → Lago journal via `autonomic-lago/publisher.rs`
+- Replay test: destroy + restart autonomicd, verify ProjectionMap matches pre-restart state
+
+---
+
+### Phase 3 — x402 Payments (weeks 5–6)
+
+**Goal**: Inter-agent micro-credit transfers via HTTP 402 protocol.
+
+- `payment.rs`: `PaymentRequired` / `PaymentToken` types, secp256k1 signature
+- `POST /payment/sign` — Autonomic signs payment requests
+- Arcan `x402_request` tool: intercepts 402, calls Autonomic, retries
+- `CreditTransfer` events written to Lago
+
+---
+
+### Phase 4 — Operational + Cognitive Homeostasis Maturity (weeks 7–8)
+
+**Goal**: Full three-pillar regulation replaces hardcoded aios-runtime heuristics.
+
+- Complete operational_rules (AgentStateVector → OperatingMode override)
+- Complete cognitive_rules (token_usage + context_pressure → model tier + max_tokens)
+- Arcan fully consults AutonomicGatingProfile for model selection + tool gating
+- Optional: promote stable economic events from Custom to canonical EventKind
+
+---
+
+### Phase 5 — Survival Pressure + Replication (weeks 9–10)
+
+**Goal**: Agents respond to economic pressure; viable agents can fork.
+
+- `Hibernate` → Arcan skips LLM calls, heartbeats only
+- `Hustle` → cheapest model, no expensive tools
+- Lago branching exposed via arcan-lago bridge
+- `POST /replicate/{session_id}` → child branch, seed credits, `AgentSpawned` event
+
+---
+
+## Communication Pattern
+
+```
+Arcan (tick_on_branch)
+  │
+  ├─ 1. Appends events to Lago journal (existing behavior, unchanged)
+  │
+  ├─ 2. GET /gating/{session_id} ──→ autonomicd (500ms timeout)
+  │        AutonomicGatingProfile ←──────────────┘
+  │
+  └─ 3. Gates next action on profile (mode, model, tool permissions)
+
+autonomicd
+  │
+  ├─ Subscribes to Lago SSE/journal stream (via autonomic-lago)
+  ├─ Maintains per-session HomeostaticState projections
+  ├─ Evaluates rule engine with hysteresis
+  └─ Writes AutonomicDecision events back to Lago
+```
+
+**Pull model**: Arcan consults Autonomic before each tick. No Arcan architectural change. Failures are non-fatal (advisory).
+
+---
+
+## Reusable Existing Code
+
+| What | Where | How Autonomic Uses It |
+|------|-------|----------------------|
+| `GatingProfile` struct | `aiOS/crates/aios-protocol/src/mode.rs:37-63` | Embedded in `AutonomicGatingProfile.operational` |
+| `OperatingMode` enum | `aiOS/crates/aios-protocol/src/mode.rs:15-29` | Used in `HomeostaticState.operational` |
+| `AgentStateVector` + `BudgetState` | `aiOS/crates/aios-protocol/src/state.rs:398-445` | Consumed from `StateEstimated` events |
+| `EventKind` (all 55+ variants) | `aiOS/crates/aios-protocol/src/event.rs:206+` | Projection reducer pattern-matches on these |
+| `EventKind::Custom` | `aiOS/crates/aios-protocol/src/event.rs` | Economic events wrapped as Custom |
+| `EventStorePort` trait | `aiOS/crates/aios-protocol/src/ports.rs:136-153` | Autonomic reads/writes events via this |
+| `Journal.stream()` → `EventTailStream` | `lago/crates/lago-journal/src/stream.rs` | Autonomic subscribes for real-time events |
+| `lago-aios-eventstore-adapter` | `lago/crates/lago-aios-eventstore-adapter/src/lib.rs` | Bridges Lago storage to canonical EventStorePort |
+| Arcan workspace Cargo.toml pattern | `arcan/Cargo.toml` (path deps, workspace config) | Template for autonomic/Cargo.toml |
+
+---
+
+## Verification
+
+```bash
+# Phase 0: workspace compiles
+cd autonomic && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace
+
+# Phase 1: cost accounting + gating
+cargo test -p autonomic-controller -- economic_rules
+cargo test -p autonomic-controller -- projection
+cargo test -p autonomic-api -- routes
+
+# End-to-end (Phase 1):
+# 1. Start lago (tempdir journal)
+# 2. Start autonomicd --lago-url http://localhost:3001
+# 3. Inject CostCharged events via lago-cli or gRPC
+# 4. GET /gating/{session_id} → assert correct EconomicMode
+
+# Cross-project validation after each phase:
+(cd autonomic && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+(cd aiOS && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+(cd arcan && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+(cd lago && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace)
+```
+
+---
+
+## Risks & Mitigations
+
+| Risk | Mitigation |
+|------|-----------|
+| Path dep resolution across 4 sibling repos | Follow exact Arcan Cargo.toml pattern: `path = "../aiOS/crates/..."` |
+| Rust 2024 edition gotchas (gen keyword, unsafe set_var) | Same MSRV 1.85 / edition 2024 as all other projects |
+| Autonomic latency blocking Arcan loop | 500ms HTTP timeout; fallback to default GatingProfile on failure |
+| Projection staleness | Track `last_event_seq` in projection; return staleness indicator in API |
+| Economic mode flapping | HysteresisGate with enter/exit thresholds + min-hold duration |
+| Large session scope (Phase 0+1) | Clear implementation order; validate with cargo check/test after each crate |
+
+---
+
+## Immediate Next Step
+
+Implement the full Phase 0+1 scope in this session:
+1. Create `live/autonomic/` directory with 5-crate workspace
+2. Implement all types, projection engine, rules, API, subscriber, daemon
+3. Target: `cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace` green with 30+ tests
+4. Init git repo, ready for GitHub push + submodule addition
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-live/5bcdd9d0-629c-40a6-9eda-e5a8ed1e58de.jsonl
