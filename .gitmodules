@@ -10,3 +10,6 @@
 	path = aiOS
 	url = https://github.com/broomva/aiOS.git
 	branch = main
+[submodule "spaces"]
+	path = spaces
+	url = https://github.com/broomva/spaces.git
