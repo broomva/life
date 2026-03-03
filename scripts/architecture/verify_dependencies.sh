@@ -14,8 +14,10 @@ collect_metadata() {
 collect_metadata "$ROOT_DIR/aiOS" "$TMP_DIR/aios.json"
 collect_metadata "$ROOT_DIR/arcan" "$TMP_DIR/arcan.json"
 collect_metadata "$ROOT_DIR/lago" "$TMP_DIR/lago.json"
+collect_metadata "$ROOT_DIR/autonomic" "$TMP_DIR/autonomic.json"
+collect_metadata "$ROOT_DIR/praxis" "$TMP_DIR/praxis.json"
 
-python3 - "$TMP_DIR/aios.json" "$TMP_DIR/arcan.json" "$TMP_DIR/lago.json" <<'PY'
+python3 - "$TMP_DIR/aios.json" "$TMP_DIR/arcan.json" "$TMP_DIR/lago.json" "$TMP_DIR/autonomic.json" "$TMP_DIR/praxis.json" <<'PY'
 import json
 import sys
 
@@ -47,6 +49,12 @@ def is_arcan(name):
 def is_lago(name):
     return starts(name, "lago-") or name == "lagod"
 
+def is_autonomic(name):
+    return starts(name, "autonomic-") or name == "autonomicd"
+
+def is_praxis(name):
+    return starts(name, "praxis-")
+
 failures = []
 
 for src, dst in edges:
@@ -74,6 +82,28 @@ for src, dst in edges:
             failures.append(
                 f"{src} -> {dst} is forbidden (outside allowed aiOS boundary for {src})"
             )
+
+    # Autonomic crates may use aios-protocol and lago-core/lago-journal, but not Arcan.
+    if is_autonomic(src):
+        if is_aios(dst) and dst != "aios-protocol":
+            failures.append(
+                f"{src} -> {dst} is forbidden (Autonomic may only use aios-protocol)"
+            )
+        if is_arcan(dst):
+            failures.append(f"{src} -> {dst} is forbidden (Autonomic must not depend on Arcan)")
+
+    # Praxis crates may use aios-protocol only. Must not depend on Arcan/Lago/Autonomic.
+    if is_praxis(src):
+        if is_aios(dst) and dst != "aios-protocol":
+            failures.append(
+                f"{src} -> {dst} is forbidden (Praxis may only use aios-protocol)"
+            )
+        if is_arcan(dst):
+            failures.append(f"{src} -> {dst} is forbidden (Praxis must not depend on Arcan)")
+        if is_lago(dst):
+            failures.append(f"{src} -> {dst} is forbidden (Praxis must not depend on Lago)")
+        if is_autonomic(dst):
+            failures.append(f"{src} -> {dst} is forbidden (Praxis must not depend on Autonomic)")
 
 if failures:
     print("architecture dependency audit failed:")

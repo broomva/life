@@ -99,16 +99,29 @@ Baseline is now the required foundation for all new work.
 
 **Goal**: Introduce controller-driven stability behaviors without creating a second runtime model.
 
-### Scope
+### Phase 0 — COMPLETE (2026-03-03)
 
-1. Define minimal controller integration contract using canonical protocol boundaries.
-2. Implement controller outputs as policy/gating inputs into canonical runtime path.
-3. Ensure controller actions are event-auditable and replay-safe.
+- [x] Core types, traits, errors (economic modes, gating profiles, hysteresis gates, rules)
+- [x] Pure rule engine with 6 rules + deterministic projection fold
+- [x] Lago bridge (publisher/subscriber) with 8 tests
+- [x] HTTP API (/gating, /projection, /health)
+- [x] Daemon binary with CLI args, TOML config, optional Lago journal
+- [x] On-demand session bootstrapping from Lago journal
+- [x] Hysteresis gates wired into fold (time-based cooldown)
+- [x] Registered as git submodule, architecture dependency audit passing
+
+### Remaining Scope
+
+1. Wire Arcan agent loop to query Autonomic `/gating/{session_id}` before runs.
+2. Ensure controller actions are event-auditable and replay-safe.
+3. Add observability (metrics/traces) to Autonomic API.
+4. E2E integration test across Lago + Autonomic.
 
 ### Acceptance
 
 - Controller integration does not bypass canonical runtime/event paths.
 - Controller-induced decisions are visible and deterministic in replay.
+- Arcan continues normally if Autonomic is unavailable (advisory architecture).
 
 ---
 
@@ -140,11 +153,15 @@ A milestone is complete only when all pass:
    - `cargo fmt`
    - `cargo clippy --workspace -- -D warnings`
    - `cargo test --workspace`
-4. `/Users/broomva/broomva.tech/life/spaces`
+4. `/Users/broomva/broomva.tech/life/autonomic`
+   - `cargo fmt`
+   - `cargo clippy --workspace -- -D warnings`
+   - `cargo test --workspace`
+5. `/Users/broomva/broomva.tech/life/spaces`
    - `cargo fmt`
    - `cargo clippy --workspace -- -D warnings`
    - `cargo check`
-5. `/Users/broomva/broomva.tech/life`
+6. `/Users/broomva/broomva.tech/life`
    - `make audit`
    - `./conformance/run.sh`
 
@@ -166,7 +183,7 @@ Current labels:
 - R2 Observability maturity: `PLANNED`
 - R3 Security hardening: `PLANNED`
 - R4 Memory/learning depth: `PLANNED`
-- R5 Controller plane: `PLANNED`
+- R5 Controller plane: `ACTIVE` (Phase 0 complete — 5 crates, 69 tests, Lago wired, hysteresis active; Arcan integration pending)
 - Spaces networking: `ACTIVE` (v0.1.0 — integration with Arcan pending)
 - R6 Temporality (Chronos): `PLANNED`
 - R7 Security enforcement (Aegis): `PLANNED`
