@@ -1,9 +1,9 @@
-# Shared cargo configuration for the live monorepo
+# Shared cargo configuration for the life monorepo
 # All subprojects (arcan, lago, aiOS) share a single target directory
 # to avoid compiling shared dependencies 3x.
 
 [build]
-target-dir = "/Users/broomva/broomva.tech/live/.target"
+target-dir = "/Users/broomva/broomva.tech/life/.target"
 
 [profile.dev]
 # Keep debug symbols in separate files — significantly reduces binary sizes

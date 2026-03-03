@@ -10,10 +10,10 @@
 
 ## Workspace Layout
 
-- `/Users/broomva/broomva.tech/live/arcan` - Runtime daemon and agent loop implementation.
-- `/Users/broomva/broomva.tech/live/lago` - Event-sourced persistence substrate.
-- `/Users/broomva/broomva.tech/live/aiOS` - Kernel contract reference (separate but present in workspace tree).
-- `/Users/broomva/broomva.tech/live/docs` - Central architecture/status/roadmap documentation.
+- `/Users/broomva/broomva.tech/life/arcan` - Runtime daemon and agent loop implementation.
+- `/Users/broomva/broomva.tech/life/lago` - Event-sourced persistence substrate.
+- `/Users/broomva/broomva.tech/life/aiOS` - Kernel contract reference (separate but present in workspace tree).
+- `/Users/broomva/broomva.tech/life/docs` - Central architecture/status/roadmap documentation.
 
 ## System Relationship
 

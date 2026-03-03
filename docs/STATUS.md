@@ -1,11 +1,11 @@
-# Agent OS: Implementation Status
+# Broomva Life: Implementation Status
 
 **Date**: 2026-03-03
 **Version**: 0.2.0 (canonical baseline)
 **Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)
 **Tests**: 657 passing (+1 ignored) across 19 crates + Spaces (21 crates total)
 
-This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/live`.
+This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/life`.
 If another status document conflicts with this one, treat this file as source of truth.
 
 ---
@@ -32,11 +32,11 @@ The baseline unification is active and enforced in production paths:
 
 Validation gates currently pass:
 
-- `/Users/broomva/broomva.tech/live/aiOS`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
-- `/Users/broomva/broomva.tech/live/arcan`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
-- `/Users/broomva/broomva.tech/live/lago`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
-- `/Users/broomva/broomva.tech/live/spaces`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo check` (WASM module: `cargo check --target wasm32-unknown-unknown --manifest-path spacetimedb/Cargo.toml`)
-- `/Users/broomva/broomva.tech/live`: `make audit`, `./scripts/architecture/verify_dependencies.sh`, `./conformance/run.sh`
+- `/Users/broomva/broomva.tech/life/aiOS`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
+- `/Users/broomva/broomva.tech/life/arcan`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
+- `/Users/broomva/broomva.tech/life/lago`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
+- `/Users/broomva/broomva.tech/life/spaces`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo check` (WASM module: `cargo check --target wasm32-unknown-unknown --manifest-path spacetimedb/Cargo.toml`)
+- `/Users/broomva/broomva.tech/life`: `make audit`, `./scripts/architecture/verify_dependencies.sh`, `./conformance/run.sh`
 
 ---
 
@@ -127,11 +127,11 @@ Validation gates currently pass:
 
 Architecture dependency gate is active:
 
-- Script: `/Users/broomva/broomva.tech/live/scripts/architecture/verify_dependencies.sh`
+- Script: `/Users/broomva/broomva.tech/life/scripts/architecture/verify_dependencies.sh`
 - Integrated in: `make audit`
 - Audit enforcement path:
-  - `/Users/broomva/broomva.tech/live/Makefile.control`
-  - `/Users/broomva/broomva.tech/live/scripts/audit_control.sh`
+  - `/Users/broomva/broomva.tech/life/Makefile.control`
+  - `/Users/broomva/broomva.tech/life/scripts/audit_control.sh`
 
 ---
 
@@ -139,7 +139,7 @@ Architecture dependency gate is active:
 
 Conformance harness entrypoint:
 
-- `/Users/broomva/broomva.tech/live/conformance/run.sh`
+- `/Users/broomva/broomva.tech/life/conformance/run.sh`
 
 Current suite validates:
 

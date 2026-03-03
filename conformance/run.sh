@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/Users/broomva/broomva.tech/live"
+ROOT="/Users/broomva/broomva.tech/life"
 
 echo "[conformance] protocol checks"
 (cd "$ROOT/aiOS/crates/aios-protocol" && cargo test)
