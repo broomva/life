@@ -1,0 +1,43 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "388a9e0b920a",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".control/topology.yaml",
+    ".gitmodules",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "PLANS.md",
+    "docs/ARCHITECTURE.md",
+    "docs/NAVIGATION.md",
+    "docs/ROADMAP.md",
+    "docs/STATUS.md",
+    "docs/control/ARCHITECTURE.md",
+    "scripts/control/check.sh",
+    "scripts/control/smoke.sh",
+    "scripts/control/test.sh",
+    "scripts/harness/lint.sh",
+    "scripts/harness/smoke.sh",
+    "scripts/harness/test.sh",
+    "scripts/harness/typecheck.sh",
+    "spaces"
+  ],
+  "sessions": [
+    {
+      "metadata": "/38/8a9e0b920a/0/metadata.json",
+      "transcript": "/38/8a9e0b920a/0/full.jsonl",
+      "context": "/38/8a9e0b920a/0/context.md",
+      "content_hash": "/38/8a9e0b920a/0/content_hash.txt",
+      "prompt": "/38/8a9e0b920a/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 10,
+    "cache_creation_tokens": 21479,
+    "cache_read_tokens": 168982,
+    "output_tokens": 857,
+    "api_call_count": 5
+  }
+}
