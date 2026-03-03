@@ -52,12 +52,7 @@ async fn get_gating(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
 ) -> Result<Json<GatingResponse>, StatusCode> {
-    let projections = state.projections.read().await;
-
-    let homeostatic_state = projections
-        .get(&session_id)
-        .cloned()
-        .unwrap_or_else(|| HomeostaticState::for_agent(&session_id));
+    let homeostatic_state = get_or_bootstrap(&state, &session_id).await;
 
     let profile = evaluate(&homeostatic_state, &state.rules);
 
@@ -93,6 +88,46 @@ async fn get_projection(
         state: homeostatic_state,
         found,
     })
+}
+
+/// Get projection from cache, or bootstrap from Lago journal if available.
+async fn get_or_bootstrap(state: &AppState, session_id: &str) -> HomeostaticState {
+    // Fast path: already in projection map
+    {
+        let projections = state.projections.read().await;
+        if let Some(s) = projections.get(session_id) {
+            return s.clone();
+        }
+    }
+
+    // Slow path: bootstrap from Lago journal if available
+    if let Some(journal) = &state.journal {
+        match autonomic_lago::load_projection(journal.clone(), session_id, "main").await {
+            Ok(loaded) => {
+                let mut projections = state.projections.write().await;
+                projections.insert(session_id.to_owned(), loaded.clone());
+
+                // Spawn live subscriber for ongoing updates
+                let j = journal.clone();
+                let sid = session_id.to_owned();
+                let p = state.projections.clone();
+                tokio::spawn(async move {
+                    autonomic_lago::subscribe_session(j, sid, "main".into(), p).await;
+                });
+
+                return loaded;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    error = %e,
+                    "failed to bootstrap projection from Lago"
+                );
+            }
+        }
+    }
+
+    HomeostaticState::for_agent(session_id)
 }
 
 #[cfg(test)]

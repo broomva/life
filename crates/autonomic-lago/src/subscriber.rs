@@ -89,7 +89,7 @@ pub async fn subscribe_session(
     info!(session_id = %session_id, "Lago journal stream ended");
 }
 
-/// Load initial projection state by reading all existing events for a session.
+/// Load the initial projection state by reading all existing events for a session.
 pub async fn load_projection(
     journal: Arc<dyn Journal>,
     session_id: &str,
@@ -108,4 +108,136 @@ pub async fn load_projection(
     }
 
     Ok(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use autonomic_core::economic::{CostReason, EconomicMode};
+    use autonomic_core::events::AutonomicEvent;
+    use lago_core::event::EventEnvelope;
+    use lago_core::id::{BranchId, EventId, SessionId};
+    use lago_journal::RedbJournal;
+
+    fn open_journal(dir: &std::path::Path) -> Arc<dyn Journal> {
+        let db_path = dir.join("test.redb");
+        Arc::new(RedbJournal::open(db_path).unwrap()) as Arc<dyn Journal>
+    }
+
+    /// Write autonomic events directly to the journal as EventEnvelopes.
+    async fn write_events(
+        journal: &Arc<dyn Journal>,
+        session_id: &str,
+        events: Vec<AutonomicEvent>,
+    ) {
+        let envelopes: Vec<EventEnvelope> = events
+            .into_iter()
+            .map(|event| EventEnvelope {
+                event_id: EventId::new(),
+                session_id: SessionId::from_string(session_id),
+                branch_id: BranchId::from_string("main"),
+                run_id: None,
+                seq: 0,
+                timestamp: EventEnvelope::now_micros(),
+                parent_id: None,
+                payload: event.into_event_kind(),
+                metadata: std::collections::HashMap::new(),
+                schema_version: 1,
+            })
+            .collect();
+        journal.append_batch(envelopes).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn load_projection_empty_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = open_journal(dir.path());
+
+        let state = load_projection(journal, "empty-session", "main")
+            .await
+            .unwrap();
+
+        assert_eq!(state.agent_id, "empty-session");
+        assert_eq!(state.last_event_seq, 0);
+        assert_eq!(state.economic.balance_micro_credits, 10_000_000); // default
+    }
+
+    #[tokio::test]
+    async fn load_projection_replays_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = open_journal(dir.path());
+
+        // Write a CostCharged event
+        write_events(
+            &journal,
+            "replay-sess",
+            vec![AutonomicEvent::CostCharged {
+                amount_micro_credits: 500,
+                reason: CostReason::ModelInference {
+                    model: "sonnet".into(),
+                    prompt_tokens: 100,
+                    completion_tokens: 50,
+                },
+                balance_after: 9_999_500,
+            }],
+        )
+        .await;
+
+        let state = load_projection(journal, "replay-sess", "main")
+            .await
+            .unwrap();
+
+        assert_eq!(state.economic.balance_micro_credits, 9_999_500);
+        assert_eq!(state.economic.lifetime_costs, 500);
+        assert!(state.last_event_seq > 0);
+    }
+
+    #[tokio::test]
+    async fn load_projection_preserves_economic_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = open_journal(dir.path());
+
+        // Write multiple autonomic events in sequence
+        write_events(
+            &journal,
+            "econ-sess",
+            vec![
+                AutonomicEvent::CostCharged {
+                    amount_micro_credits: 1000,
+                    reason: CostReason::ToolExecution {
+                        tool_name: "search".into(),
+                    },
+                    balance_after: 9_999_000,
+                },
+                AutonomicEvent::EconomicModeChanged {
+                    from: EconomicMode::Sovereign,
+                    to: EconomicMode::Conserving,
+                    reason: "balance declining".into(),
+                },
+                AutonomicEvent::CreditDeposited {
+                    amount_micro_credits: 5_000_000,
+                    source: "grant".into(),
+                    balance_after: 14_999_000,
+                },
+            ],
+        )
+        .await;
+
+        let state = load_projection(journal, "econ-sess", "main").await.unwrap();
+
+        // After CostCharged: balance=9_999_000, costs=1000
+        // After EconomicModeChanged: mode=Conserving
+        // After CreditDeposited: balance=14_999_000, revenue=5_000_000
+        assert_eq!(state.economic.balance_micro_credits, 14_999_000);
+        assert_eq!(state.economic.mode, EconomicMode::Conserving);
+        assert_eq!(state.economic.lifetime_costs, 1000);
+        assert_eq!(state.economic.lifetime_revenue, 5_000_000);
+    }
+
+    #[tokio::test]
+    async fn new_projection_map_is_empty() {
+        let map = new_projection_map();
+        let inner = map.read().await;
+        assert!(inner.is_empty());
+    }
 }

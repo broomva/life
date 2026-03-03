@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::hysteresis::HysteresisGate;
+
 /// The agent's economic operating mode, determined by balance-to-burn ratio.
 ///
 /// Transitions use hysteresis to prevent flapping.
@@ -54,6 +56,8 @@ pub struct EconomicState {
     pub cost_last_5min: i64,
     /// Timestamp of the last cost event (ms since epoch).
     pub last_cost_event_ms: u64,
+    /// Hysteresis gate for economic mode transitions — prevents flapping.
+    pub mode_gate: HysteresisGate,
 }
 
 impl Default for EconomicState {
@@ -67,6 +71,9 @@ impl Default for EconomicState {
             mode: EconomicMode::Sovereign,
             cost_last_5min: 0,
             last_cost_event_ms: 0,
+            // Mode gate: activates (escalates) when severity metric ≥ 0.7,
+            // deactivates (relaxes) when ≤ 0.3, with 30s min-hold.
+            mode_gate: HysteresisGate::new(0.7, 0.3, 30_000),
         }
     }
 }

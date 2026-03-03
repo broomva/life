@@ -139,7 +139,19 @@ fn apply_autonomic_event(state: &mut HomeostaticState, event: &AutonomicEvent) {
             state.economic.last_cost_event_ms = state.last_event_ms;
         }
         AutonomicEvent::EconomicModeChanged { to, .. } => {
-            state.economic.mode = *to;
+            let ts_ms = state.last_event_ms;
+
+            // Route through hysteresis gate to prevent mode flapping.
+            // The gate enforces a minimum hold duration between transitions.
+            // We use the gate's timing mechanism: if the last transition was
+            // too recent, the gate blocks the change.
+            let elapsed = ts_ms.saturating_sub(state.economic.mode_gate.last_transition_ms);
+            let allow = elapsed >= state.economic.mode_gate.min_hold_ms;
+
+            if allow && *to != state.economic.mode {
+                state.economic.mode = *to;
+                state.economic.mode_gate.last_transition_ms = ts_ms;
+            }
         }
         AutonomicEvent::CreditDeposited {
             amount_micro_credits,
@@ -332,5 +344,63 @@ mod tests {
             state2.operational.total_errors
         );
         assert_eq!(state1.last_event_seq, state2.last_event_seq);
+    }
+
+    #[test]
+    fn fold_economic_mode_change_hysteresis_prevents_flapping() {
+        let mut state = default_state();
+        // Use 5s min_hold; timestamps offset well past the initial settle period
+        state.economic.mode_gate = autonomic_core::hysteresis::HysteresisGate::new(0.7, 0.3, 5_000);
+
+        // Escalate Sovereign → Hustle at t=100_000 (severity 0.8 > enter 0.7)
+        let event = AutonomicEvent::EconomicModeChanged {
+            from: autonomic_core::EconomicMode::Sovereign,
+            to: autonomic_core::EconomicMode::Hustle,
+            reason: "balance low".into(),
+        };
+        let state = fold(state, &event.into_event_kind(), 1, 100_000);
+        assert_eq!(state.economic.mode, autonomic_core::EconomicMode::Hustle);
+
+        // Try to relax Hustle → Sovereign at t=101_000 (only 1s later, min_hold=5s)
+        // Gate is still active because min_hold hasn't elapsed, so relaxation is blocked
+        let event = AutonomicEvent::EconomicModeChanged {
+            from: autonomic_core::EconomicMode::Hustle,
+            to: autonomic_core::EconomicMode::Sovereign,
+            reason: "got credit".into(),
+        };
+        let state = fold(state, &event.into_event_kind(), 2, 101_000);
+        assert_eq!(
+            state.economic.mode,
+            autonomic_core::EconomicMode::Hustle,
+            "hysteresis should prevent rapid relaxation"
+        );
+    }
+
+    #[test]
+    fn fold_economic_mode_change_allowed_after_hold_duration() {
+        let mut state = default_state();
+        state.economic.mode_gate = autonomic_core::hysteresis::HysteresisGate::new(0.7, 0.3, 1_000);
+
+        // Escalate at t=100_000 (well past initial settle period)
+        let event = AutonomicEvent::EconomicModeChanged {
+            from: autonomic_core::EconomicMode::Sovereign,
+            to: autonomic_core::EconomicMode::Hustle,
+            reason: "balance low".into(),
+        };
+        let state = fold(state, &event.into_event_kind(), 1, 100_000);
+        assert_eq!(state.economic.mode, autonomic_core::EconomicMode::Hustle);
+
+        // Relax at t=102_000 (2s later, well past 1s min_hold)
+        let event = AutonomicEvent::EconomicModeChanged {
+            from: autonomic_core::EconomicMode::Hustle,
+            to: autonomic_core::EconomicMode::Sovereign,
+            reason: "balance recovered".into(),
+        };
+        let state = fold(state, &event.into_event_kind(), 2, 102_000);
+        assert_eq!(
+            state.economic.mode,
+            autonomic_core::EconomicMode::Sovereign,
+            "transition allowed after hold duration elapsed"
+        );
     }
 }

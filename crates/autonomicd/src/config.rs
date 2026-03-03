@@ -14,6 +14,11 @@ pub struct CliArgs {
     /// Path to configuration file (TOML).
     #[arg(long, short)]
     pub config: Option<String>,
+
+    /// Path to Lago data directory. Enables Lago journal for event persistence.
+    /// When omitted, runs in standalone mode with in-memory projections only.
+    #[arg(long)]
+    pub lago_data_dir: Option<String>,
 }
 
 /// Daemon configuration loaded from TOML.
@@ -22,6 +27,10 @@ pub struct AutonomicConfig {
     /// HTTP bind address.
     #[serde(default = "default_bind")]
     pub bind: String,
+
+    /// Path to Lago data directory. Enables Lago journal for event persistence.
+    #[serde(default)]
+    pub lago_data_dir: Option<String>,
 
     /// Economic setpoints.
     #[serde(default)]
@@ -40,6 +49,7 @@ impl Default for AutonomicConfig {
     fn default() -> Self {
         Self {
             bind: default_bind(),
+            lago_data_dir: None,
             economic: EconomicSetpoints::default(),
             cognitive: CognitiveSetpoints::default(),
             operational: OperationalSetpoints::default(),

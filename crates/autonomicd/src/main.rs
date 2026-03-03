@@ -6,6 +6,9 @@
 
 mod config;
 
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use anyhow::Result;
 use autonomic_api::{AppState, build_router};
 use autonomic_controller::{
@@ -15,6 +18,8 @@ use autonomic_controller::{
 use autonomic_core::rules::RuleSet;
 use clap::Parser;
 use config::{AutonomicConfig, CliArgs};
+use lago_core::journal::Journal;
+use lago_journal::RedbJournal;
 use tracing::info;
 
 fn build_rule_set(config: &AutonomicConfig) -> RuleSet {
@@ -60,7 +65,7 @@ async fn main() -> Result<()> {
     let args = CliArgs::parse();
 
     // Load config from file or use defaults
-    let config = if let Some(config_path) = &args.config {
+    let mut config: AutonomicConfig = if let Some(config_path) = &args.config {
         let content = std::fs::read_to_string(config_path)?;
         toml::from_str(&content)?
     } else {
@@ -70,10 +75,34 @@ async fn main() -> Result<()> {
         }
     };
 
+    // CLI flag overrides config file
+    if args.lago_data_dir.is_some() {
+        config.lago_data_dir = args.lago_data_dir;
+    }
+
     info!(bind = %config.bind, "starting autonomicd");
 
     let rules = build_rule_set(&config);
-    let state = AppState::new(rules);
+    let projections = autonomic_lago::new_projection_map();
+
+    // Open Lago journal if configured
+    let journal: Option<Arc<dyn Journal>> = if let Some(data_dir) = &config.lago_data_dir {
+        std::fs::create_dir_all(data_dir)?;
+        let db_path = PathBuf::from(data_dir).join("autonomic.redb");
+        let j = RedbJournal::open(&db_path)?;
+        info!(path = %db_path.display(), "Lago journal opened");
+        Some(Arc::new(j) as Arc<dyn Journal>)
+    } else {
+        info!("running in standalone mode (no Lago journal)");
+        None
+    };
+
+    let state = if let Some(journal) = journal {
+        AppState::with_journal(projections, rules, journal)
+    } else {
+        AppState::with_projections(projections, rules)
+    };
+
     let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind(&config.bind).await?;

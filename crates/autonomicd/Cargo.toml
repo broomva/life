@@ -11,10 +11,13 @@ description = "Daemon binary for the Autonomic homeostasis controller"
 [dependencies]
 autonomic-core.workspace = true
 autonomic-controller.workspace = true
+autonomic-lago.workspace = true
 autonomic-api.workspace = true
 anyhow = "1"
 axum.workspace = true
 clap.workspace = true
+lago-core.workspace = true
+lago-journal.workspace = true
 serde.workspace = true
 tokio.workspace = true
 toml.workspace = true
