@@ -1,6 +1,6 @@
 # Agent OS: Canonical Architecture
 
-**Date**: 2026-02-22  
+**Date**: 2026-03-03
 **Baseline**: Canonical runtime unification active
 
 This document describes the active architecture in `/Users/broomva/broomva.tech/live`.
@@ -9,11 +9,12 @@ This document describes the active architecture in `/Users/broomva/broomva.tech/
 
 ## 1) System Overview
 
-The system is a contract-first architecture across three active projects (plus one planned controller project):
+The system is a contract-first architecture across four active projects (plus one planned controller project):
 
 - **aiOS**: canonical contract + runtime engine
 - **Arcan**: daemon host + adapters + clients
 - **Lago**: durable event-sourced persistence substrate
+- **Spaces**: distributed agent networking engine (SpacetimeDB 2.0)
 - **Autonomic** (planned): controller for advanced homeostasis/maintenance policies
 
 ### Active Baseline Spine
@@ -198,6 +199,13 @@ Conformance and integration gates are exercised by:
 
 - `lago-aios-eventstore-adapter`: canonical event-store adapter
 - `lago-core`, `lago-journal`, `lago-store`, `lago-fs`, `lago-policy`, `lago-api`, `lago-ingest`, `lagod`, `lago-cli`: persistence substrate stack
+
+## Spaces
+
+- `spaces`: CLI client using `spacetimedb-sdk` (Rust 2024 edition)
+- `spaces/spacetimedb`: WASM module using `spacetimedb` 2.0.2 (Rust 2021 edition, `cdylib`)
+- 11 tables, 20+ reducers, 5-tier RBAC, real-time pub/sub via SpacetimeDB
+- Standalone — no dependency on aiOS/Arcan/Lago crates; Arcan agents connect as SDK clients
 
 ---
 

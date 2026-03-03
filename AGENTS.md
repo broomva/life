@@ -1,9 +1,9 @@
 # Broomva Live — Monorepo Root
 
-**Version**: 0.2.0 | **Date**: 2026-02-28 | **Status**: V1.5 (Stabilization Phase)
-**Metrics**: 596/596 tests passing (+1 ignored) | 19 crates | ~27.8K LOC | Rust 2024 Edition (MSRV 1.85)
+**Version**: 0.2.0 | **Date**: 2026-03-03 | **Status**: V1.5 (Stabilization Phase)
+**Metrics**: 657/657 tests passing (+1 ignored) | 21 crates | ~29K LOC | Rust 2024 Edition (MSRV 1.85)
 
-This workspace contains Rust projects that together form an **Agent Operating System** with event-sourced persistence, homeostatic regulation, and a canonical kernel contract.
+This workspace contains Rust projects that together form an **Agent Operating System** with event-sourced persistence, homeostatic regulation, distributed networking, and a canonical kernel contract.
 
 ## Projects
 
@@ -31,6 +31,15 @@ Event-sourced persistence substrate for the Agent OS.
 - **Key concepts**: Append-only event journal, content-addressed blob storage, filesystem manifests with branching, SSE format adapters (OpenAI/Anthropic/Vercel/Lago), RBAC policy
 - **Critical pattern**: redb is synchronous — always use `spawn_blocking`; Journal trait uses `BoxFuture` for dyn-compatibility
 
+### Spaces (`spaces/`)
+Distributed agent networking engine built on SpacetimeDB 2.0.
+- **Language**: Rust 2024 Edition (client), Rust 2021 Edition (WASM module)
+- **Stack**: SpacetimeDB 2.0.2 | WASM (`cdylib`) | `spacetimedb-sdk` (client)
+- **Components**: WASM server module (`spacetimedb/`) + CLI client (`src/`)
+- **Key concepts**: 11 tables, 20+ reducers, 5-tier RBAC, 4 channel types (Text/Voice/Announcement/AgentLog), real-time pub/sub via SpacetimeDB subscriptions
+- **Design philosophy**: Discord-like communication fabric for distributed agent interaction
+- **Critical pattern**: WASM module is deterministic; client SDK uses blocking I/O
+
 ### Autonomic (`../autonomic/` — planned, separate repo)
 Homeostasis controller and simulation kernel for agent stability regulation.
 - **Role**: Consumes event streams, outputs GatingProfile decisions, triggers memory maintenance
@@ -42,13 +51,14 @@ Homeostasis controller and simulation kernel for agent stability regulation.
 aiOS (kernel contract — types, traits, event taxonomy)
   │
   ├── Arcan (runtime — implements aiOS contract)
-  │     └── arcan-lago bridge
-  │           └── Lago (persistence substrate — stores canonical events)
+  │     ├── arcan-lago bridge
+  │     │     └── Lago (persistence substrate — stores canonical events)
+  │     └── → Spaces (distributed networking — agents connect as SDK clients)
   │
   └── Autonomic (stability controller — regulates the runtime)
 ```
 
-Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Lago provides the durable, append-only event journal and content-addressed storage underneath. The `arcan-lago` crate bridges the two.
+Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Lago provides the durable, append-only event journal and content-addressed storage underneath. Spaces provides the distributed communication fabric where agents interact in real-time. The `arcan-lago` crate bridges Arcan to Lago.
 
 ## Current State (v0.2.0 — What Works)
 
@@ -98,15 +108,23 @@ cargo test --workspace           # Run all tests
 cargo test -p lago-journal       # Test specific crate
 ```
 
+### Spaces (run from `spaces/`)
+```bash
+cargo fmt && cargo clippy --workspace -- -D warnings   # Format + lint client
+cargo check                                             # Check client builds
+spacetime publish spaces --module-path spacetimedb      # Publish WASM module
+```
+
 ### Cross-Project Validation
 ```bash
 (cd arcan && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
-(cd lago && cargo fmt && cargo clippy --workspace && cargo test --workspace)
+(cd lago && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
+(cd spaces && cargo fmt && cargo clippy --workspace -- -D warnings && cargo check)
 ```
 
 ## Shared Conventions
 
-Both projects follow these rules:
+All projects follow these rules (Spaces WASM module uses Rust 2021 edition due to SpacetimeDB requirements):
 
 - **Formatting**: `cargo fmt` before every commit
 - **Linting**: `cargo clippy --workspace` — all warnings must be addressed
@@ -279,3 +297,4 @@ See each project's self-learning rules for the detailed protocol:
 For deeper context, refer to:
 - **Arcan**: `arcan/CLAUDE.md`, `arcan/.claude/rules/`, `arcan/AGENTS.md`
 - **Lago**: `lago/CLAUDE.md`, `lago/.claude/rules/`
+- **Spaces**: `spaces/CLAUDE.md` (SpacetimeDB rules, common mistakes, SDK patterns)

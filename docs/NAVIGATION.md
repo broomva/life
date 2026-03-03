@@ -1,6 +1,6 @@
 # /live Documentation Navigation (Agent-First)
 
-Last updated: 2026-02-28
+Last updated: 2026-03-03
 
 This file is the **entrypoint for agents**. It explains where to start, which docs are canonical, and how to traverse to deeper project detail without guessing.
 
@@ -55,6 +55,12 @@ After fast path, expand by concern:
 - `aiOS/docs/REFERENCE.md`
 - `aiOS/docs/STATUS.md`
 
+### Distributed networking (Spaces)
+- `spaces/CLAUDE.md` (SpacetimeDB rules, common mistakes, hard requirements)
+- `spaces/PLANS.md` (execution plan and decision log)
+- `spaces/spacetimedb/src/lib.rs` (WASM module entry point)
+- `spaces/src/main.rs` (CLI client)
+
 ### Testing and quality gates
 - `docs/TESTING.md`
 - `Makefile.harness`
@@ -78,8 +84,9 @@ After fast path, expand by concern:
 - “What should we build next?” → `docs/ROADMAP.md` + `PLANS.md`
 - “How does Arcan talk to Lago?” → `arcan/docs/lago-integration.md`
 - “How do Conway-style economic ideas map to Agent OS?” → `docs/FEATURE_CONWAY_ACTUATION.md`
-- “How do I run safe checks quickly?” → `make smoke`, `make check`, `make ci`
-- “What is failing in governance/harness?” → `make audit` + control docs
+- "How does agent-to-agent networking work?" → `spaces/CLAUDE.md`, `spaces/spacetimedb/src/`
+- "How do I run safe checks quickly?" → `make smoke`, `make check`, `make ci`
+- "What is failing in governance/harness?" → `make audit` + control docs
 
 ---
 
@@ -106,6 +113,10 @@ After fast path, expand by concern:
   arcan/docs/*               # runtime-specific deep docs
   lago/docs/*                # persistence/policy deep docs
   aiOS/docs/*                # kernel contract deep docs
+  spaces/                    # distributed agent networking (SpacetimeDB)
+    CLAUDE.md                # SpacetimeDB rules and patterns
+    spacetimedb/src/         # WASM module (server-side)
+    src/                     # CLI client
 ```
 
 ---

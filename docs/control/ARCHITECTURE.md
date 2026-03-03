@@ -1,6 +1,6 @@
 # Control-Aware Architecture
 
-**Last updated**: 2026-03-01
+**Last updated**: 2026-03-03
 
 System design for the control plane governing the `/live` monorepo.
 
@@ -17,9 +17,9 @@ System design for the control plane governing the `/live` monorepo.
 
 Makefile.control                   Entrypoint for all control targets
   └── scripts/control/
-        ├── smoke.sh               cargo check (aiOS, arcan, lago)
-        ├── check.sh               cargo fmt --check + cargo clippy (×3)
-        ├── test.sh                cargo test --workspace (×3)
+        ├── smoke.sh               cargo check (aiOS, arcan, lago, spaces)
+        ├── check.sh               cargo fmt --check + cargo clippy (×4)
+        ├── test.sh                cargo test --workspace (×4)
         ├── recover.sh             Diagnostic recovery (identify failure, attempt fix, escalate)
         ├── install_hooks.sh       Wire .githooks/ into git config
         ├── cli_e2e.sh             Build + exercise CLI binaries
@@ -71,6 +71,7 @@ conformance/run.sh                 8-suite canonical behavior validation
 | `aiOS/` | Kernel contract | HIGH | fmt + clippy + test |
 | `arcan/` | Runtime | HIGH | fmt + clippy + test + conformance |
 | `lago/` | Persistence | HIGH | fmt + clippy + test + conformance |
+| `spaces/` | Networking | HIGH | fmt + clippy + check |
 | `docs/` | Shared | MEDIUM | Existence audit |
 | `.control/` | Control plane | HIGH | Strict audit |
 | `.github/workflows/` | CI | MEDIUM | Syntax validation |
@@ -81,15 +82,15 @@ conformance/run.sh                 8-suite canonical behavior validation
 
 ```
               ┌─────────┐
-              │  smoke   │  cargo check (×3 workspaces)
+              │  smoke   │  cargo check (×4 workspaces)
               └────┬─────┘
                    │ pass
               ┌────▼─────┐
-              │  check   │  cargo fmt --check + cargo clippy (×3)
+              │  check   │  cargo fmt --check + cargo clippy (×4)
               └────┬─────┘
                    │ pass
               ┌────▼─────┐
-              │   test   │  cargo test --workspace (×3)
+              │   test   │  cargo test --workspace (×4)
               └────┬─────┘
                    │ pass
          ┌─────────▼──────────┐

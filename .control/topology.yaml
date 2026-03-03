@@ -10,6 +10,11 @@ zones:
       - lago/
     owner: persistence-team
     critical: true
+  spaces_networking:
+    paths:
+      - spaces/
+    owner: networking-team
+    critical: true
   shared_docs:
     paths:
       - docs/

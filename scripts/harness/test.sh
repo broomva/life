@@ -9,11 +9,11 @@ if [ -n "${HARNESS_TEST_CMD:-}" ]; then
   exit 0
 fi
 
-# Multi-workspace monorepo: aiOS + Arcan + Lago
+# Multi-workspace monorepo: aiOS + Arcan + Lago + Spaces
 if command -v cargo >/dev/null 2>&1; then
   cd "$root_dir"
   ran=0
-  for ws in aiOS arcan lago; do
+  for ws in aiOS arcan lago spaces; do
     if [ -f "$ws/Cargo.toml" ]; then
       (cd "$ws" && cargo test --workspace --quiet)
       ran=1

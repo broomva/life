@@ -1,9 +1,9 @@
 # Agent OS: Implementation Status
 
-**Date**: 2026-03-01
+**Date**: 2026-03-03
 **Version**: 0.2.0 (canonical baseline)
-**Rust**: edition 2024, MSRV 1.85+
-**Tests**: 657 passing (+1 ignored) across 19 crates
+**Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)
+**Tests**: 657 passing (+1 ignored) across 19 crates + Spaces (21 crates total)
 
 This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/live`.
 If another status document conflicts with this one, treat this file as source of truth.
@@ -22,19 +22,20 @@ The baseline unification is active and enforced in production paths:
 
 ## Health Summary
 
-| Area | aiOS | Arcan | Lago |
-|---|---|---|---|
-| Build | PASS | PASS | PASS |
-| Tests | PASS | PASS | PASS |
-| Clippy (`-D warnings`) | PASS | PASS | PASS |
-| Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED |
-| Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE |
+| Area | aiOS | Arcan | Lago | Spaces |
+|---|---|---|---|---|
+| Build | PASS | PASS | PASS | PASS |
+| Tests | PASS | PASS | PASS | N/A (0 tests) |
+| Clippy (`-D warnings`) | PASS | PASS | PASS | PASS |
+| Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | STANDALONE |
+| Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | NETWORKING |
 
 Validation gates currently pass:
 
 - `/Users/broomva/broomva.tech/live/aiOS`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
 - `/Users/broomva/broomva.tech/live/arcan`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
 - `/Users/broomva/broomva.tech/live/lago`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
+- `/Users/broomva/broomva.tech/live/spaces`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo check` (WASM module: `cargo check --target wasm32-unknown-unknown --manifest-path spacetimedb/Cargo.toml`)
 - `/Users/broomva/broomva.tech/live`: `make audit`, `./scripts/architecture/verify_dependencies.sh`, `./conformance/run.sh`
 
 ---
@@ -149,6 +150,29 @@ Current suite validates:
 5. Lago API session/SSE behavior (8 tests).
 6. Lago-aiOS eventstore adapter bridge checks (11 tests).
 7. Lago journal golden replay tests (14 tests: simple-chat, tool-round-trip, branch-fork, branch-merge, forward-compat, forward-compat-evolution).
+
+## Spaces
+
+### Distributed Agent Networking
+
+- SpacetimeDB 2.0 WASM module providing real-time distributed communication for agents.
+- 11 tables, 20+ reducers, 5-tier RBAC (Owner/Admin/Moderator/Member/Agent).
+- Channel types: Text, Voice, Announcement, AgentLog.
+- Message types: Text, System, Join, Leave, AgentEvent.
+- Rust CLI client with 26 commands using `spacetimedb-sdk`.
+- Auto-generated client bindings (44 files) via `spacetime generate`.
+
+### Integration Points
+
+- Standalone project — does not depend on aiOS/Arcan/Lago crates.
+- Arcan agents will connect as SDK clients for distributed coordination.
+- AgentLog channels and AgentEvent messages provide agent-specific communication primitives.
+
+### Known Gaps
+
+- No unit tests (reducer tests, integration tests planned).
+- No DM/private messaging.
+- No Arcan integration bridge yet.
 
 ---
 

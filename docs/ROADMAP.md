@@ -1,6 +1,6 @@
 # Agent OS: Forward Roadmap (Post-Baseline)
 
-**Date**: 2026-02-22  
+**Date**: 2026-03-03
 **Baseline**: Canonical runtime unification complete
 
 This roadmap starts from the active canonical baseline and lists forward-only execution phases.
@@ -140,7 +140,11 @@ A milestone is complete only when all pass:
    - `cargo fmt`
    - `cargo clippy --workspace -- -D warnings`
    - `cargo test --workspace`
-4. `/Users/broomva/broomva.tech/live`
+4. `/Users/broomva/broomva.tech/live/spaces`
+   - `cargo fmt`
+   - `cargo clippy --workspace -- -D warnings`
+   - `cargo check`
+5. `/Users/broomva/broomva.tech/live`
    - `make audit`
    - `./conformance/run.sh`
 
@@ -158,11 +162,12 @@ Status labels used in this roadmap:
 Current labels:
 
 - Baseline unification: `COMPLETE`
-- R1 Conformance expansion: `ACTIVE`
+- R1 Conformance expansion: `COMPLETE`
 - R2 Observability maturity: `PLANNED`
 - R3 Security hardening: `PLANNED`
 - R4 Memory/learning depth: `PLANNED`
 - R5 Controller plane: `PLANNED`
+- Spaces networking: `ACTIVE` (v0.1.0 — integration with Arcan pending)
 
 ---
 
