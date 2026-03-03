@@ -1,6 +1,6 @@
 # Commands
 
-## Arcan (run from `/Users/broomva/broomva.tech/live/arcan`)
+## Arcan (run from `/Users/broomva/broomva.tech/life/arcan`)
 
 ```bash
 cargo build --workspace
@@ -19,7 +19,7 @@ cargo test -p arcan-lago
 cargo test -p arcand -- --nocapture
 ```
 
-## Lago (run from `/Users/broomva/broomva.tech/live/lago`)
+## Lago (run from `/Users/broomva/broomva.tech/life/lago`)
 
 ```bash
 cargo build --workspace
@@ -36,7 +36,7 @@ cargo test -p lago-journal
 cargo test -p lago-api --test e2e_files
 ```
 
-## Cross-Project Validation (run from `/Users/broomva/broomva.tech/live`)
+## Cross-Project Validation (run from `/Users/broomva/broomva.tech/life`)
 
 ```bash
 (cd arcan && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \

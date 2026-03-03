@@ -1,4 +1,4 @@
-# Broomva Live Codex Context
+# Broomva Life Codex Context
 
 This folder is a fast, local reference for contributors and coding agents working in this monorepo.
 
@@ -13,10 +13,10 @@ This folder is a fast, local reference for contributors and coding agents workin
 
 Use these files as a working guide, but keep changes aligned with:
 
-- `/Users/broomva/broomva.tech/live/AGENTS.md`
-- `/Users/broomva/broomva.tech/live/CLAUDE.md`
-- `/Users/broomva/broomva.tech/live/docs/STATUS.md`
-- `/Users/broomva/broomva.tech/live/docs/ARCHITECTURE.md`
-- `/Users/broomva/broomva.tech/live/docs/ROADMAP.md`
+- `/Users/broomva/broomva.tech/life/AGENTS.md`
+- `/Users/broomva/broomva.tech/life/CLAUDE.md`
+- `/Users/broomva/broomva.tech/life/docs/STATUS.md`
+- `/Users/broomva/broomva.tech/life/docs/ARCHITECTURE.md`
+- `/Users/broomva/broomva.tech/life/docs/ROADMAP.md`
 
 If code changes alter status or architecture, update the docs in `docs/` as part of the same work.

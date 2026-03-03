@@ -1,4 +1,4 @@
-# Broomva Live — Monorepo Root
+# Broomva Life — Monorepo Root
 
 **Version**: 0.2.0 | **Date**: 2026-03-03 | **Status**: V1.5 (Stabilization Phase)
 **Metrics**: 657/657 tests passing (+1 ignored) | 21 crates | ~29K LOC | Rust 2024 Edition (MSRV 1.85)
@@ -40,25 +40,38 @@ Distributed agent networking engine built on SpacetimeDB 2.0.
 - **Design philosophy**: Discord-like communication fabric where agents interact distributedly — real-time pub/sub via SpacetimeDB subscriptions
 - **Critical pattern**: WASM module is deterministic (no filesystem, network, timers, or external RNG in reducers); client SDK uses blocking I/O — use `spawn_blocking` if mixing with async runtimes
 
-### Autonomic (`../autonomic/` — planned, separate repo)
-Homeostasis controller and simulation kernel for agent stability regulation.
-- **Role**: Consumes event streams, outputs GatingProfile decisions, triggers memory maintenance
-- **Key concepts**: Rule-based controller with hysteresis, heartbeat scheduling, budget/mode management
+### Future Projects (planned — docs only, no scaffold crates yet)
+
+| Project | AOS Primitive | Biological Analog | One-liner |
+|---------|--------------|-------------------|-----------|
+| **Autonomic** | Homeostasis | Autonomic nervous system | Stability controller — consumes event streams, outputs GatingProfile decisions, heartbeat scheduling |
+| **Chronos** | Temporality | Circadian rhythm | Scheduler — temporal awareness, heartbeat scheduling, time-boxed execution windows |
+| **Aegis** | Security | Immune system | Security enforcement — OS-level sandboxing, capability attestation, secret management |
+| **Nous** | World Model | Prefrontal cortex | World model — maintains agent's understanding of environment, causal reasoning |
+| **Mnemo** | Knowledge | Long-term memory | Knowledge store — vector-indexed persistent knowledge, retrieval-augmented generation |
 
 ## Relationship
+
+The six AOS primitives (cognition, execution, persistence, temporality, security, homeostasis) map to biological systems. The name "Life" reflects the ambition of creating artificial life from computational primitives.
 
 ```
 aiOS (kernel contract — types, traits, event taxonomy)
   │
-  ├── Arcan (runtime — implements aiOS contract)
+  ├── Arcan (cognition + execution — agent runtime)
   │     ├── arcan-lago bridge
-  │     │     └── Lago (persistence substrate — stores canonical events)
-  │     └── → Spaces (distributed networking — agents connect as SDK clients)
+  │     │     └── Lago (persistence — event journal + blob store)
+  │     └── → Spaces (networking — distributed agent communication)
   │
-  └── Autonomic (stability controller — regulates the runtime)
+  ├── Autonomic (homeostasis — stability regulation)        [planned]
+  ├── Chronos (temporality — scheduling + time awareness)   [planned]
+  ├── Aegis (security — sandbox + capability enforcement)   [planned]
+  ├── Nous (world model — environment understanding)        [planned]
+  └── Mnemo (knowledge — persistent memory + RAG)           [planned]
 ```
 
-Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Lago provides the durable, append-only event journal and content-addressed storage underneath. Spaces provides the distributed communication fabric where agents interact in real-time. The `arcan-lago` crate bridges Arcan to Lago.
+**Active projects**: Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Lago provides the durable, append-only event journal and content-addressed storage. Spaces provides the distributed communication fabric. The `arcan-lago` crate bridges Arcan to Lago.
+
+**Planned projects**: Autonomic, Chronos, Aegis, Nous, and Mnemo will each implement a specific AOS primitive as a separate crate/service, integrating through the canonical `aios-protocol` contract.
 
 ## Current State (v0.2.0 — What Works)
 

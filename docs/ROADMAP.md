@@ -1,9 +1,9 @@
-# Agent OS: Forward Roadmap (Post-Baseline)
+# Broomva Life: Forward Roadmap (Post-Baseline)
 
 **Date**: 2026-03-03
 **Baseline**: Canonical runtime unification complete
 
-This roadmap starts from the active canonical baseline and lists forward-only execution phases.
+This roadmap starts from the active canonical baseline and lists forward-only execution phases. Each phase advances the "Life" vision — building artificial life from the six AOS primitives (cognition, execution, persistence, temporality, security, homeostasis).
 
 ---
 
@@ -128,23 +128,23 @@ These rules apply to every roadmap phase:
 
 A milestone is complete only when all pass:
 
-1. `/Users/broomva/broomva.tech/live/aiOS`
+1. `/Users/broomva/broomva.tech/life/aiOS`
    - `cargo fmt`
    - `cargo clippy --workspace -- -D warnings`
    - `cargo test --workspace`
-2. `/Users/broomva/broomva.tech/live/arcan`
+2. `/Users/broomva/broomva.tech/life/arcan`
    - `cargo fmt`
    - `cargo clippy --workspace -- -D warnings`
    - `cargo test --workspace`
-3. `/Users/broomva/broomva.tech/live/lago`
+3. `/Users/broomva/broomva.tech/life/lago`
    - `cargo fmt`
    - `cargo clippy --workspace -- -D warnings`
    - `cargo test --workspace`
-4. `/Users/broomva/broomva.tech/live/spaces`
+4. `/Users/broomva/broomva.tech/life/spaces`
    - `cargo fmt`
    - `cargo clippy --workspace -- -D warnings`
    - `cargo check`
-5. `/Users/broomva/broomva.tech/live`
+5. `/Users/broomva/broomva.tech/life`
    - `make audit`
    - `./conformance/run.sh`
 
@@ -168,10 +168,46 @@ Current labels:
 - R4 Memory/learning depth: `PLANNED`
 - R5 Controller plane: `PLANNED`
 - Spaces networking: `ACTIVE` (v0.1.0 — integration with Arcan pending)
+- R6 Temporality (Chronos): `PLANNED`
+- R7 Security enforcement (Aegis): `PLANNED`
+- R8 World model (Nous): `PLANNED`
+- R9 Knowledge store (Mnemo): `PLANNED`
 
 ---
 
-## 9) Planned Feature Track: Economic Actuation (Conway-Compatible)
+## 9) Phase R6–R9 — AOS Primitive Expansion
+
+These phases introduce the remaining AOS primitives as standalone projects integrated through the canonical `aios-protocol` contract.
+
+### R6 — Temporality (Chronos)
+
+- Temporal scheduler with heartbeat, deadline, and time-boxed execution
+- Circadian-style activity cycles for agent energy management
+- Contract-first: temporal events flow through canonical event store
+
+### R7 — Security Enforcement (Aegis)
+
+- OS-level sandbox isolation (beyond current soft sandbox)
+- Capability attestation and secret management
+- Network isolation enforcement
+- Integrates as a policy gate through `aios-protocol`
+
+### R8 — World Model (Nous)
+
+- Agent's persistent understanding of its environment
+- Causal reasoning and state prediction
+- Observation-driven model updates through canonical event streams
+
+### R9 — Knowledge Store (Mnemo)
+
+- Vector-indexed persistent knowledge
+- RAG pipeline for retrieval-augmented generation
+- Memory lifecycle management (consolidation, forgetting, retrieval)
+- Integrates with Lago for durable storage
+
+---
+
+## 10) Planned Feature Track: Economic Actuation (Conway-Compatible)
 
 Status: `PLANNED`
 

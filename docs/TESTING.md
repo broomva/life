@@ -9,7 +9,7 @@
 - Combined crate count (aiOS+Arcan+Lago): `19`.
 - Combined Rust LOC (aiOS+Arcan+Lago): `~27.8K`.
 - Added root cross-stack conformance entrypoint:
-  - `/Users/broomva/broomva.tech/live/conformance/run.sh`
+  - `/Users/broomva/broomva.tech/life/conformance/run.sh`
 - Conformance runner validates:
   - protocol model tests (`aios-protocol`)
   - Arcand v1 API + canonical SSE parts

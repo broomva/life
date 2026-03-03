@@ -5,7 +5,7 @@ This directory contains the cross-stack MVP conformance runner for the hard-cuto
 ## Entry point
 
 ```bash
-/Users/broomva/broomva.tech/live/conformance/run.sh
+/Users/broomva/broomva.tech/life/conformance/run.sh
 ```
 
 ## What it validates

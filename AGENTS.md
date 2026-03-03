@@ -1,4 +1,4 @@
-# Broomva Live — Monorepo Root
+# Broomva Life — Monorepo Root
 
 **Version**: 0.2.0 | **Date**: 2026-03-03 | **Status**: V1.5 (Stabilization Phase)
 **Metrics**: 657/657 tests passing (+1 ignored) | 21 crates | ~29K LOC | Rust 2024 Edition (MSRV 1.85)

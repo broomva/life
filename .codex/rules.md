@@ -29,8 +29,8 @@
 ## Process Rules
 
 - After every feature/fix, update documentation status when applicable:
-  - `/Users/broomva/broomva.tech/live/docs/STATUS.md`
-  - `/Users/broomva/broomva.tech/live/docs/ARCHITECTURE.md`
-  - `/Users/broomva/broomva.tech/live/docs/ROADMAP.md`
+  - `/Users/broomva/broomva.tech/life/docs/STATUS.md`
+  - `/Users/broomva/broomva.tech/life/docs/ARCHITECTURE.md`
+  - `/Users/broomva/broomva.tech/life/docs/ROADMAP.md`
   - relevant `CLAUDE.md` or `.claude/rules/` guidance
 - Keep documentation and implementation in sync in the same change window.

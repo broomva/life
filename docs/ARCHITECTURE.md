@@ -1,21 +1,42 @@
-# Agent OS: Canonical Architecture
+# Broomva Life: Canonical Architecture
 
 **Date**: 2026-03-03
 **Baseline**: Canonical runtime unification active
 
-This document describes the active architecture in `/Users/broomva/broomva.tech/live`.
+This document describes the active architecture in `/Users/broomva/broomva.tech/life`.
 
 ---
 
 ## 1) System Overview
 
-The system is a contract-first architecture across four active projects (plus one planned controller project):
+Life is a contract-first architecture for building artificial life from computational primitives. Six AOS primitives — cognition, execution, persistence, temporality, security, and homeostasis — map to biological systems:
+
+| Primitive | Biological Analog | Active Project | Status |
+|-----------|-------------------|----------------|--------|
+| Cognition + Execution | Central nervous system | **Arcan** | ACTIVE |
+| Persistence | Long-term memory formation | **Lago** | ACTIVE |
+| Networking | Social/swarm behavior | **Spaces** | ACTIVE |
+| Contract / DNA | Genome | **aiOS** | ACTIVE |
+| Homeostasis | Autonomic nervous system | **Autonomic** | PLANNED |
+| Temporality | Circadian rhythm | **Chronos** | PLANNED |
+| Security | Immune system | **Aegis** | PLANNED |
+| World Model | Prefrontal cortex | **Nous** | PLANNED |
+| Knowledge | Hippocampus | **Mnemo** | PLANNED |
+
+### Active Projects
 
 - **aiOS**: canonical contract + runtime engine
 - **Arcan**: daemon host + adapters + clients
 - **Lago**: durable event-sourced persistence substrate
 - **Spaces**: distributed agent networking engine (SpacetimeDB 2.0)
-- **Autonomic** (planned): controller for advanced homeostasis/maintenance policies
+
+### Planned Projects
+
+- **Autonomic**: controller for homeostasis/maintenance policies
+- **Chronos**: temporal scheduler and time-awareness engine
+- **Aegis**: OS-level sandbox, capability attestation, secret management
+- **Nous**: world model and causal reasoning engine
+- **Mnemo**: vector-indexed knowledge store and RAG pipeline
 
 ### Active Baseline Spine
 
@@ -169,13 +190,13 @@ Supported behavior:
 
 Architecture enforcement is integrated into control audit:
 
-- `/Users/broomva/broomva.tech/live/scripts/architecture/verify_dependencies.sh`
-- `/Users/broomva/broomva.tech/live/Makefile.control`
-- `/Users/broomva/broomva.tech/live/scripts/audit_control.sh`
+- `/Users/broomva/broomva.tech/life/scripts/architecture/verify_dependencies.sh`
+- `/Users/broomva/broomva.tech/life/Makefile.control`
+- `/Users/broomva/broomva.tech/life/scripts/audit_control.sh`
 
 Conformance and integration gates are exercised by:
 
-- `/Users/broomva/broomva.tech/live/conformance/run.sh`
+- `/Users/broomva/broomva.tech/life/conformance/run.sh`
 
 ---
 
