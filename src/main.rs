@@ -6,7 +6,7 @@ use module_bindings::*;
 use std::env;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use spacetimedb_sdk::{credentials, DbContext, Error, Event, Identity, Table, TableWithPrimaryKey};
+use spacetimedb_sdk::{DbContext, Error, Event, Identity, Table, TableWithPrimaryKey, credentials};
 
 // --- Shared state ---
 
@@ -37,7 +37,8 @@ fn main() {
 // --- Connection ---
 
 fn connect_to_db() -> DbConnection {
-    let host = env::var("SPACETIMEDB_HOST").unwrap_or_else(|_| "https://maincloud.spacetimedb.com".to_string());
+    let host = env::var("SPACETIMEDB_HOST")
+        .unwrap_or_else(|_| "https://maincloud.spacetimedb.com".to_string());
     let db_name = env::var("SPACETIMEDB_DB_NAME").unwrap_or_else(|_| "spaces".to_string());
 
     DbConnection::builder()
@@ -114,10 +115,10 @@ fn on_message_inserted(ctx: &EventContext, msg: &Message) {
         return;
     }
     // Only show messages for the current channel
-    if let Some(ch_id) = current_channel() {
-        if msg.channel_id == ch_id {
-            print_message(ctx, msg);
-        }
+    if let Some(ch_id) = current_channel()
+        && msg.channel_id == ch_id
+    {
+        print_message(ctx, msg);
     }
 }
 
@@ -142,11 +143,7 @@ fn user_display_name(ctx: &impl RemoteDbContext, identity: &Identity) -> String 
         .user_profile()
         .identity()
         .find(identity)
-        .map(|p| {
-            p.display_name
-                .clone()
-                .unwrap_or_else(|| p.username.clone())
-        })
+        .map(|p| p.display_name.clone().unwrap_or_else(|| p.username.clone()))
         .unwrap_or_else(|| identity.to_abbreviated_hex().to_string())
 }
 
@@ -167,7 +164,11 @@ fn print_message(ctx: &impl RemoteDbContext, msg: &Message) {
         .reply_to_id
         .map(|r| format!(" (reply to:{})", r))
         .unwrap_or_default();
-    let edit_mark = if msg.edited_at.is_some() { " (edited)" } else { "" };
+    let edit_mark = if msg.edited_at.is_some() {
+        " (edited)"
+    } else {
+        ""
+    };
     println!(
         "{}{}: {}{}{}{}",
         type_prefix, sender, msg.content, thread_suffix, reply_suffix, edit_mark
@@ -215,7 +216,10 @@ fn on_sub_applied(ctx: &SubscriptionEventContext) {
                 println!("  [{}] #{} ({:?})", ch.id, ch.name, ch.channel_type);
             }
             // Auto-select first text channel
-            if let Some(text_ch) = channels.iter().find(|c| c.channel_type == ChannelType::Text) {
+            if let Some(text_ch) = channels
+                .iter()
+                .find(|c| c.channel_type == ChannelType::Text)
+            {
                 CURRENT_CHANNEL_ID.store(text_ch.id, Ordering::Relaxed);
                 println!("\nActive channel: #{} (id={})", text_ch.name, text_ch.id);
 
@@ -227,11 +231,18 @@ fn on_sub_applied(ctx: &SubscriptionEventContext) {
                     .filter(|m| m.channel_id == text_ch.id && m.thread_id.is_none())
                     .collect();
                 msgs.sort_by_key(|m| m.created_at);
-                let recent: Vec<_> = msgs.iter().rev().take(25).collect::<Vec<_>>().into_iter().rev().collect();
+                let recent: Vec<_> = msgs
+                    .iter()
+                    .rev()
+                    .take(25)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
                 if !recent.is_empty() {
                     println!("\n--- Recent messages ---");
                     for msg in recent {
-                        print_message(ctx, &msg);
+                        print_message(ctx, msg);
                     }
                     println!("--- End ---\n");
                 }
@@ -365,7 +376,11 @@ fn cmd_list_servers(ctx: &DbConnection) {
     }
     println!("Servers:");
     for s in &servers {
-        let marker = if current_server() == Some(s.id) { " *" } else { "" };
+        let marker = if current_server() == Some(s.id) {
+            " *"
+        } else {
+            ""
+        };
         println!("  [{}] {}{}", s.id, s.name, marker);
     }
 }
@@ -380,7 +395,10 @@ fn cmd_select_server(ctx: &DbConnection, arg: &str) {
     let server = if let Ok(id) = arg.parse::<u64>() {
         ctx.db.server().id().find(&id)
     } else {
-        ctx.db.server().iter().find(|s| s.name.to_lowercase() == arg.to_lowercase())
+        ctx.db
+            .server()
+            .iter()
+            .find(|s| s.name.to_lowercase() == arg.to_lowercase())
     };
 
     if let Some(s) = server {
@@ -392,9 +410,11 @@ fn cmd_select_server(ctx: &DbConnection, arg: &str) {
         cmd_list_channels(ctx);
 
         // Auto-select first text channel
-        if let Some(ch) = ctx.db.channel().iter()
-            .filter(|c| c.server_id == s.id && c.channel_type == ChannelType::Text)
-            .next()
+        if let Some(ch) = ctx
+            .db
+            .channel()
+            .iter()
+            .find(|c| c.server_id == s.id && c.channel_type == ChannelType::Text)
         {
             CURRENT_CHANNEL_ID.store(ch.id, Ordering::Relaxed);
             println!("Active channel: #{} (id={})", ch.name, ch.id);
@@ -451,7 +471,12 @@ fn cmd_list_channels(ctx: &DbConnection) {
         eprintln!("No server selected. Use /server <id> first.");
         return;
     };
-    let mut channels: Vec<_> = ctx.db.channel().iter().filter(|c| c.server_id == server_id).collect();
+    let mut channels: Vec<_> = ctx
+        .db
+        .channel()
+        .iter()
+        .filter(|c| c.server_id == server_id)
+        .collect();
     channels.sort_by_key(|c| c.position);
     if channels.is_empty() {
         println!("No channels in this server.");
@@ -459,7 +484,11 @@ fn cmd_list_channels(ctx: &DbConnection) {
     }
     println!("Channels:");
     for ch in &channels {
-        let marker = if current_channel() == Some(ch.id) { " *" } else { "" };
+        let marker = if current_channel() == Some(ch.id) {
+            " *"
+        } else {
+            ""
+        };
         let type_tag = match ch.channel_type {
             ChannelType::Text => "",
             ChannelType::Voice => " [voice]",
@@ -483,7 +512,9 @@ fn cmd_select_channel(ctx: &DbConnection, arg: &str) {
     let channel = if let Ok(id) = arg.parse::<u64>() {
         ctx.db.channel().id().find(&id)
     } else {
-        ctx.db.channel().iter()
+        ctx.db
+            .channel()
+            .iter()
             .find(|c| c.server_id == server_id && c.name.to_lowercase() == arg.to_lowercase())
     };
 
@@ -492,11 +523,21 @@ fn cmd_select_channel(ctx: &DbConnection, arg: &str) {
         println!("Active channel: #{} (id={})", ch.name, ch.id);
 
         // Show recent messages
-        let mut msgs: Vec<_> = ctx.db.message().iter()
+        let mut msgs: Vec<_> = ctx
+            .db
+            .message()
+            .iter()
             .filter(|m| m.channel_id == ch.id && m.thread_id.is_none())
             .collect();
         msgs.sort_by_key(|m| m.created_at);
-        let recent: Vec<_> = msgs.iter().rev().take(25).collect::<Vec<_>>().into_iter().rev().collect();
+        let recent: Vec<_> = msgs
+            .iter()
+            .rev()
+            .take(25)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
         if !recent.is_empty() {
             println!("--- Recent messages ---");
             for msg in recent {
@@ -518,7 +559,10 @@ fn cmd_create_channel(ctx: &DbConnection, arg: &str) {
         eprintln!("No server selected.");
         return;
     };
-    if let Err(e) = ctx.reducers.create_channel(server_id, arg.to_string(), ChannelType::Text) {
+    if let Err(e) = ctx
+        .reducers
+        .create_channel(server_id, arg.to_string(), ChannelType::Text)
+    {
         eprintln!("Failed to create channel: {e}");
     }
 }
@@ -528,7 +572,12 @@ fn cmd_list_threads(ctx: &DbConnection) {
         eprintln!("No channel selected.");
         return;
     };
-    let threads: Vec<_> = ctx.db.thread().iter().filter(|t| t.channel_id == ch_id && !t.archived).collect();
+    let threads: Vec<_> = ctx
+        .db
+        .thread()
+        .iter()
+        .filter(|t| t.channel_id == ch_id && !t.archived)
+        .collect();
     if threads.is_empty() {
         println!("No active threads in this channel.");
         return;
@@ -551,7 +600,10 @@ fn cmd_create_thread(ctx: &DbConnection, arg: &str) {
     };
     let parts: Vec<&str> = arg.splitn(2, '|').collect();
     let name = parts[0].trim().to_string();
-    let msg = parts.get(1).map(|s| s.trim().to_string()).unwrap_or_else(|| name.clone());
+    let msg = parts
+        .get(1)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| name.clone());
     if let Err(e) = ctx.reducers.create_thread(ch_id, name, msg) {
         eprintln!("Failed to create thread: {e}");
     }
@@ -562,7 +614,12 @@ fn cmd_list_members(ctx: &DbConnection) {
         eprintln!("No server selected.");
         return;
     };
-    let members: Vec<_> = ctx.db.server_member().iter().filter(|m| m.server_id == server_id).collect();
+    let members: Vec<_> = ctx
+        .db
+        .server_member()
+        .iter()
+        .filter(|m| m.server_id == server_id)
+        .collect();
     if members.is_empty() {
         println!("No members.");
         return;
@@ -570,7 +627,11 @@ fn cmd_list_members(ctx: &DbConnection) {
     println!("Members ({}):", members.len());
     for m in &members {
         let name = user_display_name(ctx, &m.identity);
-        let online = ctx.db.user_presence().identity().find(&m.identity)
+        let online = ctx
+            .db
+            .user_presence()
+            .identity()
+            .find(&m.identity)
             .map(|p| if p.online { " (online)" } else { "" })
             .unwrap_or("");
         println!("  {} [{:?}]{}", name, m.role, online);
@@ -599,7 +660,10 @@ fn cmd_register_agent(ctx: &DbConnection, arg: &str) {
     }
     let parts: Vec<&str> = arg.splitn(2, '|').collect();
     let name = parts[0].trim().to_string();
-    let desc = parts.get(1).map(|s| s.trim().to_string()).unwrap_or_else(|| "Agent".to_string());
+    let desc = parts
+        .get(1)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "Agent".to_string());
     if let Err(e) = ctx.reducers.register_agent(name, desc) {
         eprintln!("Failed to register agent: {e}");
     } else {
@@ -631,11 +695,21 @@ fn cmd_history(ctx: &DbConnection, arg: &str) {
         return;
     };
     let count: usize = arg.parse().unwrap_or(25);
-    let mut msgs: Vec<_> = ctx.db.message().iter()
+    let mut msgs: Vec<_> = ctx
+        .db
+        .message()
+        .iter()
         .filter(|m| m.channel_id == ch_id && m.thread_id.is_none())
         .collect();
     msgs.sort_by_key(|m| m.created_at);
-    let recent: Vec<_> = msgs.iter().rev().take(count).collect::<Vec<_>>().into_iter().rev().collect();
+    let recent: Vec<_> = msgs
+        .iter()
+        .rev()
+        .take(count)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     if recent.is_empty() {
         println!("No messages.");
         return;

@@ -1,3 +1,36 @@
+# Spaces Agent Guide
+
+## Harness Commands
+
+| Command | What It Does |
+|---------|-------------|
+| `make smoke` | Quick build check: module WASM compile + client compile |
+| `make test` | Full test suite (module build + publish + client build) |
+| `make lint` | Run `cargo clippy` on module and client |
+| `make typecheck` | Run `cargo check` on module and client |
+| `make ci` | All of the above in sequence |
+| `make control-audit` | Audit control metalayer artifacts |
+| `scripts/harness/smoke.sh` | Smoke test wrapper |
+| `scripts/control/smoke.sh` | Control smoke test wrapper |
+
+## Execution Plans
+
+See `PLANS.md` for multi-step task plans and durable context.
+
+All non-trivial changes should be planned in `PLANS.md` before execution. Each plan entry should include scope, constraints, checkpoints, and acceptance criteria.
+
+## Control Commands
+
+| Command | What It Does |
+|---------|-------------|
+| `scripts/control/check.sh` | Validate control artifacts |
+| `scripts/control/smoke.sh` | Control system smoke test |
+| `scripts/control/test.sh` | Full control test suite |
+| `scripts/audit_control.sh` | Audit control metalayer |
+| `scripts/audit_harness.sh` | Audit harness artifacts |
+
+---
+
 # SpacetimeDB Rules (All Languages)
 
 ## Migrating from 1.0 to 2.0?
