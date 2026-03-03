@@ -1,0 +1,384 @@
+Spaces Project: Tests, Bridge, and DMs                                      │
+     │                                                                             │
+     │ Context                                                                     │
+     │                                                                             │
+     │ The Spaces project (SpacetimeDB 2.0 distributed networking engine) shipped  │
+     │ at v0.1.0 with 0 tests. This is the only project in the monorepo without    │
+     │ test coverage. SpacetimeDB provides no built-in test harness or mock        │
+     │ ReducerContext, but ~45% of reducer logic is pure computation (validation,  │
+     │ role hierarchy, state guards) that can be extracted and tested with         │
+     │ standard cargo test. Additionally, the Arcan integration bridge and DM      │
+     │ support are the next feature priorities.                                    │
+     │                                                                             │
+     │ Plan: 3 Priorities (Sequential)                                             │
+     │                                                                             │
+     │ Priority 1: Reducer Unit Tests (spaces/)                                    │
+     │                                                                             │
+     │ Goal: Extract pure business logic from reducers into a testable             │
+     │ validation.rs module, add ~40 unit tests, refactor reducers to call the     │
+     │ extracted functions.                                                        │
+     │                                                                             │
+     │ Key insight: The spacetimedb/ crate is crate-type = ["cdylib"] (WASM-only), │
+     │  so cargo test won't work. Fix: add "lib" to crate-type so tests compile    │
+     │ natively.                                                                   │
+     │                                                                             │
+     │ Files to modify                                                             │
+     │                                                                             │
+     │ File: spaces/spacetimedb/Cargo.toml                                         │
+     │ Action: Add "lib" to crate-type: crate-type = ["cdylib", "lib"]             │
+     │ ────────────────────────────────────────                                    │
+     │ File: spaces/spacetimedb/src/validation.rs                                  │
+     │ Action: CREATE — all pure validation + role + guard functions with          │
+     │ #[cfg(test)]                                                                │
+     │   module                                                                    │
+     │ ────────────────────────────────────────                                    │
+     │ File: spaces/spacetimedb/src/lib.rs                                         │
+     │ Action: Add pub mod validation;                                             │
+     │ ────────────────────────────────────────                                    │
+     │ File: spaces/spacetimedb/src/types.rs                                       │
+     │ Action: Add #[cfg(test)] module testing MemberRole::level() ordering        │
+     │ ────────────────────────────────────────                                    │
+     │ File: spaces/spacetimedb/src/reducers/users.rs                              │
+     │ Action: Refactor to call validation::validate_username(),                   │
+     │   validation::validate_agent_name()                                         │
+     │ ────────────────────────────────────────                                    │
+     │ File: spaces/spacetimedb/src/reducers/servers.rs                            │
+     │ Action: Refactor to call validation::validate_name(),                       │
+     │ validation::can_modify_role()                                               │
+     │ ────────────────────────────────────────                                    │
+     │ File: spaces/spacetimedb/src/reducers/channels.rs                           │
+     │ Action: Refactor to call validation::validate_name()                        │
+     │ ────────────────────────────────────────                                    │
+     │ File: spaces/spacetimedb/src/reducers/messages.rs                           │
+     │ Action: Refactor to call validation::validate_message_content(),            │
+     │   validation::validate_emoji()                                              │
+     │ ────────────────────────────────────────                                    │
+     │ File: spaces/spacetimedb/src/reducers/threads.rs                            │
+     │ Action: Refactor to call validation::validate_thread_name()                 │
+     │                                                                             │
+     │ validation.rs functions                                                     │
+     │                                                                             │
+     │ String validation (pure, no SpacetimeDB imports):                           │
+     │ - validate_username(s) -> Result<(), String> — non-empty, <=32 chars        │
+     │ - validate_name(s, entity) -> Result<(), String> — non-empty, <=100 chars   │
+     │ - validate_message_content(s) -> Result<(), String> — non-empty, <=4000     │
+     │ chars                                                                       │
+     │ - validate_emoji(s) -> Result<(), String> — non-empty                       │
+     │ - validate_agent_name(s) -> Result<(), String> — non-empty                  │
+     │ - validate_thread_name(s) -> Result<(), String> — non-empty                 │
+     │                                                                             │
+     │ Role hierarchy (pure constants + logic):                                    │
+     │ - Constants: ROLE_LEVEL_OWNER=4, ADMIN=3, MODERATOR=2, MEMBER=1, AGENT=1    │
+     │ - can_modify_role(actor_level, target_level, new_role_level,                │
+     │ target_is_owner, new_role_is_owner) -> Result<(), String>                   │
+     │ - check_role_sufficient(user_level, min_level, role_name) -> Result<(),     │
+     │ String>                                                                     │
+     │                                                                             │
+     │ State guards (pure boolean checks):                                         │
+     │ - guard_thread_not_archived(archived) -> Result                             │
+     │ - guard_thread_channel(thread_channel_id, expected) -> Result               │
+     │ - guard_not_already_agent(is_agent) -> Result                               │
+     │ - guard_message_owner(sender_matches) -> Result                             │
+     │ - guard_delete_permission(is_sender, is_admin) -> Result                    │
+     │ - guard_archive_permission(is_creator, is_admin) -> Result                  │
+     │ - guard_owner_cannot_leave(is_owner) -> Result                              │
+     │ - guard_only_owner_deletes(is_owner) -> Result                              │
+     │                                                                             │
+     │ Test coverage (~40 tests)                                                   │
+     │                                                                             │
+     │ - Validation boundaries: empty, at-limit, over-limit for each string        │
+     │ validator                                                                   │
+     │ - Role hierarchy: owner > admin > moderator > member = agent,               │
+     │ promotion/demotion rules                                                    │
+     │ - State guards: all boolean combinations (true/false for each flag)         │
+     │ - Role constants match MemberRole::level() values                           │
+     │                                                                             │
+     │ Acceptance criteria                                                         │
+     │                                                                             │
+     │ - cd spaces/spacetimedb && cargo test passes with 30+ tests                 │
+     │ - spacetime publish still works (WASM build unaffected)                     │
+     │ - Reducers call validation::* instead of inline checks                      │
+     │ - No behavioral changes (same error messages, same limits)                  │
+     │ - cd spaces && cargo fmt && cargo clippy --workspace -- -D warnings clean   │
+     │                                                                             │
+     │ ---                                                                         │
+     │ Priority 2: Arcan Integration Bridge (arcan/)                               │
+     │                                                                             │
+     │ Goal: Create arcan-spaces crate that lets Arcan agents connect to Spaces,   │
+     │ send/receive messages, and log activity to AgentLog channels.               │
+     │                                                                             │
+     │ Key design decision: Unlike arcan-lago (which implements SessionRepository  │
+     │ for persistence), arcan-spaces is a communication adapter — it exposes      │
+     │ Spaces operations as Arcan tools and provides a middleware for activity     │
+     │ logging.                                                                    │
+     │                                                                             │
+     │ Files to create                                                             │
+     │                                                                             │
+     │ File: arcan/crates/arcan-spaces/Cargo.toml                                  │
+     │ Purpose: Crate config, depends on arcan-core + spacetimedb-sdk              │
+     │ ────────────────────────────────────────                                    │
+     │ File: arcan/crates/arcan-spaces/src/lib.rs                                  │
+     │ Purpose: Module root, re-exports                                            │
+     │ ────────────────────────────────────────                                    │
+     │ File: arcan/crates/arcan-spaces/src/error.rs                                │
+     │ Purpose: SpacesError enum (thiserror)                                       │
+     │ ────────────────────────────────────────                                    │
+     │ File: arcan/crates/arcan-spaces/src/client.rs                               │
+     │ Purpose: SpacesClient wrapping SDK connection, blocking I/O                 │
+     │ ────────────────────────────────────────                                    │
+     │ File: arcan/crates/arcan-spaces/src/tools.rs                                │
+     │ Purpose: SpacesSendMessageTool, SpacesReadChannelTool, SpacesListTool       │
+     │ implementing                                                                │
+     │   arcan_core::Tool                                                          │
+     │ ────────────────────────────────────────                                    │
+     │ File: arcan/crates/arcan-spaces/src/middleware.rs                           │
+     │ Purpose: SpacesMiddleware implementing arcan_core::Middleware — mirrors     │
+     │ events to                                                                   │
+     │   AgentLog                                                                  │
+     │ ────────────────────────────────────────                                    │
+     │ File: arcan/crates/arcan-spaces/src/module_bindings/                        │
+     │ Purpose: Copy of generated bindings from spaces/src/module_bindings/        │
+     │                                                                             │
+     │ Files to modify                                                             │
+     │                                                                             │
+     │ File: arcan/Cargo.toml                                                      │
+     │ Change: Add crates/arcan-spaces to workspace members                        │
+     │ ────────────────────────────────────────                                    │
+     │ File: arcan/crates/arcan/Cargo.toml                                         │
+     │ Change: Add optional arcan-spaces dependency behind spaces feature flag     │
+     │                                                                             │
+     │ Key patterns (from arcan-lago)                                              │
+     │                                                                             │
+     │ - Sync/async bridge: SpacetimeDB SDK is blocking; use spawn_blocking when   │
+     │ called from async Arcan context                                             │
+     │ - Tool interface: Implement arcan_core::runtime::Tool trait for             │
+     │ definition() + execute()                                                    │
+     │ - Feature-gated: --features spaces to opt-in, keeps the base binary lean    │
+     │                                                                             │
+     │ Tools exposed to agents                                                     │
+     │                                                                             │
+     │ - spaces_send_message — Send message to channel (params: channel_id,        │
+     │ content, thread_id?)                                                        │
+     │ - spaces_read_channel — Read recent messages (params: channel_id, limit?)   │
+     │ - spaces_list_servers — List available servers                              │
+     │ - spaces_list_channels — List channels in a server (params: server_id)      │
+     │                                                                             │
+     │ Acceptance criteria                                                         │
+     │                                                                             │
+     │ - arcan-spaces compiles in the Arcan workspace                              │
+     │ - Tools implement arcan_core::runtime::Tool                                 │
+     │ - Middleware implements arcan_core::runtime::Middleware                     │
+     │ - cargo clippy --workspace clean                                            │
+     │ - At least 10 unit tests (tool arg parsing, error cases, middleware         │
+     │ behavior)                                                                   │
+     │                                                                             │
+     │ ---                                                                         │
+     │ Priority 3: DM / Private Messaging (spaces/)                                │
+     │                                                                             │
+     │ Goal: Add peer-to-peer direct messaging to the WASM module and CLI client.  │
+     │                                                                             │
+     │ Files to create/modify                                                      │
+     │                                                                             │
+     │ File: spaces/spacetimedb/src/tables.rs                                      │
+     │ Action: Add DirectConversation and DirectMessage tables                     │
+     │ ────────────────────────────────────────                                    │
+     │ File: spaces/spacetimedb/src/reducers/direct_messages.rs                    │
+     │ Action: CREATE — send_direct_message, edit_direct_message,                  │
+     │ delete_direct_message,                                                      │
+     │   mark_dm_read                                                              │
+     │ ────────────────────────────────────────                                    │
+     │ File: spaces/spacetimedb/src/reducers/mod.rs                                │
+     │ Action: Add pub mod direct_messages;                                        │
+     │ ────────────────────────────────────────                                    │
+     │ File: spaces/spacetimedb/src/validation.rs                                  │
+     │ Action: Add validate_dm_not_self()                                          │
+     │ ────────────────────────────────────────                                    │
+     │ File: spaces/src/main.rs                                                    │
+     │ Action: Add /dm, /dms, /dm-history CLI commands                             │
+     │                                                                             │
+     │ Table design                                                                │
+     │                                                                             │
+     │ - DirectConversation: id (PK, auto_inc), participant_a (Identity),          │
+     │ participant_b (Identity), created_at, last_message_at — participants        │
+     │ normalized (smaller hex first) to prevent duplicate conversations           │
+     │ - DirectMessage: id (PK, auto_inc), conversation_id (btree index), sender,  │
+     │ content, created_at, edited_at, read                                        │
+     │                                                                             │
+     │ Reducers                                                                    │
+     │                                                                             │
+     │ - send_direct_message(recipient, content) — validates content,              │
+     │ finds/creates conversation, inserts message                                 │
+     │ - edit_direct_message(message_id, new_content) — sender-only                │
+     │ - delete_direct_message(message_id) — sender-only                           │
+     │ - mark_dm_read(conversation_id) — marks unread messages from other          │
+     │ participant as read                                                         │
+     │                                                                             │
+     │ Acceptance criteria                                                         │
+     │                                                                             │
+     │ - Module publishes with new tables                                          │
+     │ - Client bindings regenerated                                               │
+     │ - /dm <user> <msg>, /dms, /dm-history <id> work in CLI                      │
+     │ - Validation tests for DM edge cases pass                                   │
+     │                                                                             │
+     │ ---                                                                         │
+     │ Sequencing                                                                  │
+     │                                                                             │
+     │ P1 (Tests) ─────────► Ship independently                                    │
+     │ P3 (DMs) ───────────► Ship independently (after P1 for shared               │
+     │ validation.rs)                                                              │
+     │ P2 (Bridge) ────────► Ship independently (after P1+P3 for full feature set) │
+     │                                                                             │
+     │ P1 is the foundation. P2 and P3 are independent of each other but both      │
+     │ benefit from P1's validation module.                                        │
+     │                                                                             │
+     │ Verification                                                                │
+     │                                                                             │
+     │ # After P1:                                                                 │
+     │ cd spaces/spacetimedb && cargo test        # 30+ tests pass                 │
+     │ cd spaces && cargo fmt && cargo clippy --workspace -- -D warnings           │
+     │                                                                             │
+     │ # After P3:                                                                 │
+     │ spacetime publish spaces --clear-database -y --module-path spacetimedb      │
+     │ spacetime generate --lang rust --out-dir src/module_bindings --module-path  │
+     │ spacetimedb                                                                 │
+     │ cd spaces && cargo build                                                    │
+     │                                                                             │
+     │ # After P2:                                                                 │
+     │ cd arcan && cargo clippy --workspace -- -D warnings && cargo test           │
+     │ --workspace
+
+---
+
+Base directory for this skill: /Users/broomva/.claude/skills/find-skills
+
+# Find Skills
+
+This skill helps you discover and install skills from the open agent skills ecosystem.
+
+## When to Use This Skill
+
+Use this skill when the user:
+
+- Asks "how do I do X" where X might be a common task with an existing skill
+- Says "find a skill for X" or "is there a skill for X"
+- Asks "can you do X" where X is a specialized capability
+- Expresses interest in extending agent capabilities
+- Wants to search for tools, templates, or workflows
+- Mentions they wish they had help with a specific domain (design, testing, deployment, etc.)
+
+## What is the Skills CLI?
+
+The Skills CLI (`npx skills`) is the package manager for the open agent skills ecosystem. Skills are modular packages that extend agent capabilities with specialized knowledge, workflows, and tools.
+
+**Key commands:**
+
+- `npx skills find [query]` - Search for skills interactively or by keyword
+- `npx skills add <package>` - Install a skill from GitHub or other sources
+- `npx skills check` - Check for skill updates
+- `npx skills update` - Update all installed skills
+
+**Browse skills at:** https://skills.sh/
+
+## How to Help Users Find Skills
+
+### Step 1: Understand What They Need
+
+When a user asks for help with something, identify:
+
+1. The domain (e.g., React, testing, design, deployment)
+2. The specific task (e.g., writing tests, creating animations, reviewing PRs)
+3. Whether this is a common enough task that a skill likely exists
+
+### Step 2: Search for Skills
+
+Run the find command with a relevant query:
+
+```bash
+npx skills find [query]
+```
+
+For example:
+
+- User asks "how do I make my React app faster?" → `npx skills find react performance`
+- User asks "can you help me with PR reviews?" → `npx skills find pr review`
+- User asks "I need to create a changelog" → `npx skills find changelog`
+
+The command will return results like:
+
+```
+Install with npx skills add <owner/repo@skill>
+
+vercel-labs/agent-skills@vercel-react-best-practices
+└ https://skills.sh/vercel-labs/agent-skills/vercel-react-best-practices
+```
+
+### Step 3: Present Options to the User
+
+When you find relevant skills, present them to the user with:
+
+1. The skill name and what it does
+2. The install command they can run
+3. A link to learn more at skills.sh
+
+Example response:
+
+```
+I found a skill that might help! The "vercel-react-best-practices" skill provides
+React and Next.js performance optimization guidelines from Vercel Engineering.
+
+To install it:
+npx skills add vercel-labs/agent-skills@vercel-react-best-practices
+
+Learn more: https://skills.sh/vercel-labs/agent-skills/vercel-react-best-practices
+```
+
+### Step 4: Offer to Install
+
+If the user wants to proceed, you can install the skill for them:
+
+```bash
+npx skills add <owner/repo@skill> -g -y
+```
+
+The `-g` flag installs globally (user-level) and `-y` skips confirmation prompts.
+
+## Common Skill Categories
+
+When searching, consider these common categories:
+
+| Category        | Example Queries                          |
+| --------------- | ---------------------------------------- |
+| Web Development | react, nextjs, typescript, css, tailwind |
+| Testing         | testing, jest, playwright, e2e           |
+| DevOps          | deploy, docker, kubernetes, ci-cd        |
+| Documentation   | docs, readme, changelog, api-docs        |
+| Code Quality    | review, lint, refactor, best-practices   |
+| Design          | ui, ux, design-system, accessibility     |
+| Productivity    | workflow, automation, git                |
+
+## Tips for Effective Searches
+
+1. **Use specific keywords**: "react testing" is better than just "testing"
+2. **Try alternative terms**: If "deploy" doesn't work, try "deployment" or "ci-cd"
+3. **Check popular sources**: Many skills come from `vercel-labs/agent-skills` or `ComposioHQ/awesome-claude-skills`
+
+## When No Skills Are Found
+
+If no relevant skills exist:
+
+1. Acknowledge that no existing skill was found
+2. Offer to help with the task directly using your general capabilities
+3. Suggest the user could create their own skill with `npx skills init`
+
+Example:
+
+```
+I searched for skills related to "xyz" but didn't find any matches.
+I can still help you with this task directly! Would you like me to proceed?
+
+If this is something you do often, you could create your own skill:
+npx skills init my-xyz-skill
+```
+
+
+ARGUMENTS: spacetimedb testing best practices
