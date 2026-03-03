@@ -1,0 +1,27 @@
+[package]
+name = "praxis-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Canonical tool implementations (filesystem, editing, shell, memory) for the Praxis tool engine"
+
+[dependencies]
+aios-protocol.workspace = true
+praxis-core.workspace = true
+blake3.workspace = true
+glob.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
