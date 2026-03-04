@@ -3,9 +3,11 @@
   "checkpoint_id": "791d7baf3643",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 1,
+  "checkpoints_count": 2,
   "files_touched": [
+    "praxis/crates/praxis-core/src/fs_port.rs",
     "praxis/crates/praxis-core/src/lib.rs",
+    "praxis/crates/praxis-core/src/local_fs.rs",
     "praxis/crates/praxis-tools/src/edit.rs",
     "praxis/crates/praxis-tools/src/fs.rs"
   ],
@@ -16,13 +18,20 @@
       "context": "/79/1d7baf3643/0/context.md",
       "content_hash": "/79/1d7baf3643/0/content_hash.txt",
       "prompt": "/79/1d7baf3643/0/prompt.txt"
+    },
+    {
+      "metadata": "/79/1d7baf3643/1/metadata.json",
+      "transcript": "/79/1d7baf3643/1/full.jsonl",
+      "context": "/79/1d7baf3643/1/context.md",
+      "content_hash": "/79/1d7baf3643/1/content_hash.txt",
+      "prompt": "/79/1d7baf3643/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 787,
-    "cache_creation_tokens": 368157,
-    "cache_read_tokens": 17220886,
-    "output_tokens": 40730,
-    "api_call_count": 156
+    "input_tokens": 878,
+    "cache_creation_tokens": 587623,
+    "cache_read_tokens": 26996313,
+    "output_tokens": 47259,
+    "api_call_count": 243
   }
 }
