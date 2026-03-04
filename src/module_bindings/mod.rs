@@ -17,11 +17,18 @@ pub mod create_channel_reducer;
 pub mod create_server_reducer;
 pub mod create_thread_reducer;
 pub mod delete_channel_reducer;
+pub mod delete_direct_message_reducer;
 pub mod delete_message_reducer;
 pub mod delete_server_reducer;
+pub mod direct_conversation_table;
+pub mod direct_conversation_type;
+pub mod direct_message_table;
+pub mod direct_message_type;
+pub mod edit_direct_message_reducer;
 pub mod edit_message_reducer;
 pub mod join_server_reducer;
 pub mod leave_server_reducer;
+pub mod mark_dm_read_reducer;
 pub mod mark_read_reducer;
 pub mod member_role_type;
 pub mod message_table;
@@ -31,6 +38,7 @@ pub mod reaction_table;
 pub mod reaction_type;
 pub mod register_agent_reducer;
 pub mod remove_reaction_reducer;
+pub mod send_direct_message_reducer;
 pub mod send_message_reducer;
 pub mod server_member_table;
 pub mod server_member_type;
@@ -63,11 +71,18 @@ pub use create_channel_reducer::create_channel;
 pub use create_server_reducer::create_server;
 pub use create_thread_reducer::create_thread;
 pub use delete_channel_reducer::delete_channel;
+pub use delete_direct_message_reducer::delete_direct_message;
 pub use delete_message_reducer::delete_message;
 pub use delete_server_reducer::delete_server;
+pub use direct_conversation_table::*;
+pub use direct_conversation_type::DirectConversation;
+pub use direct_message_table::*;
+pub use direct_message_type::DirectMessage;
+pub use edit_direct_message_reducer::edit_direct_message;
 pub use edit_message_reducer::edit_message;
 pub use join_server_reducer::join_server;
 pub use leave_server_reducer::leave_server;
+pub use mark_dm_read_reducer::mark_dm_read;
 pub use mark_read_reducer::mark_read;
 pub use member_role_type::MemberRole;
 pub use message_table::*;
@@ -77,6 +92,7 @@ pub use reaction_table::*;
 pub use reaction_type::Reaction;
 pub use register_agent_reducer::register_agent;
 pub use remove_reaction_reducer::remove_reaction;
+pub use send_direct_message_reducer::send_direct_message;
 pub use send_message_reducer::send_message;
 pub use server_member_table::*;
 pub use server_member_type::ServerMember;
@@ -130,11 +146,18 @@ pub enum Reducer {
     DeleteChannel {
         channel_id: u64,
     },
+    DeleteDirectMessage {
+        message_id: u64,
+    },
     DeleteMessage {
         message_id: u64,
     },
     DeleteServer {
         server_id: u64,
+    },
+    EditDirectMessage {
+        message_id: u64,
+        new_content: String,
     },
     EditMessage {
         message_id: u64,
@@ -145,6 +168,9 @@ pub enum Reducer {
     },
     LeaveServer {
         server_id: u64,
+    },
+    MarkDmRead {
+        conversation_id: u64,
     },
     MarkRead {
         channel_id: u64,
@@ -157,6 +183,10 @@ pub enum Reducer {
     RemoveReaction {
         message_id: u64,
         emoji: String,
+    },
+    SendDirectMessage {
+        recipient: __sdk::Identity,
+        content: String,
     },
     SendMessage {
         channel_id: u64,
@@ -203,14 +233,18 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateServer { .. } => "create_server",
             Reducer::CreateThread { .. } => "create_thread",
             Reducer::DeleteChannel { .. } => "delete_channel",
+            Reducer::DeleteDirectMessage { .. } => "delete_direct_message",
             Reducer::DeleteMessage { .. } => "delete_message",
             Reducer::DeleteServer { .. } => "delete_server",
+            Reducer::EditDirectMessage { .. } => "edit_direct_message",
             Reducer::EditMessage { .. } => "edit_message",
             Reducer::JoinServer { .. } => "join_server",
             Reducer::LeaveServer { .. } => "leave_server",
+            Reducer::MarkDmRead { .. } => "mark_dm_read",
             Reducer::MarkRead { .. } => "mark_read",
             Reducer::RegisterAgent { .. } => "register_agent",
             Reducer::RemoveReaction { .. } => "remove_reaction",
+            Reducer::SendDirectMessage { .. } => "send_direct_message",
             Reducer::SendMessage { .. } => "send_message",
             Reducer::SetProfile { .. } => "set_profile",
             Reducer::StartTyping { .. } => "start_typing",
@@ -263,6 +297,11 @@ impl __sdk::Reducer for Reducer {
                     channel_id: channel_id.clone(),
                 })
             }
+            Reducer::DeleteDirectMessage { message_id } => {
+                __sats::bsatn::to_vec(&delete_direct_message_reducer::DeleteDirectMessageArgs {
+                    message_id: message_id.clone(),
+                })
+            }
             Reducer::DeleteMessage { message_id } => {
                 __sats::bsatn::to_vec(&delete_message_reducer::DeleteMessageArgs {
                     message_id: message_id.clone(),
@@ -273,6 +312,13 @@ impl __sdk::Reducer for Reducer {
                     server_id: server_id.clone(),
                 })
             }
+            Reducer::EditDirectMessage {
+                message_id,
+                new_content,
+            } => __sats::bsatn::to_vec(&edit_direct_message_reducer::EditDirectMessageArgs {
+                message_id: message_id.clone(),
+                new_content: new_content.clone(),
+            }),
             Reducer::EditMessage {
                 message_id,
                 new_content,
@@ -288,6 +334,11 @@ impl __sdk::Reducer for Reducer {
             Reducer::LeaveServer { server_id } => {
                 __sats::bsatn::to_vec(&leave_server_reducer::LeaveServerArgs {
                     server_id: server_id.clone(),
+                })
+            }
+            Reducer::MarkDmRead { conversation_id } => {
+                __sats::bsatn::to_vec(&mark_dm_read_reducer::MarkDmReadArgs {
+                    conversation_id: conversation_id.clone(),
                 })
             }
             Reducer::MarkRead {
@@ -308,6 +359,12 @@ impl __sdk::Reducer for Reducer {
                 __sats::bsatn::to_vec(&remove_reaction_reducer::RemoveReactionArgs {
                     message_id: message_id.clone(),
                     emoji: emoji.clone(),
+                })
+            }
+            Reducer::SendDirectMessage { recipient, content } => {
+                __sats::bsatn::to_vec(&send_direct_message_reducer::SendDirectMessageArgs {
+                    recipient: recipient.clone(),
+                    content: content.clone(),
                 })
             }
             Reducer::SendMessage {
@@ -375,6 +432,8 @@ impl __sdk::Reducer for Reducer {
 pub struct DbUpdate {
     channel: __sdk::TableUpdate<Channel>,
     channel_read_state: __sdk::TableUpdate<ChannelReadState>,
+    direct_conversation: __sdk::TableUpdate<DirectConversation>,
+    direct_message: __sdk::TableUpdate<DirectMessage>,
     message: __sdk::TableUpdate<Message>,
     reaction: __sdk::TableUpdate<Reaction>,
     server: __sdk::TableUpdate<Server>,
@@ -398,6 +457,12 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "channel_read_state" => db_update
                     .channel_read_state
                     .append(channel_read_state_table::parse_table_update(table_update)?),
+                "direct_conversation" => db_update
+                    .direct_conversation
+                    .append(direct_conversation_table::parse_table_update(table_update)?),
+                "direct_message" => db_update
+                    .direct_message
+                    .append(direct_message_table::parse_table_update(table_update)?),
                 "message" => db_update
                     .message
                     .append(message_table::parse_table_update(table_update)?),
@@ -457,6 +522,15 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.channel_read_state = cache
             .apply_diff_to_table::<ChannelReadState>("channel_read_state", &self.channel_read_state)
             .with_updates_by_pk(|row| &row.id);
+        diff.direct_conversation = cache
+            .apply_diff_to_table::<DirectConversation>(
+                "direct_conversation",
+                &self.direct_conversation,
+            )
+            .with_updates_by_pk(|row| &row.id);
+        diff.direct_message = cache
+            .apply_diff_to_table::<DirectMessage>("direct_message", &self.direct_message)
+            .with_updates_by_pk(|row| &row.id);
         diff.message = cache
             .apply_diff_to_table::<Message>("message", &self.message)
             .with_updates_by_pk(|row| &row.id);
@@ -499,6 +573,12 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "channel_read_state" => db_update
                     .channel_read_state
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "direct_conversation" => db_update
+                    .direct_conversation
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "direct_message" => db_update
+                    .direct_message
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "message" => db_update
                     .message
@@ -546,6 +626,12 @@ impl __sdk::DbUpdate for DbUpdate {
                 "channel_read_state" => db_update
                     .channel_read_state
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "direct_conversation" => db_update
+                    .direct_conversation
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "direct_message" => db_update
+                    .direct_message
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "message" => db_update
                     .message
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -590,6 +676,8 @@ impl __sdk::DbUpdate for DbUpdate {
 pub struct AppliedDiff<'r> {
     channel: __sdk::TableAppliedDiff<'r, Channel>,
     channel_read_state: __sdk::TableAppliedDiff<'r, ChannelReadState>,
+    direct_conversation: __sdk::TableAppliedDiff<'r, DirectConversation>,
+    direct_message: __sdk::TableAppliedDiff<'r, DirectMessage>,
     message: __sdk::TableAppliedDiff<'r, Message>,
     reaction: __sdk::TableAppliedDiff<'r, Reaction>,
     server: __sdk::TableAppliedDiff<'r, Server>,
@@ -616,6 +704,16 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<ChannelReadState>(
             "channel_read_state",
             &self.channel_read_state,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<DirectConversation>(
+            "direct_conversation",
+            &self.direct_conversation,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<DirectMessage>(
+            "direct_message",
+            &self.direct_message,
             event,
         );
         callbacks.invoke_table_row_callbacks::<Message>("message", &self.message, event);
@@ -1293,6 +1391,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         channel_table::register_table(client_cache);
         channel_read_state_table::register_table(client_cache);
+        direct_conversation_table::register_table(client_cache);
+        direct_message_table::register_table(client_cache);
         message_table::register_table(client_cache);
         reaction_table::register_table(client_cache);
         server_table::register_table(client_cache);
@@ -1306,6 +1406,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "channel",
         "channel_read_state",
+        "direct_conversation",
+        "direct_message",
         "message",
         "reaction",
         "server",

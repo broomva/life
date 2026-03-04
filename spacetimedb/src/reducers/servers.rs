@@ -2,22 +2,25 @@ use spacetimedb::{reducer, ReducerContext, Table};
 
 use crate::auth;
 use crate::tables::{
-    channel, message, reaction, server, server_member, thread, user_profile,
-    Channel, Message, Server, ServerMember,
+    channel, message, reaction, server, server_member, thread, user_profile, Channel, Message,
+    Server, ServerMember,
 };
 use crate::types::{ChannelType, MemberRole, MessageType};
+use crate::validation;
 
 #[reducer]
-pub fn create_server(ctx: &ReducerContext, name: String, description: Option<String>) -> Result<(), String> {
-    if name.is_empty() {
-        return Err("Server name cannot be empty".to_string());
-    }
-    if name.len() > 100 {
-        return Err("Server name must be 100 characters or fewer".to_string());
-    }
+pub fn create_server(
+    ctx: &ReducerContext,
+    name: String,
+    description: Option<String>,
+) -> Result<(), String> {
+    validation::validate_name(&name, "Server")?;
 
     // Ensure user has a profile
-    ctx.db.user_profile().identity().find(ctx.sender())
+    ctx.db
+        .user_profile()
+        .identity()
+        .find(ctx.sender())
         .ok_or("Must be connected to create a server")?;
 
     let server = ctx.db.server().insert(Server {
@@ -49,7 +52,12 @@ pub fn create_server(ctx: &ReducerContext, name: String, description: Option<Str
         created_at: ctx.timestamp,
     });
 
-    log::info!("Server '{}' (id={}) created by {:?}", server.name, server.id, ctx.sender());
+    log::info!(
+        "Server '{}' (id={}) created by {:?}",
+        server.name,
+        server.id,
+        ctx.sender()
+    );
     Ok(())
 }
 
@@ -62,13 +70,15 @@ pub fn update_server(
 ) -> Result<(), String> {
     auth::require_role(ctx, server_id, MemberRole::Admin)?;
 
-    let server = ctx.db.server().id().find(server_id)
+    let server = ctx
+        .db
+        .server()
+        .id()
+        .find(server_id)
         .ok_or("Server not found")?;
 
     let new_name = name.unwrap_or(server.name.clone());
-    if new_name.is_empty() {
-        return Err("Server name cannot be empty".to_string());
-    }
+    validation::validate_name(&new_name, "Server")?;
 
     ctx.db.server().id().update(Server {
         name: new_name,
@@ -81,12 +91,14 @@ pub fn update_server(
 
 #[reducer]
 pub fn delete_server(ctx: &ReducerContext, server_id: u64) -> Result<(), String> {
-    let server = ctx.db.server().id().find(server_id)
+    let server = ctx
+        .db
+        .server()
+        .id()
+        .find(server_id)
         .ok_or("Server not found")?;
 
-    if server.owner != ctx.sender() {
-        return Err("Only the server owner can delete the server".to_string());
-    }
+    validation::guard_only_owner_deletes(server.owner == ctx.sender())?;
 
     // Cascade delete: messages, channels, members
     let channels: Vec<_> = ctx.db.channel().server_id().filter(&server_id).collect();
@@ -96,35 +108,46 @@ pub fn delete_server(ctx: &ReducerContext, server_id: u64) -> Result<(), String>
             // Delete reactions for this message
             let reactions: Vec<_> = ctx.db.reaction().message_id().filter(&msg.id).collect();
             for r in &reactions {
-                ctx.db.reaction().id().delete(&r.id);
+                ctx.db.reaction().id().delete(r.id);
             }
-            ctx.db.message().id().delete(&msg.id);
+            ctx.db.message().id().delete(msg.id);
         }
         // Delete threads
         let threads: Vec<_> = ctx.db.thread().channel_id().filter(&ch.id).collect();
         for t in &threads {
-            ctx.db.thread().id().delete(&t.id);
+            ctx.db.thread().id().delete(t.id);
         }
-        ctx.db.channel().id().delete(&ch.id);
+        ctx.db.channel().id().delete(ch.id);
     }
 
     // Delete members
-    let members: Vec<_> = ctx.db.server_member().server_id().filter(&server_id).collect();
+    let members: Vec<_> = ctx
+        .db
+        .server_member()
+        .server_id()
+        .filter(&server_id)
+        .collect();
     for m in &members {
-        ctx.db.server_member().id().delete(&m.id);
+        ctx.db.server_member().id().delete(m.id);
     }
 
-    ctx.db.server().id().delete(&server_id);
+    ctx.db.server().id().delete(server_id);
     log::info!("Server {} deleted by {:?}", server_id, ctx.sender());
     Ok(())
 }
 
 #[reducer]
 pub fn join_server(ctx: &ReducerContext, server_id: u64) -> Result<(), String> {
-    ctx.db.server().id().find(server_id)
+    ctx.db
+        .server()
+        .id()
+        .find(server_id)
         .ok_or("Server not found")?;
 
-    ctx.db.user_profile().identity().find(ctx.sender())
+    ctx.db
+        .user_profile()
+        .identity()
+        .find(ctx.sender())
         .ok_or("Must be connected to join a server")?;
 
     // Check not already a member
@@ -132,11 +155,19 @@ pub fn join_server(ctx: &ReducerContext, server_id: u64) -> Result<(), String> {
         return Err("Already a member of this server".to_string());
     }
 
-    let is_agent = ctx.db.user_profile().identity().find(ctx.sender())
+    let is_agent = ctx
+        .db
+        .user_profile()
+        .identity()
+        .find(ctx.sender())
         .map(|p| p.is_agent)
         .unwrap_or(false);
 
-    let role = if is_agent { MemberRole::Agent } else { MemberRole::Member };
+    let role = if is_agent {
+        MemberRole::Agent
+    } else {
+        MemberRole::Member
+    };
 
     ctx.db.server_member().insert(ServerMember {
         id: 0,
@@ -147,11 +178,17 @@ pub fn join_server(ctx: &ReducerContext, server_id: u64) -> Result<(), String> {
     });
 
     // Post a system join message in general channel
-    if let Some(general) = ctx.db.channel().server_id().filter(&server_id)
+    if let Some(general) = ctx
+        .db
+        .channel()
+        .server_id()
+        .filter(&server_id)
         .find(|c| c.name == "general")
     {
         let profile = ctx.db.user_profile().identity().find(ctx.sender());
-        let name = profile.map(|p| p.username).unwrap_or_else(|| "Unknown".to_string());
+        let name = profile
+            .map(|p| p.username)
+            .unwrap_or_else(|| "Unknown".to_string());
         ctx.db.message().insert(Message {
             id: 0,
             channel_id: general.id,
@@ -170,22 +207,30 @@ pub fn join_server(ctx: &ReducerContext, server_id: u64) -> Result<(), String> {
 
 #[reducer]
 pub fn leave_server(ctx: &ReducerContext, server_id: u64) -> Result<(), String> {
-    let server = ctx.db.server().id().find(server_id)
+    let server = ctx
+        .db
+        .server()
+        .id()
+        .find(server_id)
         .ok_or("Server not found")?;
 
-    if server.owner == ctx.sender() {
-        return Err("Server owner cannot leave. Transfer ownership or delete the server.".to_string());
-    }
+    validation::guard_owner_cannot_leave(server.owner == ctx.sender())?;
 
     let member = auth::require_member(ctx, server_id)?;
-    ctx.db.server_member().id().delete(&member.id);
+    ctx.db.server_member().id().delete(member.id);
 
     // Post a system leave message
-    if let Some(general) = ctx.db.channel().server_id().filter(&server_id)
+    if let Some(general) = ctx
+        .db
+        .channel()
+        .server_id()
+        .filter(&server_id)
         .find(|c| c.name == "general")
     {
         let profile = ctx.db.user_profile().identity().find(ctx.sender());
-        let name = profile.map(|p| p.username).unwrap_or_else(|| "Unknown".to_string());
+        let name = profile
+            .map(|p| p.username)
+            .unwrap_or_else(|| "Unknown".to_string());
         ctx.db.message().insert(Message {
             id: 0,
             channel_id: general.id,
@@ -213,21 +258,13 @@ pub fn update_member_role(
     let target = auth::get_membership(ctx, server_id, target_identity)
         .ok_or("Target is not a member of this server")?;
 
-    // Cannot change owner role
-    if target.role == MemberRole::Owner {
-        return Err("Cannot change the owner's role".to_string());
-    }
-    if new_role == MemberRole::Owner {
-        return Err("Cannot assign Owner role. Use transfer ownership instead.".to_string());
-    }
-
-    // Actor must outrank the target's current role AND the new role
-    if actor.role.level() <= target.role.level() {
-        return Err("Cannot modify role of someone with equal or higher rank".to_string());
-    }
-    if actor.role.level() <= new_role.level() {
-        return Err("Cannot assign a role equal to or higher than your own".to_string());
-    }
+    validation::can_modify_role(
+        actor.role.level(),
+        target.role.level(),
+        new_role.level(),
+        target.role == MemberRole::Owner,
+        new_role == MemberRole::Owner,
+    )?;
 
     ctx.db.server_member().id().update(ServerMember {
         role: new_role,

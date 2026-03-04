@@ -3,6 +3,7 @@ use spacetimedb::{reducer, ReducerContext, Table};
 use crate::auth;
 use crate::tables::{channel, message, reaction, thread, Channel};
 use crate::types::{ChannelType, MemberRole};
+use crate::validation;
 
 #[reducer]
 pub fn create_channel(
@@ -11,17 +12,16 @@ pub fn create_channel(
     name: String,
     channel_type: ChannelType,
 ) -> Result<(), String> {
-    if name.is_empty() {
-        return Err("Channel name cannot be empty".to_string());
-    }
-    if name.len() > 100 {
-        return Err("Channel name must be 100 characters or fewer".to_string());
-    }
+    validation::validate_name(&name, "Channel")?;
 
     auth::require_role(ctx, server_id, MemberRole::Admin)?;
 
     // Determine next position
-    let max_pos = ctx.db.channel().server_id().filter(&server_id)
+    let max_pos = ctx
+        .db
+        .channel()
+        .server_id()
+        .filter(&server_id)
         .map(|c| c.position)
         .max()
         .unwrap_or(0);
@@ -50,9 +50,7 @@ pub fn update_channel(
     auth::require_role(ctx, channel.server_id, MemberRole::Admin)?;
 
     let new_name = name.unwrap_or(channel.name.clone());
-    if new_name.is_empty() {
-        return Err("Channel name cannot be empty".to_string());
-    }
+    validation::validate_name(&new_name, "Channel")?;
 
     ctx.db.channel().id().update(Channel {
         name: new_name,
@@ -73,17 +71,17 @@ pub fn delete_channel(ctx: &ReducerContext, channel_id: u64) -> Result<(), Strin
     for msg in &messages {
         let reactions: Vec<_> = ctx.db.reaction().message_id().filter(&msg.id).collect();
         for r in &reactions {
-            ctx.db.reaction().id().delete(&r.id);
+            ctx.db.reaction().id().delete(r.id);
         }
-        ctx.db.message().id().delete(&msg.id);
+        ctx.db.message().id().delete(msg.id);
     }
 
     // Delete threads
     let threads: Vec<_> = ctx.db.thread().channel_id().filter(&channel_id).collect();
     for t in &threads {
-        ctx.db.thread().id().delete(&t.id);
+        ctx.db.thread().id().delete(t.id);
     }
 
-    ctx.db.channel().id().delete(&channel_id);
+    ctx.db.channel().id().delete(channel_id);
     Ok(())
 }

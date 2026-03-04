@@ -7,8 +7,12 @@ license-file = "LICENSE"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["module"]
+module = ["dep:spacetimedb", "dep:log"]
 
 [dependencies]
-spacetimedb = { version = "2.0.2" }
-log.version = "0.4.17"
+spacetimedb = { version = "2.0.2", optional = true }
+log = { version = "0.4.17", optional = true }

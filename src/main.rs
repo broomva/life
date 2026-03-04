@@ -86,6 +86,10 @@ fn register_callbacks(ctx: &DbConnection) {
     ctx.db.message().on_insert(on_message_inserted);
     ctx.db.server().on_insert(on_server_inserted);
     ctx.db.channel().on_insert(on_channel_inserted);
+    #[cfg(feature = "dm")]
+    ctx.db
+        .direct_message()
+        .on_insert(on_direct_message_inserted);
 }
 
 fn on_user_profile_inserted(ctx: &EventContext, profile: &UserProfile) {
@@ -134,6 +138,15 @@ fn on_channel_inserted(ctx: &EventContext, channel: &Channel) {
         return;
     }
     println!("[+] New channel: #{} (id={})", channel.name, channel.id);
+}
+
+#[cfg(feature = "dm")]
+fn on_direct_message_inserted(ctx: &EventContext, msg: &DirectMessage) {
+    if matches!(ctx.event, Event::SubscribeApplied) {
+        return;
+    }
+    let sender_name = user_display_name(ctx, &msg.sender);
+    println!("[DM] {}: {}", sender_name, msg.content);
 }
 
 // --- Helpers ---
@@ -314,6 +327,12 @@ fn handle_command(ctx: &DbConnection, input: &str) {
         "/agent" => cmd_register_agent(ctx, arg),
         "/who" => cmd_who(ctx),
         "/history" => cmd_history(ctx, arg),
+        #[cfg(feature = "dm")]
+        "/dm" => cmd_dm(ctx, arg),
+        #[cfg(feature = "dm")]
+        "/dms" => cmd_list_dms(ctx),
+        #[cfg(feature = "dm")]
+        "/dm-history" => cmd_dm_history(ctx, arg),
         _ => eprintln!("Unknown command: {cmd}. Type /help for available commands."),
     }
 }
@@ -352,6 +371,14 @@ User:
   /who                     - Show online users
   /members                 - List server members
   /help                    - Show this help
+"#
+    );
+    #[cfg(feature = "dm")]
+    println!(
+        r#"Direct Messages:
+  /dm <user> <message>     - Send a direct message
+  /dms                     - List your conversations
+  /dm-history <id> [n]     - Show DM history (default 25)
 "#
     );
 }
@@ -719,4 +746,141 @@ fn cmd_history(ctx: &DbConnection, arg: &str) {
         print_message(ctx, msg);
     }
     println!("--- End ---");
+}
+
+// --- Direct Message Commands ---
+
+#[cfg(feature = "dm")]
+fn cmd_dm(ctx: &DbConnection, arg: &str) {
+    let parts: Vec<&str> = arg.splitn(2, ' ').collect();
+    if parts.len() < 2 {
+        eprintln!("Usage: /dm <username> <message>");
+        return;
+    }
+    let target_name = parts[0];
+    let content = parts[1].to_string();
+
+    // Look up recipient by username
+    let recipient = ctx
+        .db
+        .user_profile()
+        .iter()
+        .find(|p| p.username == target_name);
+    let Some(recipient) = recipient else {
+        eprintln!("User not found: {target_name}");
+        return;
+    };
+
+    if let Err(e) = ctx
+        .reducers
+        .send_direct_message(recipient.identity, content)
+    {
+        eprintln!("Failed to send DM: {e}");
+    } else {
+        println!("[DM -> {}] sent", target_name);
+    }
+}
+
+#[cfg(feature = "dm")]
+fn cmd_list_dms(ctx: &DbConnection) {
+    let my_identity = ctx.identity();
+    let mut convs: Vec<_> = ctx
+        .db
+        .direct_conversation()
+        .iter()
+        .filter(|c| c.participant_a == my_identity || c.participant_b == my_identity)
+        .collect();
+    convs.sort_by(|a, b| b.last_message_at.cmp(&a.last_message_at));
+
+    if convs.is_empty() {
+        println!("No direct conversations.");
+        return;
+    }
+
+    println!("Direct Conversations:");
+    for conv in &convs {
+        let other = if conv.participant_a == my_identity {
+            &conv.participant_b
+        } else {
+            &conv.participant_a
+        };
+        let other_name = user_display_name(ctx, other);
+
+        // Count unread messages
+        let unread = ctx
+            .db
+            .direct_message()
+            .iter()
+            .filter(|m| m.conversation_id == conv.id && m.sender != my_identity && !m.read)
+            .count();
+
+        let unread_tag = if unread > 0 {
+            format!(" ({unread} unread)")
+        } else {
+            String::new()
+        };
+        println!("  [{}] {}{}", conv.id, other_name, unread_tag);
+    }
+}
+
+#[cfg(feature = "dm")]
+fn cmd_dm_history(ctx: &DbConnection, arg: &str) {
+    let parts: Vec<&str> = arg.splitn(2, ' ').collect();
+    if parts.is_empty() || parts[0].is_empty() {
+        eprintln!("Usage: /dm-history <conversation_id> [n]");
+        return;
+    }
+    let Ok(conv_id) = parts[0].parse::<u64>() else {
+        eprintln!("Invalid conversation ID: {}", parts[0]);
+        return;
+    };
+    let count: usize = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(25);
+
+    let conv = ctx.db.direct_conversation().id().find(&conv_id);
+    if conv.is_none() {
+        eprintln!("Conversation not found: {conv_id}");
+        return;
+    }
+
+    let mut msgs: Vec<_> = ctx
+        .db
+        .direct_message()
+        .iter()
+        .filter(|m| m.conversation_id == conv_id)
+        .collect();
+    msgs.sort_by_key(|m| m.created_at);
+    let recent: Vec<_> = msgs
+        .iter()
+        .rev()
+        .take(count)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+
+    if recent.is_empty() {
+        println!("No messages in this conversation.");
+        return;
+    }
+
+    println!("--- DM History ({}) ---", recent.len());
+    for msg in recent {
+        let sender_name = user_display_name(ctx, &msg.sender);
+        let edit_mark = if msg.edited_at.is_some() {
+            " (edited)"
+        } else {
+            ""
+        };
+        let read_mark = if msg.read { "" } else { " [unread]" };
+        println!(
+            "  {}: {}{}{}",
+            sender_name, msg.content, edit_mark, read_mark
+        );
+    }
+    println!("--- End ---");
+
+    // Mark as read
+    if let Err(e) = ctx.reducers.mark_dm_read(conv_id) {
+        eprintln!("Failed to mark as read: {e}");
+    }
 }

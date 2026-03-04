@@ -1,6 +1,7 @@
 use spacetimedb::{reducer, ReducerContext};
 
 use crate::tables::{user_profile, UserProfile};
+use crate::validation;
 
 #[reducer]
 pub fn set_profile(
@@ -10,21 +11,18 @@ pub fn set_profile(
     avatar_url: Option<String>,
     bio: Option<String>,
 ) -> Result<(), String> {
-    if username.is_empty() {
-        return Err("Username cannot be empty".to_string());
-    }
-    if username.len() > 32 {
-        return Err("Username must be 32 characters or fewer".to_string());
-    }
+    validation::validate_username(&username)?;
 
-    let profile = ctx.db.user_profile().identity().find(ctx.sender())
+    let profile = ctx
+        .db
+        .user_profile()
+        .identity()
+        .find(ctx.sender())
         .ok_or("User profile not found. Connect first.")?;
 
     // Check username uniqueness (if changing)
-    if profile.username != username {
-        if ctx.db.user_profile().username().find(&username).is_some() {
-            return Err(format!("Username '{}' is already taken", username));
-        }
+    if profile.username != username && ctx.db.user_profile().username().find(&username).is_some() {
+        return Err(format!("Username '{}' is already taken", username));
     }
 
     ctx.db.user_profile().identity().update(UserProfile {
@@ -44,22 +42,22 @@ pub fn register_agent(
     agent_name: String,
     description: String,
 ) -> Result<(), String> {
-    if agent_name.is_empty() {
-        return Err("Agent name cannot be empty".to_string());
-    }
+    validation::validate_agent_name(&agent_name)?;
 
-    let profile = ctx.db.user_profile().identity().find(ctx.sender())
+    let profile = ctx
+        .db
+        .user_profile()
+        .identity()
+        .find(ctx.sender())
         .ok_or("User profile not found. Connect first.")?;
 
-    if profile.is_agent {
-        return Err("Already registered as an agent".to_string());
-    }
+    validation::guard_not_already_agent(profile.is_agent)?;
 
     // Check username uniqueness if changing
-    if profile.username != agent_name {
-        if ctx.db.user_profile().username().find(&agent_name).is_some() {
-            return Err(format!("Name '{}' is already taken", agent_name));
-        }
+    if profile.username != agent_name
+        && ctx.db.user_profile().username().find(&agent_name).is_some()
+    {
+        return Err(format!("Name '{}' is already taken", agent_name));
     }
 
     ctx.db.user_profile().identity().update(UserProfile {

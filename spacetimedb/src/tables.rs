@@ -126,6 +126,36 @@ pub struct ChannelReadState {
     pub last_read_msg_id: u64,
 }
 
+// --- Direct messaging tables ---
+
+/// A direct conversation between two participants.
+/// Participants are normalized so participant_a < participant_b (by hex)
+/// to prevent duplicate conversations.
+#[spacetimedb::table(accessor = direct_conversation, public)]
+pub struct DirectConversation {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub participant_a: Identity,
+    pub participant_b: Identity,
+    pub created_at: Timestamp,
+    pub last_message_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = direct_message, public)]
+pub struct DirectMessage {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    #[index(btree)]
+    pub conversation_id: u64,
+    pub sender: Identity,
+    pub content: String,
+    pub created_at: Timestamp,
+    pub edited_at: Option<Timestamp>,
+    pub read: bool,
+}
+
 // --- Event tables (transient) ---
 
 #[spacetimedb::table(accessor = typing_indicator, public)]
