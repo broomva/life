@@ -3,7 +3,7 @@
 **Date**: 2026-03-04
 **Version**: 0.2.0 (canonical baseline)
 **Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)
-**Tests**: 996 passing (+1 ignored) across 29 crates + Spaces (31 crates total)
+**Tests**: 1012 passing (+3 ignored) across 29 crates + Spaces (31 crates total)
 
 This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/life`.
 If another status document conflicts with this one, treat this file as source of truth.
@@ -25,7 +25,7 @@ The baseline unification is active and enforced in production paths:
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Spaces |
 |---|---|---|---|---|---|---|
 | Build | PASS | PASS | PASS | PASS | PASS | PASS |
-| Tests | PASS (96) | PASS (441) | PASS (332) | PASS (69) | PASS (58) | N/A (0 tests) |
+| Tests | PASS (96) | PASS (465+16 w/ spacetimedb) | PASS (332) | PASS (69) | PASS (58) | N/A (0 tests) |
 | Clippy (`-D warnings`) | PASS | PASS | PASS | PASS | PASS | PASS |
 | Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | BRIDGED (arcan-spaces) |
 | Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | NETWORKING |
@@ -111,7 +111,8 @@ Validation gates currently pass:
 - `arcan-spaces` provides port-based abstraction (`SpacesPort` trait) for Spaces networking.
 - 6 tool definitions: list_channels, send_message, read_messages, send_dm, create_channel, list_members.
 - Middleware for agent event logging to Spaces channels.
-- Mock hub for testing (18 tests). Concrete SpacetimeDB SDK adapter pending.
+- Mock hub for testing (18 tests).
+- **SpacetimeDB HTTP adapter** (`spacetimedb` feature): Concrete `SpacetimeDbClient` implementing `SpacesPort` via SpacetimeDB REST API (SQL reads + reducer calls). 16 new tests (+2 ignored live integration). Backend selection via `--spaces-backend spacetimedb` or `ARCAN_SPACES_BACKEND` env var.
 
 ### Client Alignment
 
@@ -168,18 +169,24 @@ Current suite validates:
 - 5 crates: `autonomic-core` (24 tests), `autonomic-controller` (31 tests), `autonomic-lago` (8 tests), `autonomic-api` (4 tests), `autonomicd` (2 tests).
 - Pure rule engine with deterministic projection fold over events.
 - Economic modes: Sovereign, Conserving, Hustle, Hibernate — with hysteresis-gated transitions.
-- Advisory architecture: Arcan consults via HTTP GET `/gating/{session_id}`; failures are non-fatal.
+- Dual-mode advisory architecture:
+  - **Embedded** (default): In-process `autonomic-controller` fold+rules with microsecond-latency gating; no network required.
+  - **Remote** (opt-in via `--autonomic-url`): Consults standalone daemon via HTTP GET `/gating/{session_id}`; failures are non-fatal.
+- Economic gate handle wired to provider layer: Hibernate blocks model calls, Hustle caps tokens.
+- Token usage flows through RunFinished events → event mapping → Autonomic fold.
 - Lago journal integration via `--lago-data-dir` flag; on-demand session bootstrapping.
 
 ### Integration Points
 
 - Depends on `aios-protocol` (canonical contract) and `lago-core`/`lago-journal` (persistence).
 - Events use `EventKind::Custom` with `"autonomic."` prefix for forward-compatible Lago persistence.
+- `arcan-aios-adapters` depends on `autonomic-core` and `autonomic-controller` for embedded mode.
 - Does not depend on Arcan crates — standalone advisory service.
 
 ### Known Gaps
 
 - ~~Not yet consulted by Arcan agent loop~~ (R5 Phase 1 COMPLETE — `AutonomicPolicyAdapter` decorator wired in Arcan).
+- ~~Feedback loop open (Autonomic projection always at default)~~ (R5 Phase 2 COMPLETE — embedded controller, economic gating, token usage flow).
 - No observability (metrics/traces) yet.
 - Identity system is placeholder.
 
@@ -231,7 +238,7 @@ Current suite validates:
 
 - No unit tests (reducer tests, integration tests planned).
 - No DM/private messaging.
-- arcan-spaces bridge uses mock hub only — concrete SpacetimeDB SDK adapter not yet implemented.
+- ~~arcan-spaces bridge uses mock hub only — concrete SpacetimeDB SDK adapter not yet implemented.~~ (SpacetimeDB HTTP adapter COMPLETE — `SpacetimeDbClient` via REST API with backend selection).
 
 ---
 
@@ -243,7 +250,7 @@ The baseline runtime architecture is in place and validated. Remaining work is a
 2. Observability depth expansion (metrics/traces across runtime and adapters) (R2, PLANNED).
 3. Security hardening beyond current software-level sandbox controls (R3, PLANNED).
 4. Memory and learning depth (R4, PLANNED).
-5. Controller plane / Autonomic integration — Phase 0 COMPLETE (5 crates, 69 tests, Lago wired, hysteresis active); Phase 1 COMPLETE: Arcan advisory client wired (`AutonomicPolicyAdapter` decorator, 6 tests); economic gate provider hints remaining (R5, Phase 2 PLANNED).
+5. Controller plane / Autonomic integration — Phase 0 COMPLETE (5 crates, 69 tests, Lago wired, hysteresis active); Phase 1 COMPLETE: Arcan advisory client wired (`AutonomicPolicyAdapter` decorator, 6 tests); **Phase 2 COMPLETE**: Embedded controller (dual-mode adapter, economic gate handle wired to provider, token usage flow, 24 new tests — R5 DONE).
 
 ### Infrastructure (2026-03-01)
 
