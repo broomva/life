@@ -1,9 +1,9 @@
 # Broomva Life: Implementation Status
 
-**Date**: 2026-03-03
+**Date**: 2026-03-04
 **Version**: 0.2.0 (canonical baseline)
 **Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)
-**Tests**: 1000 passing (+1 ignored) across 29 crates + Spaces (31 crates total)
+**Tests**: 996 passing (+1 ignored) across 29 crates + Spaces (31 crates total)
 
 This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/life`.
 If another status document conflicts with this one, treat this file as source of truth.
@@ -25,7 +25,7 @@ The baseline unification is active and enforced in production paths:
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Spaces |
 |---|---|---|---|---|---|---|
 | Build | PASS | PASS | PASS | PASS | PASS | PASS |
-| Tests | PASS | PASS | PASS | PASS (69) | PASS (49) | N/A (0 tests) |
+| Tests | PASS (96) | PASS (441) | PASS (332) | PASS (69) | PASS (58) | N/A (0 tests) |
 | Clippy (`-D warnings`) | PASS | PASS | PASS | PASS | PASS | PASS |
 | Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | BRIDGED (arcan-spaces) |
 | Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | NETWORKING |
@@ -179,7 +179,7 @@ Current suite validates:
 
 ### Known Gaps
 
-- Not yet consulted by Arcan agent loop (HTTP client integration pending).
+- ~~Not yet consulted by Arcan agent loop~~ (R5 Phase 1 COMPLETE — `AutonomicPolicyAdapter` decorator wired in Arcan).
 - No observability (metrics/traces) yet.
 - Identity system is placeholder.
 
@@ -188,13 +188,13 @@ Current suite validates:
 ### Canonical Tool Execution Engine
 
 - Standalone tool execution and sandbox engine extracted from `arcan-harness`.
-- 4 crates: `praxis-core` (12 tests), `praxis-tools` (24 tests), `praxis-skills` (11 tests), `praxis-mcp` (2 tests).
+- 4 crates: `praxis-core` (17 tests), `praxis-tools` (28 tests), `praxis-skills` (11 tests), `praxis-mcp` (2 tests).
 - Depends only on `aios-protocol` — no dependency on Arcan, Lago, or Autonomic.
 - Implements canonical `Tool` trait from `aios-protocol::tool`.
 
 ### Components
 
-- **praxis-core**: Sandbox policy enforcement, workspace boundary checks (FsPolicy), command runner abstraction.
+- **praxis-core**: Sandbox policy enforcement, workspace boundary checks (FsPolicy), FsPort abstraction (pluggable filesystem), command runner abstraction.
 - **praxis-tools**: ReadFile, WriteFile, ListDir, Glob, Grep, EditFile (hashline/Blake3), Bash, ReadMemory, WriteMemory.
 - **praxis-skills**: SKILL.md frontmatter parser, skill registry with discovery and activation.
 - **praxis-mcp**: MCP server connection management, McpTool bridge wrapping external tools via rmcp 0.15.
@@ -202,12 +202,12 @@ Current suite validates:
 ### Integration Points
 
 - Depends on `aios-protocol` (canonical tool contract).
-- Will be consumed by Arcan as the tool execution backend (Phase 4 — pending).
+- Consumed by Arcan via `arcan-harness` bridge (Praxis is the canonical tool backend).
 - Architecture dependency audit enforces isolation from Arcan/Lago/Autonomic.
 
 ### Known Gaps
 
-- Not yet wired into Arcan (still uses arcan-harness tools directly).
+- ~~Not yet wired into Arcan~~ (arcan-harness now bridges to Praxis tools).
 - No integration tests with live MCP servers.
 
 ## Spaces
@@ -243,7 +243,7 @@ The baseline runtime architecture is in place and validated. Remaining work is a
 2. Observability depth expansion (metrics/traces across runtime and adapters) (R2, PLANNED).
 3. Security hardening beyond current software-level sandbox controls (R3, PLANNED).
 4. Memory and learning depth (R4, PLANNED).
-5. Controller plane / Autonomic integration — Phase 0 COMPLETE (5 crates, 69 tests, Lago wired, hysteresis active); Arcan HTTP client for gating queries remaining (R5, ACTIVE).
+5. Controller plane / Autonomic integration — Phase 0 COMPLETE (5 crates, 69 tests, Lago wired, hysteresis active); Phase 1 COMPLETE: Arcan advisory client wired (`AutonomicPolicyAdapter` decorator, 6 tests); economic gate provider hints remaining (R5, Phase 2 PLANNED).
 
 ### Infrastructure (2026-03-01)
 

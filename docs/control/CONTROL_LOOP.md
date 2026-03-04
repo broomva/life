@@ -94,5 +94,38 @@ Required fields per event: `run_id`, `trace_id`, `task_id`, `command_id`, `statu
 | Loop | Cadence | Trigger |
 |---|---|---|
 | Fast (per change) | Every commit/PR | Git hooks, CI workflows |
+| Agent tick | Every agent tick | Arcan GET /gating/{session_id} → Autonomic |
 | Daily | 04:00 UTC | control-nightly.yml |
 | Weekly | Manual | Review setpoint drift |
+
+## Autonomic Feedback Loop (Agent Runtime)
+
+The development control loop (above) governs the build/test pipeline. The Autonomic feedback loop governs agent runtime behavior through a second, nested control system.
+
+### Nested Control Architecture
+
+```
+Outer loop (development):  Commit → Smoke → Check → Test → Audit → Deploy
+Inner loop (runtime):      Event → Fold → Rules → Gating → Agent Tick → Event
+```
+
+### Inner Loop Definition
+
+1. **Observe**: Fold events from Lago journal into `HomeostaticState` (deterministic, pure).
+2. **Evaluate**: Run 6 rules against state, each producing `Option<GatingDecision>`.
+3. **Merge**: Most-restrictive-wins across all firing rules.
+4. **Actuate**: Return `AutonomicGatingProfile` via HTTP GET (advisory, fail-open).
+5. **Execute**: Arcan applies gating profile to tool permissions, model selection, rate limits.
+6. **Emit**: Agent tick produces events → back to step 1 (closed loop).
+
+### Loop Properties
+
+| Property | Status | Notes |
+|---|---|---|
+| Stability | PASS | Bang-bang with hysteresis — no oscillation in deadband |
+| Observability | PARTIAL | Observer correct, sensor disconnected (separate journals) |
+| Controllability | PASS | Every pillar has rules mapping deviations to corrections |
+| Monotonic safety | PASS | Most-restrictive merge prevents any rule weakening another |
+| Fail-safe | PASS | Advisory boundary — Autonomic down → base policy continues |
+| Determinism | PASS | Same events → same state (projection is pure fold) |
+| Closed-loop | **OPEN** | Events not yet flowing from plant to observer (R5 Phase 2) |
