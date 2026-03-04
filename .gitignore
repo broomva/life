@@ -13,3 +13,6 @@ spacetime.local.json
 
 # Claude Code user-specific settings
 .claude/settings.local.json
+
+# Build tooling
+.entire/
