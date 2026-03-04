@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "68ee78356f59",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "docs/STATUS.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/68/ee78356f59/0/metadata.json",
+      "transcript": "/68/ee78356f59/0/full.jsonl",
+      "context": "/68/ee78356f59/0/context.md",
+      "content_hash": "/68/ee78356f59/0/content_hash.txt",
+      "prompt": "/68/ee78356f59/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2076,
+    "cache_creation_tokens": 217634,
+    "cache_read_tokens": 10351603,
+    "output_tokens": 12338,
+    "api_call_count": 85
+  }
+}
