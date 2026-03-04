@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "791d7baf3643",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "praxis/crates/praxis-core/src/lib.rs",
+    "praxis/crates/praxis-tools/src/edit.rs",
+    "praxis/crates/praxis-tools/src/fs.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/79/1d7baf3643/0/metadata.json",
+      "transcript": "/79/1d7baf3643/0/full.jsonl",
+      "context": "/79/1d7baf3643/0/context.md",
+      "content_hash": "/79/1d7baf3643/0/content_hash.txt",
+      "prompt": "/79/1d7baf3643/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 787,
+    "cache_creation_tokens": 368157,
+    "cache_read_tokens": 17220886,
+    "output_tokens": 40730,
+    "api_call_count": 156
+  }
+}
