@@ -1,28 +1,28 @@
 //! Filesystem tools: read, write, list, glob, grep.
 //!
-//! All operations are confined to the workspace root via [`FsPolicy`].
+//! All operations are confined to the workspace root via [`FsPort`].
 
 use crate::edit::render_hashed_content;
 use aios_protocol::tool::{
     Tool, ToolAnnotations, ToolCall, ToolContext, ToolDefinition, ToolError, ToolResult,
 };
-use praxis_core::workspace::FsPolicy;
+use praxis_core::FsPort;
 use regex::Regex;
 use serde_json::json;
-use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 // ── ReadFileTool ─────────────────────────────────────────────────────
 
 /// Reads a file and returns content with hashline tags for editing.
 pub struct ReadFileTool {
-    policy: FsPolicy,
+    fs: Arc<dyn FsPort>,
 }
 
 impl ReadFileTool {
-    pub fn new(policy: FsPolicy) -> Self {
-        Self { policy }
+    pub fn new(fs: Arc<dyn FsPort>) -> Self {
+        Self { fs }
     }
 }
 
@@ -60,18 +60,21 @@ impl Tool for ReadFileTool {
                 message: "Missing or invalid 'path' argument".into(),
             })?;
 
-        let path = self
-            .policy
-            .resolve_existing(Path::new(path_str))
+        let path =
+            self.fs
+                .resolve(Path::new(path_str))
+                .map_err(|e| ToolError::ExecutionFailed {
+                    tool_name: "read_file".into(),
+                    message: e.to_string(),
+                })?;
+
+        let content = self
+            .fs
+            .read_to_string(&path)
             .map_err(|e| ToolError::ExecutionFailed {
                 tool_name: "read_file".into(),
-                message: e.to_string(),
+                message: format!("Failed to read file: {e}"),
             })?;
-
-        let content = fs::read_to_string(&path).map_err(|e| ToolError::ExecutionFailed {
-            tool_name: "read_file".into(),
-            message: format!("Failed to read file: {e}"),
-        })?;
 
         let hashed_content = render_hashed_content(&content);
 
@@ -89,12 +92,12 @@ impl Tool for ReadFileTool {
 
 /// Writes content to a file, overwriting it completely.
 pub struct WriteFileTool {
-    policy: FsPolicy,
+    fs: Arc<dyn FsPort>,
 }
 
 impl WriteFileTool {
-    pub fn new(policy: FsPolicy) -> Self {
-        Self { policy }
+    pub fn new(fs: Arc<dyn FsPort>) -> Self {
+        Self { fs }
     }
 }
 
@@ -141,17 +144,19 @@ impl Tool for WriteFileTool {
             })?;
 
         let path = self
-            .policy
+            .fs
             .resolve_for_write(Path::new(path_str))
             .map_err(|e| ToolError::ExecutionFailed {
                 tool_name: "write_file".into(),
                 message: e.to_string(),
             })?;
 
-        fs::write(&path, content).map_err(|e| ToolError::ExecutionFailed {
-            tool_name: "write_file".into(),
-            message: format!("Failed to write file: {e}"),
-        })?;
+        self.fs
+            .write(&path, content.as_bytes())
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool_name: "write_file".into(),
+                message: format!("Failed to write file: {e}"),
+            })?;
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),
@@ -167,12 +172,12 @@ impl Tool for WriteFileTool {
 
 /// Lists contents of a directory.
 pub struct ListDirTool {
-    policy: FsPolicy,
+    fs: Arc<dyn FsPort>,
 }
 
 impl ListDirTool {
-    pub fn new(policy: FsPolicy) -> Self {
-        Self { policy }
+    pub fn new(fs: Arc<dyn FsPort>) -> Self {
+        Self { fs }
     }
 }
 
@@ -210,25 +215,25 @@ impl Tool for ListDirTool {
                 message: "Missing or invalid 'path' argument".into(),
             })?;
 
-        let path = self
-            .policy
-            .resolve_existing(Path::new(path_str))
-            .map_err(|e| ToolError::ExecutionFailed {
-                tool_name: "list_dir".into(),
-                message: e.to_string(),
-            })?;
+        let path =
+            self.fs
+                .resolve(Path::new(path_str))
+                .map_err(|e| ToolError::ExecutionFailed {
+                    tool_name: "list_dir".into(),
+                    message: e.to_string(),
+                })?;
 
-        let entries = fs::read_dir(&path)
+        let entries = self
+            .fs
+            .read_dir(&path)
             .map_err(|e| ToolError::ExecutionFailed {
                 tool_name: "list_dir".into(),
                 message: format!("Failed to read dir: {e}"),
             })?
-            .filter_map(|entry| {
-                entry.ok().map(|e: std::fs::DirEntry| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    let kind = if e.path().is_dir() { "dir" } else { "file" };
-                    json!({ "name": name, "kind": kind })
-                })
+            .into_iter()
+            .map(|e| {
+                let kind = if e.is_dir { "dir" } else { "file" };
+                json!({ "name": e.name, "kind": kind })
             })
             .collect::<Vec<_>>();
 
@@ -246,12 +251,12 @@ impl Tool for ListDirTool {
 
 /// Searches for files matching a glob pattern within the workspace.
 pub struct GlobTool {
-    policy: FsPolicy,
+    fs: Arc<dyn FsPort>,
 }
 
 impl GlobTool {
-    pub fn new(policy: FsPolicy) -> Self {
-        Self { policy }
+    pub fn new(fs: Arc<dyn FsPort>) -> Self {
+        Self { fs }
     }
 }
 
@@ -295,15 +300,15 @@ impl Tool for GlobTool {
             .get("path")
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.policy.workspace_root().to_path_buf());
+            .unwrap_or_else(|| self.fs.workspace_root().to_path_buf());
 
-        let base_dir = self
-            .policy
-            .resolve_existing(Path::new(&base_dir))
-            .map_err(|e| ToolError::ExecutionFailed {
-                tool_name: "glob".into(),
-                message: e.to_string(),
-            })?;
+        let base_dir =
+            self.fs
+                .resolve(Path::new(&base_dir))
+                .map_err(|e| ToolError::ExecutionFailed {
+                    tool_name: "glob".into(),
+                    message: e.to_string(),
+                })?;
 
         let full_pattern = base_dir.join(pattern).display().to_string();
 
@@ -313,9 +318,9 @@ impl Tool for GlobTool {
                 message: format!("Invalid glob pattern: {e}"),
             })?
             .filter_map(Result::ok)
-            .filter(|path| self.policy.resolve_existing(path).is_ok())
+            .filter(|path| self.fs.resolve(path).is_ok())
             .map(|path| {
-                path.strip_prefix(self.policy.workspace_root())
+                path.strip_prefix(self.fs.workspace_root())
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| path.display().to_string())
             })
@@ -337,12 +342,12 @@ impl Tool for GlobTool {
 
 /// Searches file contents for a regex pattern within the workspace.
 pub struct GrepTool {
-    policy: FsPolicy,
+    fs: Arc<dyn FsPort>,
 }
 
 impl GrepTool {
-    pub fn new(policy: FsPolicy) -> Self {
-        Self { policy }
+    pub fn new(fs: Arc<dyn FsPort>) -> Self {
+        Self { fs }
     }
 }
 
@@ -393,15 +398,15 @@ impl Tool for GrepTool {
             .get("path")
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.policy.workspace_root().to_path_buf());
+            .unwrap_or_else(|| self.fs.workspace_root().to_path_buf());
 
-        let base_dir = self
-            .policy
-            .resolve_existing(Path::new(&base_dir))
-            .map_err(|e| ToolError::ExecutionFailed {
-                tool_name: "grep".into(),
-                message: e.to_string(),
-            })?;
+        let base_dir =
+            self.fs
+                .resolve(Path::new(&base_dir))
+                .map_err(|e| ToolError::ExecutionFailed {
+                    tool_name: "grep".into(),
+                    message: e.to_string(),
+                })?;
 
         let glob_filter = call.input.get("glob").and_then(|v| v.as_str());
 
@@ -413,6 +418,7 @@ impl Tool for GrepTool {
 
         let mut matches = Vec::new();
 
+        // Grep walks the filesystem directly for streaming reads (read-only).
         for entry in walkdir::WalkDir::new(&base_dir)
             .into_iter()
             .filter_map(Result::ok)
@@ -440,7 +446,7 @@ impl Tool for GrepTool {
                 }
             }
 
-            let Ok(file) = fs::File::open(path) else {
+            let Ok(file) = std::fs::File::open(path) else {
                 continue;
             };
 
@@ -452,7 +458,7 @@ impl Tool for GrepTool {
 
                 if regex.is_match(&line) {
                     let rel_path = path
-                        .strip_prefix(self.policy.workspace_root())
+                        .strip_prefix(self.fs.workspace_root())
                         .map(|p| p.display().to_string())
                         .unwrap_or_else(|_| path.display().to_string());
 
@@ -489,6 +495,8 @@ impl Tool for GrepTool {
 mod tests {
     use super::*;
     use aios_protocol::tool::{ToolCall, ToolContext};
+    use praxis_core::LocalFs;
+    use praxis_core::workspace::FsPolicy;
     use tempfile::TempDir;
 
     fn make_ctx() -> ToolContext {
@@ -508,13 +516,17 @@ mod tests {
         }
     }
 
+    fn make_fs(dir: &TempDir) -> Arc<dyn FsPort> {
+        Arc::new(LocalFs::new(FsPolicy::new(dir.path())))
+    }
+
     #[test]
     fn read_file_returns_hashed_content() {
         let dir = TempDir::new().unwrap();
         std::fs::write(dir.path().join("test.txt"), "hello\nworld").unwrap();
 
-        let policy = FsPolicy::new(dir.path());
-        let tool = ReadFileTool::new(policy);
+        let fs = make_fs(&dir);
+        let tool = ReadFileTool::new(fs);
         let ctx = make_ctx();
 
         let call = make_call("read_file", json!({"path": "test.txt"}));
@@ -529,8 +541,8 @@ mod tests {
     #[test]
     fn read_file_outside_workspace_fails() {
         let dir = TempDir::new().unwrap();
-        let policy = FsPolicy::new(dir.path());
-        let tool = ReadFileTool::new(policy);
+        let fs = make_fs(&dir);
+        let tool = ReadFileTool::new(fs);
         let ctx = make_ctx();
 
         let call = make_call("read_file", json!({"path": "/etc/passwd"}));
@@ -541,9 +553,9 @@ mod tests {
     #[test]
     fn write_then_read_file() {
         let dir = TempDir::new().unwrap();
-        let policy = FsPolicy::new(dir.path());
-        let write_tool = WriteFileTool::new(policy.clone());
-        let read_tool = ReadFileTool::new(policy);
+        let fs = make_fs(&dir);
+        let write_tool = WriteFileTool::new(fs.clone());
+        let read_tool = ReadFileTool::new(fs);
         let ctx = make_ctx();
 
         let call = make_call(
@@ -565,8 +577,8 @@ mod tests {
         std::fs::write(dir.path().join("a.txt"), "").unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
 
-        let policy = FsPolicy::new(dir.path());
-        let tool = ListDirTool::new(policy);
+        let fs = make_fs(&dir);
+        let tool = ListDirTool::new(fs);
         let ctx = make_ctx();
 
         let call = make_call("list_dir", json!({"path": "."}));
@@ -590,8 +602,8 @@ mod tests {
         std::fs::write(dir.path().join("b.rs"), "").unwrap();
         std::fs::write(dir.path().join("c.txt"), "").unwrap();
 
-        let policy = FsPolicy::new(dir.path());
-        let tool = GlobTool::new(policy);
+        let fs = make_fs(&dir);
+        let tool = GlobTool::new(fs);
         let ctx = make_ctx();
 
         let call = make_call("glob", json!({"pattern": "*.rs"}));
@@ -613,8 +625,8 @@ mod tests {
         .unwrap();
         std::fs::write(dir.path().join("other.txt"), "no match here\n").unwrap();
 
-        let policy = FsPolicy::new(dir.path());
-        let tool = GrepTool::new(policy);
+        let fs = make_fs(&dir);
+        let tool = GrepTool::new(fs);
         let ctx = make_ctx();
 
         let call = make_call("grep", json!({"pattern": "println"}));
@@ -632,8 +644,8 @@ mod tests {
         std::fs::write(dir.path().join("a.rs"), "fn hello() {}\n").unwrap();
         std::fs::write(dir.path().join("b.txt"), "fn hello() {}\n").unwrap();
 
-        let policy = FsPolicy::new(dir.path());
-        let tool = GrepTool::new(policy);
+        let fs = make_fs(&dir);
+        let tool = GrepTool::new(fs);
         let ctx = make_ctx();
 
         let call = make_call("grep", json!({"pattern": "hello", "glob": "*.rs"}));
@@ -650,8 +662,8 @@ mod tests {
         let content: String = (0..50).map(|i| format!("match line {i}\n")).collect();
         std::fs::write(dir.path().join("many.txt"), content).unwrap();
 
-        let policy = FsPolicy::new(dir.path());
-        let tool = GrepTool::new(policy);
+        let fs = make_fs(&dir);
+        let tool = GrepTool::new(fs);
         let ctx = make_ctx();
 
         let call = make_call("grep", json!({"pattern": "match", "max_matches": 5}));
