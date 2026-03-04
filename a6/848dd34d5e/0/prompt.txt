@@ -1,0 +1,486 @@
+Implement the following plan:
+
+# R5 Phase 2: Close the Autonomic Feedback Loop
+
+## Context
+
+R5 Phase 1 is COMPLETE — `AutonomicPolicyAdapter` wired in Arcan, advisory gating works via HTTP. But the feedback loop is **open**: Arcan writes events to its journal, Autonomic has a separate journal with `last_event_seq: 0`. No rules fire because the projection is always at the default initial state.
+
+**Problem**: The broadcast channel in `RedbJournal` is in-process only. Two separate processes sharing the same redb file can read/write concurrently (ACID), but live stream notifications won't cross process boundaries.
+
+**Solution**: Embed Autonomic's pure controller (fold + rules) inside Arcan's process. The controller subscribes to the shared journal's in-process broadcast channel, maintains per-session projections, and evaluates rules locally. The standalone Autonomic daemon remains for multi-machine deployments and dashboards.
+
+---
+
+## Approach: Embedded Controller (Dual-Mode Adapter)
+
+The `AutonomicPolicyAdapter` is refactored to support two modes:
+
+- **Embedded** (default): Runs `autonomic-controller` in-process, subscribes to journal broadcast, microsecond-latency gating. No network.
+- **Remote** (opt-in via `--autonomic-url`): Existing HTTP GET behavior, unchanged.
+
+This preserves advisory semantics (failures fall through to inner gate) and the standalone daemon option.
+
+---
+
+## Step 1: Fix Token Usage Gap (prerequisite)
+
+Autonomic's `fold()` expects `RunFinished { usage: Some(...) }` to track costs. Arcan's `event_map` currently drops token usage.
+
+### Files
+
+| File | Change |
+|------|--------|
+| `arcan/crates/arcan-core/src/protocol.rs` | Add `usage: Option<TokenUsage>` to `AgentEvent::RunFinished` (with `#[serde(default)]`) |
+| `arcan/crates/arcan-core/src/runtime.rs` | Emit `total_usage` in RunFinished event construction (~line 606) |
+| `arcan/crates/arcan-lago/src/event_map.rs` | Forward usage in `arcan_to_lago()` and `lago_to_arcan()` for RunFinished |
+
+### Type conversion
+
+arcan-core `TokenUsage` (u64, 4 fields: input, output, cache_read, cache_creation) → lago-core `TokenUsage` (u32, 3 fields: prompt, completion, total). Map `input_tokens → prompt_tokens`, `output_tokens → completion_tokens`, sum → `total_tokens`.
+
+### Tests
+
+- Unit test: RunFinished usage roundtrip through event_map
+- Integration: Mock provider with usage → orchestrator → journal → verify usage present
+
+---
+
+## Step 2: Add Autonomic Dependencies to Arcan Workspace
+
+### Files
+
+| File | Change |
+|------|--------|
+| `arcan/Cargo.toml` | Add `autonomic-core` and `autonomic-controller` to `[workspace.dependencies]` with path deps |
+| `arcan/crates/arcan-aios-adapters/Cargo.toml` | Add `autonomic-core = { workspace = true }`, `autonomic-controller = { workspace = true }` |
+| `scripts/architecture/verify_dependencies.sh` | Allow `arcan-aios-adapters` → `autonomic-core`, `autonomic-controller` (other arcan crates still blocked) |
+
+---
+
+## Step 3: Implement Embedded Controller
+
+**New file**: `arcan/crates/arcan-aios-adapters/src/embedded_autonomic.rs`
+
+### Design
+
+```rust
+pub type ProjectionMap = Arc<RwLock<HashMap<String, HomeostaticState>>>;
+
+pub struct EmbeddedAutonomicController {
+    projections: ProjectionMap,
+    rules: Arc<RuleSet>,  // 6 default rules from autonomic-controller
+    economic_handle: EconomicGateHandle,
+}
+```
+
+**`spawn_journal_subscriber(journal: Arc<dyn Journal>)`**: Subscribes to journal's broadcast channel. On each event notification:
+1. Read event from journal
+2. `fold(state, event.kind, event.seq, event.timestamp)` → updated `HomeostaticState`
+3. Store in projections map
+
+**`evaluate_gating(session_id) -> Option<AutonomicGatingProfile>`**:
+1. Read projection for session (returns None if no data yet)
+2. `autonomic_controller::evaluate(state, rules)` → profile
+3. Update `EconomicGateHandle` with economic gates
+
+**Key properties**:
+- Pure function calls only (fold + evaluate have zero I/O)
+- Falls through to inner gate if no projection exists for session
+- Microsecond-scale latency (in-memory read + pure computation)
+
+---
+
+## Step 4: Refactor AutonomicPolicyAdapter to Dual-Mode
+
+**File**: `arcan/crates/arcan-aios-adapters/src/autonomic.rs`
+
+```rust
+pub struct AutonomicPolicyAdapter {
+    inner: Arc<dyn PolicyGatePort>,
+    mode: AutonomicMode,
+    economic_handle: EconomicGateHandle,
+}
+
+enum AutonomicMode {
+    Embedded(EmbeddedAutonomicController),
+    Remote { client: reqwest::Client, base_url: String },
+}
+```
+
+### Constructors
+
+- `new_embedded(inner, journal)` → Creates controller with 6 default rules, spawns journal subscriber
+- `new_remote(inner, base_url)` → Existing HTTP mode (renamed from `new`)
+- `new(inner, base_url)` → Backward compat alias for `new_remote`
+
+### `evaluate()` flow
+
+- **Embedded**: Call `controller.evaluate_gating(session_id)` → merge with inner. No HTTP.
+- **Remote**: Existing `fetch_gating()` HTTP GET → merge with inner. Unchanged.
+
+Both modes use the same `merge_decision()` function and same `EconomicGateHandle` pattern.
+
+---
+
+## Step 5: Wire in Arcan Binary
+
+**File**: `arcan/crates/arcan/src/main.rs`
+
+```rust
+let (policy_gate, economic_handle): (Arc<dyn PolicyGatePort>, EconomicGateHandle) =
+    if let Some(url) = &resolved.autonomic_url {
+        // Remote: consult external Autonomic daemon
+        tracing::info!(url = %url, "Autonomic advisory enabled (remote)");
+        let adapter = AutonomicPolicyAdapter::new_remote(base_policy, url.clone());
+        let handle = adapter.economic_handle();
+        (Arc::new(adapter), handle)
+    } else {
+        // Embedded: run controller in-process (default)
+        tracing::info!("Autonomic advisory enabled (embedded)");
+        let adapter = AutonomicPolicyAdapter::new_embedded(base_policy, journal.clone());
+        let handle = adapter.economic_handle();
+        (Arc::new(adapter), handle)
+    };
+```
+
+Key change: Embedded mode is the **default** (no flag needed). Remote mode is opt-in via `--autonomic-url`.
+
+---
+
+## Step 6: Wire EconomicGateHandle to Provider Selection
+
+**File**: `arcan/crates/arcan-aios-adapters/src/provider.rs`
+
+The `ArcanProviderAdapter` (which wraps the LLM provider for the canonical runtime) accepts an optional `EconomicGateHandle`. Before each model call:
+
+1. Read `EconomicGates` from handle
+2. **Hibernate**: Block the call entirely (return error — runtime handles gracefully)
+3. **Hustle**: Cap `max_tokens` to `min(requested, gates.max_tokens_next_turn)`
+4. **Conserving**: Log advisory, cap tokens if set
+5. **Sovereign**: No restrictions
+
+This is advisory — if the handle is None or the read fails, the provider call proceeds normally.
+
+---
+
+## Step 7: Tests
+
+### Unit tests (in `arcan-aios-adapters`)
+
+1. **`embedded_fold_processes_events`** — Send RunFinished + ToolCallCompleted events through broadcast → verify projection updates
+2. **`embedded_rules_fire_on_error_streak`** — Feed 6+ events with >30% error rate → verify gating restricts side effects
+3. **`embedded_economic_handle_updated`** — After events flow, verify EconomicGateHandle contains correct mode/tier
+4. **`embedded_fallthrough_on_missing_session`** — Query gating for unknown session → inner gate decision passes through
+5. **`remote_mode_backward_compat`** — Existing wiremock tests still pass
+6. **`provider_caps_tokens_in_hustle`** — Set economic handle to Hustle with max_tokens=2048 → verify provider request capped
+7. **`provider_blocks_in_hibernate`** — Set economic handle to Hibernate → verify provider call returns error
+
+### Integration tests
+
+8. **`feedback_loop_end_to_end`** — Create session, run ticks with mock provider that returns errors, verify that after enough errors the embedded controller restricts side effects
+
+---
+
+## Files Summary
+
+| File | Action |
+|------|--------|
+| `arcan/crates/arcan-core/src/protocol.rs` | EDIT — add usage to RunFinished |
+| `arcan/crates/arcan-core/src/runtime.rs` | EDIT — emit usage in finished event |
+| `arcan/crates/arcan-lago/src/event_map.rs` | EDIT — forward usage in mapping |
+| `arcan/crates/arcan-aios-adapters/src/embedded_autonomic.rs` | NEW — embedded controller |
+| `arcan/crates/arcan-aios-adapters/src/autonomic.rs` | EDIT — dual-mode refactor |
+| `arcan/crates/arcan-aios-adapters/src/lib.rs` | EDIT — export new module |
+| `arcan/crates/arcan-aios-adapters/src/provider.rs` | EDIT — consult economic handle |
+| `arcan/crates/arcan-aios-adapters/Cargo.toml` | EDIT — add autonomic deps |
+| `arcan/Cargo.toml` | EDIT — workspace deps |
+| `arcan/crates/arcan/src/main.rs` | EDIT — wire embedded mode + economic handle |
+| `scripts/architecture/verify_dependencies.sh` | EDIT — allow adapter → autonomic edge |
+| `docs/STATUS.md` | EDIT — update R5 Phase 2 status |
+
+---
+
+## Verification
+
+```bash
+# Arcan (including new tests)
+cd /Users/broomva/broomva.tech/life/arcan
+cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace
+
+# Architecture audit (must pass with new dependency edge)
+cd /Users/broomva/broomva.tech/life
+./scripts/architecture/verify_dependencies.sh
+
+# Full monorepo
+(cd aiOS && cargo test --workspace) && \
+(cd arcan && cargo test --workspace) && \
+(cd lago && cargo test --workspace) && \
+(cd autonomic && cargo test --workspace) && \
+(cd praxis && cargo test --workspace)
+```
+
+**Expected outcome**: Embedded mode is default. Running `cargo run -p arcan` starts with embedded Autonomic controller. Events from agent ticks flow through broadcast channel → fold → rules → gating profile is live. Running `cargo run -p arcan -- --autonomic-url http://localhost:3002` uses the standalone daemon instead.
+
+**E2E validation**: Run agent, send messages that cause errors, observe gating profile transitioning from permissive → restrictive as error rate exceeds 30%.
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-life/efa1a5b0-3f80-441a-add0-3b41203d9a18.jsonl
+
+---
+
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Analysis:
+Let me chronologically analyze the conversation:
+
+1. The user provided a detailed implementation plan for "R5 Phase 2: Close the Autonomic Feedback Loop" with 7 steps.
+
+2. I created task tracking items for all 7 steps.
+
+3. I read many files to understand the codebase:
+   - arcan/crates/arcan-core/src/protocol.rs - AgentEvent enum, TokenUsage struct
+   - arcan/crates/arcan-core/src/runtime.rs - Orchestrator, RunFinished event emission
+   - arcan/crates/arcan-lago/src/event_map.rs - arcan_to_lago and lago_to_arcan conversion
+   - arcan/crates/arcan-aios-adapters/src/autonomic.rs - Current AutonomicPolicyAdapter (HTTP-only)
+   - arcan/crates/arcan-aios-adapters/src/lib.rs - Module exports
+   - arcan/crates/arcan-aios-adapters/src/provider.rs - ArcanProviderAdapter
+   - arcan/crates/arcan-aios-adapters/Cargo.toml
+   - arcan/Cargo.toml - workspace deps
+   - arcan/crates/arcan/src/main.rs - Binary entry point, run_serve function
+   - autonomic core types (gating.rs, rules.rs, economic.rs, lib.rs)
+   - autonomic controller (lib.rs, projection.rs, engine.rs)
+   - scripts/architecture/verify_dependencies.sh
+   - lago-core journal.rs, event.rs
+   - aiOS protocol event.rs (TokenUsage definition)
+
+4. Step 1: Fix Token Usage Gap
+   - Added `usage: Option<TokenUsage>` to `AgentEvent::RunFinished` in protocol.rs
+   - Emitted `total_usage` in the RunFinished event in runtime.rs
+   - Forwarded usage through event_map.rs with conversion functions `arcan_usage_to_lago` and `lago_usage_to_arcan`
+   - Used a sub-agent to fix all RunFinished constructions across 9 files (adding `usage: None`)
+   - Added a `run_finished_usage_round_trips` test in event_map.rs
+   - Verified compilation passed
+
+5. Step 2: Add Autonomic Dependencies
+   - Added `autonomic-core` and `autonomic-controller` to arcan/Cargo.toml workspace deps
+   - Added deps to arcan-aios-adapters/Cargo.toml (including lago-core)
+   - Updated verify_dependencies.sh to allow arcan-aios-adapters → autonomic-core/controller
+   - Verified compilation passed
+
+6. Step 3: Implement Embedded Controller (partially complete)
+   - Created embedded_autonomic.rs with EmbeddedAutonomicController
+   - Key design decision: Instead of subscribing to journal broadcast (which requires RedbJournal-specific API), fold events inline as they flow through Arcan's event handler
+   - Created agent_event_to_payload conversion function
+   - Created 8 tests
+   - Exported the module in lib.rs
+   - Hit error: rule constructors need arguments (struct literal syntax, not unit struct)
+   - Fixed by using `::default()` on all rules
+   - Verified compilation passed
+
+7. Step 4: Refactor AutonomicPolicyAdapter to dual-mode - NOT YET STARTED
+8. Step 5: Wire in Arcan binary - NOT YET STARTED
+9. Step 6: Wire EconomicGateHandle to provider - NOT YET STARTED
+10. Step 7: Tests and verification - NOT YET STARTED
+
+Key technical details:
+- Arcan TokenUsage: u64, 4 fields (input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens)
+- aiOS/Lago TokenUsage: u32, 3 fields (prompt_tokens, completion_tokens, total_tokens)
+- Lago EventPayload = aios_protocol::EventKind (type alias)
+- autonomic-controller fold() signature: `fn fold(state: HomeostaticState, kind: &EventKind, seq: u64, ts_ms: u64) -> HomeostaticState`
+- autonomic-controller evaluate() signature: `fn evaluate(state: &HomeostaticState, rules: &RuleSet) -> AutonomicGatingProfile`
+- The embedded controller approach avoids journal broadcast subscription, instead folding events inline
+- EconomicGateHandle = Arc<tokio::sync::RwLock<Option<EconomicGates>>>
+
+The linter auto-formatted embedded_autonomic.rs after creation (minor formatting changes).
+The linter also auto-formatted event_map.rs after the test was added.
+
+Current state: Step 3 is complete (compiles). The task list shows steps 3-7 as pending/in_progress, but step 3 just finished compiling successfully. Next is Step 4: Refactor AutonomicPolicyAdapter to dual-mode.
+
+Summary:
+1. Primary Request and Intent:
+   The user provided a comprehensive implementation plan for "R5 Phase 2: Close the Autonomic Feedback Loop" and asked me to implement it. The plan has 7 steps:
+   - Step 1: Fix Token Usage Gap in RunFinished events (add usage field, forward through event mapping)
+   - Step 2: Add Autonomic dependencies to Arcan workspace
+   - Step 3: Implement Embedded Autonomic Controller (in-process fold + rules)
+   - Step 4: Refactor AutonomicPolicyAdapter to dual-mode (Embedded default, Remote opt-in)
+   - Step 5: Wire embedded mode in Arcan binary (default embedded, `--autonomic-url` for remote)
+   - Step 6: Wire EconomicGateHandle to provider selection (token capping, hibernate blocking)
+   - Step 7: Write tests and run full verification
+
+   The goal is to close the feedback loop: Arcan writes events → embedded Autonomic controller folds them → rules fire → gating profiles restrict agent behavior. Currently the loop is open (Autonomic daemon has `last_event_seq: 0`, no rules fire).
+
+2. Key Technical Concepts:
+   - **Arcan TokenUsage**: `u64`, 4 fields: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens`
+   - **aiOS/Lago TokenUsage**: `u32`, 3 fields: `prompt_tokens`, `completion_tokens`, `total_tokens`
+   - **Lago EventPayload** = `aios_protocol::EventKind` (type alias, not a separate type)
+   - **Autonomic fold**: `fn fold(state: HomeostaticState, kind: &EventKind, seq: u64, ts_ms: u64) -> HomeostaticState` — pure deterministic function
+   - **Autonomic evaluate**: `fn evaluate(state: &HomeostaticState, rules: &RuleSet) -> AutonomicGatingProfile` — pure rule evaluation
+   - **EconomicGateHandle**: `Arc<tokio::sync::RwLock<Option<EconomicGates>>>` — shared between policy adapter and provider
+   - **6 default rules**: SurvivalRule, SpendVelocityRule, BudgetExhaustionRule, ContextPressureRule, TokenExhaustionRule, ErrorStreakRule — all have `Default` impl
+   - **Design decision**: Embedded controller folds events inline (no journal broadcast subscription needed) — avoids dependency on `RedbJournal`-specific `subscribe()` method that isn't on `dyn Journal`
+   - **Advisory semantics**: failures fall through to inner gate (non-fatal)
+   - **AutonomicPolicyAdapter** currently: HTTP-only mode wrapping `PolicyGatePort` with `reqwest::Client`
+   - **Architecture audit**: `verify_dependencies.sh` enforces crate dependency boundaries using `cargo metadata`
+
+3. Files and Code Sections:
+
+   - **`arcan/crates/arcan-core/src/protocol.rs`**
+     - Contains `AgentEvent` enum and `TokenUsage` struct
+     - **EDITED**: Added `usage: Option<TokenUsage>` field to `AgentEvent::RunFinished`
+     ```rust
+     RunFinished {
+         run_id: String,
+         session_id: String,
+         reason: RunStopReason,
+         total_iterations: u32,
+         final_answer: Option<String>,
+         /// Accumulated token usage across all iterations in this run.
+         #[serde(default, skip_serializing_if = "Option::is_none")]
+         usage: Option<TokenUsage>,
+     },
+     ```
+
+   - **`arcan/crates/arcan-core/src/runtime.rs`**
+     - Contains `Orchestrator` agent loop, `RunOutput` with `total_usage`
+     - **EDITED**: RunFinished event emission now includes usage
+     ```rust
+     let finished_event = AgentEvent::RunFinished {
+         run_id: input.run_id.clone(),
+         session_id: input.session_id.clone(),
+         reason: stop_reason,
+         total_iterations,
+         final_answer: final_answer.clone(),
+         usage: if total_usage.total() > 0 {
+             Some(total_usage)
+         } else {
+             None
+         },
+     };
+     ```
+
+   - **`arcan/crates/arcan-lago/src/event_map.rs`**
+     - Converts between Arcan `AgentEvent` and Lago `EventPayload`
+     - **EDITED**: Forward usage in `arcan_to_lago()` and `lago_to_arcan()`; added conversion functions; added usage roundtrip test
+     ```rust
+     fn arcan_usage_to_lago(usage: &arcan_core::protocol::TokenUsage) -> lago_core::event::TokenUsage {
+         lago_core::event::TokenUsage {
+             prompt_tokens: usage.input_tokens as u32,
+             completion_tokens: usage.output_tokens as u32,
+             total_tokens: usage.total() as u32,
+         }
+     }
+     
+     fn lago_usage_to_arcan(usage: &lago_core::event::TokenUsage) -> arcan_core::protocol::TokenUsage {
+         arcan_core::protocol::TokenUsage {
+             input_tokens: u64::from(usage.prompt_tokens),
+             output_tokens: u64::from(usage.completion_tokens),
+             cache_read_tokens: 0,
+             cache_creation_tokens: 0,
+         }
+     }
+     ```
+
+   - **`arcan/Cargo.toml`**
+     - Workspace-level dependency definitions
+     - **EDITED**: Added autonomic-core and autonomic-controller workspace deps
+     ```toml
+     # Autonomic homeostasis controller (embedded controller support)
+     autonomic-core = { path = "../autonomic/crates/autonomic-core", version = "0.1.0" }
+     autonomic-controller = { path = "../autonomic/crates/autonomic-controller", version = "0.1.0" }
+     ```
+
+   - **`arcan/crates/arcan-aios-adapters/Cargo.toml`**
+     - **EDITED**: Added `autonomic-core`, `autonomic-controller`, and `lago-core` dependencies
+
+   - **`scripts/architecture/verify_dependencies.sh`**
+     - Architecture dependency audit script
+     - **EDITED**: Added rules allowing `arcan-aios-adapters` → `autonomic-core`/`autonomic-controller`, blocking other arcan crates from depending on Autonomic
+
+   - **`arcan/crates/arcan-aios-adapters/src/embedded_autonomic.rs`** — **NEW FILE**
+     - Embedded Autonomic controller with `EmbeddedAutonomicController`, `ProjectionMap`, `agent_event_to_payload()`, `default_rules()`, and 8 tests
+     - Key struct:
+     ```rust
+     pub struct EmbeddedAutonomicController {
+         projections: ProjectionMap,  // Arc<RwLock<HashMap<String, HomeostaticState>>>
+         rules: Arc<RuleSet>,
+         economic_handle: EconomicGateHandle,
+     }
+     ```
+     - Key methods: `fold_event()`, `evaluate_gating()`, `get_projection()`
+     - `agent_event_to_payload()` converts Arcan events → Lago EventPayload for the fold
+
+   - **`arcan/crates/arcan-aios-adapters/src/lib.rs`**
+     - **EDITED**: Added `pub mod embedded_autonomic;` and `pub use embedded_autonomic::EmbeddedAutonomicController;`
+
+   - **`arcan/crates/arcan-aios-adapters/src/autonomic.rs`** — READ (not yet edited for Step 4)
+     - Current HTTP-only `AutonomicPolicyAdapter` with `reqwest::Client`
+     - Local types: `EconomicGateHandle`, `EconomicGates`, `EconomicMode`, `ModelTier`, `GatingResponse`, `LocalGatingProfile`
+     - `merge_decision()` function for most-restrictive-wins merging
+     - 6 existing tests with wiremock
+
+   - **`arcan/crates/arcan-aios-adapters/src/provider.rs`** — READ (not yet edited for Step 6)
+     - `ArcanProviderAdapter` implementing `ModelProviderPort`
+     - Currently does NOT consult economic handle
+
+   - **`arcan/crates/arcan/src/main.rs`** — READ (not yet edited for Step 5)
+     - Current wiring: only creates `AutonomicPolicyAdapter` when `--autonomic-url` is set, otherwise no Autonomic
+
+   - **9 other files** had `usage: None` added to `AgentEvent::RunFinished` constructions by sub-agent:
+     - arcan-store/src/session.rs, arcan-lago/src/repository.rs, arcan-lago/tests/end_to_end.rs (2 instances), arcan-lago/src/sse_bridge.rs, arcan-core/src/aisdk.rs (2 instances), arcan-tui/src/client.rs, arcan-tui/src/integration_test.rs, arcan-tui/src/models_test.rs (2 instances)
+
+   - **Autonomic files READ** (not modified):
+     - `autonomic-core/src/gating.rs` — `HomeostaticState`, `AutonomicGatingProfile`, `EconomicGates`, `OperationalState`, `CognitiveState`
+     - `autonomic-core/src/rules.rs` — `RuleSet`, `GatingDecision`, `HomeostaticRule` trait
+     - `autonomic-core/src/economic.rs` — `EconomicMode`, `ModelTier`, `EconomicState`
+     - `autonomic-controller/src/projection.rs` — `fold()` function
+     - `autonomic-controller/src/engine.rs` — `evaluate()` function
+     - `autonomic-controller/src/lib.rs` — re-exports
+
+4. Errors and fixes:
+   - **Missing `usage` field in RunFinished constructions**: After adding the field to the enum, ~12 construction sites across 9 files needed `usage: None`. Fixed via sub-agent that edited all files.
+   - **Rule constructors need arguments**: `ErrorStreakRule`, `SpendVelocityRule`, etc. are structs with fields, not unit structs. Calling `ErrorStreakRule` without fields gave `E0423`. Fixed by using `::default()` on all rules (all have `Default` impls).
+   - No user feedback on errors — all were discovered and fixed by me.
+
+5. Problem Solving:
+   - **Journal broadcast subscription**: The plan suggested subscribing to `RedbJournal`'s broadcast channel, but `subscribe()` is on `RedbJournal` not `dyn Journal`. Solved by taking a simpler approach: fold events inline from the event handler path, avoiding any journal-specific API dependency.
+   - **Token usage type mismatch**: Arcan uses u64/4-field TokenUsage, aiOS/Lago uses u32/3-field. Created bidirectional conversion functions, mapping `input_tokens ↔ prompt_tokens`, `output_tokens ↔ completion_tokens`, and computing `total_tokens`.
+
+6. All user messages:
+   - Message 1: "Implement the following plan: [full R5 Phase 2 plan with 7 steps, file lists, verification commands]" — with reference to plan mode transcript at `/Users/broomva/.claude/projects/-Users-broomva-broomva-tech-life/efa1a5b0-3f80-441a-add0-3b41203d9a18.jsonl`
+   - No other non-tool user messages were sent.
+
+7. Pending Tasks:
+   - **Step 4**: Refactor `AutonomicPolicyAdapter` to dual-mode (Embedded + Remote) — add `AutonomicMode` enum, `new_embedded()` constructor, dual evaluate() dispatch
+   - **Step 5**: Wire embedded mode in Arcan binary `main.rs` — embedded as default, remote opt-in via `--autonomic-url`
+   - **Step 6**: Wire `EconomicGateHandle` to `ArcanProviderAdapter` — token capping in Hustle, blocking in Hibernate
+   - **Step 7**: Write remaining tests and run full workspace verification (`cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace` for all projects)
+
+8. Current Work:
+   Step 3 (Implement Embedded Autonomic Controller) just completed successfully — `embedded_autonomic.rs` was created, exported, and compiles. The task list shows Step 3 as `in_progress` but compilation passed. I was about to move to **Step 4: Refactor AutonomicPolicyAdapter to dual-mode**.
+
+   The plan specifies for Step 4:
+   ```rust
+   enum AutonomicMode {
+       Embedded(EmbeddedAutonomicController),
+       Remote { client: reqwest::Client, base_url: String },
+   }
+   ```
+   With constructors `new_embedded(inner, journal)` (though we don't need journal since embedded controller folds inline), and `new_remote(inner, base_url)`.
+
+9. Optional Next Step:
+   **Step 4: Refactor AutonomicPolicyAdapter to dual-mode** in `arcan/crates/arcan-aios-adapters/src/autonomic.rs`.
+
+   From the plan:
+   > "The `AutonomicPolicyAdapter` is refactored to support two modes:
+   > - **Embedded** (default): Runs `autonomic-controller` in-process, subscribes to journal broadcast, microsecond-latency gating. No network.
+   > - **Remote** (opt-in via `--autonomic-url`): Existing HTTP GET behavior, unchanged."
+
+   The file to edit is `arcan/crates/arcan-aios-adapters/src/autonomic.rs`. The current implementation has `client: reqwest::Client` and `base_url: String` fields. Need to replace with `mode: AutonomicMode` enum, add `new_embedded()` constructor that takes `inner` and creates an `EmbeddedAutonomicController`, and modify `evaluate()` to dispatch based on mode. The `merge_decision()` function and existing tests should remain unchanged.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-life/2ad5004b-7766-4ee1-8733-f2a6b33784c5.jsonl
+Please continue the conversation from where we left off without asking the user any further questions. Continue with the last task that you were asked to work on.
+
+---
+
+good, is everything commited and pushed?  harness and control docs updated? cicd checks green?
