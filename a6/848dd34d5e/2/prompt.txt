@@ -1,0 +1,365 @@
+Implement the following plan:
+
+# Arcan-Autonomic Integration (R5 Phase 1)
+
+## Context
+
+Autonomic Phase 0 is complete — 5 crates, 69 tests, Lago wired, hysteresis active. The next step (R5) is wiring Arcan's agent loop to consult Autonomic's `/gating/{session_id}` endpoint before tool execution. This is the last missing piece to make the homeostasis controller actually influence agent behavior.
+
+**Architecture**: Decorator pattern on `PolicyGatePort`. A new `AutonomicPolicyAdapter` wraps the existing `ArcanPolicyAdapter`, optionally consulting Autonomic over HTTP before delegating. Advisory semantics: if Autonomic is unreachable, Arcan continues with permissive defaults (fail-open).
+
+---
+
+## Step 1: Create `autonomic.rs` adapter in `arcan-aios-adapters`
+
+**New file**: `arcan/crates/arcan-aios-adapters/src/autonomic.rs`
+
+### Design
+
+`AutonomicPolicyAdapter` implements `PolicyGatePort` as a decorator:
+
+```rust
+pub struct AutonomicPolicyAdapter {
+    inner: Arc<dyn PolicyGatePort>,       // existing ArcanPolicyAdapter
+    client: reqwest::Client,              // async HTTP client
+    base_url: String,                     // e.g. "http://127.0.0.1:3002"
+    economic_handle: EconomicGateHandle,  // shared state for economic gates
+}
+
+pub type EconomicGateHandle = Arc<tokio::sync::RwLock<Option<EconomicGates>>>;
+```
+
+### `evaluate()` flow
+
+1. Call `GET {base_url}/gating/{session_id}` with 2s timeout
+2. Parse response as `GatingResponse` (same struct used in `autonomic-api::router`)
+3. Merge operational gates: compare `AutonomicGatingProfile.operational` with inner's decision → most restrictive wins
+   - If Autonomic says `allow_side_effects: false` → Deny (regardless of inner)
+   - If Autonomic says `max_tool_calls_per_tick < inner_limit` → use Autonomic's limit
+4. Store `EconomicGates` in the shared handle for provider-layer hints
+5. Fall through to inner on any HTTP error / timeout / parse failure (log warning)
+
+### `set_policy()` flow
+
+Delegate directly to `inner.set_policy()` (Autonomic doesn't own policy writes).
+
+### Response type (for deserialization)
+
+```rust
+#[derive(Deserialize)]
+struct GatingResponse {
+    session_id: String,
+    profile: AutonomicGatingProfile,
+    last_event_seq: u64,
+    last_event_ms: u64,
+}
+```
+
+Note: `AutonomicGatingProfile` and `EconomicGates` are in `autonomic-core::gating`. We do NOT add a dependency on `autonomic-core` — instead, we duplicate the response types locally (3 small structs) to avoid coupling Arcan to Autonomic at the crate level. This keeps the advisory boundary clean.
+
+---
+
+## Step 2: Update `arcan-aios-adapters` module registration and dependencies
+
+**File**: `arcan/crates/arcan-aios-adapters/src/lib.rs`
+- Add `pub mod autonomic;`
+- Add `pub use autonomic::{AutonomicPolicyAdapter, EconomicGateHandle};`
+
+**File**: `arcan/crates/arcan-aios-adapters/Cargo.toml`
+- Add to `[dependencies]`: `reqwest = { workspace = true }`, `serde = { workspace = true }`, `tracing = { workspace = true }`
+- Add `[dev-dependencies]`: `wiremock = "0.6"`, `tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }`
+
+---
+
+## Step 3: Add `autonomic_url` to Arcan config
+
+**File**: `arcan/crates/arcan/src/config.rs`
+- Add `autonomic_url: Option<String>` to `ResolvedConfig`
+- Add to `ArcanConfig.defaults`: `autonomic_url: Option<String>`
+- Add resolution in `resolve()`: CLI flag → env `ARCAN_AUTONOMIC_URL` → config → None
+- Add `set_key`/`get_key` support for `"autonomic_url"` / `"defaults.autonomic_url"`
+
+**File**: `arcan/crates/arcan/src/main.rs` (Cli struct, line ~145)
+- Add `#[arg(long, env = "ARCAN_AUTONOMIC_URL", global = true)] autonomic_url: Option<String>`
+
+**File**: `arcan/crates/arcan/src/main.rs` (resolve() call)
+- Pass `cli.autonomic_url` through to resolution
+
+---
+
+## Step 4: Wire decorator in `main.rs`
+
+**File**: `arcan/crates/arcan/src/main.rs` (lines 512-513)
+
+Currently:
+```rust
+let policy_gate: Arc<dyn PolicyGatePort> =
+    Arc::new(ArcanPolicyAdapter::new(aios_protocol::PolicySet::default()));
+```
+
+Change to:
+```rust
+let base_policy: Arc<dyn PolicyGatePort> =
+    Arc::new(ArcanPolicyAdapter::new(aios_protocol::PolicySet::default()));
+
+let (policy_gate, _economic_handle): (Arc<dyn PolicyGatePort>, Option<EconomicGateHandle>) =
+    if let Some(url) = &resolved.autonomic_url {
+        tracing::info!(url = %url, "Autonomic advisory enabled");
+        let adapter = AutonomicPolicyAdapter::new(base_policy, url.clone());
+        let handle = adapter.economic_handle();
+        (Arc::new(adapter), Some(handle))
+    } else {
+        (base_policy, None)
+    };
+```
+
+The `_economic_handle` is stored for future use by provider selection (R5 Phase 2 — not this PR).
+
+---
+
+## Step 5: Tests
+
+**File**: `arcan/crates/arcan-aios-adapters/src/autonomic.rs` (inline `#[cfg(test)]` module)
+
+Using `wiremock::MockServer`:
+
+1. **`passthrough_when_autonomic_allows`** — Mock returns permissive profile → inner's Allow decision passes through unchanged
+2. **`deny_overrides_inner_allow`** — Mock returns `allow_side_effects: false` → merged result denies even though inner says Allow
+3. **`unreachable_falls_through`** — No mock server running (connection refused) → inner's Allow passes through, warning logged
+4. **`timeout_falls_through`** — Mock with 5s response delay, adapter has 2s timeout → falls through to inner
+5. **`economic_gates_stored_in_handle`** — After evaluate(), `economic_handle` contains the returned economic gates (mode, token cap, model tier)
+6. **`set_policy_delegates_to_inner`** — Verify set_policy() reaches the inner adapter
+
+---
+
+## Step 6: Update documentation
+
+**File**: `arcan/CLAUDE.md` — Add `--autonomic-url` flag to running instructions, mention `AutonomicPolicyAdapter`
+**File**: `docs/STATUS.md` — Update R5 line: "Phase 1: Arcan advisory client wired"
+**File**: `MEMORY.md` — Update test counts after completion
+
+---
+
+## Files Summary
+
+| File | Action |
+|------|--------|
+| `arcan/crates/arcan-aios-adapters/src/autonomic.rs` | NEW — decorator adapter |
+| `arcan/crates/arcan-aios-adapters/src/lib.rs` | EDIT — add module + re-exports |
+| `arcan/crates/arcan-aios-adapters/Cargo.toml` | EDIT — add reqwest, serde, tracing, wiremock |
+| `arcan/crates/arcan/src/config.rs` | EDIT — add `autonomic_url` field + resolution |
+| `arcan/crates/arcan/src/main.rs` | EDIT — CLI flag + decorator wiring |
+| `arcan/CLAUDE.md` | EDIT — document new flag |
+| `docs/STATUS.md` | EDIT — update R5 status |
+
+---
+
+## Verification
+
+```bash
+# Arcan (including new tests)
+cd /Users/broomva/broomva.tech/life/arcan
+cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace
+
+# Full monorepo validation
+(cd aiOS && cargo test --workspace) && \
+(cd arcan && cargo test --workspace) && \
+(cd lago && cargo test --workspace) && \
+(cd autonomic && cargo test --workspace) && \
+(cd praxis && cargo test --workspace) && \
+(cd spaces && cargo check)
+```
+
+**Expected**: 6 new tests in `arcan-aios-adapters`, all existing tests still passing. `arcan --autonomic-url http://localhost:3002 serve` enables advisory gating.
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-life/60589102-adb0-4b3d-856a-c464c7cc580a.jsonl
+
+---
+
+<task-notification>
+<task-id>b23326a</task-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-tech-life/tasks/b23326a.output</output-file>
+<status>completed</status>
+<summary>Background command "Run full monorepo validation" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-broomva-broomva-tech-life/tasks/b23326a.output
+
+---
+
+how does autonomic works, please be detailed, and lets also think about the integration with the agent loop and agent state and how it affects it
+
+---
+
+can we use arcan cli to test the agent running and validate the autonomic setup, please read the logs from the daemons and confirm everything is on the green
+
+---
+
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Analysis:
+Let me chronologically analyze the conversation:
+
+1. **First user message**: "Implement the following plan: Arcan-Autonomic Integration (R5 Phase 1)" - A detailed plan for wiring Arcan's agent loop to consult Autonomic's `/gating/{session_id}` endpoint before tool execution. The plan had 6 steps with specific files, code designs, and test requirements.
+
+2. **Implementation phase**: I read key files (lib.rs, Cargo.toml, config.rs, main.rs, policy.rs) and explored PolicyGatePort trait, autonomic gating types, and workspace dependencies via subagents. Then I created the implementation across multiple files.
+
+3. **Errors during implementation**:
+   - Clippy: `manual_let_else` - changed `match` to `let...else`
+   - Clippy: `extend_with_drain` - changed `extend(drain(..))` to `append(&mut)`
+   - Clap `env` attribute requires `env` feature not enabled - removed `env = "ARCAN_AUTONOMIC_URL"` from CLI arg, kept env var resolution in `resolve()` function
+   - `SessionId::new()` doesn't exist - changed to `SessionId::from_string()`
+   - Missing field `autonomic_url` in `DefaultsConfig` struct literal in test - added the field
+
+4. **Second user message**: "how does autonomic works, please be detailed, and lets also think about the integration with the agent loop and agent state and how it affects it" - Deep research request. I launched 3 explore agents to read the full Autonomic codebase, Arcan agent loop, and aiOS state/mode types. Then synthesized a comprehensive explanation covering the three pillars, projection fold, hysteresis, rule engine, API, integration with agent loop, and future integration points.
+
+5. **Third user message**: "can we use arcan cli to test the agent running and validate the autonomic setup, please read the logs from the daemons and confirm everything is on the green" - Hands-on testing request.
+
+6. **During testing, user interjected**: "you may test with ollama with gpt oss 20b" - When OpenAI quota was exhausted.
+
+7. **Testing phase**: Started both daemons, tested endpoints, sent messages through agent loop, verified tool execution worked with Autonomic advisory gating. Encountered redb lock issues from stale processes, cleaned up and restarted. Final state: both daemons running, tool execution working, Autonomic gating returning Sovereign mode with all gates open.
+
+Let me now catalog all files, code changes, errors, and current state.
+
+Summary:
+1. Primary Request and Intent:
+   The user requested implementation of the "Arcan-Autonomic Integration (R5 Phase 1)" plan — wiring Arcan's agent loop to consult Autonomic's `/gating/{session_id}` HTTP endpoint before tool execution using a decorator pattern on `PolicyGatePort`. This was followed by a request for a detailed explanation of how Autonomic works and its integration with the agent loop, and finally a hands-on validation using the Arcan CLI with both daemons running.
+
+2. Key Technical Concepts:
+   - **Decorator pattern on PolicyGatePort**: `AutonomicPolicyAdapter` wraps `ArcanPolicyAdapter`, optionally consulting Autonomic over HTTP
+   - **Advisory/fail-open semantics**: If Autonomic is unreachable (timeout, connection refused, parse error), the adapter delegates entirely to the inner gate
+   - **Most-restrictive-wins merge**: Autonomic's operational gates are merged with inner decision — if `allow_side_effects: false`, all capabilities denied
+   - **EconomicGateHandle**: `Arc<tokio::sync::RwLock<Option<EconomicGates>>>` shared handle for future provider-layer use (R5 Phase 2)
+   - **Local type duplication**: Response types duplicated locally to avoid coupling `arcan-aios-adapters` to `autonomic-core` at the crate level
+   - **Three-pillar homeostasis**: Operational (error rates), Cognitive (token/context pressure), Economic (survival/velocity/exhaustion)
+   - **Pure projection fold**: `HomeostaticState = fold(default, events...)` — deterministic, no I/O
+   - **Hysteresis anti-flapping**: `HysteresisGate` with separate enter/exit thresholds + min-hold duration (30s)
+   - **6 rules**: SurvivalRule, SpendVelocityRule, BudgetExhaustionRule, ContextPressureRule, TokenExhaustionRule, ErrorStreakRule
+   - **8-phase tick lifecycle**: Perceive → Deliberate → Estimate → Run → Gate (where Autonomic hooks in) → Execute → Reflect → Sleep
+   - **On-demand bootstrapping**: First `/gating/{session_id}` call loads projection from Lago journal + spawns live subscriber
+
+3. Files and Code Sections:
+
+   - **`arcan/crates/arcan-aios-adapters/src/autonomic.rs`** (NEW — ~510 lines)
+     - Core adapter implementing the Autonomic advisory integration
+     - Contains `AutonomicPolicyAdapter` struct, `PolicyGatePort` impl, local response types, merge logic, and 6 tests
+     ```rust
+     pub struct AutonomicPolicyAdapter {
+         inner: Arc<dyn PolicyGatePort>,
+         client: reqwest::Client,
+         base_url: String,
+         economic_handle: EconomicGateHandle,
+     }
+     ```
+     - `evaluate()` flow: call inner → fetch gating from Autonomic → store economic gates → merge decisions
+     - `merge_decision()`: if `!allow_side_effects` → deny all; selectively deny shell/network capabilities
+     - Local types: `GatingResponse`, `LocalGatingProfile`, `EconomicGates`, `EconomicMode`, `ModelTier`
+     - 6 tests using `wiremock`: passthrough_when_autonomic_allows, deny_overrides_inner_allow, unreachable_falls_through, timeout_falls_through, economic_gates_stored_in_handle, set_policy_delegates_to_inner
+
+   - **`arcan/crates/arcan-aios-adapters/src/lib.rs`** (EDITED)
+     - Added `pub mod autonomic;` and `pub use autonomic::{AutonomicPolicyAdapter, EconomicGateHandle};`
+
+   - **`arcan/crates/arcan-aios-adapters/Cargo.toml`** (EDITED)
+     - Added dependencies: `reqwest.workspace = true`, `serde = { workspace = true }`, `tracing.workspace = true`
+     - Added dev-dependency: `wiremock = "0.6"`
+
+   - **`arcan/crates/arcan/src/config.rs`** (EDITED)
+     - Added `autonomic_url: Option<String>` to `DefaultsConfig` and `ResolvedConfig`
+     - Added merge logic for `autonomic_url` in `ArcanConfig::merge()`
+     - Added `set_key`/`get_key` support for `"autonomic_url"` / `"defaults.autonomic_url"`
+     - Updated `resolve()` signature to accept `cli_autonomic_url: Option<&str>` (7th parameter)
+     - Resolution: CLI > env `ARCAN_AUTONOMIC_URL` > config > None
+     - Updated all test calls to pass extra `None` parameter
+
+   - **`arcan/crates/arcan/src/main.rs`** (EDITED)
+     - Added CLI arg: `#[arg(long, global = true)] autonomic_url: Option<String>` with doc comment mentioning env var
+     - Added imports: `AutonomicPolicyAdapter, EconomicGateHandle`
+     - Updated all 7 `config::resolve()` call sites to pass `cli.autonomic_url.as_deref()`
+     - Replaced policy gate construction with decorator pattern:
+     ```rust
+     let base_policy: Arc<dyn PolicyGatePort> =
+         Arc::new(ArcanPolicyAdapter::new(aios_protocol::PolicySet::default()));
+     let (policy_gate, _economic_handle): (Arc<dyn PolicyGatePort>, Option<EconomicGateHandle>) =
+         if let Some(url) = &resolved.autonomic_url {
+             tracing::info!(url = %url, "Autonomic advisory enabled");
+             let adapter = AutonomicPolicyAdapter::new(base_policy, url.clone());
+             let handle = adapter.economic_handle();
+             (Arc::new(adapter), Some(handle))
+         } else {
+             (base_policy, None)
+         };
+     ```
+
+   - **`arcan/CLAUDE.md`** (EDITED)
+     - Added `arcan-aios-adapters` description mentioning `AutonomicPolicyAdapter`
+     - Added run instructions for `--autonomic-url` flag and `ARCAN_AUTONOMIC_URL` env var
+
+   - **`docs/STATUS.md`** (EDITED)
+     - Updated test count from 1000 to 1006
+     - Struck through "Not yet consulted by Arcan agent loop" gap
+     - Updated R5 line to show Phase 1 COMPLETE with Phase 2 PLANNED
+
+   - **`~/.claude/projects/.../memory/MEMORY.md`** (EDITED)
+     - Updated Arcan test count from 429 to 435
+     - Updated combined test count from 967 to 973
+     - Added R5 Phase 1 completion milestone
+
+4. Errors and fixes:
+   - **Clippy `manual_let_else`**: `match self.fetch_gating(...) { Some(g) => g, None => return ... }` → Changed to `let Some(gating) = self.fetch_gating(...) else { return Ok(inner_decision); };`
+   - **Clippy `extend_with_drain`**: `decision.denied.extend(decision.allowed.drain(..))` → Changed to `decision.denied.append(&mut decision.allowed)`
+   - **Clap `env` attribute requires feature**: `#[arg(long, env = "ARCAN_AUTONOMIC_URL")]` failed because clap's `env` feature wasn't enabled → Removed `env` attribute, kept env var resolution in the `resolve()` function which already reads `ARCAN_AUTONOMIC_URL`
+   - **`SessionId::new()` doesn't exist**: Tests used `SessionId::new("test-session")` but the typed_id macro only provides `from_string` and `new_uuid` → Changed all 6 occurrences to `SessionId::from_string("test-session")`
+   - **Missing struct field in test**: `DefaultsConfig { provider, model, port }` missing `autonomic_url` → Added `autonomic_url: None`
+   - **OpenAI quota exhausted during testing**: User directed to use Ollama with `gpt-oss:20b` model instead
+   - **redb journal lock conflict**: Stale Arcan process held the lock → `pkill -f "target/debug/arcan"` + clean restart
+
+5. Problem Solving:
+   - Successfully implemented the full R5 Phase 1 plan with decorator pattern, advisory fail-open semantics, and 6 comprehensive tests
+   - All 468 Arcan tests pass (+1 ignored), all other projects unaffected
+   - Both daemons (Arcan on :3000, Autonomic on :3002) tested running together successfully
+   - Agent loop exercises confirmed: text-only messages, tool use (list_dir, read_file, bash) all work with Autonomic advisory gating active
+   - Autonomic correctly returns Sovereign mode with all gates open for fresh sessions
+   - Autonomic's on-demand bootstrapping works: first gating query spawns journal subscriber
+
+6. All user messages:
+   - "Implement the following plan: Arcan-Autonomic Integration (R5 Phase 1)" — with detailed 6-step plan including file changes, design, and test requirements
+   - "how does autonomic works, please be detailed, and lets also think about the integration with the agent loop and agent state and how it affects it" — request for detailed architectural explanation
+   - "can we use arcan cli to test the agent running and validate the autonomic setup, please read the logs from the daemons and confirm everything is on the green" — hands-on validation request
+   - "you may test with ollama with gpt oss 20b" — direction to use local Ollama model when OpenAI quota was exhausted
+
+7. Pending Tasks:
+   - No explicitly pending tasks. The R5 Phase 1 implementation is complete and validated. The user asked to confirm "everything is on the green" and the testing showed both daemons running, tool execution working through the advisory gating, clean logs with no errors/warnings.
+
+8. Current Work:
+   The most recent work was hands-on validation of the Arcan-Autonomic integration. Both daemons were started:
+   - **Autonomic**: `autonomicd --lago-data-dir /tmp/autonomic-data` on port 3002
+   - **Arcan**: `arcan --provider ollama --model gpt-oss:20b --autonomic-url http://127.0.0.1:3002 serve` on port 3000
+   
+   Three successful agent loop executions were performed:
+   1. Text-only: "What is 2 + 2?" → "Four." (mode: Explore)
+   2. Tool use: "List the files..." → list_dir tool executed OK (mode: Execute)
+   3. Tool use: "Read CLAUDE.md..." → read_file tool executed OK (mode: Execute)
+   4. Tool use: "Use bash to echo..." → bash tool executed OK (mode: Execute)
+   
+   Autonomic logs showed on-demand subscriber spawning for each new session. Gating returned Sovereign mode with all permissions open. Arcan logs showed `Autonomic advisory enabled` at startup, clean tick finalization. No errors or warnings in either daemon log.
+   
+   Note: Autonomic's projection shows `last_event_seq: 0` because Arcan and Autonomic use separate Lago journals — Arcan persists to `.arcan/journal.redb`, Autonomic has its own at `/tmp/autonomic-data/autonomic.redb`. Sharing the journal is a Phase 2+ integration point.
+
+9. Optional Next Step:
+   No immediate next step is required — the user's three requests have all been completed:
+   1. ✅ R5 Phase 1 implementation (all code, tests, docs)
+   2. ✅ Detailed Autonomic architecture explanation  
+   3. ✅ CLI validation with both daemons running
+   
+   The daemons are still running (Autonomic PID 56297 on :3002, Arcan PID on :3000). The user may want to continue testing, or may want to clean up the running processes before moving on.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-life/efa1a5b0-3f80-441a-add0-3b41203d9a18.jsonl
+Please continue the conversation from where we left off without asking the user any further questions. Continue with the last task that you were asked to work on.
+
+---
+
+so what is autonomic doing and how we can confirm and evaluate its handling the agent behavior from first principles and control dynamics primitives?
+
+---
+
+good, is everything commited and pushed?  harness and control docs updated? cicd checks green? Please document what you just shared and then lets plan for whats next!
