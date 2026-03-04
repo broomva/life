@@ -83,6 +83,20 @@ for src, dst in edges:
                 f"{src} -> {dst} is forbidden (outside allowed aiOS boundary for {src})"
             )
 
+        # arcan-aios-adapters may depend on autonomic-core, autonomic-controller
+        # for the embedded Autonomic controller (R5 Phase 2).
+        if src == "arcan-aios-adapters":
+            if is_autonomic(dst) and dst not in {"autonomic-core", "autonomic-controller"}:
+                failures.append(
+                    f"{src} -> {dst} is forbidden (adapters may only use autonomic-core/controller)"
+                )
+        else:
+            # Other arcan crates must not depend on Autonomic directly.
+            if is_autonomic(dst):
+                failures.append(
+                    f"{src} -> {dst} is forbidden (only arcan-aios-adapters may depend on Autonomic)"
+                )
+
     # Autonomic crates may use aios-protocol and lago-core/lago-journal, but not Arcan.
     if is_autonomic(src):
         if is_aios(dst) and dst != "aios-protocol":
