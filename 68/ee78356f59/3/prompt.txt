@@ -1,0 +1,252 @@
+is this a good idea? Is it the best practice and proper design decision? Praxis depends ONLY on aios-protocol (enforced by verify_dependencies.sh).
+
+---
+
+is this proper? any better ideas? or is it already the best idea?
+
+ Phase 5: Connect Praxis FS Tools to Lago Event-Sourced Persistence
+
+ Context
+
+ Praxis FS tools (ReadFile, WriteFile, EditFile, ListDir, Glob, Grep)
+ use raw std::fs calls. After every tool execution, a LakeFsObserver in
+ arcan's main.rs does a post-hoc full-workspace scan to reconcile with
+ Lago's event journal. This is O(workspace_size) per tool call —
+ rebuilding the entire manifest from the journal, snapshotting every
+ file, diffing, then emitting events. Wasteful and slow for large
+ workspaces.
+
+ Goal: Replace the post-hoc scan with inline write tracking. When Praxis
+  writes a file, Lago knows immediately — O(1) per write instead of O(n)
+  per tool call.
+
+ Constraint: Praxis depends ONLY on aios-protocol (enforced by
+ verify_dependencies.sh). Praxis CANNOT depend on Lago crates. The
+ abstraction must live in praxis-core.
+
+ Design
+
+ Praxis FS Tools (ReadFile, WriteFile, EditFile, ListDir, Glob, Grep)
+          │
+          ▼
+    praxis-core::FsPort (trait)
+          │
+     ┌────┴────┐
+     ▼         ▼
+  LocalFs    LagoTrackedFs
+ (praxis)    (arcan-lago)
+   std::fs    LocalFs + blob store + channel
+                       │
+                       ▼
+               Background async task
+               → Lago Journal append
+
+ - FsPort: Sync trait in praxis-core abstracting filesystem ops with
+ workspace boundary enforcement
+ - LocalFs: Default implementation wrapping std::fs + FsPolicy (backward
+  compatible)
+ - LagoTrackedFs: Decorator in arcan-lago — delegates I/O to LocalFs,
+ additionally hashes + stores blobs + sends write notifications via
+ bounded mpsc channel
+ - Background event writer: Async task receiving notifications and
+ appending FileWrite events to Lago journal
+
+ Steps
+
+ 1. Add FsPort trait + LocalFs to praxis-core
+
+ NEW praxis/crates/praxis-core/src/fs_port.rs:
+
+ pub trait FsPort: Send + Sync {
+     fn workspace_root(&self) -> &Path;
+     fn resolve(&self, path: &Path) -> PraxisResult<PathBuf>;
+     fn resolve_for_write(&self, path: &Path) -> PraxisResult<PathBuf>;
+     fn read_to_string(&self, path: &Path) -> PraxisResult<String>;
+     fn read_bytes(&self, path: &Path) -> PraxisResult<Vec<u8>>;
+     fn write(&self, path: &Path, content: &[u8]) -> PraxisResult<()>;
+     fn exists(&self, path: &Path) -> bool;
+     fn metadata(&self, path: &Path) -> PraxisResult<FsMetadata>;
+     fn read_dir(&self, path: &Path) -> PraxisResult<Vec<FsDirEntry>>;
+     fn create_dir_all(&self, path: &Path) -> PraxisResult<()>;
+     fn relative(&self, absolute_path: &Path) -> Option<PathBuf>;
+ }
+
+ Supporting types: FsMetadata { is_file, is_dir, size_bytes },
+ FsDirEntry { name, is_file, is_dir }.
+
+ NEW praxis/crates/praxis-core/src/local_fs.rs:
+ - LocalFs { policy: FsPolicy } implements FsPort
+ - All methods delegate to std::fs with FsPolicy boundary enforcement
+ - write() auto-creates parent directories
+ - ~8 unit tests (boundary enforcement, parent creation, relative paths,
+  read/write round-trip)
+
+ MODIFY praxis/crates/praxis-core/src/lib.rs:
+ - Add pub mod fs_port; and pub mod local_fs;
+ - Re-export: pub use fs_port::{FsPort, FsMetadata, FsDirEntry}; and pub
+  use local_fs::LocalFs;
+
+ 2. Refactor Praxis tools to use FsPort
+
+ MODIFY praxis/crates/praxis-tools/src/fs.rs:
+ - Change all 5 tool structs: policy: FsPolicy → fs: Arc<dyn FsPort>
+ - Constructors: ::new(policy: FsPolicy) → ::new(fs: Arc<dyn FsPort>)
+ - ReadFileTool: fs::read_to_string → self.fs.read_to_string()
+ - WriteFileTool: fs::write → self.fs.write()
+ - ListDirTool: fs::read_dir → self.fs.read_dir()
+ - GlobTool: self.fs.workspace_root() for base, self.fs.resolve() for
+ validation, glob::glob() for search (unchanged)
+ - GrepTool: self.fs.resolve() for validation, self.fs.metadata() for
+ size check, direct std::fs::File::open for streaming (read-only, no
+ tracking needed)
+
+ MODIFY praxis/crates/praxis-tools/src/edit.rs:
+ - EditFileTool { policy: FsPolicy } → EditFileTool { fs: Arc<dyn
+ FsPort> }
+ - fs::read_to_string → self.fs.read_to_string()
+ - fs::write → self.fs.write()
+ - Hashline logic (hash_lines, apply_tagged_edits) is pure — unchanged
+
+ UNCHANGED: memory.rs (uses dedicated memory_dir, not FsPolicy),
+ shell.rs (uses SandboxPolicy)
+
+ MODIFY all tests in fs.rs and edit.rs:
+ - FsPolicy::new(tmp) → Arc::new(LocalFs::new(FsPolicy::new(tmp)))
+ - Same test logic otherwise
+
+ 3. Add LagoTrackedFs to arcan-lago
+
+ MODIFY arcan/crates/arcan-lago/Cargo.toml:
+ - Add: praxis-core.workspace = true
+
+ NEW arcan/crates/arcan-lago/src/tracked_fs.rs:
+
+ pub struct LagoTrackedFs {
+     local_fs: LocalFs,
+     blob_store: Arc<BlobStore>,
+     tx: mpsc::Sender<FsWriteNotification>,
+ }
+
+ - Implements FsPort — delegates all ops to local_fs
+ - write() override: (1) local_fs.write(), (2) blob_store.put(content)
+ [sync redb], (3) try_send notification to channel. On channel full: log
+  warning, drop notification (degraded mode).
+ - run_event_writer(): Async function consuming the channel receiver,
+ constructing EventEnvelope with EventPayload::FileWrite, appending to
+ journal
+
+ MODIFY arcan/crates/arcan-lago/src/lib.rs:
+ - Add pub mod tracked_fs;
+ - Re-export LagoTrackedFs, FsWriteNotification, run_event_writer
+
+ 4. Wire LagoTrackedFs in Arcan binary
+
+ MODIFY arcan/crates/arcan/src/main.rs:
+ - Remove: LakeFsObserver struct + impl (~100 lines deleted)
+ - Add: mpsc::channel(1000) for write notifications
+ - Add: tokio::spawn(run_event_writer(rx, journal, session_id,
+ branch_id))
+ - Add: LagoTrackedFs::new(local_fs, blob_store, tx) as Arc<dyn FsPort>
+ - Change: Tool constructors from FsPolicy → Arc<dyn FsPort> (via
+ PraxisToolBridge)
+
+ 5. Update arcan-harness re-exports
+
+ MODIFY arcan/crates/arcan-harness/src/lib.rs:
+ - Add re-export: pub use praxis_core::{FsPort, LocalFs, FsMetadata,
+ FsDirEntry};
+
+ 6. Verify
+
+ # Praxis (49+ tests)
+ (cd praxis && cargo fmt && cargo clippy --workspace -- -D warnings &&
+ cargo test --workspace)
+
+ # Arcan (429+ tests)
+ (cd arcan && cargo fmt && cargo clippy --workspace -- -D warnings &&
+ cargo test --workspace)
+
+ # Architecture gate
+ ./scripts/architecture/verify_dependencies.sh
+
+ Files to Modify
+
+ File: praxis/crates/praxis-core/src/fs_port.rs
+ Action: NEW: FsPort trait + types
+ Lines: ~80
+ ────────────────────────────────────────
+ File: praxis/crates/praxis-core/src/local_fs.rs
+ Action: NEW: LocalFs impl + tests
+ Lines: ~200
+ ────────────────────────────────────────
+ File: praxis/crates/praxis-core/src/lib.rs
+ Action: Add modules + re-exports
+ Lines: ~5
+ ────────────────────────────────────────
+ File: praxis/crates/praxis-tools/src/fs.rs
+ Action: Refactor 5 tools: FsPolicy → FsPort
+ Lines: ~60 changed
+ ────────────────────────────────────────
+ File: praxis/crates/praxis-tools/src/edit.rs
+ Action: Refactor EditFileTool
+ Lines: ~20 changed
+ ────────────────────────────────────────
+ File: arcan/crates/arcan-lago/Cargo.toml
+ Action: Add praxis-core dep
+ Lines: ~2
+ ────────────────────────────────────────
+ File: arcan/crates/arcan-lago/src/tracked_fs.rs
+ Action: NEW: LagoTrackedFs + event writer
+ Lines: ~250
+ ────────────────────────────────────────
+ File: arcan/crates/arcan-lago/src/lib.rs
+ Action: Add module + re-exports
+ Lines: ~3
+ ────────────────────────────────────────
+ File: arcan/crates/arcan-harness/src/lib.rs
+ Action: Add FsPort re-exports
+ Lines: ~3
+ ────────────────────────────────────────
+ File: arcan/crates/arcan/src/main.rs
+ Action: Remove LakeFsObserver, wire LagoTrackedFs
+ Lines: ~-70 net
+
+ Scope Boundaries
+
+ In scope: ReadFileTool, WriteFileTool, EditFileTool, ListDirTool,
+ GlobTool, GrepTool
+ Out of scope: BashTool (SandboxPolicy), ReadMemoryTool/WriteMemoryTool
+ (memory_dir), arcan-spaces tools, arcan-lago MemoryQueryTool
+
+ Risk Assessment
+
+ Risk: Channel full (missed events)
+ Mitigation: Bounded 1000-item buffer + warn log; periodic fallback scan
+
+   can be added later
+ ────────────────────────────────────────
+ Risk: BlobStore.put() contention
+ Mitigation: redb handles concurrent readers; single writer per session
+ ────────────────────────────────────────
+ Risk: Test refactor breakage
+ Mitigation: Mechanical change (FsPolicy → Arc LocalFs); same logic
+ ────────────────────────────────────────
+ Risk: Dependency cycle
+ Mitigation: FsPort in praxis-core (not Lago); arcan-lago → praxis-core
+   is allowed
+ ────────────────────────────────────────
+ Risk: Event loss on crash
+ Mitigation: Acceptable: tracking is best-effort; manual reconciliation
+   available via lago-fs snapshot
+ ────────────────────────────────────────
+ Risk: Performance regression
+ Mitigation: Removes O(n) scan; adds O(1) hash+send per write — net
+   improvement
+
+---
+
+so we dont use lago fs capabilities?
+
+---
+
+lago should be the source of truth, can we improve lago to avoid the O(n) issue from it?
