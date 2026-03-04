@@ -7,10 +7,11 @@ use aios_protocol::tool::{
     Tool, ToolAnnotations, ToolCall, ToolContext, ToolDefinition, ToolError, ToolResult,
 };
 use blake3::Hasher;
-use praxis_core::workspace::FsPolicy;
+use praxis_core::FsPort;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::Path;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// A line of content with its hash tag.
@@ -133,12 +134,12 @@ pub enum EditError {
 
 /// Tool that applies hashline edits to files.
 pub struct EditFileTool {
-    policy: FsPolicy,
+    fs: Arc<dyn FsPort>,
 }
 
 impl EditFileTool {
-    pub fn new(policy: FsPolicy) -> Self {
-        Self { policy }
+    pub fn new(fs: Arc<dyn FsPort>) -> Self {
+        Self { fs }
     }
 }
 
@@ -199,16 +200,19 @@ impl Tool for EditFileTool {
             })?;
 
         let path = self
-            .policy
+            .fs
             .resolve_for_write(Path::new(path_str))
             .map_err(|e| ToolError::PolicyViolation {
                 message: e.to_string(),
             })?;
 
-        let content = std::fs::read_to_string(&path).map_err(|e| ToolError::ExecutionFailed {
-            tool_name: "edit_file".into(),
-            message: format!("Failed to read file: {e}"),
-        })?;
+        let content = self
+            .fs
+            .read_to_string(&path)
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool_name: "edit_file".into(),
+                message: format!("Failed to read file: {e}"),
+            })?;
 
         let new_content =
             apply_tagged_edits(&content, &ops).map_err(|e| ToolError::ExecutionFailed {
@@ -216,10 +220,12 @@ impl Tool for EditFileTool {
                 message: format!("Edit failed: {e}"),
             })?;
 
-        std::fs::write(&path, &new_content).map_err(|e| ToolError::ExecutionFailed {
-            tool_name: "edit_file".into(),
-            message: format!("Failed to write file: {e}"),
-        })?;
+        self.fs
+            .write(&path, new_content.as_bytes())
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool_name: "edit_file".into(),
+                message: format!("Failed to write file: {e}"),
+            })?;
 
         let hashed_content = render_hashed_content(&new_content);
 
