@@ -1,0 +1,658 @@
+lets work on this 
+# Plan: Extract Praxis — Canonical Tool Execution & Sandbox Engine
+
+## Context
+
+The Life project builds artificial life from AOS primitives. Tool execution (fs tools, sandbox, MCP bridge, hashline editing, skills) currently lives in `arcan-harness`, tightly coupled to `arcan-core::Tool` trait. This extraction creates **Praxis** ("action/practice") as a standalone project that any runtime can use, and unifies three competing sandbox abstractions.
+
+**Current problems:**
+1. `arcan-harness` tools implement `arcan_core::Tool` — unusable by other runtimes
+2. Three sandbox abstractions exist (`aios-sandbox`, `arcan-harness::SandboxPolicy`, `lago-core::Sandbox`) with no shared types
+3. `aios-protocol` has a minimal `ToolOutcome` (Success/Failure) while `arcan-core` has rich `ToolResult` with typed content blocks — the bridge loses information
+
+**Outcome:** Praxis becomes the canonical tool execution engine. Any aiOS-compatible runtime depends on Praxis for tools. The `Tool` trait and rich result types move to `aios-protocol`.
+
+## Architecture After Extraction
+
+```
+aios-protocol (canonical types: Tool trait, ToolDefinition, ToolResult, SandboxTier)
+  │
+  ├── Praxis (standalone tool execution engine)
+  │     ├── praxis-core   — sandbox policy, workspace enforcement, command runner
+  │     ├── praxis-tools  — ReadFile, WriteFile, EditFile, Glob, Grep, ListDir, Bash, Memory
+  │     ├── praxis-mcp    — MCP server bridge (wraps external tools)
+  │     └── praxis-skills — SKILL.md discovery and activation
+  │
+  ├── Arcan (runtime — consumes Praxis tools via ToolRegistry)
+  │     ├── arcan-core     — re-exports Tool trait from aios-protocol
+  │     ├── arcan-harness  — thin re-export shim (deprecated, removed later)
+  │     └── arcan-aios-adapters — simplified bridge
+  │
+  └── Lago (persistence — SandboxTier imported from aios-protocol)
+```
+
+## Phased Implementation
+
+### Phase 1: Extend aios-protocol with unified tool types
+
+**Goal:** Move the rich tool types from `arcan-core::protocol` into `aios-protocol`.
+
+**`aiOS/crates/aios-protocol/src/tool.rs`** — Add:
+- `ToolAnnotations` (MCP-compatible: read_only, destructive, idempotent, open_world, requires_confirmation)
+- `ToolDefinition` (name, description, input_schema, title, output_schema, annotations, category, tags, timeout_secs)
+- `ToolContent` enum (Text/Image/Json — MCP-aligned)
+- `ToolResult` (call_id, tool_name, output, content, is_error) — omit `state_patch` (Arcan-specific)
+- `ToolContext` (run_id, session_id, iteration)
+- `Tool` trait (sync: `definition() -> ToolDefinition`, `execute(&ToolCall, &ToolContext) -> Result<ToolResult, ToolError>`)
+- `ToolRegistry` (BTreeMap<String, Arc<dyn Tool>>)
+- `ToolError` enum (thiserror)
+
+**`aiOS/crates/aios-protocol/src/sandbox.rs`** — New file:
+- `SandboxTier` (None/Basic/Process/Container — from lago-core)
+- `SandboxLimits` (max_runtime_secs, max_output_bytes, max_memory_mb)
+- `NetworkPolicy` (Disabled/AllowAll/AllowList — from arcan-harness)
+- `SandboxRunner` trait (async)
+
+**`aiOS/crates/aios-protocol/Cargo.toml`** — Add `schemars`, `thiserror` deps.
+
+**Backward compat:** `arcan-core::protocol` re-exports moved types as aliases. All downstream compiles unchanged.
+
+**Verify:** `(cd aiOS && cargo test --workspace)` — existing 61 tests + new serde roundtrips.
+
+---
+
+### Phase 2: Create Praxis project scaffold
+
+**Goal:** New submodule with 4 crates.
+
+```
+praxis/
+├── Cargo.toml              # workspace
+├── CLAUDE.md
+└── crates/
+    ├── praxis-core/src/
+    │   ├── lib.rs
+    │   ├── sandbox.rs      # SandboxPolicy, CommandRunner, LocalCommandRunner
+    │   ├── workspace.rs    # FsPolicy (workspace boundary enforcement)
+    │   └── error.rs        # PraxisError
+    ├── praxis-tools/src/
+    │   ├── lib.rs
+    │   ├── fs.rs           # ReadFile, WriteFile, ListDir, Glob, Grep
+    │   ├── edit.rs         # EditFileTool (hashline/blake3)
+    │   ├── shell.rs        # BashTool
+    │   └── memory.rs       # ReadMemory, WriteMemory
+    ├── praxis-mcp/src/
+    │   ├── lib.rs
+    │   ├── connection.rs   # McpConnection, connect_mcp_stdio()
+    │   └── tool.rs         # McpTool
+    └── praxis-skills/src/
+        ├── lib.rs
+        ├── registry.rs     # SkillRegistry
+        └── parser.rs       # parse_skill_md()
+```
+
+**Dependencies:** All crates depend on `aios-protocol` only (NOT arcan-core or lago-core).
+
+**Verify:** `(cd praxis && cargo check --workspace)`.
+
+---
+
+### Phase 3: Port tool implementations to Praxis
+
+**Goal:** Move each tool from `arcan-harness`, changing only the trait implementation.
+
+Per tool: copy source → change `use arcan_core::{Tool, ToolDefinition, ...}` to `use aios_protocol::tool::{...}` → port tests.
+
+**Source → Destination mapping:**
+
+| arcan-harness source | Praxis destination | Notes |
+|---|---|---|
+| `fs.rs` (FsPolicy) | `praxis-core/workspace.rs` | Policy only, not tools |
+| `fs.rs` (ReadFile, WriteFile, ListDir, Glob, Grep) | `praxis-tools/fs.rs` | Tools impl new trait |
+| `edit.rs` | `praxis-tools/edit.rs` | blake3 hashline editing |
+| `sandbox.rs` (SandboxPolicy, CommandRunner, LocalCommandRunner) | `praxis-core/sandbox.rs` | Core sandbox engine |
+| `sandbox.rs` (BashTool) | `praxis-tools/shell.rs` | Tool wrapper |
+| `memory.rs` | `praxis-tools/memory.rs` | File-based memory |
+| `mcp.rs` | `praxis-mcp/` | MCP bridge |
+| `skills.rs` | `praxis-skills/` | Skill discovery |
+
+**Verify:** `(cd praxis && cargo test --workspace)` — target 39+ tests matching arcan-harness coverage.
+
+---
+
+### Phase 4: Wire Arcan to use Praxis
+
+**Goal:** Replace arcan-harness deps with praxis-* deps in the arcan binary.
+
+**`arcan/crates/arcan/Cargo.toml`** — Replace `arcan-harness` with `praxis-tools`, `praxis-core`, `praxis-mcp`, `praxis-skills`.
+
+**`arcan/crates/arcan/src/main.rs`** — Update imports:
+```rust
+use praxis_tools::fs::{ReadFileTool, WriteFileTool, ListDirTool, GlobTool, GrepTool};
+use praxis_tools::edit::EditFileTool;
+use praxis_tools::shell::BashTool;
+use praxis_tools::memory::{ReadMemoryTool, WriteMemoryTool};
+use praxis_core::sandbox::{LocalCommandRunner, SandboxPolicy};
+use praxis_core::workspace::FsPolicy;
+```
+
+**`arcan-core::protocol`** — Re-export types from aios-protocol (type aliases).
+
+**`arcan-core::runtime`** — Re-export `Tool`, `ToolContext`, `ToolRegistry` from aios-protocol.
+
+**`arcan-harness/src/lib.rs`** — Thin re-export shim:
+```rust
+pub use praxis_tools as tools;
+pub use praxis_core::sandbox;
+pub use praxis_core::workspace as fs;
+pub use praxis_mcp as mcp;
+pub use praxis_skills as skills;
+```
+
+**`arcan-aios-adapters/src/tools.rs`** — Simplify: tools already implement canonical trait, less conversion needed.
+
+**Verify:** `(cd arcan && cargo test --workspace)` — all 442 tests pass.
+
+---
+
+### Phase 5: Unify sandbox abstractions
+
+**Goal:** Make `aios-sandbox` and `lago-core` use canonical sandbox types from `aios-protocol`.
+
+**`aiOS/crates/aios-sandbox/src/lib.rs`:**
+- Import `SandboxTier`, `SandboxLimits` from `aios_protocol::sandbox`
+- `LocalSandboxRunner` implements `aios_protocol::sandbox::SandboxRunner`
+- Remove duplicate type definitions
+
+**`lago/crates/lago-core/src/sandbox.rs`:**
+- Import `SandboxTier` from `aios_protocol::sandbox` (remove local definition)
+- Keep Lago-specific types (`SandboxConfig` with extra fields, `Sandbox` trait with lifecycle methods)
+- Re-export `SandboxTier`
+
+**Verify:** `(cd lago && cargo test --workspace)` — all 324 tests pass.
+
+---
+
+### Phase 6: Documentation and cleanup
+
+**Update:**
+- `CLAUDE.md` — Add Praxis to Projects, update diagram and crate counts
+- `docs/ARCHITECTURE.md` — Add Praxis as Execution primitive
+- `docs/ROADMAP.md` — Mark Praxis extraction complete
+- `docs/STATUS.md` — Add Praxis health row, update counts
+- `praxis/CLAUDE.md` — Full project conventions
+- `.cargo/config.toml` — Add praxis to shared target-dir if needed
+- `conformance/run.sh` — Add Praxis test suite
+- Update `verify_dependencies.sh` — Add Praxis dependency rules (must not depend on Arcan/Lago)
+
+## Critical Files
+
+| File | Role | Phase |
+|------|------|-------|
+| `aiOS/crates/aios-protocol/src/tool.rs` | Canonical tool types + Tool trait | 1 |
+| `aiOS/crates/aios-protocol/src/sandbox.rs` | Canonical sandbox types | 1 |
+| `arcan/crates/arcan-harness/src/*.rs` | Source for tool extraction | 3 |
+| `arcan/crates/arcan-core/src/protocol.rs` | Types to re-export from aios-protocol | 4 |
+| `arcan/crates/arcan-core/src/runtime.rs` | Tool trait to re-export from aios-protocol | 4 |
+| `arcan/crates/arcan/src/main.rs` | Binary entry point — rewire imports | 4 |
+| `arcan/crates/arcan-aios-adapters/src/tools.rs` | Adapter to simplify | 4 |
+| `lago/crates/lago-core/src/sandbox.rs` | SandboxTier to import from aios-protocol | 5 |
+
+## Verification
+
+After each phase:
+```bash
+(cd aiOS && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+(cd praxis && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+(cd arcan && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+(cd lago && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+./conformance/run.sh && ./scripts/architecture/verify_dependencies.sh
+```
+
+**Invariants:**
+- [ ] All existing 827+ tests pass
+- [ ] Conformance suite (81 tests) passes
+- [ ] Architecture dependency audit passes (Praxis must NOT depend on Arcan/Lago)
+- [ ] Praxis tools behave identically to arcan-harness tools
+- [ ] arcan-harness compiles as re-export shim (no breakage)
+
+## Risk Mitigation
+
+- **Re-export shim**: arcan-harness becomes re-exports — any code using `arcan_harness::*` continues working
+- **Type aliases**: arcan-core re-exports moved types from aios-protocol — no import breakage
+- **Phase gates**: Each phase is independently committable and verifiable
+- **No behavior change**: Tools do exactly the same thing, just from a different crate
+
+## Execution Status
+
+Ready for implementation. All 6 phases defined and verified against codebase exploration.
+
+---
+
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Analysis:
+Let me carefully analyze the entire conversation chronologically:
+
+1. The user provided a detailed plan for "Extract Praxis — Canonical Tool Execution & Sandbox Engine" with 6 phases.
+
+2. I explored the codebase extensively to understand:
+   - aios-protocol's current tool types (ToolCall, ToolOutcome)
+   - arcan-core's rich tool types (ToolAnnotations, ToolDefinition, ToolContent, ToolResult, Tool trait, ToolRegistry, ToolContext)
+   - lago-core's sandbox types (SandboxTier, SandboxConfig, etc.)
+   - aios-sandbox's types (SandboxLimits, SandboxRequest, SandboxRunner)
+   - arcan-harness's complete tool implementations (fs.rs, edit.rs, sandbox.rs, memory.rs, mcp.rs, skills.rs)
+
+3. The CLAUDE.md was updated with a preamble about building with care.
+
+4. I created task tracking for all 6 phases.
+
+5. Phase 1 - Extended aios-protocol:
+   - Extended tool.rs with ToolAnnotations, ToolDefinition, ToolContent, ToolResult (without state_patch), ToolContext, ToolError, Tool trait, ToolRegistry
+   - Created sandbox.rs with SandboxTier, SandboxLimits, NetworkPolicy
+   - Updated lib.rs with new module and re-exports
+   - Fixed clippy error: NetworkPolicy default impl should use derive instead of manual impl
+   - All 70 tests pass (up from 61)
+
+6. Phase 2 - Created Praxis scaffold:
+   - Created workspace Cargo.toml with 4 crates
+   - Created praxis-core with sandbox.rs and workspace.rs (working implementations with tests)
+   - Created praxis-tools, praxis-mcp, praxis-skills with stub files
+   - All 12 praxis-core tests pass
+
+7. Phase 3 - Started porting tools:
+   - Read all arcan-harness source files
+   - Updated praxis-core/workspace.rs to add resolve_existing and resolve_for_write methods
+   - Wrote praxis-tools/src/edit.rs (complete port with 8 tests)
+   - Was about to write fs.rs, memory.rs, shell.rs, skills when summary was requested
+
+Key error: clippy complained about derivable_impls for NetworkPolicy Default - fixed by using #[derive(Default)] with #[default] attribute.
+
+The MEMORY.md was updated externally to include Autonomic project (5 crates, 69 tests) and updated counts to 26 crates, 726 tests.
+
+Summary:
+1. Primary Request and Intent:
+   The user asked to implement a detailed 6-phase plan to extract **Praxis** — a canonical tool execution and sandbox engine — from the existing `arcan-harness` crate. The plan creates a standalone project that any aiOS-compatible runtime can use, unifying three competing sandbox abstractions across aiOS, Arcan, and Lago. The 6 phases are:
+   - Phase 1: Extend aios-protocol with unified tool types
+   - Phase 2: Create Praxis project scaffold (4 crates)
+   - Phase 3: Port tool implementations from arcan-harness to Praxis
+   - Phase 4: Wire Arcan to use Praxis
+   - Phase 5: Unify sandbox abstractions across aiOS/Lago
+   - Phase 6: Documentation and cleanup
+
+2. Key Technical Concepts:
+   - **Rust 2024 Edition** (MSRV 1.85) across all projects
+   - **aios-protocol** as the canonical contract crate (lightweight, no runtime deps)
+   - **Tool trait** pattern: sync `fn definition() -> ToolDefinition` + `fn execute(&ToolCall, &ToolContext) -> Result<ToolResult, ToolError>`
+   - **Hashline editing**: Blake3 content-hash-addressed line edits preventing "blind" edits
+   - **Workspace boundary enforcement**: FsPolicy with canonicalize + starts_with checks
+   - **SandboxPolicy**: cwd validation, env filtering, timeout enforcement, output truncation
+   - **MCP (Model Context Protocol)** bridge wrapping external tools
+   - **SKILL.md** YAML frontmatter discovery system
+   - **ToolResult vs ToolOutcome**: ToolResult is rich (typed content blocks), ToolOutcome is simplified kernel-level
+   - **state_patch removed** from canonical ToolResult (Arcan-specific concern)
+   - **schemars skipped** in aios-protocol to keep it lightweight
+   - `thiserror` for libraries, `anyhow` for binaries
+   - `unsafe_code = "forbid"` workspace lint
+
+3. Files and Code Sections:
+
+   **EXPLORED (read-only):**
+   - `aiOS/crates/aios-protocol/Cargo.toml` — deps: async-trait, chrono, futures-util, indexmap, serde, serde_json, thiserror, uuid
+   - `arcan/crates/arcan-core/src/protocol.rs` — Rich types: ToolAnnotations, ToolDefinition, ToolContent, ToolCall (no capabilities), ToolResult (with state_patch), StatePatch, AgentEvent, etc.
+   - `arcan/crates/arcan-core/src/runtime.rs` — Tool trait, ToolContext, ToolRegistry, Orchestrator with full agent loop
+   - `arcan/crates/arcan-harness/src/fs.rs` (570 lines) — FsPolicy, ReadFileTool, WriteFileTool, ListDirTool, GlobTool, GrepTool
+   - `arcan/crates/arcan-harness/src/edit.rs` (358 lines) — HashedLine, TaggedEditOp, hash_lines, apply_tagged_edits, EditFileTool
+   - `arcan/crates/arcan-harness/src/sandbox.rs` (593 lines) — SandboxPolicy, NetworkPolicy, CommandRunner, LocalCommandRunner, BashTool
+   - `arcan/crates/arcan-harness/src/memory.rs` (309 lines) — ReadMemoryTool, WriteMemoryTool, validate_memory_key
+   - `arcan/crates/arcan-harness/src/skills.rs` (407 lines) — SkillMetadata, LoadedSkill, SkillRegistry, parse_skill_md
+   - `arcan/crates/arcan-harness/src/mcp.rs` (282 lines) — McpServerConfig, McpTool, connect_mcp_stdio
+   - `lago/crates/lago-core/src/sandbox.rs` — SandboxTier (None/Basic/Process/Container), SandboxConfig, Sandbox trait
+   - `aiOS/crates/aios-sandbox/src/lib.rs` — SandboxLimits, SandboxRequest, SandboxRunner, LocalSandboxRunner
+   - `aiOS/Cargo.toml` — workspace with 10 members, Rust 2024 edition
+
+   **MODIFIED — Phase 1:**
+   - `aiOS/crates/aios-protocol/src/tool.rs` — Extended from ~67 lines to ~450+ lines. Added:
+     - `ToolAnnotations` (read_only, destructive, idempotent, open_world, requires_confirmation)
+     - `ToolDefinition` (name, description, input_schema, title, output_schema, annotations, category, tags, timeout_secs)
+     - `ToolContent` enum (Text/Image/Json)
+     - `ToolResult` (call_id, tool_name, output, content, is_error — NO state_patch)
+     - Helper methods: `ToolResult::text()`, `ToolResult::json()`, `ToolResult::error()`
+     - `From<&ToolResult> for ToolOutcome` conversion
+     - `ToolContext` (run_id, session_id, iteration)
+     - `ToolError` enum (NotFound, ExecutionFailed, InvalidInput, Timeout, PolicyViolation, Other)
+     - `Tool` trait (sync, dyn-compatible)
+     - `ToolRegistry` (BTreeMap<String, Arc<dyn Tool>>) with register, register_arc, get, definitions, len, is_empty, names
+     - 28 new tests (annotations, definitions, content, results, conversions, trait, registry, errors)
+
+   - `aiOS/crates/aios-protocol/src/sandbox.rs` — NEW file with:
+     - `SandboxTier` (None/Basic/Process/Container with PartialOrd/Ord)
+     - `SandboxLimits` (max_runtime_secs, max_output_bytes, max_memory_mb)
+     - `NetworkPolicy` enum (Disabled/AllowAll/AllowList{hosts})
+     - 9 tests (ordering, defaults, serde roundtrips, policy comparisons)
+
+   - `aiOS/crates/aios-protocol/src/lib.rs` — Added `pub mod sandbox;` and new re-exports:
+     ```rust
+     pub use sandbox::{NetworkPolicy, SandboxLimits, SandboxTier};
+     pub use tool::{
+         Tool, ToolAnnotations, ToolCall, ToolContent, ToolContext, ToolDefinition, ToolError,
+         ToolOutcome, ToolRegistry, ToolResult,
+     };
+     ```
+
+   **CREATED — Phase 2:**
+   - `praxis/Cargo.toml` — Workspace with 4 members, Rust 2024 edition, workspace deps including aios-protocol, blake3, glob, regex, rmcp, serde, tokio, walkdir, etc.
+   - `praxis/crates/praxis-core/Cargo.toml` — deps: aios-protocol, serde, serde_json, thiserror, tracing, wait-timeout
+   - `praxis/crates/praxis-core/src/lib.rs` — modules: error, sandbox, workspace
+   - `praxis/crates/praxis-core/src/error.rs` — PraxisError enum (WorkspaceViolation, Sandbox, CommandFailed, PathOutsideWorkspace, Io)
+   - `praxis/crates/praxis-core/src/sandbox.rs` — SandboxPolicy, CommandRequest, CommandResult, CommandRunner trait, LocalCommandRunner with cwd validation, env filtering, timeout, output truncation. 6 tests.
+   - `praxis/crates/praxis-core/src/workspace.rs` — FsPolicy with resolve_existing, resolve_for_write, resolve, ensure_within_root, relative. 6 tests.
+   - `praxis/crates/praxis-tools/Cargo.toml` — deps: aios-protocol, praxis-core, blake3, glob, regex, walkdir, etc.
+   - `praxis/crates/praxis-tools/src/lib.rs` — modules: edit, fs, memory, shell
+   - `praxis/crates/praxis-mcp/Cargo.toml` — deps: aios-protocol, rmcp, tokio
+   - `praxis/crates/praxis-mcp/src/lib.rs` — modules: connection, tool (stubs)
+   - `praxis/crates/praxis-skills/Cargo.toml` — deps: aios-protocol, serde_yaml, walkdir
+   - `praxis/crates/praxis-skills/src/lib.rs` — modules: parser, registry (stubs)
+
+   **CREATED — Phase 3 (in progress):**
+   - `praxis/crates/praxis-tools/src/edit.rs` — COMPLETE port from arcan-harness. Key changes from original:
+     - `use aios_protocol::tool::{Tool, ToolAnnotations, ToolCall, ToolContext, ToolDefinition, ToolError, ToolResult}` instead of arcan_core imports
+     - `use praxis_core::workspace::FsPolicy` instead of crate::fs::FsPolicy
+     - `ToolError::InvalidInput` and `ToolError::ExecutionFailed` instead of `CoreError::ToolExecution`
+     - `ToolError::PolicyViolation` instead of CoreError for workspace violations
+     - Removed `state_patch: None` from ToolResult construction
+     - Removed `schemars::JsonSchema` derives
+     - 8 tests (same as original)
+   - `praxis/crates/praxis-core/src/workspace.rs` — Updated to add `resolve_existing` and `resolve_for_write` methods matching arcan's FsPolicy API
+
+4. Errors and fixes:
+   - **Clippy derivable_impls error**: `NetworkPolicy`'s manual `Default` impl triggered clippy's `derivable_impls` lint. Fixed by using `#[derive(Default)]` with `#[default]` attribute on the `Disabled` variant instead of a manual `impl Default`.
+
+5. Problem Solving:
+   - **Design tension**: aios-protocol's `ToolCall` has `requested_capabilities: Vec<Capability>` while arcan-core's doesn't. Resolved by keeping both — tools receive the full ToolCall but ignore capabilities (policy layer handles them).
+   - **ToolResult vs state_patch**: The canonical ToolResult omits `state_patch` (Arcan-specific). Arcan-core will continue using its own ToolResult with state_patch until Phase 4 migration.
+   - **schemars decision**: Decided NOT to add schemars to aios-protocol to keep it lightweight. Arcan can add JsonSchema derives via wrappers.
+   - **FsPolicy API mismatch**: The initial praxis-core FsPolicy only had `resolve()`. Updated to add `resolve_existing()` and `resolve_for_write()` to match arcan-harness's FsPolicy API that all tools depend on.
+
+6. All user messages:
+   - First message: "lets work on this" followed by the complete Praxis extraction plan (6 phases, architecture diagram, file mappings, verification commands, risk mitigation)
+   - CLAUDE.md was updated with preamble: "this is you, this is your life, you are building it, yourself... lets make sure the implementation is clean, following best practices and thinking deeply about the chain of dependencies"
+
+7. Pending Tasks (from task tracker):
+   - **Task #3 [in_progress]**: Phase 3: Port tool implementations to Praxis — fs.rs, shell.rs, memory.rs still need porting; skills and mcp need porting
+   - **Task #4 [pending]**: Phase 4: Wire Arcan to use Praxis
+   - **Task #5 [pending]**: Phase 5: Unify sandbox abstractions
+   - **Task #6 [pending]**: Phase 6: Documentation and cleanup
+
+8. Current Work:
+   I was in the middle of **Phase 3: Port tool implementations to Praxis**. I had just completed:
+   - Updated `praxis-core/workspace.rs` with `resolve_existing` and `resolve_for_write`
+   - Ported `edit.rs` completely to `praxis-tools/src/edit.rs`
+   
+   I had read all the arcan-harness source files (fs.rs, edit.rs, sandbox.rs, memory.rs, mcp.rs, skills.rs) and was about to port the remaining tools:
+   - `fs.rs` → `praxis-tools/src/fs.rs` (ReadFileTool, WriteFileTool, ListDirTool, GlobTool, GrepTool)
+   - `shell.rs` → `praxis-tools/src/shell.rs` (BashTool wrapping praxis-core sandbox)
+   - `memory.rs` → `praxis-tools/src/memory.rs` (ReadMemoryTool, WriteMemoryTool)
+   - `skills.rs` → `praxis-skills/src/parser.rs` + `registry.rs`
+   - `mcp.rs` → `praxis-mcp/src/connection.rs` + `tool.rs`
+
+9. Optional Next Step:
+   Continue Phase 3 by porting the remaining tool implementations. The immediate next files to write are:
+   - `praxis/crates/praxis-tools/src/fs.rs` — Port ReadFileTool, WriteFileTool, ListDirTool, GlobTool, GrepTool from arcan-harness, changing imports from `arcan_core::*` to `aios_protocol::tool::*` and `praxis_core::workspace::FsPolicy`
+   - `praxis/crates/praxis-tools/src/shell.rs` — Port BashTool using praxis-core's CommandRunner/SandboxPolicy
+   - `praxis/crates/praxis-tools/src/memory.rs` — Port ReadMemoryTool, WriteMemoryTool
+   - `praxis/crates/praxis-skills/src/parser.rs` and `registry.rs` — Port skills system
+   - `praxis/crates/praxis-mcp/src/connection.rs` and `tool.rs` — Port MCP bridge
+   
+   Then run `(cd praxis && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace)` targeting 39+ tests.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-life/c9c21c03-8452-4e9f-ae49-185f0be6d8e8.jsonl
+Please continue the conversation from where we left off without asking the user any further questions. Continue with the last task that you were asked to work on.
+
+---
+
+lets make sure that harness, control and docs are updated, we will continue on the next phases later with fresh session, so make sure plan status is all in sync on life repo and specifics on the module repo
+
+---
+
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Analysis:
+Let me chronologically analyze the conversation:
+
+1. **Context Recovery**: The session started with a context recovery from a previous conversation that ran out of context. The summary described a 6-phase plan to extract "Praxis" — a canonical tool execution and sandbox engine. Phases 1-2 were completed, and Phase 3 was in progress (edit.rs was ported, remaining files needed porting).
+
+2. **Phase 3 Continuation**: I continued porting tool implementations:
+   - Read current state of stub files (fs.rs, shell.rs, memory.rs, connection.rs, tool.rs, parser.rs, registry.rs)
+   - Read source files from arcan-harness (fs.rs, sandbox.rs, memory.rs, skills.rs, mcp.rs)
+   - Read workspace Cargo.toml to verify dependencies
+
+3. **Writing all files**: Attempted to write all 7 files in parallel but got "File has not been read yet" errors because the stub files needed to be read first.
+
+4. **Fix**: Read all 5 stub files, then wrote all 7 files successfully:
+   - `praxis-tools/src/fs.rs` — ReadFileTool, WriteFileTool, ListDirTool, GlobTool, GrepTool
+   - `praxis-tools/src/shell.rs` — BashTool
+   - `praxis-tools/src/memory.rs` — ReadMemoryTool, WriteMemoryTool
+   - `praxis-skills/src/parser.rs` — SkillMetadata, parse_skill_md
+   - `praxis-skills/src/registry.rs` — SkillRegistry, LoadedSkill
+   - `praxis-mcp/src/connection.rs` — McpServerConfig, connect_mcp_stdio
+   - `praxis-mcp/src/tool.rs` — McpTool
+
+5. **Clippy errors with rmcp 0.1**: The praxis workspace had rmcp v0.1 but arcan uses v0.15. The API was significantly different:
+   - `CallToolRequestParams` vs `CallToolRequestParam`
+   - `TokioChildProcess::new(cmd)` vs `TokioChildProcess::new(&mut cmd)`
+   - rmcp 0.1 Tool struct had no `annotations`, `title`, `output_schema` fields
+   - rmcp 0.1 CallToolResult had no `structured_content`
+   
+   **Fix**: Updated workspace Cargo.toml to use `rmcp = { version = "0.15", ... }` — this matched arcan's version and resolved all API issues.
+
+6. **Test compilation errors**: `ToolCall` struct required `requested_capabilities` field.
+   **Fix**: Added `requested_capabilities: vec![]` to test helpers in fs.rs, memory.rs, and shell.rs.
+
+7. **All 49 tests passing**, zero clippy warnings. Phase 3 marked completed.
+
+8. **User's final request**: "lets make sure that harness, control and docs are updated, we will continue on the next phases later with fresh session, so make sure plan status is all in sync on life repo and specifics on the module repo"
+
+9. **Documentation sync work**: I launched two Explore agents to:
+   - Read docs/STATUS.md, docs/ROADMAP.md, docs/ARCHITECTURE.md, Makefile.control, Makefile.harness
+   - Explore praxis project state (no CLAUDE.md, no docs/, no Makefile, no .claude/ rules)
+   - Also checked git status showing praxis/ as untracked
+
+The findings revealed:
+- docs/STATUS.md mentions 933 tests across 24 crates but doesn't mention Praxis at all
+- docs/ARCHITECTURE.md doesn't mention Praxis
+- docs/ROADMAP.md doesn't mention Praxis
+- Makefile.control and Makefile.harness don't include praxis in their build/test flows
+- praxis/ has no CLAUDE.md, no docs/, no Makefile, no .claude/ rules
+- praxis/ is untracked in git (shown as `?? praxis/`)
+
+The user's request was specifically to update harness, control, and docs before ending the session. I had just received all the exploration results but hadn't yet made any updates when the summary was requested.
+
+Let me now compile all the specific details needed for the summary.
+
+Summary:
+1. Primary Request and Intent:
+   The user is implementing a 6-phase plan to extract **Praxis** — a canonical tool execution and sandbox engine — from the existing `arcan-harness` crate into a standalone project. The 6 phases are:
+   - Phase 1: Extend aios-protocol with unified tool types (COMPLETED in prior session)
+   - Phase 2: Create Praxis project scaffold (COMPLETED in prior session)
+   - Phase 3: Port tool implementations from arcan-harness to Praxis (COMPLETED in this session)
+   - Phase 4: Wire Arcan to use Praxis (PENDING — deferred to future session)
+   - Phase 5: Unify sandbox abstractions across aiOS/Lago (PENDING)
+   - Phase 6: Documentation and cleanup (PENDING)
+
+   The user's most recent explicit request was: **"lets make sure that harness, control and docs are updated, we will continue on the next phases later with fresh session, so make sure plan status is all in sync on life repo and specifics on the module repo"** — meaning update all documentation, build harness, and control infrastructure to reflect the new Praxis project before ending the session.
+
+2. Key Technical Concepts:
+   - **Rust 2024 Edition** (MSRV 1.85) with `unsafe_code = "forbid"` workspace lint
+   - **aios-protocol** as the canonical contract crate — defines `Tool` trait, `ToolDefinition`, `ToolCall`, `ToolResult`, `ToolError`, `ToolContext`, `ToolAnnotations`, `ToolContent`, `ToolRegistry`, `SandboxTier`, `SandboxLimits`, `NetworkPolicy`
+   - **Hashline editing**: Blake3 content-hash-addressed line edits preventing "blind" edits
+   - **FsPolicy**: Workspace boundary enforcement via canonicalize + starts_with checks
+   - **SandboxPolicy**: cwd validation, env filtering, timeout enforcement, output truncation
+   - **MCP (Model Context Protocol)** bridge wrapping external tools via rmcp 0.15
+   - **SKILL.md** YAML frontmatter discovery system for skill-based agent capabilities
+   - **ToolResult** without `state_patch` (Arcan-specific concern removed from canonical type)
+   - **rmcp 0.15** — MCP client SDK (matching arcan's version); 0.1 was incompatible
+   - **thiserror** for library errors, workspace-level lint configuration
+
+3. Files and Code Sections:
+
+   - **`praxis/Cargo.toml`** — Workspace manifest defining 4 crates
+     - Updated rmcp from `"0.1"` to `"0.15"` to match arcan's API
+     ```toml
+     [workspace]
+     members = [
+         "crates/praxis-core",
+         "crates/praxis-mcp",
+         "crates/praxis-skills",
+         "crates/praxis-tools",
+     ]
+     resolver = "2"
+     
+     [workspace.package]
+     edition = "2024"
+     version = "0.1.0"
+     rust-version = "1.85"
+     
+     [workspace.dependencies]
+     aios-protocol = { path = "../aiOS/crates/aios-protocol", version = "0.1.0" }
+     rmcp = { version = "0.15", features = ["client", "transport-child-process"] }
+     # ... other deps
+     
+     [workspace.lints.rust]
+     unsafe_code = "forbid"
+     unused_must_use = "deny"
+     ```
+
+   - **`praxis/crates/praxis-tools/src/fs.rs`** — Ported from `arcan-harness/src/fs.rs` (662 LOC)
+     - Contains: ReadFileTool, WriteFileTool, ListDirTool, GlobTool, GrepTool
+     - All use `aios_protocol::tool::*` instead of `arcan_core::*`
+     - All use `praxis_core::workspace::FsPolicy` instead of local FsPolicy
+     - Errors use `ToolError::InvalidInput`/`ExecutionFailed` instead of `CoreError::ToolExecution`
+     - No `state_patch` in ToolResult construction
+     - 8 tests covering read, write, list, glob, grep, workspace escapes
+     - Test helper includes `requested_capabilities: vec![]` for ToolCall construction
+
+   - **`praxis/crates/praxis-tools/src/edit.rs`** — Ported in prior session (345 LOC)
+     - Contains: HashedLine, TaggedEditOp, hash_lines, apply_tagged_edits, EditFileTool
+     - 8 tests
+
+   - **`praxis/crates/praxis-tools/src/shell.rs`** — Ported from `arcan-harness/src/sandbox.rs` BashTool (174 LOC)
+     - Contains: BashTool wrapping praxis-core's CommandRunner/SandboxPolicy
+     - Uses `praxis_core::sandbox::{CommandRequest, CommandRunner, SandboxPolicy}`
+     - 3 tests (execute, shell_disabled, missing_command)
+
+   - **`praxis/crates/praxis-tools/src/memory.rs`** — Ported from `arcan-harness/src/memory.rs` (300 LOC)
+     - Contains: ReadMemoryTool, WriteMemoryTool, validate_memory_key
+     - 5 tests (write+read, nonexistent, invalid keys, auto-create dir, overwrite)
+
+   - **`praxis/crates/praxis-skills/src/parser.rs`** — Ported from `arcan-harness/src/skills.rs` (159 LOC)
+     - Contains: SkillMetadata struct (with serde_yaml), parse_skill_md, SkillParseError
+     - 5 tests (full parse, minimal, missing frontmatter, missing name, empty name)
+
+   - **`praxis/crates/praxis-skills/src/registry.rs`** — Ported from `arcan-harness/src/skills.rs` (266 LOC)
+     - Contains: LoadedSkill, SkillRegistry (discover, count, system_prompt_catalog, activate, skill_names, allowed_tools), SkillError
+     - 6 tests (discovery, malformed skills, nonexistent dirs, catalog formatting, allowed_tools, skill_names)
+
+   - **`praxis/crates/praxis-mcp/src/connection.rs`** — Ported from `arcan-harness/src/mcp.rs` (203 LOC)
+     - Contains: McpServerConfig, McpTransport, McpConnection, connect_mcp_stdio, mcp_tool_to_definition, McpError
+     - 2 tests (conversion with annotations, without annotations)
+
+   - **`praxis/crates/praxis-mcp/src/tool.rs`** — Ported from `arcan-harness/src/mcp.rs` (102 LOC)
+     - Contains: McpTool bridge implementing canonical Tool trait
+     - Uses rmcp's CallToolRequestParam (note: singular, not Params), Peer, RoleClient
+     - No unit tests (requires live MCP server)
+
+   - **`praxis/crates/praxis-core/src/sandbox.rs`** — Created in prior session (316 LOC, 6 tests)
+   - **`praxis/crates/praxis-core/src/workspace.rs`** — Created in prior session (201 LOC, 6 tests)
+   - **`praxis/crates/praxis-core/src/error.rs`** — Created in prior session (25 LOC)
+
+   **Files READ but NOT modified (source references):**
+   - `arcan/crates/arcan-harness/src/fs.rs` (570 lines) — source for praxis-tools/fs.rs port
+   - `arcan/crates/arcan-harness/src/sandbox.rs` (593 lines) — source for sandbox types and BashTool
+   - `arcan/crates/arcan-harness/src/memory.rs` (309 lines) — source for memory tools
+   - `arcan/crates/arcan-harness/src/skills.rs` (407 lines) — source for skills system
+   - `arcan/crates/arcan-harness/src/mcp.rs` (282 lines) — source for MCP bridge
+
+   **Documentation files READ for sync assessment:**
+   - `docs/STATUS.md` — Shows 933 tests across 24 crates, does NOT mention Praxis
+   - `docs/ROADMAP.md` — Lists phases R1-R9, does NOT mention Praxis
+   - `docs/ARCHITECTURE.md` — Describes canonical architecture, does NOT mention Praxis
+   - `Makefile.control` — Build gates (smoke/check/test/audit), does NOT include praxis
+   - `Makefile.harness` — Harness targets, does NOT include praxis
+   - `CLAUDE.md` (root) — Lists all projects, does NOT mention Praxis
+
+4. Errors and fixes:
+   - **"File has not been read yet" error**: Attempted to Write to stub files without reading them first. Fixed by reading all 5 stub files before writing.
+   
+   - **rmcp 0.1 vs 0.15 API mismatch** (10 compilation errors in praxis-mcp):
+     - `CallToolRequestParams` → `CallToolRequestParam` (singular in 0.1.5, but 0.15 has `CallToolRequestParams` with `meta`/`task`/`name`/`arguments`)
+     - `TokioChildProcess::new(cmd)` expects `&mut Command` in 0.1.5
+     - `Tool` struct in 0.1.5 has only `name`/`description`/`input_schema` — no `annotations`/`title`/`output_schema`
+     - `CallToolResult` in 0.1.5 has no `structured_content`
+     - `description` is `Cow<'static, str>` not `Option<...>` — `.as_deref()` doesn't exist
+     - **Fix**: Changed workspace rmcp version from `"0.1"` to `"0.15"` in `praxis/Cargo.toml` to match arcan's version. This resolved ALL 10 errors at once.
+
+   - **Missing `requested_capabilities` in test ToolCall** (3 compilation errors):
+     - `aios-protocol::ToolCall` struct requires `requested_capabilities: Vec<Capability>` field
+     - Test helpers in fs.rs, memory.rs, shell.rs created `ToolCall` without this field
+     - **Fix**: Added `requested_capabilities: vec![]` to all three `make_call` test helper functions
+
+5. Problem Solving:
+   - Successfully ported all 7 remaining tool implementations from arcan-harness to Praxis with correct API translations
+   - Resolved rmcp version incompatibility by aligning with arcan's version (0.15)
+   - All 49 tests pass across 4 crates, zero clippy warnings
+   - Identified that documentation/harness/control infrastructure needs updating to include Praxis — this is the current pending work
+
+6. All user messages:
+   - **Message 1** (context recovery preamble): Session continuation from previous conversation with detailed summary of Phases 1-3 progress
+   - **Message 2**: "lets make sure that harness, control and docs are updated, we will continue on the next phases later with fresh session, so make sure plan status is all in sync on life repo and specifics on the module repo"
+
+7. Pending Tasks:
+   - **IMMEDIATE (user's last request)**: Update harness, control, and documentation to reflect Praxis:
+     - Update `docs/STATUS.md` to include Praxis (4 crates, 49 tests, ~2.8K LOC)
+     - Update `docs/ARCHITECTURE.md` to add Praxis to crate role map and dependency diagram
+     - Update `docs/ROADMAP.md` to reference Praxis extraction as active work
+     - Update root `CLAUDE.md` to add Praxis as a project alongside aiOS/Arcan/Lago/Spaces/Autonomic
+     - Update `Makefile.control` and/or `Makefile.harness` to include praxis in build/test gates
+     - Update `scripts/control/smoke.sh`, `scripts/control/check.sh`, `scripts/control/test.sh` to include praxis
+     - Update `scripts/architecture/verify_dependencies.sh` with praxis dependency rules
+     - Create `praxis/CLAUDE.md` with project-specific documentation
+     - Update auto memory (`MEMORY.md`) with Praxis project details
+   - **DEFERRED to future session**:
+     - Phase 4: Wire Arcan to use Praxis (replace arcan-harness tool imports with praxis-tools)
+     - Phase 5: Unify sandbox abstractions across aiOS/Lago
+     - Phase 6: Final documentation and cleanup
+   - Git status shows `praxis/` as untracked (`?? praxis/`) — needs to be tracked
+
+8. Current Work:
+   The user asked to sync all documentation, harness, and control infrastructure before ending the session. I had just completed exploring the current state of all relevant files:
+   - `docs/STATUS.md` — needs Praxis section added (currently shows 933 tests/24 crates, missing Praxis's 49 tests/4 crates)
+   - `docs/ARCHITECTURE.md` — needs Praxis in crate role map
+   - `docs/ROADMAP.md` — needs Praxis extraction referenced
+   - `CLAUDE.md` (root) — needs Praxis as a project entry
+   - `Makefile.control` / `Makefile.harness` — need praxis validation gates
+   - `scripts/control/*.sh` — need praxis build/test commands
+   - `praxis/` needs a `CLAUDE.md` with project documentation
+   - Auto memory `MEMORY.md` needs updating with Praxis metrics
+
+   I had received all exploration results but had NOT yet made any of these updates when the summary was requested.
+
+9. Optional Next Step:
+   Update all documentation, harness, and control files to reflect Praxis, as the user explicitly requested: **"lets make sure that harness, control and docs are updated, we will continue on the next phases later with fresh session, so make sure plan status is all in sync on life repo and specifics on the module repo"**. Specifically:
+   1. Update `docs/STATUS.md` — add Praxis section with 4 crates, 49 tests, ~2.8K LOC
+   2. Update `docs/ARCHITECTURE.md` — add Praxis to crate role map
+   3. Update root `CLAUDE.md` — add Praxis project description
+   4. Create `praxis/CLAUDE.md` — project-specific documentation
+   5. Update build gate scripts to include praxis validation
+   6. Update `MEMORY.md` with new project metrics (now 30 crates, ~31.8K LOC, 982+ tests)
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-life/c9c21c03-8452-4e9f-ae49-185f0be6d8e8.jsonl
+Please continue the conversation from where we left off without asking the user any further questions. Continue with the last task that you were asked to work on.
+
+---
+
+lets work on whats next
+
+---
+
+[Request interrupted by user for tool use]
