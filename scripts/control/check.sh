@@ -4,6 +4,12 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$root"
 
+# Environment-first: auto-load rustup cargo path when available.
+if ! command -v cargo >/dev/null 2>&1 && [ -f "$HOME/.cargo/env" ]; then
+  # shellcheck disable=SC1090
+  . "$HOME/.cargo/env"
+fi
+
 if [ -n "${CONTROL_CHECK_CMD:-}" ]; then
   eval "$CONTROL_CHECK_CMD"
   exit 0
