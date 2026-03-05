@@ -17,3 +17,7 @@ rules:
     type: hard
     condition: "task_duration_minutes > 30 and plan_missing"
     action: block_execution
+  - id: environment-first-triage
+    type: hard
+    condition: "gate_failure_detected and environment_not_verified"
+    action: run_environment_remediation
