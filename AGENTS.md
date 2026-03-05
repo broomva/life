@@ -237,7 +237,7 @@ make audit              # Validate control plane
 Pre-commit and pre-push hooks installed at `.githooks/` enforce:
 - Format checks
 - Lint compliance
-- Test validation before push
+- Smoke validation before push (full test matrix remains CI-authoritative)
 
 Reinstall with: `bash scripts/control/install_hooks.sh`
 
