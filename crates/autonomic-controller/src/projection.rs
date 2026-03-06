@@ -8,6 +8,7 @@ use aios_protocol::event::{EventKind, SpanStatus, TokenUsage};
 use autonomic_core::ModelCostRates;
 use autonomic_core::events::AutonomicEvent;
 use autonomic_core::gating::HomeostaticState;
+use tracing::{Span, instrument};
 
 /// Default cost rates used when no model-specific rates are available.
 const DEFAULT_RATES: ModelCostRates = ModelCostRates {
@@ -18,12 +19,20 @@ const DEFAULT_RATES: ModelCostRates = ModelCostRates {
 /// Apply a single event to the homeostatic state, returning the updated state.
 ///
 /// This is the core projection function — a pure fold.
+#[instrument(level = "debug", skip(state, kind), fields(life.event_seq = seq, life.event_kind))]
 pub fn fold(
     mut state: HomeostaticState,
     kind: &EventKind,
     seq: u64,
     ts_ms: u64,
 ) -> HomeostaticState {
+    // Extract variant name from Debug representation (e.g. "RunFinished { .. }" → "RunFinished")
+    let kind_dbg = format!("{kind:?}");
+    let variant_name = kind_dbg
+        .split_once([' ', '{'])
+        .map_or(kind_dbg.as_str(), |(name, _)| name);
+    Span::current().record("life.event_kind", variant_name);
+
     state.last_event_seq = seq;
     state.last_event_ms = ts_ms;
 

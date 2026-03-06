@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use autonomic_core::gating::HomeostaticState;
 use autonomic_core::rules::RuleSet;
@@ -17,6 +18,8 @@ pub struct AppState {
     pub rules: Arc<RuleSet>,
     /// Optional Lago journal for on-demand session bootstrapping.
     pub journal: Option<Arc<dyn Journal>>,
+    /// Daemon startup time for uptime reporting.
+    pub started_at: Instant,
 }
 
 impl AppState {
@@ -26,6 +29,7 @@ impl AppState {
             projections: Arc::new(RwLock::new(HashMap::new())),
             rules: Arc::new(rules),
             journal: None,
+            started_at: Instant::now(),
         }
     }
 
@@ -38,6 +42,7 @@ impl AppState {
             projections,
             rules: Arc::new(rules),
             journal: None,
+            started_at: Instant::now(),
         }
     }
 
@@ -51,6 +56,7 @@ impl AppState {
             projections,
             rules: Arc::new(rules),
             journal: Some(journal),
+            started_at: Instant::now(),
         }
     }
 }

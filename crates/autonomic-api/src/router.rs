@@ -10,6 +10,8 @@ use axum::http::StatusCode;
 use axum::response::Json;
 use axum::{Router, routing::get};
 use serde::Serialize;
+use serde_json::json;
+use tracing::instrument;
 
 use autonomic_controller::evaluate;
 use autonomic_core::gating::{AutonomicGatingProfile, HomeostaticState};
@@ -25,18 +27,19 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Health check response.
-#[derive(Serialize)]
-struct HealthResponse {
-    status: &'static str,
-    version: &'static str,
-}
-
-async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "ok",
-        version: env!("CARGO_PKG_VERSION"),
-    })
+async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let uptime_seconds = state.started_at.elapsed().as_secs();
+    let otlp_configured = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok();
+    Json(json!({
+        "status": "ok",
+        "service": "autonomic",
+        "version": env!("CARGO_PKG_VERSION"),
+        "uptime_seconds": uptime_seconds,
+        "telemetry": {
+            "sdk": "vigil",
+            "otlp_configured": otlp_configured,
+        },
+    }))
 }
 
 /// Gating response with staleness indicator.
@@ -48,6 +51,7 @@ pub struct GatingResponse {
     pub last_event_ms: u64,
 }
 
+#[instrument(skip(state), fields(life.session_id = %session_id))]
 async fn get_gating(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
@@ -72,6 +76,7 @@ pub struct ProjectionResponse {
     pub found: bool,
 }
 
+#[instrument(skip(state), fields(life.session_id = %session_id))]
 async fn get_projection(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
@@ -91,6 +96,7 @@ async fn get_projection(
 }
 
 /// Get projection from cache, or bootstrap from Lago journal if available.
+#[instrument(skip(state), fields(life.session_id = %session_id))]
 async fn get_or_bootstrap(state: &AppState, session_id: &str) -> HomeostaticState {
     // Fast path: already in projection map
     {

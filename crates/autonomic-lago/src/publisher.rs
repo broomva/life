@@ -9,9 +9,10 @@ use autonomic_core::events::AutonomicEvent;
 use lago_core::event::EventEnvelope;
 use lago_core::id::{BranchId, EventId, SeqNo, SessionId};
 use lago_core::journal::Journal;
-use tracing::warn;
+use tracing::{instrument, warn};
 
 /// Publish an Autonomic event to the Lago journal.
+#[instrument(skip(journal, event), fields(lago.stream_id = %session_id))]
 pub async fn publish_event(
     journal: Arc<dyn Journal>,
     session_id: &str,
@@ -35,6 +36,7 @@ pub async fn publish_event(
 }
 
 /// Publish a batch of Autonomic events atomically.
+#[instrument(skip(journal, events), fields(lago.stream_id = %session_id, lago.event_count = events.len()))]
 pub async fn publish_events(
     journal: Arc<dyn Journal>,
     session_id: &str,

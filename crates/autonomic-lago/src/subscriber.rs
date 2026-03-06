@@ -11,7 +11,7 @@ use autonomic_core::gating::HomeostaticState;
 use lago_core::journal::Journal;
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 /// Shared projection state across all sessions.
 pub type ProjectionMap = Arc<RwLock<HashMap<String, HomeostaticState>>>;
@@ -26,6 +26,7 @@ pub fn new_projection_map() -> ProjectionMap {
 ///
 /// This function runs until the stream ends or an error occurs.
 /// It should be spawned as a tokio task.
+#[instrument(skip(journal, projections), fields(lago.stream_id = %session_id))]
 pub async fn subscribe_session(
     journal: Arc<dyn Journal>,
     session_id: String,
@@ -90,6 +91,7 @@ pub async fn subscribe_session(
 }
 
 /// Load the initial projection state by reading all existing events for a session.
+#[instrument(skip(journal), fields(lago.stream_id = %session_id))]
 pub async fn load_projection(
     journal: Arc<dyn Journal>,
     session_id: &str,

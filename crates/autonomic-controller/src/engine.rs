@@ -8,13 +8,24 @@ use aios_protocol::mode::GatingProfile;
 use autonomic_core::gating::{AutonomicGatingProfile, EconomicGates, HomeostaticState};
 use autonomic_core::rules::{GatingDecision, RuleSet};
 use autonomic_core::{EconomicMode, ModelTier};
+use tracing::{Span, instrument};
 
 /// Evaluate all rules and merge decisions into a final gating profile.
 ///
 /// Merge strategy: most restrictive wins for each field.
+#[instrument(skip(state, rules), fields(autonomic.economic_mode, autonomic.rules_checked))]
 pub fn evaluate(state: &HomeostaticState, rules: &RuleSet) -> AutonomicGatingProfile {
     let decisions = rules.evaluate_all(state);
-    merge_decisions(&decisions)
+    let profile = merge_decisions(&decisions);
+
+    let span = Span::current();
+    span.record(
+        "autonomic.economic_mode",
+        tracing::field::debug(profile.economic.economic_mode),
+    );
+    span.record("autonomic.rules_checked", decisions.len());
+
+    profile
 }
 
 /// Merge multiple gating decisions into a single profile.

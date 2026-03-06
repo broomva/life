@@ -21,6 +21,7 @@ use config::{AutonomicConfig, CliArgs};
 use lago_core::journal::Journal;
 use lago_journal::RedbJournal;
 use tracing::info;
+use vigil::VigConfig;
 
 fn build_rule_set(config: &AutonomicConfig) -> RuleSet {
     let mut rules = RuleSet::new();
@@ -54,13 +55,8 @@ fn build_rule_set(config: &AutonomicConfig) -> RuleSet {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "autonomicd=info".into()),
-        )
-        .init();
+    // Initialize telemetry via Vigil (structured logging + optional OTel export)
+    let _guard = vigil::init_telemetry(VigConfig::for_service("autonomic").with_env_overrides())?;
 
     let args = CliArgs::parse();
 

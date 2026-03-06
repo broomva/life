@@ -5,6 +5,7 @@
 //! a metric oscillating near a threshold causes rapid state changes.
 
 use serde::{Deserialize, Serialize};
+use tracing::{Span, instrument};
 
 /// A hysteresis gate with separate enter/exit thresholds and min-hold duration.
 ///
@@ -40,7 +41,9 @@ impl HysteresisGate {
     /// Evaluate the gate with the given metric value at the given timestamp.
     ///
     /// Returns the (potentially updated) active state.
+    #[instrument(skip(self), fields(autonomic.hysteresis.metric = metric, autonomic.hysteresis.active))]
     pub fn evaluate(&mut self, metric: f64, now_ms: u64) -> bool {
+        let was_active = self.active;
         let held_long_enough = now_ms.saturating_sub(self.last_transition_ms) >= self.min_hold_ms;
 
         if !self.active && metric >= self.threshold_enter && held_long_enough {
@@ -49,6 +52,16 @@ impl HysteresisGate {
         } else if self.active && metric <= self.threshold_exit && held_long_enough {
             self.active = false;
             self.last_transition_ms = now_ms;
+        }
+
+        let span = Span::current();
+        span.record("autonomic.hysteresis.active", self.active);
+        if was_active != self.active {
+            tracing::debug!(
+                from = was_active,
+                to = self.active,
+                "hysteresis gate state changed"
+            );
         }
 
         self.active
