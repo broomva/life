@@ -27,6 +27,15 @@ check_cmd make
 check_cmd cargo
 check_cmd jq
 
+echo "== heartbeat: host capacity =="
+avail_kb=$(df -Pk . | awk 'NR==2{print $4}')
+# 2 GiB minimum free space guard
+if [ "${avail_kb:-0}" -ge 2097152 ]; then
+  ok "disk headroom OK ($(df -h . | awk 'NR==2{print $4" free"}'))"
+else
+  err "low disk headroom (<2GiB free); cleanup required before heavy builds"
+fi
+
 echo "== heartbeat: repo control invariants =="
 if [ -f .control/policy.yaml ] && [ -f .control/commands.yaml ] && [ -f .control/topology.yaml ]; then
   ok "control policy artifacts present"
