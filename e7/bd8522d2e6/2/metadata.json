@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "e7bd8522d2e6",
+  "session_id": "d1bcfab6-6cca-4594-99fd-0be6478420be",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T16:17:07.658307Z",
+  "branch": "successful-sole",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "arcan",
+    "autonomic",
+    "lago"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "b37ffded594c",
+  "token_usage": {
+    "input_tokens": 10,
+    "cache_creation_tokens": 28268,
+    "cache_read_tokens": 322756,
+    "output_tokens": 96,
+    "api_call_count": 8
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T16:17:07.615608Z",
+    "agent_lines": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 0,
+    "agent_percentage": 0
+  }
+}
