@@ -1,0 +1,37 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "7b13413be328",
+  "session_id": "8c9078c5-2954-429b-8c17-e17f65423fc1",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T14:18:46.395734Z",
+  "branch": "successful-sole",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "METALAYER.md",
+    "docs/ARCHITECTURE.md",
+    "docs/PLAN.md",
+    "docs/PLANS.md",
+    "docs/PLATFORM.md",
+    "docs/STATUS.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "38b06675f987",
+  "token_usage": {
+    "input_tokens": 20,
+    "cache_creation_tokens": 114719,
+    "cache_read_tokens": 1599343,
+    "output_tokens": 196,
+    "api_call_count": 16
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T14:18:46.101939Z",
+    "agent_lines": 356,
+    "human_added": 3762,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 4118,
+    "agent_percentage": 8.644973288003884
+  }
+}
