@@ -15,6 +15,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::process::Command;
 use tokio::runtime::Handle;
+use tracing::info;
 
 /// Configuration for connecting to an MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +41,13 @@ pub struct McpConnection {
 
 /// Connect to an MCP server via stdio and return all its tools.
 pub async fn connect_mcp_stdio(config: &McpServerConfig) -> Result<McpConnection, McpError> {
+    let span = tracing::info_span!(
+        "mcp_connect",
+        mcp.server = %config.name,
+        mcp.tools_discovered = tracing::field::Empty,
+    );
+    let _guard = span.enter();
+
     let McpTransport::Stdio {
         ref command,
         ref args,
@@ -68,6 +76,13 @@ pub async fn connect_mcp_stdio(config: &McpServerConfig) -> Result<McpConnection
             McpTool::new(definition, peer.clone(), mcp_tool_name, runtime.clone())
         })
         .collect();
+
+    span.record("mcp.tools_discovered", mcp_tools.len());
+    info!(
+        server = %config.name,
+        tools = mcp_tools.len(),
+        "MCP server connected"
+    );
 
     Ok(McpConnection {
         server_name: config.name.clone(),

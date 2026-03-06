@@ -6,33 +6,31 @@
 
 How aiOS, Arcan, and Lago compose into an operating system for agents — and the path to multi-tenant SaaS.
 
-> Status badges: `[IMPLEMENTED]` `[PARTIAL]` `[PROPOSED]` `[FUTURE]`
-
----
+> Status badges: [IMPLEMENTED] [PARTIAL] [PROPOSED] [FUTURE]
 
 ## 1. The OS Analogy — Concrete Mapping
 
 This is not metaphor. The dependency graph between aiOS, Arcan, and Lago mirrors the layered architecture of an operating system: kernel contract → runtime → persistence. Each "OS concept" below maps to a specific type, trait, or crate that exists in the codebase today.
 
 | OS Concept | Traditional OS | Agent OS Primitive | Actual Type / Trait | Crate | Status |
-|---|---|---|---|---|---|
-| **Kernel contract** | POSIX, syscall table | Protocol types | `EventKind` (55 variants), `EventEnvelope` | `aios-protocol` | `[IMPLEMENTED]` |
-| **Syscall interface** | `read()`, `write()` | Tool trait | `trait Tool { definition(); execute() }` | `arcan-core` | `[IMPLEMENTED]` |
-| **Process** | Unix process | Agent session | `SessionId`, `AgentLoop` | `aios-protocol`, `arcand` | `[IMPLEMENTED]` |
-| **Scheduler** | CFS, nice | Orchestrator + budget | `Orchestrator`, `BudgetState`, `OperatingMode` | `arcan-core`, `aios-protocol` | `[PARTIAL]` |
-| **Virtual memory** | Page tables | Context compiler | `ContextCompiler`, `ContextBlock` | `arcan-core` | `[IMPLEMENTED]` |
-| **Filesystem** | ext4, VFS | Lago FS + blobs | `Manifest`, `BranchManager`, `BlobStore` | `lago-fs`, `lago-store` | `[IMPLEMENTED]` |
-| **Block device** | Disk I/O | Event journal | `RedbJournal` (ACID, 60B compound key) | `lago-journal` | `[IMPLEMENTED]` |
-| **Mount / VFS** | `/dev`, `/proc` | Mount trait | `trait Mount { read, write, delete, list, stat }` | `lago-core` | `[DEFINED]` |
-| **IPC** | Pipes, sockets | Event stream + SSE | `EventStreamHub`, SSE adapters | `lago-api` | `[IMPLEMENTED]` |
-| **Security module** | SELinux, AppArmor | Policy + sandbox | `PolicyEngine`, `SandboxPolicy`, `FsPolicy` | `lago-policy`, `arcan-harness` | `[IMPLEMENTED]` |
-| **Capabilities** | POSIX caps | Capability tokens | `Capability("fs:read:/session/**")`, `GatingProfile` | `aios-protocol` | `[PARTIAL]` |
-| **Health monitor** | watchdog, OOM killer | Homeostasis | `AgentStateVector` (8 dims), `OperatingMode` (6 modes) | `aios-protocol` | `[PARTIAL]` |
-| **Package manager** | apt, cargo | Skill registry | `SkillRegistry`, `SkillMetadata` | `arcan-harness` | `[PARTIAL]` |
-| **Cron** | systemd timers | Heartbeat scheduler | `HeartbeatScheduler`, `EventKind::Heartbeat` | `arcand`, `aios-protocol` | `[PARTIAL]` |
-| **Device driver** | USB, NIC | MCP bridge | `McpTool`, `McpServerConfig` | `arcan-harness` | `[IMPLEMENTED]` |
-| **User / tenant** | UID, namespaces | Tenant isolation | — | — | `[PROPOSED]` |
-| **Credential store** | keyring, Vault | Secret resolver | `Capability::secrets("scope")` exists | `aios-protocol` | `[PROPOSED]` |
+| --- | --- | --- | --- | --- | --- |
+| Kernel contract | POSIX, syscall table | Protocol types | EventKind (55 variants), EventEnvelope | aios-protocol | [IMPLEMENTED] |
+| Syscall interface | read(), write() | Tool trait | trait Tool { definition(); execute() } | arcan-core | [IMPLEMENTED] |
+| Process | Unix process | Agent session | SessionId, AgentLoop | aios-protocol, arcand | [IMPLEMENTED] |
+| Scheduler | CFS, nice | Orchestrator + budget | Orchestrator, BudgetState, OperatingMode | arcan-core, aios-protocol | [PARTIAL] |
+| Virtual memory | Page tables | Context compiler | ContextCompiler, ContextBlock | arcan-core | [IMPLEMENTED] |
+| Filesystem | ext4, VFS | Lago FS + blobs | Manifest, BranchManager, BlobStore | lago-fs, lago-store | [IMPLEMENTED] |
+| Block device | Disk I/O | Event journal | RedbJournal (ACID, 60B compound key) | lago-journal | [IMPLEMENTED] |
+| Mount / VFS | /dev, /proc | Mount trait | trait Mount { read, write, delete, list, stat } | lago-core | [DEFINED] |
+| IPC | Pipes, sockets | Event stream + SSE | EventStreamHub, SSE adapters | lago-api | [IMPLEMENTED] |
+| Security module | SELinux, AppArmor | Policy + sandbox | PolicyEngine, SandboxPolicy, FsPolicy | lago-policy, arcan-harness | [IMPLEMENTED] |
+| Capabilities | POSIX caps | Capability tokens | Capability("fs:read:/session/**"), GatingProfile | aios-protocol | [PARTIAL] |
+| Health monitor | watchdog, OOM killer | Homeostasis | AgentStateVector (8 dims), OperatingMode (6 modes) | aios-protocol | [PARTIAL] |
+| Package manager | apt, cargo | Skill registry | SkillRegistry, SkillMetadata | arcan-harness | [PARTIAL] |
+| Cron | systemd timers | Heartbeat scheduler | HeartbeatScheduler, EventKind::Heartbeat | arcand, aios-protocol | [PARTIAL] |
+| Device driver | USB, NIC | MCP bridge | McpTool, McpServerConfig | arcan-harness | [IMPLEMENTED] |
+| User / tenant | UID, namespaces | Tenant isolation | — | — | [PROPOSED] |
+| Credential store | keyring, Vault | Secret resolver | Capability::secrets("scope") exists | aios-protocol | [PROPOSED] |
 
 ### Why this layering matters
 
@@ -45,8 +43,6 @@ Lago  = storage substrate  (persists all state changes)
 ```
 
 A skill doesn't need to know about redb. A provider doesn't need to know about policy rules. The harness doesn't need to know about SSE formats. Each layer has a clean boundary mediated by traits and event conversion.
-
----
 
 ## 2. Layer Architecture — What Each Project Owns
 
@@ -78,27 +74,28 @@ A separate, fully-functional kernel implementation that parallels Arcan+Lago:
 - **Implementations**: `FileEventStore` (JSONL), `WorkspaceMemoryStore` (soul.json + observations.jsonl), `SessionPolicyEngine` (glob matching), `LocalSandboxRunner` (tokio subprocess), `ToolDispatcher` with 3 core tools (fs.read, fs.write, shell.exec)
 - **Homeostasis**: Rule-based mode estimation — pending approvals → AskHuman, error streak → Recover, progress ≥ 98% → Sleep, high uncertainty → Explore, high side-effect pressure → Verify, default → Execute
 
-> **Note**: The aiOS kernel runtime and Arcan+Lago are currently parallel implementations. Phase 7 (Agent OS Unification) plans to merge them. `lago-core` already uses `pub type EventPayload = aios_protocol::EventKind` — the type alignment exists, the runtime unification does not.
+> Note: The aiOS kernel runtime and Arcan+Lago are currently parallel implementations. Phase 7 (Agent OS Unification) plans to merge them. lago-core already uses pub type EventPayload = aios_protocol::EventKind — the type alignment exists, the runtime unification does not.
 
 ### 2.3 Arcan — Runtime `[IMPLEMENTED]`
 
 **9 crates** at `arcan/crates/`:
 
 | Crate | LOC | Owns | Key Types |
-|---|---|---|---|
-| `arcan-core` | ~3,450 | Agent loop, traits, context | `Orchestrator`, `Tool`, `Middleware`, `Provider`, `ContextCompiler`, `AgentEvent` (23 variants), `AppState` |
-| `arcan-harness` | ~2,520 | Tools, sandbox, skills, MCP | `SandboxPolicy`, `FsPolicy`, `BashTool`, `SkillRegistry`, `McpTool`, hashline editing |
-| `arcan-aios-adapters` | ~330 | Canonical runtime adapters | aiOS provider/tool/policy/approval/memory adapter implementations |
-| `arcan-provider` | ~1,270 | LLM backends | `AnthropicProvider`, `OpenAiCompatibleProvider`, `MockProvider` |
-| `arcan-store` | ~430 | Session repo trait | `SessionRepository`, `EventRecord` |
-| `arcan-tui` | ~1,430 | Terminal client | Canonical session + approval endpoint client integration |
-| `arcand` | ~790 | HTTP server, heartbeat | `AgentLoop`, `HeartbeatScheduler`, axum routes |
-| `arcan-lago` | ~4,470 | Bridge to Lago | `LagoSessionRepository`, `LagoPolicyMiddleware`, `ApprovalGate`, `event_map`, `SseBridge`, memory modules |
-| `arcan` | ~550 | Binary entry point | CLI args, wiring |
+| --- | --- | --- | --- |
+| arcan-core | ~3,450 | Agent loop, traits, context | Orchestrator, Tool, Middleware, Provider, ContextCompiler, AgentEvent (23 variants), AppState |
+| arcan-harness | ~2,520 | Tools, sandbox, skills, MCP | SandboxPolicy, FsPolicy, BashTool, SkillRegistry, McpTool, hashline editing |
+| arcan-aios-adapters | ~330 | Canonical runtime adapters | aiOS provider/tool/policy/approval/memory adapter implementations |
+| arcan-provider | ~1,270 | LLM backends | AnthropicProvider, OpenAiCompatibleProvider, MockProvider |
+| arcan-store | ~430 | Session repo trait | SessionRepository, EventRecord |
+| arcan-tui | ~1,430 | Terminal client | Canonical session + approval endpoint client integration |
+| arcand | ~790 | HTTP server, heartbeat | AgentLoop, HeartbeatScheduler, axum routes |
+| arcan-lago | ~4,470 | Bridge to Lago | LagoSessionRepository, LagoPolicyMiddleware, ApprovalGate, event_map, SseBridge, memory modules |
+| arcan | ~550 | Binary entry point | CLI args, wiring |
 
 **14 built-in tools**: read_file, write_file, list_dir, edit_file (hashline), glob, grep, bash, read_memory, write_memory, memory_query, memory_propose, memory_commit, MCP bridge tools, skill catalog
 
 **Defense-in-depth harness**:
+
 ```
 Tool invocation
   ├── Layer 1: PolicyEngine (LagoPolicyMiddleware → Allow/Deny/RequireApproval)
@@ -113,29 +110,28 @@ Tool invocation
 **10 crates** at `lago/crates/`:
 
 | Crate | LOC | Owns | Key Types |
-|---|---|---|---|
-| `lago-core` | ~2,890 | Types, traits | `EventEnvelope`, `EventPayload` (= `aios_protocol::EventKind`), `Journal` trait (BoxFuture), `Projection` trait, `Mount` trait |
-| `lago-journal` | ~1,520 | Event persistence | `RedbJournal` — compound key: session(26B) + branch(26B) + seq(8B BE) = 60B, tables: EVENTS, EVENT_INDEX, BRANCH_HEADS, SESSIONS, SNAPSHOTS |
-| `lago-store` | ~320 | Blob storage | `BlobStore` — SHA-256 + zstd, shard layout `{root}/{hash[0:2]}/{hash[2:]}.zst`, atomic writes |
-| `lago-fs` | ~1,050 | Filesystem | `Manifest` (BTreeMap), `BranchManager` (copy-on-write), `ManifestProjection`, `diff()` |
-| `lago-policy` | ~1,340 | Access control | `PolicyEngine` (priority rules), `RbacManager` (role→permissions), `HookRunner`, TOML config |
-| `lago-api` | ~3,220 | HTTP + SSE | REST routes (sessions, branches, files, blobs, events), SSE format adapters (OpenAI, Anthropic, Vercel, Lago) |
-| `lago-ingest` | ~590 | gRPC streaming | Bidirectional event streaming via tonic |
-| `lago-aios-eventstore-adapter` | ~145 | Canonical event store adapter | `EventStorePort` implementation over `lago_core::Journal` |
-| `lago-cli` | ~1,160 | CLI binary | init, serve, session, branch, log, cat |
-| `lagod` | ~310 | Daemon binary | gRPC (50051) + HTTP (8080), TOML config, graceful shutdown |
+| --- | --- | --- | --- |
+| lago-core | ~2,890 | Types, traits | EventEnvelope, EventPayload (= aios_protocol::EventKind), Journal trait (BoxFuture), Projection trait, Mount trait |
+| lago-journal | ~1,520 | Event persistence | RedbJournal — compound key: session(26B) + branch(26B) + seq(8B BE) = 60B, tables: EVENTS, EVENT_INDEX, BRANCH_HEADS, SESSIONS, SNAPSHOTS |
+| lago-store | ~320 | Blob storage | BlobStore — SHA-256 + zstd, shard layout {root}/{hash[0:2]}/{hash[2:]}.zst, atomic writes |
+| lago-fs | ~1,050 | Filesystem | Manifest (BTreeMap), BranchManager (copy-on-write), ManifestProjection, diff() |
+| lago-policy | ~1,340 | Access control | PolicyEngine (priority rules), RbacManager (role→permissions), HookRunner, TOML config |
+| lago-api | ~3,220 | HTTP + SSE | REST routes (sessions, branches, files, blobs, events), SSE format adapters (OpenAI, Anthropic, Vercel, Lago) |
+| lago-ingest | ~590 | gRPC streaming | Bidirectional event streaming via tonic |
+| lago-aios-eventstore-adapter | ~145 | Canonical event store adapter | EventStorePort implementation over lago_core::Journal |
+| lago-cli | ~1,160 | CLI binary | init, serve, session, branch, log, cat |
+| lagod | ~310 | Daemon binary | gRPC (50051) + HTTP (8080), TOML config, graceful shutdown |
 
 ### 2.5 Autonomic — Homeostasis Controller `[FUTURE]`
 
 Not yet started. Would own:
+
 - Homeostasis rule engine consuming event streams
 - `GatingProfile` output enforcement at harness boundary
 - Memory maintenance triggers (compaction, promotion, forgetting)
 - Heartbeat scheduling with hysteresis
 
 Events it would emit: `StateEstimated`, `BudgetUpdated`, `ModeChanged`, `GatesUpdated`, `CircuitBreakerTripped`, `Heartbeat`
-
----
 
 ## 3. Data Flow — How Events Move Through the System
 
@@ -195,15 +191,14 @@ These hold across all layers:
 6. **Sequences are monotonic per branch** — `RedbJournal` enforces `seq = head + 1` atomically.
 7. **Events are immutable** — Once written to journal, events are never modified. Use compensating events.
 
----
-
 ## 4. The Skill Ecosystem
 
 ### 4.1 Current State `[IMPLEMENTED]`
 
 Skills are filesystem-discovered SKILL.md files with YAML frontmatter.
 
-**`SkillMetadata`** (at `arcan-harness/src/skills.rs`):
+`SkillMetadata` (at `arcan-harness/src/skills.rs`):
+
 ```yaml
 ---
 name: commit-helper          # required
@@ -219,13 +214,15 @@ disable_model_invocation: false  # optional
 Instructions for the agent when this skill is active...
 ```
 
-**`SkillRegistry`**:
+`SkillRegistry`:
+
 - `discover(dirs)`: Scans directories for SKILL.md via walkdir
 - `system_prompt_catalog()`: Generates compact listing for LLM injection (~100 tokens/skill)
 - `activate(name)`: Returns full `LoadedSkill` (metadata + body + root_dir)
 - `allowed_tools(name)`: Returns tool whitelist per skill
 
 **What's missing**:
+
 - Skills are not persisted to Lago journal (ephemeral in runtime)
 - No resource declarations (secrets, network, filesystem scope, schedule)
 - No versioning or artifact hashing
@@ -290,16 +287,16 @@ require_activation_approval = true
 Every manifest field maps to a type that already exists in the codebase:
 
 | Manifest Field | Existing Type | Crate | Status |
-|---|---|---|---|
-| `tools.allowed` | `SkillMetadata.allowed_tools` | `arcan-harness` | `[IMPLEMENTED]` |
-| `policy.sandbox_tier` | `SandboxTier` (None/Basic/Restricted) | `arcan-harness` | `[IMPLEMENTED]` |
-| `resources.network.allow` | `NetworkPolicy::AllowList(Vec<String>)` | `arcan-harness` | `[IMPLEMENTED]` |
-| `resources.filesystem.*` | `FsPolicy` allowlist/denylist | `arcan-harness` | `[IMPLEMENTED]` |
-| `policy.risk_level` | `RiskLevel` (Low/Medium/High/Critical) | `aios-protocol` | `[IMPLEMENTED]` |
-| `resources.secrets.*` | `Capability::secrets(scope)` | `aios-protocol` | Type exists, no resolver |
-| `resources.schedule.cron` | `EventKind::Heartbeat` | `aios-protocol` | Event exists, no scheduler |
-| `skill.version` | — | — | `[PROPOSED]` |
-| `require_activation_approval` | `ApprovalGate` | `arcan-lago` | `[IMPLEMENTED]` for tools |
+| --- | --- | --- | --- |
+| tools.allowed | SkillMetadata.allowed_tools | arcan-harness | [IMPLEMENTED] |
+| policy.sandbox_tier | SandboxTier (None/Basic/Restricted) | arcan-harness | [IMPLEMENTED] |
+| resources.network.allow | NetworkPolicy::AllowList(Vec<String>) | arcan-harness | [IMPLEMENTED] |
+| resources.filesystem.* | FsPolicy allowlist/denylist | arcan-harness | [IMPLEMENTED] |
+| policy.risk_level | RiskLevel (Low/Medium/High/Critical) | aios-protocol | [IMPLEMENTED] |
+| resources.secrets.* | Capability::secrets(scope) | aios-protocol | Type exists, no resolver |
+| resources.schedule.cron | EventKind::Heartbeat | aios-protocol | Event exists, no scheduler |
+| skill.version | — | — | [PROPOSED] |
+| require_activation_approval | ApprovalGate | arcan-lago | [IMPLEMENTED] for tools |
 
 ### 4.4 Skills as Lago Artifacts `[PROPOSED]`
 
@@ -310,15 +307,13 @@ To make skills durable, versioned, and auditable:
 **Lifecycle events** (new `EventKind` variants, forward-compatible via `Custom` until formalized):
 
 | Event | Fields | Purpose |
-|---|---|---|
-| `SkillInstalled` | skill_id, version, manifest_hash: BlobHash, installed_by | Skill added to platform |
-| `SkillActivated` | skill_id, session_id, capabilities_granted: Vec\<Capability\> | Skill enabled for a session |
-| `SkillDeactivated` | skill_id, session_id, reason | Skill disabled |
-| `SkillScheduled` | skill_id, schedule (cron), next_run (timestamp) | Recurring execution registered |
+| --- | --- | --- |
+| SkillInstalled | skill_id, version, manifest_hash: BlobHash, installed_by | Skill added to platform |
+| SkillActivated | skill_id, session_id, capabilities_granted: Vec&lt;Capability&gt; | Skill enabled for a session |
+| SkillDeactivated | skill_id, session_id, reason | Skill disabled |
+| SkillScheduled | skill_id, schedule (cron), next_run (timestamp) | Recurring execution registered |
 
 **Versioning**: Each skill version is a unique `BlobHash` of its manifest + instruction files. The journal provides a complete audit trail of installs, activations, and deactivations.
-
----
 
 ## 5. The SaaS Trajectory — What Needs to Be Built
 
@@ -327,10 +322,10 @@ To make skills durable, versioned, and auditable:
 The Garmin Connect skill (from skills.sh) exposes the exact gaps between single-user runtime and multi-tenant platform:
 
 | Dependency | What the skill needs | What exists today | Gap |
-|---|---|---|---|
-| **Credential isolation** | Per-tenant `garmin_email` + `garmin_password` | API keys from env vars only. `Capability::secrets("scope")` exists as a type. MCP child processes inherit parent env unsanitized. | No `SecretResolver`, no `TenantId`, no per-tenant scoping |
-| **Tenant workspace** | Writes to `health/YYYY-MM-DD.md` isolated per tenant | `FsPolicy` enforces workspace boundaries. `BranchManager` supports copy-on-write forking. Both session-scoped only. | No tenant dimension in compound key or branching |
-| **Scheduled execution** | Daily sync at 6am | `HeartbeatScheduler` with pluggable checks. `EventKind::Heartbeat` exists. | Heartbeat is monitoring-only, not a trigger system |
+| --- | --- | --- | --- |
+| Credential isolation | Per-tenant garmin_email + garmin_password | API keys from env vars only. Capability::secrets("scope") exists as a type. MCP child processes inherit parent env unsanitized. | No SecretResolver, no TenantId, no per-tenant scoping |
+| Tenant workspace | Writes to health/YYYY-MM-DD.md isolated per tenant | FsPolicy enforces workspace boundaries. BranchManager supports copy-on-write forking. Both session-scoped only. | No tenant dimension in compound key or branching |
+| Scheduled execution | Daily sync at 6am | HeartbeatScheduler with pluggable checks. EventKind::Heartbeat exists. | Heartbeat is monitoring-only, not a trigger system |
 
 ### 5.2 Proposed: TenantId `[PROPOSED]`
 
@@ -344,12 +339,14 @@ typed_id!(
 ```
 
 **Where it appears**:
+
 - `EventEnvelope` gains `tenant_id: Option<TenantId>` (backward-compatible via `skip_serializing_if`)
 - `SessionManifest` gains `tenant_id: Option<TenantId>`
 - `PolicyContext` gains `tenant_id: Option<TenantId>`
 - `RbacManager` gains tenant-scoped role assignment
 
 **Isolation strategy** (two options, not mutually exclusive):
+
 1. **Logical**: Tenant_id as filter in queries. Same redb instance, compound key gains optional tenant prefix.
 2. **Physical**: Separate redb instance per tenant. Operationally heavier but strongest isolation.
 
@@ -377,12 +374,14 @@ pub enum SecretScope {
 ```
 
 **Integration points**:
+
 - `SandboxPolicy` gains `secret_resolver: Option<Arc<dyn SecretResolver>>`
 - `LocalCommandRunner` uses resolver to inject env vars instead of inheriting parent env
 - MCP child process construction sanitizes env, injects only resolved secrets
 - `PolicyEngine` evaluates `Capability::secrets("tenant/garmin_email")` before resolution
 
 **Implementations**:
+
 - `EnvVarSecretResolver`: Wraps current behavior (reads from process env). Zero-migration for existing single-user deployments.
 - `VaultSecretResolver`: HashiCorp Vault integration (production SaaS).
 - `EncryptedBlobSecretResolver`: Secrets encrypted in Lago blob store with per-tenant keys.
@@ -414,16 +413,16 @@ pub struct ScheduleEntry {
 ### 5.5 Implementation Crate Map
 
 | Component | Target Crate | Dependencies | New/Modified |
-|---|---|---|---|
-| `TenantId` | `aios-protocol` | None (ids.rs macro) | Modified |
-| `SecretScope` enum | `aios-protocol` | None | New in policy.rs |
-| `SecretResolver` trait | `arcan-core` | `aios-protocol` | New module |
-| `EnvVarSecretResolver` | `arcan-harness` | `arcan-core` | New in sandbox.rs |
-| `SkillManifest` parser | `arcan-harness` | `toml`, `serde` | New module |
-| Skill lifecycle events | `aios-protocol` | None | Modified (EventKind) |
-| `SkillScheduler` | `arcand` | `arcan-core`, `lago-core` | New module |
-| Tenant-scoped branching | `lago-fs`, `arcan-lago` | `lago-core` | Modified |
-| Auth middleware (JWT) | `lago-api`, `arcand` | `axum`, `jsonwebtoken` | New module |
+| --- | --- | --- | --- |
+| TenantId | aios-protocol | None (ids.rs macro) | Modified |
+| SecretScope enum | aios-protocol | None | New in policy.rs |
+| SecretResolver trait | arcan-core | aios-protocol | New module |
+| EnvVarSecretResolver | arcan-harness | arcan-core | New in sandbox.rs |
+| SkillManifest parser | arcan-harness | toml, serde | New module |
+| Skill lifecycle events | aios-protocol | None | Modified (EventKind) |
+| SkillScheduler | arcand | arcan-core, lago-core | New module |
+| Tenant-scoped branching | lago-fs, arcan-lago | lago-core | Modified |
+| Auth middleware (JWT) | lago-api, arcand | axum, jsonwebtoken | New module |
 
 ### 5.6 Build Order
 
@@ -464,8 +463,6 @@ Phase F: Auth & API Gateway (lago-api, arcand)
   ├── Session isolation enforcement
   └── Per-request RBAC enforcement
 ```
-
----
 
 ## 6. The Full Platform Diagram
 
@@ -513,25 +510,21 @@ Phase F: Auth & API Gateway (lago-api, arcand)
 
 In the SaaS configuration, skills are stateless callables. All statefulness — credentials, filesystem, scheduling, outputs — is owned by the platform layer, not the skill.
 
----
-
 ## 7. Type Alignment Across Projects
 
 Type duplication is minimal and well-managed:
 
 | Category | Canonical Home | Arcan | Lago | Notes |
-|---|---|---|---|---|
-| Event taxonomy | `aios-protocol::EventKind` | Converts via `event_map.rs` | Uses directly (`EventPayload = EventKind`) | Clean separation |
-| IDs (ULID/UUID) | `aios-protocol::ids` | String conversions | `lago-core::id` (re-exports) | Trivial bridge |
-| Enums (RiskLevel, etc.) | `aios-protocol::event` | String parsing in event_map | Re-exports from aios | No duplication |
-| Tool metadata | `arcan-core::protocol::ToolDefinition` | Arcan-specific (MCP-aligned) | Not used | Not yet canonical |
-| AppState | `arcan-core::state::AppState` | Arcan-specific (JSON + patches) | Not used | Not yet canonical |
+| --- | --- | --- | --- | --- |
+| Event taxonomy | aios-protocol::EventKind | Converts via event_map.rs | Uses directly (EventPayload = EventKind) | Clean separation |
+| IDs (ULID/UUID) | aios-protocol::ids | String conversions | lago-core::id (re-exports) | Trivial bridge |
+| Enums (RiskLevel, etc.) | aios-protocol::event | String parsing in event_map | Re-exports from aios | No duplication |
+| Tool metadata | arcan-core::protocol::ToolDefinition | Arcan-specific (MCP-aligned) | Not used | Not yet canonical |
+| AppState | arcan-core::state::AppState | Arcan-specific (JSON + patches) | Not used | Not yet canonical |
 | Policy types | Divergent | Middleware hooks | Rule engine + RBAC | Complementary, not duplicated |
-| Skill metadata | `arcan-harness::skills::SkillMetadata` | Arcan-only | Not used | Not yet persisted |
+| Skill metadata | arcan-harness::skills::SkillMetadata | Arcan-only | Not used | Not yet persisted |
 
 **Unification path**: Skills, AppState, and tool definitions should eventually be canonicalized in `aios-protocol` (Phase 7). The `event_map.rs` bridge would then convert fewer types at the boundary.
-
----
 
 ## 8. Appendix — The skills.sh Bridge Pattern
 
@@ -593,8 +586,6 @@ require_activation_approval = true
 5. **Execution**: At 6am UTC, scheduler emits `Heartbeat` → `AgentLoop.run()` with skill context → tool calls execute within sandbox → events persisted to journal → output in tenant's workspace branch
 
 The skill itself is unchanged — it's still a SKILL.md with bash commands. The platform mediates all resource access through the kernel primitives that already exist.
-
----
 
 ## References
 

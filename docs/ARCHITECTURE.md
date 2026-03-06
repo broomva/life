@@ -1,28 +1,26 @@
 # Broomva Life: Canonical Architecture
 
-**Date**: 2026-03-03
-**Baseline**: Canonical runtime unification active
+**Date**: 2026-03-03**Baseline**: Canonical runtime unification active
 
 This document describes the active architecture in `/Users/broomva/broomva.tech/life`.
-
----
 
 ## 1) System Overview
 
 Life is a contract-first architecture for building artificial life from computational primitives. Six AOS primitives — cognition, execution, persistence, temporality, security, and homeostasis — map to biological systems:
 
 | Primitive | Biological Analog | Active Project | Status |
-|-----------|-------------------|----------------|--------|
-| Cognition + Execution | Central nervous system | **Arcan** | ACTIVE |
-| Tool Execution | Motor cortex / effectors | **Praxis** | ACTIVE |
-| Persistence | Long-term memory formation | **Lago** | ACTIVE |
-| Networking | Social/swarm behavior | **Spaces** | ACTIVE |
-| Contract / DNA | Genome | **aiOS** | ACTIVE |
-| Homeostasis | Autonomic nervous system | **Autonomic** | ACTIVE |
-| Temporality | Circadian rhythm | **Chronos** | PLANNED |
-| Security | Immune system | **Aegis** | PLANNED |
-| World Model | Prefrontal cortex | **Nous** | PLANNED |
-| Knowledge | Hippocampus | **Mnemo** | PLANNED |
+| --- | --- | --- | --- |
+| Cognition + Execution | Central nervous system | Arcan | ACTIVE |
+| Tool Execution | Motor cortex / effectors | Praxis | ACTIVE |
+| Persistence | Long-term memory formation | Lago | ACTIVE |
+| Networking | Social/swarm behavior | Spaces | ACTIVE |
+| Contract / DNA | Genome | aiOS | ACTIVE |
+| Homeostasis | Autonomic nervous system | Autonomic | ACTIVE |
+| Observability | Sensory feedback / proprioception | Vigil | ACTIVE |
+| Temporality | Circadian rhythm | Chronos | PLANNED |
+| Security | Immune system | Aegis | PLANNED |
+| World Model | Prefrontal cortex | Nous | PLANNED |
+| Knowledge | Hippocampus | Mnemo | PLANNED |
 
 ### Active Projects
 
@@ -32,6 +30,7 @@ Life is a contract-first architecture for building artificial life from computat
 - **Lago**: durable event-sourced persistence substrate
 - **Spaces**: distributed agent networking engine (SpacetimeDB 2.0)
 - **Autonomic**: three-pillar homeostasis controller (operational, cognitive, economic)
+- **Vigil**: OpenTelemetry-native observability (tracing, GenAI metrics, contract-derived spans)
 
 ### Planned Projects
 
@@ -47,8 +46,6 @@ Life is a contract-first architecture for building artificial life from computat
 3. Lago persistence is consumed through canonical adapter implementation.
 4. Arcan hosts the runtime and provides adapter implementations for provider/harness/policy/approval/memory.
 5. Runtime API is the canonical session API family.
-
----
 
 ## 2) Canonical Boundaries
 
@@ -79,8 +76,6 @@ Life is a contract-first architecture for building artificial life from computat
 3. Runtime path data exchange must remain canonical protocol types.
 4. Architecture dependency edges are validated by audit gate scripts.
 
----
-
 ## 3) Runtime Host Topology
 
 ## Canonical Runtime Host (Arcan)
@@ -106,8 +101,6 @@ Life is a contract-first architecture for building artificial life from computat
 
 No alternate production runtime route family is part of the baseline.
 
----
-
 ## 4) Persistence Topology (Lago)
 
 ## Event Journal
@@ -129,8 +122,6 @@ Lago substrate provides:
 - policy engine support
 - API and stream formatting utilities used by integration layers
 
----
-
 ## 5) Adapter Architecture
 
 ## Lago Adapter
@@ -151,8 +142,6 @@ Lago substrate provides:
 
 Adapters isolate implementation details from canonical runtime contract.
 
----
-
 ## 6) Runtime Data Flow
 
 Canonical run flow:
@@ -172,8 +161,6 @@ Approval flow:
 
 - approval resolution uses canonical approval endpoint and canonical runtime approval port.
 
----
-
 ## 7) Streaming Model
 
 Primary stream endpoint:
@@ -184,8 +171,6 @@ Supported behavior:
 
 - canonical event streaming for replay/live consumption
 - optional Vercel AI SDK v6 envelope path through format handling in canonical stream route
-
----
 
 ## 8) Governance and Enforcement
 
@@ -198,8 +183,6 @@ Architecture enforcement is integrated into control audit:
 Conformance and integration gates are exercised by:
 
 - `/Users/broomva/broomva.tech/life/conformance/run.sh`
-
----
 
 ## 9) Crate Role Map (Active)
 
@@ -238,6 +221,13 @@ Conformance and integration gates are exercised by:
 - `autonomic-api`: axum HTTP server (/gating, /projection, /health endpoints)
 - `autonomicd`: daemon binary with config, signal handling, optional Lago journal
 
+## Vigil
+
+- `vigil`: OpenTelemetry-native observability (config, semconv, spans, metrics)
+- Cross-cutting: depends on `aios-protocol`, consumed by Arcan/Lago/Autonomic/Praxis
+- Contract-derived spans map EventKind → OTel spans with GenAI semantic conventions
+- Dual-write: trace context written into EventEnvelope for persisted event correlation
+
 ## Spaces
 
 - `spaces`: CLI client using `spacetimedb-sdk` (Rust 2024 edition)
@@ -245,16 +235,12 @@ Conformance and integration gates are exercised by:
 - 11 tables, 20+ reducers, 5-tier RBAC, real-time pub/sub via SpacetimeDB
 - Connected to Arcan via `arcan-spaces` bridge (port-based abstraction, mock-backed, concrete SDK adapter pending)
 
----
-
 ## 10) Current Constraints
 
-1. Baseline emphasizes canonical runtime/persistence integration, not full observability maturity.
+1. Vigil provides the observability foundation (tracing, metrics, GenAI conventions); integration into runtime projects is the next step.
 2. OS-level sandbox hardening remains an active follow-up area.
 3. Cross-project golden fixture breadth can still be expanded.
 4. Autonomic is active but advisory-only — Arcan does not yet query it during agent runs.
-
----
 
 ## 11) Definition of Architectural Baseline
 
@@ -265,4 +251,3 @@ The baseline is complete when all of the following hold (currently true):
 - Lago is active persistence backend for runtime events through canonical adapter path.
 - Canonical session API is the production runtime API family.
 - Architecture dependency audit and conformance gates pass.
-

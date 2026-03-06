@@ -16,3 +16,6 @@
 [submodule "autonomic"]
 	path = autonomic
 	url = https://github.com/broomva/autonomic.git
+[submodule "vigil"]
+	path = vigil
+	url = https://github.com/broomva/vigil.git
