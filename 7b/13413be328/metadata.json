@@ -3,7 +3,7 @@
   "checkpoint_id": "7b13413be328",
   "strategy": "manual-commit",
   "branch": "successful-sole",
-  "checkpoints_count": 1,
+  "checkpoints_count": 2,
   "files_touched": [
     "AGENTS.md",
     "CLAUDE.md",
@@ -13,9 +13,16 @@
     "docs/PLANS.md",
     "docs/PLATFORM.md",
     "docs/STATUS.md",
+    "docs/control/OBSERVABILITY.md",
     "praxis/crates/praxis-core/src/sandbox.rs",
+    "praxis/crates/praxis-mcp/src/connection.rs",
+    "praxis/crates/praxis-mcp/src/tool.rs",
+    "praxis/crates/praxis-skills/src/registry.rs",
+    "praxis/crates/praxis-tools/src/edit.rs",
     "praxis/crates/praxis-tools/src/fs.rs",
+    "praxis/crates/praxis-tools/src/memory.rs",
     "praxis/crates/praxis-tools/src/shell.rs",
+    "vigil/CLAUDE.md",
     "vigil/Cargo.lock",
     "vigil/Cargo.toml",
     "vigil/src/config.rs",
@@ -38,13 +45,20 @@
       "context": "/7b/13413be328/1/context.md",
       "content_hash": "/7b/13413be328/1/content_hash.txt",
       "prompt": "/7b/13413be328/1/prompt.txt"
+    },
+    {
+      "metadata": "/7b/13413be328/2/metadata.json",
+      "transcript": "/7b/13413be328/2/full.jsonl",
+      "context": "/7b/13413be328/2/context.md",
+      "content_hash": "/7b/13413be328/2/content_hash.txt",
+      "prompt": "/7b/13413be328/2/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 59,
-    "cache_creation_tokens": 206375,
+    "input_tokens": 61,
+    "cache_creation_tokens": 290587,
     "cache_read_tokens": 5142325,
-    "output_tokens": 635,
-    "api_call_count": 55
+    "output_tokens": 636,
+    "api_call_count": 56
   }
 }
