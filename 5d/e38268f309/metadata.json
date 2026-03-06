@@ -3,7 +3,7 @@
   "checkpoint_id": "5de38268f309",
   "strategy": "manual-commit",
   "branch": "successful-sole",
-  "checkpoints_count": 1,
+  "checkpoints_count": 4,
   "files_touched": [
     ".gitmodules",
     "AGENTS.md",
@@ -39,13 +39,20 @@
       "context": "/5d/e38268f309/1/context.md",
       "content_hash": "/5d/e38268f309/1/content_hash.txt",
       "prompt": "/5d/e38268f309/1/prompt.txt"
+    },
+    {
+      "metadata": "/5d/e38268f309/2/metadata.json",
+      "transcript": "/5d/e38268f309/2/full.jsonl",
+      "context": "/5d/e38268f309/2/context.md",
+      "content_hash": "/5d/e38268f309/2/content_hash.txt",
+      "prompt": "/5d/e38268f309/2/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 243,
-    "cache_creation_tokens": 57674,
-    "cache_read_tokens": 1903907,
-    "output_tokens": 440,
-    "api_call_count": 39
+    "input_tokens": 266,
+    "cache_creation_tokens": 178354,
+    "cache_read_tokens": 3761912,
+    "output_tokens": 683,
+    "api_call_count": 56
   }
 }
