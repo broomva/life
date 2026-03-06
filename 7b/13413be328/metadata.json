@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "7b13413be328",
+  "strategy": "manual-commit",
+  "branch": "successful-sole",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "METALAYER.md",
+    "docs/ARCHITECTURE.md",
+    "docs/PLAN.md",
+    "docs/PLANS.md",
+    "docs/PLATFORM.md",
+    "docs/STATUS.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/7b/13413be328/0/metadata.json",
+      "transcript": "/7b/13413be328/0/full.jsonl",
+      "context": "/7b/13413be328/0/context.md",
+      "content_hash": "/7b/13413be328/0/content_hash.txt",
+      "prompt": "/7b/13413be328/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 9,
+    "cache_creation_tokens": 83598,
+    "cache_read_tokens": 475274,
+    "output_tokens": 105,
+    "api_call_count": 7
+  }
+}
