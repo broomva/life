@@ -12,7 +12,17 @@
     "docs/PLAN.md",
     "docs/PLANS.md",
     "docs/PLATFORM.md",
-    "docs/STATUS.md"
+    "docs/STATUS.md",
+    "praxis/crates/praxis-core/src/sandbox.rs",
+    "praxis/crates/praxis-tools/src/fs.rs",
+    "praxis/crates/praxis-tools/src/shell.rs",
+    "vigil/Cargo.lock",
+    "vigil/Cargo.toml",
+    "vigil/src/config.rs",
+    "vigil/src/lib.rs",
+    "vigil/src/metrics.rs",
+    "vigil/src/semconv.rs",
+    "vigil/src/spans.rs"
   ],
   "sessions": [
     {
@@ -21,13 +31,20 @@
       "context": "/7b/13413be328/0/context.md",
       "content_hash": "/7b/13413be328/0/content_hash.txt",
       "prompt": "/7b/13413be328/0/prompt.txt"
+    },
+    {
+      "metadata": "/7b/13413be328/1/metadata.json",
+      "transcript": "/7b/13413be328/1/full.jsonl",
+      "context": "/7b/13413be328/1/context.md",
+      "content_hash": "/7b/13413be328/1/content_hash.txt",
+      "prompt": "/7b/13413be328/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 9,
-    "cache_creation_tokens": 83598,
-    "cache_read_tokens": 475274,
-    "output_tokens": 105,
-    "api_call_count": 7
+    "input_tokens": 59,
+    "cache_creation_tokens": 206375,
+    "cache_read_tokens": 5142325,
+    "output_tokens": 635,
+    "api_call_count": 55
   }
 }
