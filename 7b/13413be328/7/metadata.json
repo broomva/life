@@ -1,0 +1,44 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "7b13413be328",
+  "session_id": "9048f81f-e008-47df-83b0-ee35f27f578d",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T14:18:46.689321Z",
+  "branch": "successful-sole",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "METALAYER.md",
+    "docs/ARCHITECTURE.md",
+    "docs/PLAN.md",
+    "docs/PLANS.md",
+    "docs/PLATFORM.md",
+    "docs/STATUS.md",
+    "vigil/Cargo.lock",
+    "vigil/Cargo.toml",
+    "vigil/src/config.rs",
+    "vigil/src/lib.rs",
+    "vigil/src/metrics.rs",
+    "vigil/src/semconv.rs",
+    "vigil/src/spans.rs"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "6fa78b689dd0",
+  "token_usage": {
+    "input_tokens": 78,
+    "cache_creation_tokens": 139405,
+    "cache_read_tokens": 7021226,
+    "output_tokens": 734,
+    "api_call_count": 74
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T14:18:46.502263Z",
+    "agent_lines": 3786,
+    "human_added": 332,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 4118,
+    "agent_percentage": 91.93783389995144
+  }
+}
