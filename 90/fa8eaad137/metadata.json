@@ -1,0 +1,51 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "90fa8eaad137",
+  "strategy": "manual-commit",
+  "branch": "successful-sole",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".gitmodules",
+    "praxis",
+    "praxis/CLAUDE.md",
+    "praxis/Cargo.lock",
+    "praxis/Cargo.toml",
+    "praxis/crates/praxis-core/Cargo.toml",
+    "praxis/crates/praxis-core/src/error.rs",
+    "praxis/crates/praxis-core/src/fs_port.rs",
+    "praxis/crates/praxis-core/src/lib.rs",
+    "praxis/crates/praxis-core/src/local_fs.rs",
+    "praxis/crates/praxis-core/src/sandbox.rs",
+    "praxis/crates/praxis-core/src/workspace.rs",
+    "praxis/crates/praxis-mcp/Cargo.toml",
+    "praxis/crates/praxis-mcp/src/connection.rs",
+    "praxis/crates/praxis-mcp/src/lib.rs",
+    "praxis/crates/praxis-mcp/src/tool.rs",
+    "praxis/crates/praxis-skills/Cargo.toml",
+    "praxis/crates/praxis-skills/src/lib.rs",
+    "praxis/crates/praxis-skills/src/parser.rs",
+    "praxis/crates/praxis-skills/src/registry.rs",
+    "praxis/crates/praxis-tools/Cargo.toml",
+    "praxis/crates/praxis-tools/src/edit.rs",
+    "praxis/crates/praxis-tools/src/fs.rs",
+    "praxis/crates/praxis-tools/src/lib.rs",
+    "praxis/crates/praxis-tools/src/memory.rs",
+    "praxis/crates/praxis-tools/src/shell.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/90/fa8eaad137/0/metadata.json",
+      "transcript": "/90/fa8eaad137/0/full.jsonl",
+      "context": "/90/fa8eaad137/0/context.md",
+      "content_hash": "/90/fa8eaad137/0/content_hash.txt",
+      "prompt": "/90/fa8eaad137/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  }
+}
