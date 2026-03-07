@@ -36,7 +36,7 @@ if [ -f lago/Cargo.toml ]; then
     fail "lago-cli build"
   fi
 
-  lago_bin="lago/target/debug/lago-cli"
+  lago_bin="lago/.target/debug/lago-cli"
   if [ -x "$lago_bin" ]; then
     # --help flag
     if "$lago_bin" --help >/dev/null 2>&1; then
@@ -73,7 +73,7 @@ if [ -f lago/Cargo.toml ]; then
     fail "lagod build"
   fi
 
-  lagod_bin="lago/target/debug/lagod"
+  lagod_bin="lago/.target/debug/lagod"
   if [ -x "$lagod_bin" ]; then
     if "$lagod_bin" --help >/dev/null 2>&1; then
       ok "lagod --help"
@@ -94,7 +94,7 @@ if [ -f arcan/Cargo.toml ]; then
     fail "arcan binary build"
   fi
 
-  arcan_bin="arcan/target/debug/arcan"
+  arcan_bin="arcan/.target/debug/arcan"
   if [ -x "$arcan_bin" ]; then
     if "$arcan_bin" --help >/dev/null 2>&1; then
       ok "arcan --help"

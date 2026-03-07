@@ -17,7 +17,7 @@ jobs:
           git submodule update --init --depth 1 aiOS arcan lago autonomic spaces vigil
 
       - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler lld
 
       - uses: dtolnay/rust-toolchain@stable
         with:
