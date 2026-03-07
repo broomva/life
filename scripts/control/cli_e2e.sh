@@ -29,15 +29,15 @@ echo
 if [ -f lago/Cargo.toml ]; then
   echo "--- lago-cli ---"
 
-  # Build
-  if (cd lago && cargo build -p lago-cli --quiet 2>/dev/null); then
+  # Build (package is named `lago` in lago/crates/lago-cli)
+  if (cd lago && cargo build -p lago --quiet); then
     ok "lago-cli builds"
   else
     fail "lago-cli build"
   fi
 
   lago_bin=""
-  for candidate in "lago/.target/debug/lago-cli" "lago/target/debug/lago-cli" ".target/debug/lago-cli" "target/debug/lago-cli"; do
+  for candidate in "lago/.target/debug/lago-cli" "lago/.target/debug/lago" "lago/target/debug/lago" ".target/debug/lago" "target/debug/lago"; do
     if [ -x "$candidate" ]; then
       lago_bin="$candidate"
       break
