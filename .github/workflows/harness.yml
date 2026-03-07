@@ -1,5 +1,5 @@
 name: Harness CI
-
+# push to main, all PRs, manual dispatch
 on:
   push:
     branches: [main]
