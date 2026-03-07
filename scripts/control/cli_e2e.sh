@@ -29,15 +29,21 @@ echo
 if [ -f lago/Cargo.toml ]; then
   echo "--- lago-cli ---"
 
-  # Build
-  if (cd lago && cargo build -p lago-cli --quiet 2>/dev/null); then
+  # Build (package is named `lago` in lago/crates/lago-cli)
+  if (cd lago && cargo build -p lago --quiet); then
     ok "lago-cli builds"
   else
     fail "lago-cli build"
   fi
 
-  lago_bin="lago/target/debug/lago-cli"
-  if [ -x "$lago_bin" ]; then
+  lago_bin=""
+  for candidate in "lago/target/debug/lago" ".target/debug/lago" "target/debug/lago"; do
+    if [ -x "$candidate" ]; then
+      lago_bin="$candidate"
+      break
+    fi
+  done
+  if [ -n "$lago_bin" ]; then
     # --help flag
     if "$lago_bin" --help >/dev/null 2>&1; then
       ok "lago-cli --help"
@@ -73,8 +79,14 @@ if [ -f lago/Cargo.toml ]; then
     fail "lagod build"
   fi
 
-  lagod_bin="lago/target/debug/lagod"
-  if [ -x "$lagod_bin" ]; then
+  lagod_bin=""
+  for candidate in "lago/target/debug/lagod" ".target/debug/lagod" "target/debug/lagod"; do
+    if [ -x "$candidate" ]; then
+      lagod_bin="$candidate"
+      break
+    fi
+  done
+  if [ -n "$lagod_bin" ]; then
     if "$lagod_bin" --help >/dev/null 2>&1; then
       ok "lagod --help"
     else
@@ -94,8 +106,14 @@ if [ -f arcan/Cargo.toml ]; then
     fail "arcan binary build"
   fi
 
-  arcan_bin="arcan/target/debug/arcan"
-  if [ -x "$arcan_bin" ]; then
+  arcan_bin=""
+  for candidate in "arcan/target/debug/arcan" ".target/debug/arcan" "target/debug/arcan"; do
+    if [ -x "$candidate" ]; then
+      arcan_bin="$candidate"
+      break
+    fi
+  done
+  if [ -n "$arcan_bin" ]; then
     if "$arcan_bin" --help >/dev/null 2>&1; then
       ok "arcan --help"
     else

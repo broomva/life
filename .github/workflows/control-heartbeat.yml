@@ -1,18 +1,18 @@
-name: CLI E2E
+name: Control Heartbeat
 
 on:
-  pull_request:
+  schedule:
+    - cron: '15 * * * *'
   workflow_dispatch:
 
 jobs:
-  cli-e2e:
+  heartbeat:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Checkout submodules with remotes
         run: |
-          git submodule sync --recursive
           git submodule update --init --depth 1 aiOS arcan lago autonomic spaces
 
       - name: Install protoc
@@ -21,13 +21,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+          components: clippy, rustfmt
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            aiOS
-            arcan
-            lago
+      - name: Configure hooks path
+        run: git config core.hooksPath .githooks
 
-      - name: Run CLI E2E tests
-        run: ./scripts/control/cli_e2e.sh
+      - name: Run heartbeat
+        run: ./scripts/control/heartbeat.sh
