@@ -51,7 +51,7 @@ if [ -f arcan/Cargo.toml ]; then
   fi
 fi
 
-arcan_bin="arcan/.target/debug/arcan"
+arcan_bin=".target/debug/arcan"
 if [ ! -x "$arcan_bin" ]; then
   echo "Web E2E: arcan binary not found at $arcan_bin" >&2
   exit 1
