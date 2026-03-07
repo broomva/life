@@ -1,4 +1,4 @@
-.PHONY: smoke check test recover hooks-install web-e2e cli-e2e ci-e2e control-audit architecture-audit audit ci
+.PHONY: smoke check test recover hooks-install web-e2e cli-e2e heartbeat ci-e2e control-audit architecture-audit audit ci
 
 smoke:
 	@./scripts/control/smoke.sh
@@ -20,6 +20,9 @@ web-e2e:
 
 cli-e2e:
 	@if [ -x ./scripts/control/cli_e2e.sh ]; then ./scripts/control/cli_e2e.sh; else echo "cli primitive not installed"; exit 2; fi
+
+heartbeat:
+	@./scripts/control/heartbeat.sh
 
 control-audit:
 	@./scripts/audit_control.sh .

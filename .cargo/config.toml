@@ -3,7 +3,7 @@
 # to avoid compiling shared dependencies 3x.
 
 [build]
-target-dir = "/Users/broomva/broomva.tech/life/.target"
+target-dir = ".target"
 
 [profile.dev]
 # Keep debug symbols in separate files — significantly reduces binary sizes
