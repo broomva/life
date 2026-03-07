@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-03**Baseline**: Canonical runtime unification active
 
-This document describes the active architecture in `/Users/broomva/broomva.tech/life`.
+This document describes the active architecture in this repository (`/life`).
 
 ## 1) System Overview
 
@@ -176,13 +176,13 @@ Supported behavior:
 
 Architecture enforcement is integrated into control audit:
 
-- `/Users/broomva/broomva.tech/life/scripts/architecture/verify_dependencies.sh`
-- `/Users/broomva/broomva.tech/life/Makefile.control`
-- `/Users/broomva/broomva.tech/life/scripts/audit_control.sh`
+- `scripts/architecture/verify_dependencies.sh`
+- `Makefile.control`
+- `scripts/audit_control.sh`
 
 Conformance and integration gates are exercised by:
 
-- `/Users/broomva/broomva.tech/life/conformance/run.sh`
+- `conformance/run.sh`
 
 ## 9) Crate Role Map (Active)
 

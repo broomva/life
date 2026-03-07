@@ -2,7 +2,9 @@
 # Entire CLI hooks
 # Pre-push hook: push session logs alongside user's push
 # $1 is the remote name (e.g., "origin")
-entire hooks git pre-push "$1" || true
+if command -v entire >/dev/null 2>&1; then
+  entire hooks git pre-push "$1" || true
+fi
 # Chain: run pre-existing hook
 _entire_hook_dir="$(dirname "$0")"
 if [ -x "$_entire_hook_dir/pre-push.pre-entire" ]; then

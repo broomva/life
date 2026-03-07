@@ -70,6 +70,7 @@ After fast path, expand by concern:
 - `docs/control/CONTROL_LOOP.md` (consolidated: loop, sensors, setpoints, actuators, stability, observability)
 - `docs/control/ARCHITECTURE.md` (boundaries and ownership)
 - `docs/control/OBSERVABILITY.md` (event taxonomy for instrumentation)
+- `docs/control/HEARTBEAT_STRATEGY.md` (cross-project heartbeat cadence and environment-first triage)
 
 ### Planned feature tracks
 - `docs/FEATURE_CONWAY_ACTUATION.md` (economic actuation plane, Conway-compatible)

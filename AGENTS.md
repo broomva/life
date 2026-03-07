@@ -215,6 +215,16 @@ Plans are stored in `PLANS.md` and kept in sync with actual implementation in `A
 
 This workspace operates as a **control loop** for autonomous agent development. The metalayer provides governance primitives, observability hooks, and safety gates.
 
+### Feedback-First Philosophy (Cross-Project)
+
+The harness and control layers exist to produce **meaningful, actionable feedback** for feature delivery, not ceremony.
+
+- Every feature iteration should flow through measurable gates (`smoke → check → test → audit`).
+- PR pipelines and git hooks are the same control law at different cadences (remote vs local).
+- Agent orchestration should treat failures as feedback signals that improve the system.
+- Default triage model is **environment-first**: missing toolchains, credentials, permissions, runtime services, or compute are environment/capability issues to fix before blaming feature code.
+- If capability is missing, create/execute an environment remediation step and re-run gates before escalating.
+
 ### Key Components
 
 | Component | Location | Purpose |
@@ -244,7 +254,7 @@ Pre-commit and pre-push hooks installed at `.githooks/` enforce:
 
 - Format checks
 - Lint compliance
-- Test validation before push
+- Smoke validation before push (full test matrix remains CI-authoritative)
 
 Reinstall with: `bash scripts/control/install_hooks.sh`
 
@@ -253,7 +263,8 @@ Reinstall with: `bash scripts/control/install_hooks.sh`
 Run control audits to validate governance compliance:
 
 ```bash
-python3 scripts/control_wizard.py audit . --strict
+./scripts/audit_control.sh .
+./scripts/audit_control.sh . --strict
 ```
 
 Audit failures block agent operations until resolved.

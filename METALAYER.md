@@ -24,6 +24,13 @@ This repository operates as a control loop for autonomous agent development.
 - Gate sequence: smoke -> check -> test
 - Retry budget: 2 (per gate, per run)
 - Escalation conditions: retry_budget_exhausted -> human_oncall
+- Failure model: environment-first triage before code-level fault attribution
+
+## Cross-Project Philosophy
+
+- Harness/control are feedback systems for continuous feature development.
+- Local hooks and PR CI must enforce the same intent (early detection, deterministic checks, safe progression).
+- Failures are control signals; unresolved capability gaps are environment debt and should be remediated explicitly.
 
 ## Actuators
 
