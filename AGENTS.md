@@ -138,6 +138,16 @@ cargo check                                             # Check client builds
 spacetime publish spaces --module-path spacetimedb      # Publish WASM module
 ```
 
+### Quick Local Bring-up (entry point)
+
+```bash
+# Start core platform services (lagod + autonomicd + arcan)
+bash scripts/dev/up.sh
+
+# Stop all started services
+bash scripts/dev/down.sh
+```
+
 ### Cross-Project Validation
 
 ```bash
