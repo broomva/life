@@ -141,6 +141,9 @@ spacetime publish spaces --module-path spacetimedb      # Publish WASM module
 ### Quick Local Bring-up (entry point)
 
 ```bash
+# Canonical state root (V2)
+export AIOS_STATE_ROOT=/home/exedev/.aios
+
 # Start core platform services (lagod + autonomicd + arcan)
 bash scripts/dev/up.sh
 

@@ -9,8 +9,19 @@ if ! command -v cargo >/dev/null 2>&1 && [ -f "$HOME/.cargo/env" ]; then
   . "$HOME/.cargo/env"
 fi
 
-RUNTIME_DIR="$ROOT/.control/runtime"
-mkdir -p "$RUNTIME_DIR"
+AIOS_STATE_ROOT="${AIOS_STATE_ROOT:-/home/exedev/.aios}"
+TENANT_ID="${AIOS_TENANT_ID:-default}"
+PROJECT_ID="${AIOS_PROJECT_ID:-life}"
+SESSION_ID="${AIOS_SESSION_ID:-dev}"
+
+RUNTIME_ROOT="$AIOS_STATE_ROOT/runtime"
+RUNTIME_LOG_DIR="$RUNTIME_ROOT/logs"
+RUNTIME_PID_DIR="$RUNTIME_ROOT/pids"
+RUNTIME_SOCKET_DIR="$RUNTIME_ROOT/sockets"
+SESSION_ROOT="$AIOS_STATE_ROOT/tenants/$TENANT_ID/projects/$PROJECT_ID/sessions/$SESSION_ID"
+CONTROL_STATE_DIR="$AIOS_STATE_ROOT/control/state"
+
+mkdir -p "$RUNTIME_LOG_DIR" "$RUNTIME_PID_DIR" "$RUNTIME_SOCKET_DIR" "$SESSION_ROOT" "$CONTROL_STATE_DIR"
 
 ARCAN_PORT="${ARCAN_PORT:-3000}"
 AUTONOMIC_PORT="${AUTONOMIC_PORT:-3002}"
@@ -32,6 +43,10 @@ Options:
   -h, --help        Show help
 
 Environment:
+  AIOS_STATE_ROOT   Canonical unified state root (default: /home/exedev/.aios)
+  AIOS_TENANT_ID    Tenant namespace (default: default)
+  AIOS_PROJECT_ID   Project namespace (default: life)
+  AIOS_SESSION_ID   Session namespace (default: dev)
   ARCAN_PORT        Default 3000
   AUTONOMIC_PORT    Default 3002
 EOF
@@ -64,8 +79,8 @@ start_service() {
   local name="$1"; shift
   local workdir="$1"; shift
   local cmd="$*"
-  local pidfile="$RUNTIME_DIR/${name}.pid"
-  local logfile="$RUNTIME_DIR/${name}.log"
+  local pidfile="$RUNTIME_PID_DIR/${name}.pid"
+  local logfile="$RUNTIME_LOG_DIR/${name}.log"
 
   if is_running "$pidfile"; then
     log "$name already running (pid=$(cat "$pidfile"))"
@@ -110,18 +125,21 @@ if ! $SKIP_BUILD; then
   log "build step completed"
 fi
 
-$NO_LAGO || start_service "lagod" "$ROOT/lago" "cargo run -p lagod"
-$NO_AUTONOMIC || start_service "autonomicd" "$ROOT/autonomic" "cargo run -p autonomicd"
-$NO_ARCAN || start_service "arcan" "$ROOT/arcan" "cargo run -p arcan"
+$NO_LAGO || start_service "lagod" "$ROOT/lago" "cargo run -p lagod -- --data-dir '$SESSION_ROOT'"
+$NO_AUTONOMIC || start_service "autonomicd" "$ROOT/autonomic" "cargo run -p autonomicd -- --lago-data-dir '$CONTROL_STATE_DIR'"
+$NO_ARCAN || start_service "arcan" "$ROOT/arcan" "cargo run -p arcan -- --data-dir '$SESSION_ROOT'"
 
 # Best-effort health checks (non-fatal; different binaries may expose different routes)
 $NO_ARCAN || wait_http "arcan" "http://127.0.0.1:${ARCAN_PORT}/health" 25 || true
 $NO_AUTONOMIC || wait_http "autonomicd" "http://127.0.0.1:${AUTONOMIC_PORT}/health" 20 || true
 
 echo
-log "runtime status files: $RUNTIME_DIR"
+log "AIOS state root: $AIOS_STATE_ROOT"
+log "session root: $SESSION_ROOT"
+log "runtime logs: $RUNTIME_LOG_DIR"
+log "runtime pids: $RUNTIME_PID_DIR"
 log "next commands:"
 echo "  - stop all:  $ROOT/scripts/dev/down.sh"
-echo "  - show pids: ls -la $RUNTIME_DIR/*.pid"
-echo "  - tail logs: tail -f $RUNTIME_DIR/arcan.log"
+echo "  - show pids: ls -la $RUNTIME_PID_DIR/*.pid"
+echo "  - tail logs: tail -f $RUNTIME_LOG_DIR/arcan.log"
 echo "  - control gates: make smoke && make check && make test"

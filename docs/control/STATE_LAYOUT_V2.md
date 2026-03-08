@@ -84,6 +84,18 @@ All stateful services must read/write under this root only.
 - [ ] `make web-e2e` / `make cli-e2e` pass with V2 pathing.
 - [ ] backup script includes `AIOS_STATE_ROOT`.
 
+## Quick Start (V2)
+
+```bash
+export AIOS_STATE_ROOT=/home/exedev/.aios
+export AIOS_TENANT_ID=default
+export AIOS_PROJECT_ID=life
+export AIOS_SESSION_ID=dev
+
+bash scripts/dev/up.sh
+bash scripts/dev/down.sh
+```
+
 ## Execution Plan (initial)
 
 1. Introduce `AIOS_STATE_ROOT` env contract in dev scripts and docs.

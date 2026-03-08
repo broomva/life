@@ -2,13 +2,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-RUNTIME_DIR="$ROOT/.control/runtime"
+AIOS_STATE_ROOT="${AIOS_STATE_ROOT:-/home/exedev/.aios}"
+RUNTIME_PID_DIR="$AIOS_STATE_ROOT/runtime/pids"
 
 log() { echo "[down] $*"; }
 
 stop_service() {
   local name="$1"
-  local pidfile="$RUNTIME_DIR/${name}.pid"
+  local pidfile="$RUNTIME_PID_DIR/${name}.pid"
   if [[ ! -f "$pidfile" ]]; then
     log "$name not running (no pidfile)"
     return 0
