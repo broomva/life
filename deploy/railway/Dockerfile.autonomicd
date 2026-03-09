@@ -1,0 +1,15 @@
+FROM rust:1.88-bookworm AS builder
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler clang lld pkg-config libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY . .
+RUN cd autonomic && cargo build --release -p autonomicd
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /app/.target/release/autonomicd /usr/local/bin/autonomicd
+ENV AIOS_STATE_ROOT=/data/.aios
+ENV PORT=3002
+EXPOSE 3002
+CMD ["sh","-lc","/usr/local/bin/autonomicd --bind 0.0.0.0:${PORT} --lago-data-dir /data/.aios/control/state"]

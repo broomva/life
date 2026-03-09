@@ -1,14 +1,8 @@
 # Broomva Life: Implementation Status
 
-**Date**: 2026-03-04
-**Version**: 0.2.0 (canonical baseline)
-**Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)
-**Tests**: 1012 passing (+3 ignored) across 29 crates + Spaces (31 crates total)
+**Date**: 2026-03-04**Version**: 0.2.0 (canonical baseline)**Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)**Tests**: 1038 passing (+5 ignored) across 30 crates + Spaces (32 crates total)
 
-This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/life`.
-If another status document conflicts with this one, treat this file as source of truth.
-
----
+This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/life`.If another status document conflicts with this one, treat this file as source of truth.
 
 ## Current State
 
@@ -22,13 +16,13 @@ The baseline unification is active and enforced in production paths:
 
 ## Health Summary
 
-| Area | aiOS | Arcan | Lago | Autonomic | Praxis | Spaces |
-|---|---|---|---|---|---|---|
-| Build | PASS | PASS | PASS | PASS | PASS | PASS |
-| Tests | PASS (96) | PASS (465+16 w/ spacetimedb) | PASS (332) | PASS (69) | PASS (58) | N/A (0 tests) |
-| Clippy (`-D warnings`) | PASS | PASS | PASS | PASS | PASS | PASS |
-| Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | BRIDGED (arcan-spaces) |
-| Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | NETWORKING |
+| Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Build | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Tests | PASS (96) | PASS (465+16 w/ spacetimedb) | PASS (332) | PASS (69) | PASS (58) | PASS (26+2 ignored) | N/A (0 tests) |
+| Clippy (-D warnings) | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | CROSS-CUTTING | BRIDGED (arcan-spaces) |
+| Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | OBSERVABILITY | NETWORKING |
 
 Validation gates currently pass:
 
@@ -37,10 +31,9 @@ Validation gates currently pass:
 - `/Users/broomva/broomva.tech/life/lago`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
 - `/Users/broomva/broomva.tech/life/autonomic`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
 - `/Users/broomva/broomva.tech/life/praxis`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
+- `/Users/broomva/broomva.tech/life/vigil`: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`
 - `/Users/broomva/broomva.tech/life/spaces`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo check` (WASM module: `cargo check --target wasm32-unknown-unknown --manifest-path spacetimedb/Cargo.toml`)
 - `/Users/broomva/broomva.tech/life`: `make audit`, `./scripts/architecture/verify_dependencies.sh`, `./conformance/run.sh`
-
----
 
 ## Canonical Architecture
 
@@ -63,8 +56,6 @@ Validation gates currently pass:
 - `GET /sessions/{session_id}/branches`
 - `POST /sessions/{session_id}/branches/{branch_id}/merge`
 - `POST /sessions/{session_id}/approvals/{approval_id}`
-
----
 
 ## Project Status
 
@@ -131,8 +122,6 @@ Validation gates currently pass:
 
 - Journal, blob store, policy engine, API, and file/manifest subsystems are operational and tested.
 
----
-
 ## Governance and Dependency Control
 
 Architecture dependency gate is active:
@@ -142,8 +131,6 @@ Architecture dependency gate is active:
 - Audit enforcement path:
   - `/Users/broomva/broomva.tech/life/Makefile.control`
   - `/Users/broomva/broomva.tech/life/scripts/audit_control.sh`
-
----
 
 ## Conformance Coverage
 
@@ -185,8 +172,8 @@ Current suite validates:
 
 ### Known Gaps
 
-- ~~Not yet consulted by Arcan agent loop~~ (R5 Phase 1 COMPLETE — `AutonomicPolicyAdapter` decorator wired in Arcan).
-- ~~Feedback loop open (Autonomic projection always at default)~~ (R5 Phase 2 COMPLETE — embedded controller, economic gating, token usage flow).
+- Not yet consulted by Arcan agent loop (R5 Phase 1 COMPLETE — `AutonomicPolicyAdapter` decorator wired in Arcan).
+- Feedback loop open (Autonomic projection always at default) (R5 Phase 2 COMPLETE — embedded controller, economic gating, token usage flow).
 - No observability (metrics/traces) yet.
 - Identity system is placeholder.
 
@@ -214,8 +201,36 @@ Current suite validates:
 
 ### Known Gaps
 
-- ~~Not yet wired into Arcan~~ (arcan-harness now bridges to Praxis tools).
+- Not yet wired into Arcan (arcan-harness now bridges to Praxis tools).
 - No integration tests with live MCP servers.
+
+## Vigil
+
+### Observability Foundation
+
+- OpenTelemetry-native tracing and GenAI metrics for the Agent OS.
+- 1 crate: `vigil` (26 tests + 2 ignored).
+- Depends only on `aios-protocol` — no dependency on Arcan, Lago, Autonomic, or Praxis.
+- Implements contract-derived spans (EventKind → OTel spans), GenAI semantic conventions (`gen_ai.*` attributes), and dual-write architecture (OTel spans + EventEnvelope trace context).
+
+### Components
+
+- **config**: `VigConfig` with env var overrides (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `VIGIL_LOG_FORMAT`, `VIGIL_CAPTURE_CONTENT`, `VIGIL_SAMPLING_RATIO`).
+- **semconv**: GenAI semantic conventions (`gen_ai.*`), Life attributes (`life.*`), Autonomic attributes (`autonomic.*`), Lago attributes (`lago.*`).
+- **spans**: Contract-derived span builders (`agent_span`, `phase_span`, `chat_span`, `tool_span`), trace context dual-write (`write_trace_context` / `extract_trace_context`).
+- **metrics**: `GenAiMetrics` — OTel instruments for token usage, operation duration, tool executions, budget gauges, mode transitions.
+
+### Integration Points
+
+- Depends on `aios-protocol` (canonical contract — `EventEnvelope`, `LoopPhase`, `TokenUsage`).
+- Designed for consumption by all runtime projects (Arcan, Lago, Autonomic, Praxis).
+- Graceful degradation: structured logging via `tracing-subscriber` when no OTLP endpoint is configured.
+
+### Known Gaps
+
+- Not yet wired into Arcan agent loop (consumers use `vigil` as a dependency, instrument their own code).
+- No OTLP smoke test in CI.
+- No content capture (prompt/completion) in spans yet (privacy flag exists but unused).
 
 ## Spaces
 
@@ -238,16 +253,14 @@ Current suite validates:
 
 - No unit tests (reducer tests, integration tests planned).
 - No DM/private messaging.
-- ~~arcan-spaces bridge uses mock hub only — concrete SpacetimeDB SDK adapter not yet implemented.~~ (SpacetimeDB HTTP adapter COMPLETE — `SpacetimeDbClient` via REST API with backend selection).
-
----
+- arcan-spaces bridge uses mock hub only — concrete SpacetimeDB SDK adapter not yet implemented. (SpacetimeDB HTTP adapter COMPLETE — `SpacetimeDbClient` via REST API with backend selection).
 
 ## Remaining Work (Post-Baseline)
 
 The baseline runtime architecture is in place and validated. Remaining work is additive:
 
-1. ~~Cross-project golden fixture expansion for replay determinism breadth~~ (R1, COMPLETE — branch-merge, forward-compat-evolution, stream cursor/replay invariants).
-2. Observability depth expansion (metrics/traces across runtime and adapters) (R2, PLANNED).
+1. Cross-project golden fixture expansion for replay determinism breadth (R1, COMPLETE — branch-merge, forward-compat-evolution, stream cursor/replay invariants).
+2. Observability depth expansion (metrics/traces across runtime and adapters) (R2, FOUNDATION COMPLETE — Vigil crate with OTel tracing, GenAI metrics, contract-derived spans; integration into runtime projects pending).
 3. Security hardening beyond current software-level sandbox controls (R3, PLANNED).
 4. Memory and learning depth (R4, PLANNED).
 5. Controller plane / Autonomic integration — Phase 0 COMPLETE (5 crates, 69 tests, Lago wired, hysteresis active); Phase 1 COMPLETE: Arcan advisory client wired (`AutonomicPolicyAdapter` decorator, 6 tests); **Phase 2 COMPLETE**: Embedded controller (dual-mode adapter, economic gate handle wired to provider, token usage flow, 24 new tests — R5 DONE).
@@ -263,8 +276,6 @@ The baseline runtime architecture is in place and validated. Remaining work is a
 - [x] CI workflows updated for CLI and Web E2E pipelines.
 - [x] MemoryPort removed from canonical port list (was removed from aios-protocol 2026-02-28).
 
----
-
 ## Baseline Completion Checklist
 
 - [x] Single canonical contract (`aios-protocol`) across projects.
@@ -274,4 +285,3 @@ The baseline runtime architecture is in place and validated. Remaining work is a
 - [x] Architecture dependency gate integrated in audit flow.
 - [x] Workspace build/lint/test gates green.
 - [x] Conformance harness green.
-

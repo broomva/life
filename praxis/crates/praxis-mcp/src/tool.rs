@@ -9,6 +9,7 @@ use serde_json::json;
 use std::borrow::Cow;
 use std::sync::Arc;
 use tokio::runtime::Handle;
+use tracing::info;
 
 /// Bridge: wraps a single MCP tool into the canonical Tool trait.
 pub struct McpTool {
@@ -41,6 +42,17 @@ impl Tool for McpTool {
     }
 
     fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let span = tracing::info_span!(
+            "mcp_call_tool",
+            mcp.server = %self.definition.name,
+            mcp.method = %self.mcp_tool_name,
+            mcp.duration_ms = tracing::field::Empty,
+            mcp.is_error = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+
+        let start = std::time::Instant::now();
+
         let arguments = call.input.as_object().cloned();
 
         let params = CallToolRequestParams {
@@ -58,6 +70,17 @@ impl Tool for McpTool {
                 tool_name: call.tool_name.clone(),
                 message: format!("MCP call_tool failed: {e}"),
             })?;
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let is_error = mcp_result.is_error.unwrap_or(false);
+        span.record("mcp.duration_ms", duration_ms);
+        span.record("mcp.is_error", is_error);
+        info!(
+            method = %self.mcp_tool_name,
+            duration_ms,
+            is_error,
+            "MCP tool call completed"
+        );
 
         // Convert MCP content to canonical ToolContent
         let content: Vec<ToolContent> = mcp_result
@@ -96,7 +119,7 @@ impl Tool for McpTool {
             } else {
                 Some(content)
             },
-            is_error: mcp_result.is_error.unwrap_or(false),
+            is_error,
         })
     }
 }

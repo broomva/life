@@ -52,13 +52,12 @@ if [ -f arcan/Cargo.toml ]; then
 fi
 
 arcan_bin=""
-for candidate in "arcan/target/debug/arcan" ".target/debug/arcan" "target/debug/arcan"; do
+for candidate in "arcan/.target/debug/arcan" "arcan/target/debug/arcan" ".target/debug/arcan" "target/debug/arcan"; do
   if [ -x "$candidate" ]; then
     arcan_bin="$candidate"
     break
   fi
 done
-
 if [ -z "$arcan_bin" ]; then
   echo "Web E2E: arcan binary not found in expected locations" >&2
   exit 1

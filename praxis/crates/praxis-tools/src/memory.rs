@@ -9,6 +9,7 @@ use aios_protocol::tool::{
 use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
+use tracing::debug;
 
 // ── ReadMemoryTool ───────────────────────────────────────────────────
 
@@ -57,6 +58,10 @@ impl Tool for ReadMemoryTool {
                 message: "Missing or invalid 'key' argument".into(),
             })?;
 
+        let _span =
+            tracing::debug_span!("read_memory", memory.operation = "read", memory.key = %key)
+                .entered();
+
         validate_memory_key(key).map_err(|msg| ToolError::InvalidInput { message: msg })?;
 
         let file_path = self.memory_dir.join(format!("{key}.md"));
@@ -68,6 +73,8 @@ impl Tool for ReadMemoryTool {
                     message: format!("Failed to read memory file: {e}"),
                 })?;
 
+            debug!(exists = true, bytes = content.len(), "memory read");
+
             Ok(ToolResult {
                 call_id: call.call_id.clone(),
                 tool_name: call.tool_name.clone(),
@@ -76,6 +83,8 @@ impl Tool for ReadMemoryTool {
                 is_error: false,
             })
         } else {
+            debug!(exists = false, "memory key not found");
+
             Ok(ToolResult {
                 call_id: call.call_id.clone(),
                 tool_name: call.tool_name.clone(),
@@ -142,6 +151,14 @@ impl Tool for WriteMemoryTool {
                 message: "Missing or invalid 'content' argument".into(),
             })?;
 
+        let _span = tracing::debug_span!(
+            "write_memory",
+            memory.operation = "write",
+            memory.key = %key,
+            memory.bytes = content.len(),
+        )
+        .entered();
+
         validate_memory_key(key).map_err(|msg| ToolError::InvalidInput { message: msg })?;
 
         fs::create_dir_all(&self.memory_dir).map_err(|e| ToolError::ExecutionFailed {
@@ -155,6 +172,8 @@ impl Tool for WriteMemoryTool {
             tool_name: "write_memory".into(),
             message: format!("Failed to write memory file: {e}"),
         })?;
+
+        debug!(bytes = content.len(), "memory written");
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),

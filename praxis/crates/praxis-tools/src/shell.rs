@@ -9,6 +9,7 @@ use aios_protocol::tool::{
 use praxis_core::sandbox::{CommandRequest, CommandRunner, SandboxPolicy};
 use serde_json::json;
 use std::path::PathBuf;
+use tracing::info;
 
 /// Tool that executes bash commands within the sandbox.
 pub struct BashTool {
@@ -58,6 +59,14 @@ impl Tool for BashTool {
                 message: "Missing 'command' argument".into(),
             })?;
 
+        let span = tracing::info_span!(
+            "bash_execute",
+            tool.name = "bash",
+            call_id = %call.call_id,
+            bash.exit_code = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+
         let cwd = call
             .input
             .get("cwd")
@@ -79,6 +88,9 @@ impl Tool for BashTool {
                     tool_name: "bash".into(),
                     message: e.to_string(),
                 })?;
+
+        span.record("bash.exit_code", result.exit_code);
+        info!(exit_code = result.exit_code, "bash command completed");
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),

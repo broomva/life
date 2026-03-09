@@ -12,6 +12,7 @@ use serde_json::json;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tracing::debug;
 
 // ── ReadFileTool ─────────────────────────────────────────────────────
 
@@ -60,6 +61,13 @@ impl Tool for ReadFileTool {
                 message: "Missing or invalid 'path' argument".into(),
             })?;
 
+        let span = tracing::debug_span!(
+            "read_file",
+            fs.path = %path_str,
+            fs.bytes_read = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+
         let path =
             self.fs
                 .resolve(Path::new(path_str))
@@ -75,6 +83,9 @@ impl Tool for ReadFileTool {
                 tool_name: "read_file".into(),
                 message: format!("Failed to read file: {e}"),
             })?;
+
+        span.record("fs.bytes_read", content.len());
+        debug!(bytes = content.len(), "file read");
 
         let hashed_content = render_hashed_content(&content);
 
@@ -143,6 +154,13 @@ impl Tool for WriteFileTool {
                 message: "Missing or invalid 'content' argument".into(),
             })?;
 
+        let _span = tracing::debug_span!(
+            "write_file",
+            fs.path = %path_str,
+            fs.bytes_written = content.len(),
+        )
+        .entered();
+
         let path = self
             .fs
             .resolve_for_write(Path::new(path_str))
@@ -157,6 +175,8 @@ impl Tool for WriteFileTool {
                 tool_name: "write_file".into(),
                 message: format!("Failed to write file: {e}"),
             })?;
+
+        debug!(bytes = content.len(), "file written");
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),
@@ -215,6 +235,8 @@ impl Tool for ListDirTool {
                 message: "Missing or invalid 'path' argument".into(),
             })?;
 
+        let _span = tracing::debug_span!("list_dir", fs.path = %path_str).entered();
+
         let path =
             self.fs
                 .resolve(Path::new(path_str))
@@ -236,6 +258,8 @@ impl Tool for ListDirTool {
                 json!({ "name": e.name, "kind": kind })
             })
             .collect::<Vec<_>>();
+
+        debug!(entry_count = entries.len(), "directory listed");
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),
@@ -295,6 +319,13 @@ impl Tool for GlobTool {
                 message: "Missing or invalid 'pattern' argument".into(),
             })?;
 
+        let span = tracing::debug_span!(
+            "glob_search",
+            fs.pattern = %pattern,
+            fs.matches_found = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+
         let base_dir = call
             .input
             .get("path")
@@ -327,6 +358,8 @@ impl Tool for GlobTool {
             .collect();
 
         let count = matches.len();
+        span.record("fs.matches_found", count);
+        debug!(count, "glob search completed");
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),
@@ -387,6 +420,13 @@ impl Tool for GrepTool {
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "Missing or invalid 'pattern' argument".into(),
             })?;
+
+        let span = tracing::debug_span!(
+            "grep_search",
+            fs.pattern = %pattern_str,
+            fs.matches_found = tracing::field::Empty,
+        );
+        let _guard = span.enter();
 
         let regex = Regex::new(pattern_str).map_err(|e| ToolError::ExecutionFailed {
             tool_name: "grep".into(),
@@ -480,6 +520,8 @@ impl Tool for GrepTool {
         }
 
         let count = matches.len();
+        span.record("fs.matches_found", count);
+        debug!(count, "grep search completed");
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),

@@ -7,6 +7,7 @@ use crate::parser::{SkillMetadata, SkillParseError, parse_skill_md};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use tracing::info;
 
 /// A loaded skill with its full content.
 #[derive(Debug, Clone)]
@@ -26,6 +27,13 @@ pub struct SkillRegistry {
 impl SkillRegistry {
     /// Scan directories for SKILL.md files. Returns a registry of discovered skills.
     pub fn discover(dirs: &[PathBuf]) -> Result<Self, SkillError> {
+        let span = tracing::info_span!(
+            "skill_discover",
+            skills.dirs_scanned = dirs.len(),
+            skills.found = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+
         let mut skills = BTreeMap::new();
 
         for dir in dirs {
@@ -76,6 +84,9 @@ impl SkillRegistry {
                 }
             }
         }
+
+        span.record("skills.found", skills.len());
+        info!(count = skills.len(), "skill discovery completed");
 
         Ok(Self { skills })
     }

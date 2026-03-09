@@ -118,3 +118,41 @@ Defined in `evals/control-metrics.yaml` (calibrated 2026-02-28):
 | `.control/state.json` | 30 days | GitHub Actions artifact |
 | Gate pass/fail summary | Per-run | `$GITHUB_STEP_SUMMARY` |
 | Test output logs | Per-run | CI job output |
+
+---
+
+## Runtime Observability (Vigil)
+
+The `vigil` crate provides runtime observability for the Agent OS using OpenTelemetry.
+
+### Span Hierarchy
+
+```
+invoke_agent (session)
+  ├── loop_phase (perceive)
+  ├── loop_phase (deliberate)
+  ├── loop_phase (gate)
+  ├── loop_phase (execute)
+  │     ├── chat (LLM call — gen_ai.* attributes)
+  │     └── execute_tool (tool call — gen_ai.tool.* attributes)
+  ├── loop_phase (commit)
+  ├── loop_phase (reflect)
+  └── loop_phase (sleep)
+```
+
+### GenAI Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `gen_ai.client.token.usage` | Histogram | Token counts per request (input/output) |
+| `gen_ai.client.operation.duration` | Histogram | LLM call duration (seconds) |
+| `life.tool.executions` | Counter | Tool executions by name and status |
+| `life.budget.tokens_remaining` | Gauge | Remaining token budget |
+| `life.budget.cost_remaining_usd` | Gauge | Remaining cost budget (USD) |
+| `life.mode.transitions` | Counter | Operating mode transitions |
+
+### Configuration
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` to enable OTel export. Without it, Vigil degrades to structured logging only.
+
+See `vigil/CLAUDE.md` for full configuration reference and platform integration examples (Langfuse, LangSmith, Jaeger, Grafana Tempo).
