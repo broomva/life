@@ -13,7 +13,7 @@ jobs:
 
       - name: Checkout submodules with remotes
         run: |
-          git submodule update --init --depth 1 aiOS arcan lago autonomic spaces
+          git submodule update --init --depth 1 aiOS arcan lago autonomic spaces praxis vigil
 
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
