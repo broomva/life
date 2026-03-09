@@ -13,6 +13,7 @@ use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
+use tracing::info;
 
 /// A line of content with its hash tag.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -199,6 +200,14 @@ impl Tool for EditFileTool {
                 message: format!("Invalid 'ops' format: {e}"),
             })?;
 
+        let span = tracing::info_span!(
+            "edit_file",
+            hashline.file = %path_str,
+            hashline.ops_count = ops.len(),
+            hashline.lines_changed = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+
         let path = self
             .fs
             .resolve_for_write(Path::new(path_str))
@@ -214,11 +223,17 @@ impl Tool for EditFileTool {
                 message: format!("Failed to read file: {e}"),
             })?;
 
+        let original_line_count = content.lines().count();
+
         let new_content =
             apply_tagged_edits(&content, &ops).map_err(|e| ToolError::ExecutionFailed {
                 tool_name: "edit_file".into(),
                 message: format!("Edit failed: {e}"),
             })?;
+
+        let new_line_count = new_content.lines().count();
+        let lines_changed = (new_line_count as isize - original_line_count as isize).unsigned_abs();
+        span.record("hashline.lines_changed", lines_changed);
 
         self.fs
             .write(&path, new_content.as_bytes())
@@ -226,6 +241,8 @@ impl Tool for EditFileTool {
                 tool_name: "edit_file".into(),
                 message: format!("Failed to write file: {e}"),
             })?;
+
+        info!(ops = ops.len(), lines_changed, "file edited");
 
         let hashed_content = render_hashed_content(&new_content);
 

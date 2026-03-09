@@ -8,7 +8,7 @@ use aios_protocol::sandbox::NetworkPolicy;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// Security policy for sandboxed command execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +132,14 @@ impl LocalCommandRunner {
 
 impl CommandRunner for LocalCommandRunner {
     fn run(&self, policy: &SandboxPolicy, request: &CommandRequest) -> PraxisResult<CommandResult> {
+        let span = tracing::info_span!(
+            "sandbox_run",
+            sandbox.executable = %request.executable,
+            sandbox.exit_code = tracing::field::Empty,
+            sandbox.duration_ms = tracing::field::Empty,
+        );
+        let _guard = span.enter();
+
         if !policy.shell_enabled {
             return Err(PraxisError::Sandbox(
                 "shell execution is disabled by policy".into(),
@@ -146,6 +154,8 @@ impl CommandRunner for LocalCommandRunner {
             cwd = %canonical_cwd.display(),
             "executing command"
         );
+
+        let start = std::time::Instant::now();
 
         let mut cmd = std::process::Command::new(&request.executable);
         cmd.args(&request.args);
@@ -162,15 +172,19 @@ impl CommandRunner for LocalCommandRunner {
             .map_err(|e| PraxisError::CommandFailed(format!("spawn failed: {e}")))?;
 
         let timeout = std::time::Duration::from_millis(policy.max_execution_ms);
-        match wait_timeout::ChildExt::wait_timeout(&mut child, timeout) {
+        let result = match wait_timeout::ChildExt::wait_timeout(&mut child, timeout) {
             Ok(Some(status)) => {
                 let stdout =
                     Self::truncate(read_pipe(child.stdout.take()), policy.max_stdout_bytes);
                 let stderr =
                     Self::truncate(read_pipe(child.stderr.take()), policy.max_stderr_bytes);
 
+                let exit_code = status.code().unwrap_or(-1);
+                span.record("sandbox.exit_code", exit_code);
+                info!(exit_code, "command completed");
+
                 Ok(CommandResult {
-                    exit_code: status.code().unwrap_or(-1),
+                    exit_code,
                     stdout,
                     stderr,
                 })
@@ -184,6 +198,7 @@ impl CommandRunner for LocalCommandRunner {
                 );
                 let _ = child.kill();
                 let _ = child.wait();
+                span.record("sandbox.exit_code", -1);
                 Ok(CommandResult {
                     exit_code: -1,
                     stdout: String::new(),
@@ -191,7 +206,12 @@ impl CommandRunner for LocalCommandRunner {
                 })
             }
             Err(e) => Err(PraxisError::CommandFailed(format!("wait failed: {e}"))),
-        }
+        };
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        span.record("sandbox.duration_ms", elapsed);
+
+        result
     }
 }
 

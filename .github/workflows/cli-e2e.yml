@@ -13,10 +13,10 @@ jobs:
       - name: Checkout submodules with remotes
         run: |
           git submodule sync --recursive
-          git submodule update --init --depth 1 aiOS arcan lago autonomic spaces
+          git submodule update --init --depth 1 aiOS arcan lago autonomic spaces vigil
 
       - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler lld
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -25,9 +25,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            aiOS
-            arcan
-            lago
+            aiOS -> .target
+            arcan -> .target
+            lago -> .target
+            autonomic -> .target
+            praxis -> .target
+            vigil -> .target
 
       - name: Run CLI E2E tests
         run: ./scripts/control/cli_e2e.sh

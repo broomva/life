@@ -18,7 +18,7 @@ fi
 # Multi-workspace monorepo: aiOS + Arcan + Lago + Autonomic + Spaces
 if command -v cargo >/dev/null 2>&1; then
   ran=0
-  for ws in aiOS arcan lago autonomic praxis spaces; do
+  for ws in aiOS arcan lago autonomic praxis vigil spaces; do
     if [ -f "$ws/Cargo.toml" ]; then
       (cd "$ws" && cargo test --workspace --quiet)
       ran=1

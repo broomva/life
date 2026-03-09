@@ -1,0 +1,16 @@
+FROM rust:1.88-bookworm AS builder
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler clang lld pkg-config libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+RUN cd lago && cargo build --release -p lagod
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /app/.target/release/lagod /usr/local/bin/lagod
+ENV AIOS_STATE_ROOT=/data/.aios
+EXPOSE 50052
+CMD ["/usr/local/bin/lagod","--data-dir","/data/.aios/tenants/default/projects/life/sessions/prod"]

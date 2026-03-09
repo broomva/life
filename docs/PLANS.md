@@ -33,8 +33,6 @@
 - 2026-02-21 — Added `docs/NAVIGATION.md` as mandatory first-stop for agents.
 - 2026-02-21 — Deferred full cross-repo doc reconciliation to a dedicated cleanup pass.
 
----
-
 ## Active Plan B: Economic Actuation Track (Conway-Compatible)
 
 ### Objective

@@ -37,7 +37,7 @@ if [ -f lago/Cargo.toml ]; then
   fi
 
   lago_bin=""
-  for candidate in "lago/target/debug/lago" ".target/debug/lago" "target/debug/lago"; do
+  for candidate in "lago/.target/debug/lago-cli" "lago/.target/debug/lago" "lago/target/debug/lago" ".target/debug/lago" "target/debug/lago"; do
     if [ -x "$candidate" ]; then
       lago_bin="$candidate"
       break
@@ -80,7 +80,7 @@ if [ -f lago/Cargo.toml ]; then
   fi
 
   lagod_bin=""
-  for candidate in "lago/target/debug/lagod" ".target/debug/lagod" "target/debug/lagod"; do
+  for candidate in "lago/.target/debug/lagod" "lago/target/debug/lagod" ".target/debug/lagod" "target/debug/lagod"; do
     if [ -x "$candidate" ]; then
       lagod_bin="$candidate"
       break
@@ -107,7 +107,7 @@ if [ -f arcan/Cargo.toml ]; then
   fi
 
   arcan_bin=""
-  for candidate in "arcan/target/debug/arcan" ".target/debug/arcan" "target/debug/arcan"; do
+  for candidate in "arcan/.target/debug/arcan" "arcan/target/debug/arcan" ".target/debug/arcan" "target/debug/arcan"; do
     if [ -x "$candidate" ]; then
       arcan_bin="$candidate"
       break
