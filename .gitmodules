@@ -19,3 +19,6 @@
 [submodule "vigil"]
 	path = vigil
 	url = https://github.com/broomva/vigil.git
+[submodule "praxis"]
+	path = praxis
+	url = https://github.com/broomva/praxis.git
