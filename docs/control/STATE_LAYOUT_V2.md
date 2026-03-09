@@ -77,12 +77,13 @@ All stateful services must read/write under this root only.
 
 ## Validation Checklist
 
-- [ ] `scripts/dev/up.sh` creates required runtime dirs under `AIOS_STATE_ROOT`.
-- [ ] `arcan` starts with explicit state root and writes no state under repo.
-- [ ] `lagod` uses V2 data dir and creates journal/blobs under state root.
-- [ ] `autonomicd` writes control state under V2 control root.
+- [x] `scripts/dev/up.sh` creates required runtime dirs under `AIOS_STATE_ROOT`.
+- [x] `arcan` starts with explicit state root and writes no state under repo.
+- [x] `lagod` uses V2 data dir and creates journal/blobs under state root.
+- [x] `autonomicd` writes control state under V2 control root.
 - [ ] `make web-e2e` / `make cli-e2e` pass with V2 pathing.
 - [ ] backup script includes `AIOS_STATE_ROOT`.
+- [ ] Railway persistence conformance: `/sessions` survives redeploy.
 
 ## Quick Start (V2)
 
@@ -98,8 +99,9 @@ bash scripts/dev/down.sh
 
 ## Execution Plan (initial)
 
-1. Introduce `AIOS_STATE_ROOT` env contract in dev scripts and docs.
-2. Update service startup args/env for arcan/lagod/autonomicd.
+1. Introduce `AIOS_STATE_ROOT` env contract in dev scripts and docs. ✅
+2. Update service startup args/env for arcan/lagod/autonomicd. ✅
 3. Update control/audit scripts to validate path invariants.
 4. Update CI to run with explicit `AIOS_STATE_ROOT`.
 5. Add lint/audit rule: fail if runtime state is written under repo working tree.
+6. Implement session-index durability/rebuild so `/sessions` remains stable after redeploy (see `RAILWAY_SMOKE_REPORT_2026-03-08.md`).
