@@ -1,3 +1,15 @@
+---
+tags:
+  - broomva
+  - life
+  - architecture
+  - control
+type: architecture
+status: active
+area: system
+created: 2026-03-17
+---
+
 # Control-Aware Architecture
 
 **Last updated**: 2026-03-03

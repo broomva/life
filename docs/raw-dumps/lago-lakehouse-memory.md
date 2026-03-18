@@ -1,3 +1,15 @@
+---
+tags:
+  - broomva
+  - life
+  - raw-dump
+  - lago
+type: reference
+status: active
+area: lago
+created: 2026-03-17
+---
+
 Are there other layers we need to consider for agentic native systems?
 
 Tokio → execution engine

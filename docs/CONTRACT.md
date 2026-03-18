@@ -1,3 +1,14 @@
+---
+tags:
+  - broomva
+  - life
+  - architecture
+type: spec
+status: active
+area: kernel
+created: 2026-03-17
+---
+
 # Agent OS: Kernel Contract
 
 The `aios-protocol` crate (published by aiOS) defines the canonical types, event taxonomy, and interfaces that all Agent OS projects implement. This document is the reference for the contract.

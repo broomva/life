@@ -1,3 +1,14 @@
+---
+tags:
+  - broomva
+  - life
+  - meta
+type: reference
+status: active
+area: vault
+created: 2026-03-17
+---
+
 # /live Documentation Navigation (Agent-First)
 
 Last updated: 2026-03-03

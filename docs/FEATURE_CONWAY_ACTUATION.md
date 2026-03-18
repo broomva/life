@@ -1,3 +1,14 @@
+---
+tags:
+  - broomva
+  - life
+  - architecture
+type: spec
+status: active
+area: conway
+created: 2026-03-17
+---
+
 # Planned Feature: Economic Actuation Plane (Conway-Compatible)
 
 Status: Proposed  

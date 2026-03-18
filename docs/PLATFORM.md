@@ -1,3 +1,14 @@
+---
+tags:
+  - broomva
+  - life
+  - architecture
+type: architecture
+status: active
+area: platform
+created: 2026-03-17
+---
+
 # Agent OS: Platform Architecture
 
 **From Runtime to Managed Service**

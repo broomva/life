@@ -1,3 +1,14 @@
+---
+tags:
+  - broomva
+  - life
+  - crate
+type: crate
+status: active
+area: arcan
+created: 2026-03-17
+---
+
 # Arcan + Lago: a Rust-native agent OS with event-sourced persistence
 
 **Arcan and Lago together represent the first Rust-native, event-sourced agent runtime stack designed to treat AI agent infrastructure as an operating system rather than a library.** In a market dominated by Python-first frameworks with ephemeral state, no sandboxing guarantees, and fragmented persistence, this pairing addresses fundamental reliability gaps that block production-grade autonomous agents. Arcan provides the runtime daemon—orchestrator loop, typed streaming events, and harness-quality sandbox guarantees— while Lago provides the persistence substrate: an append-only event journal, content-addressed blob storage, Git-like filesystem branching, and a policy engine for tool governance. Together, they form an “Agent OS” where every state transition is immutable, every action is replayable, and every tool invocation passes through compile-time-verified safety gates.

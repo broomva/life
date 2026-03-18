@@ -1,3 +1,14 @@
+---
+tags:
+  - broomva
+  - life
+  - operations
+type: operations
+status: active
+area: testing
+created: 2026-03-17
+---
+
 # Agent OS: Testing Strategy
 
 ## 2026-02-28 Coverage Update

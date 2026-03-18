@@ -1,3 +1,15 @@
+---
+tags:
+  - broomva
+  - life
+  - control
+  - governance
+type: operations
+status: active
+area: governance
+created: 2026-03-17
+---
+
 # METALAYER
 
 This repository operates as a control loop for autonomous agent development.
