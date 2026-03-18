@@ -1,3 +1,14 @@
+---
+tags:
+  - broomva
+  - life
+  - roadmap
+type: roadmap
+status: active
+area: system
+created: 2026-03-17
+---
+
 # Broomva Life: Forward Roadmap (Post-Baseline)
 
 **Date**: 2026-03-03
@@ -80,6 +91,8 @@ Baseline is now the required foundation for all new work.
 ## 4) Phase R4 — Memory and Learning Depth
 
 **Goal**: Evolve memory/learning features on top of canonical baseline without violating contract boundaries.
+
+> **Partially unblocked**: autoany-aios + autoany-lago adapters wired, autoany_core has dead-end tracking, stagnation detection, strategy distillation, cross-run inheritance.
 
 ### Scope
 

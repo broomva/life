@@ -1,3 +1,14 @@
+---
+tags:
+  - broomva
+  - life
+  - architecture
+type: architecture
+status: active
+area: system
+created: 2026-03-17
+---
+
 # Broomva Life: Canonical Architecture
 
 **Date**: 2026-03-03**Baseline**: Canonical runtime unification active
@@ -141,6 +152,13 @@ Lago substrate provides:
   - memory adapter
 
 Adapters isolate implementation details from canonical runtime contract.
+
+## External Integration Adapters
+
+- `symphony-arcan`: Symphony dispatches via Arcan HTTP instead of CLI subprocess.
+- `autoany-aios`: EGRI execution via Arcan sessions.
+- `autoany-lago`: EGRI trials persisted to Lago via `EventKind::Custom` with `"egri."` prefix.
+
 
 ## 6) Runtime Data Flow
 
