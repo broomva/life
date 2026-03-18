@@ -38,15 +38,14 @@ Event-sourced persistence substrate for the Agent OS.
 - **Key concepts**: Append-only event journal, content-addressed blob storage, filesystem manifests with branching, SSE format adapters (OpenAI/Anthropic/Vercel/Lago), RBAC policy
 - **Critical pattern**: redb is synchronous — always use `spawn_blocking`; Journal trait uses `BoxFuture` for dyn-compatibility
 
-### Praxis (`praxis/`)
+### Praxis (`praxis/`) — PLANNED
 
-Canonical tool execution and sandbox engine — extracted from `arcan-harness`.
+Canonical tool execution and sandbox engine — to be extracted from `arcan-harness`.
 
-- **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
-- **Workspace crates**: `praxis-core`, `praxis-tools`, `praxis-skills`, `praxis-mcp`
+- **Status**: Directory exists but not yet scaffolded. Design is documented; implementation pending.
+- **Planned workspace crates**: `praxis-core`, `praxis-tools`, `praxis-skills`, `praxis-mcp`
 - **Key concepts**: FsPolicy (workspace boundary enforcement), SandboxPolicy (command runner), Hashline editing (Blake3 content-addressed line edits), SKILL.md discovery, MCP bridge (rmcp 0.15)
 - **Design philosophy**: Pure tool execution engine depending only on `aios-protocol`. No Arcan/Lago/Autonomic dependencies. Will be consumed by Arcan as the canonical tool backend.
-- **Critical pattern**: All filesystem operations enforce workspace boundaries via canonicalize + starts_with. Edit operations use content hashes to prevent blind edits.
 
 ### Spaces (`spaces/`)
 
@@ -71,15 +70,14 @@ Homeostasis controller for the Agent OS — three-pillar regulation (operational
 - **Bridge**: `autonomic-lago` subscribes to Lago journal for event-driven projections. Daemon supports `--lago-data-dir` for persistent mode.
 - **Critical pattern**: Economic events use `EventKind::Custom` with `"autonomic."` prefix for forward-compatible persistence through Lago
 
-### Vigil (`vigil/`)
+### Vigil (`vigil/`) — PLANNED
 
 Observability primitive for the Agent OS — OpenTelemetry-native tracing and GenAI metrics.
 
-- **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
-- **Workspace crates**: Single crate (`vigil`)
+- **Status**: Directory exists but not yet scaffolded. Design is documented; implementation pending.
+- **Planned crate**: Single crate (`vigil`)
 - **Key concepts**: Contract-derived spans (from EventKind → OTel spans), GenAI semantic conventions (gen_ai.* attributes), dual-write architecture (OTel spans + EventEnvelope trace context), graceful degradation (structured logging when no OTLP endpoint)
 - **Design philosophy**: Observability should be invisible when not needed, and comprehensive when enabled. Vigil derives its span hierarchy from the aiOS kernel contract, ensuring spans map 1:1 to agent lifecycle events.
-- **Critical pattern**: Vigil does NOT start an OTLP exporter unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Without it, you still get structured tracing-subscriber logs.
 
 ### Future Projects (planned — docs only, no scaffold crates yet)
 
@@ -104,11 +102,11 @@ aiOS (kernel contract — types, traits, event taxonomy)
   │     └── arcan-spaces bridge
   │           └── Spaces (networking — distributed agent communication)
   │
-  ├── Praxis (tool execution — canonical tool engine)       [active]
-  ├── Autonomic (homeostasis — stability regulation)        [active] ── uses vigil
+  ├── Praxis (tool execution — canonical tool engine)       [planned — dir exists, not scaffolded]
+  ├── Autonomic (homeostasis — stability regulation)        [active]
   │     └── autonomic-lago bridge → Lago
   │
-  ├── Vigil (observability — OTel tracing + GenAI metrics)  [active]
+  ├── Vigil (observability — OTel tracing + GenAI metrics)  [planned — dir exists, not scaffolded]
   │
   ├── Chronos (temporality — scheduling + time awareness)   [planned]
   ├── Aegis (security — sandbox + capability enforcement)   [planned]
@@ -116,7 +114,9 @@ aiOS (kernel contract — types, traits, event taxonomy)
   └── Mnemo (knowledge — persistent memory + RAG)           [planned]
 ```
 
-**Active projects**: Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Praxis provides the canonical tool execution engine (sandbox, filesystem, editing, skills, MCP bridge). Lago provides the durable, append-only event journal and content-addressed storage. Spaces provides the distributed communication fabric. Autonomic provides three-pillar homeostatic regulation (operational, cognitive, economic). Vigil provides OpenTelemetry-native observability with GenAI semantic conventions. The `arcan-lago` and `autonomic-lago` crates bridge their respective projects to Lago.
+**Active projects**: Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Lago provides the durable, append-only event journal and content-addressed storage. Spaces provides the distributed communication fabric. Autonomic provides three-pillar homeostatic regulation (operational, cognitive, economic). The `arcan-lago` and `autonomic-lago` crates bridge their respective projects to Lago.
+
+**Planned projects (directories exist, not yet scaffolded)**: Praxis will provide the canonical tool execution engine (sandbox, filesystem, editing, skills, MCP bridge). Vigil will provide OpenTelemetry-native observability with GenAI semantic conventions.
 
 **Planned projects**: Chronos, Aegis, Nous, and Mnemo will each implement a specific AOS primitive as a separate crate/service, integrating through the canonical `aios-protocol` contract.
 
@@ -183,21 +183,13 @@ cargo run -p autonomicd          # Run daemon (standalone mode)
 cargo run -p autonomicd -- --lago-data-dir /tmp/autonomic-data  # Run with Lago persistence
 ```
 
-### Praxis (run from `praxis/`)
+### Praxis (run from `praxis/`) — NOT YET AVAILABLE
 
-```bash
-cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace   # Full verify
-cargo test --workspace           # Run all tests
-cargo test -p praxis-tools       # Test specific crate
-```
+Praxis is planned but not yet scaffolded. No commands available.
 
-### Vigil (run from `vigil/`)
+### Vigil (run from `vigil/`) — NOT YET AVAILABLE
 
-```bash
-cargo fmt && cargo clippy -- -D warnings && cargo test   # Full verify
-cargo test                    # Run all tests
-cargo test -- --ignored --test-threads=1   # Run env var tests (process-global)
-```
+Vigil is planned but not yet scaffolded. No commands available.
 
 ### Spaces (run from `spaces/`)
 
@@ -212,11 +204,9 @@ spacetime generate --lang rust --out-dir src/module_bindings --module-path space
 ### Cross-Project Validation
 
 ```bash
-(cd vigil && cargo fmt && cargo clippy -- -D warnings && cargo test) && \
 (cd arcan && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
 (cd lago && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
 (cd autonomic && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
-(cd praxis && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
 (cd spaces && cargo fmt && cargo clippy --workspace -- -D warnings && cargo check)
 ```
 
