@@ -1,3 +1,14 @@
+---
+tags:
+  - broomva
+  - life
+  - roadmap
+type: planning
+status: active
+area: system
+created: 2026-03-17
+---
+
 # PLANS.md
 
 ## Completed Plan A: Docs Traversal + Canonicality (Harness Alignment)

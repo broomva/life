@@ -1,3 +1,14 @@
+---
+tags:
+  - broomva
+  - life
+  - roadmap
+type: planning
+status: active
+area: system
+created: 2026-03-17
+---
+
 # Arcan + Lago: Consolidated Development Plan
 
 **Last updated**: 2026-02-28**Version**: 0.2.0

@@ -1,3 +1,15 @@
+---
+tags:
+  - broomva
+  - life
+  - control
+  - governance
+type: operations
+status: active
+area: governance
+created: 2026-03-17
+---
+
 # Control Loop
 
 The autonomous development loop for this repository. All control primitives are consolidated here.

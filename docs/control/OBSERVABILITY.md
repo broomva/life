@@ -1,3 +1,15 @@
+---
+tags:
+  - broomva
+  - life
+  - observability
+  - control
+type: operations
+status: active
+area: observability
+created: 2026-03-17
+---
+
 # Control Observability
 
 **Last updated**: 2026-03-01

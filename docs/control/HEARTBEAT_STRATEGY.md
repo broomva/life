@@ -1,3 +1,15 @@
+---
+tags:
+  - broomva
+  - life
+  - control
+  - operations
+type: operations
+status: active
+area: governance
+created: 2026-03-17
+---
+
 # Control Heartbeat Strategy
 
 This heartbeat strategy keeps autonomous development loops trustworthy across projects.
