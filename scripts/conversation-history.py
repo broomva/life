@@ -41,6 +41,42 @@ def _resolve_transcripts_dir() -> Path:
 TRANSCRIPTS_DIR = _resolve_transcripts_dir()
 
 
+# ── Transcript Cache ──────────────────────────────────────────────────────────
+_transcript_cache: dict[str, dict] = {}
+
+
+def _get_transcript(sid: str) -> dict:
+    """Get parsed transcript, using cache if available."""
+    if sid in _transcript_cache:
+        return _transcript_cache[sid]
+    transcript_path = TRANSCRIPTS_DIR / f"{sid}.jsonl"
+    transcript = parse_transcript(transcript_path)
+    _transcript_cache[sid] = transcript
+    return transcript
+
+
+def _synthetic_meta(session_id: str, transcript: dict) -> dict:
+    """Create synthetic session metadata from JSONL transcript when .entire/ is unavailable."""
+    user_msgs = [e for e in transcript.get("timeline", []) if e.get("kind") == "user"]
+    turns = [{"start": e.get("timestamp", "")} for e in user_msgs]
+
+    return {
+        "starts": [transcript.get("first_timestamp", "")],
+        "ends": [transcript.get("last_timestamp", "")],
+        "turns": turns,
+        "subagents": [],
+        "checkpoints": [],
+        "commits": [],
+        "attributions": [],
+        "phases": [],
+        "first_seen": transcript.get("first_timestamp"),
+        "last_seen": transcript.get("last_timestamp"),
+        "branch": transcript.get("git_branch"),
+        "total_messages": transcript.get("total_messages", 0),
+        "_source": "jsonl",
+    }
+
+
 # ── Event Log Parser ───────────────────────────────────────────────────────────
 def parse_event_log(log_path: Path) -> dict:
     """Parse .entire/logs/entire.log into per-session metadata."""
@@ -818,26 +854,44 @@ def main():
 
     output_dir = Path(args.output)
 
-    print(f"📂 Parsing event log: {ENTIRE_LOG}")
-    if not ENTIRE_LOG.exists():
-        print("⏭  .entire/ not configured — skipping conversation history generation.")
-        print("   Install Entire (https://entire.dev) to enable session logging.")
-        sys.exit(0)
+    # Source 1: Event log (optional — provides rich metadata)
+    sessions = {}
+    if ENTIRE_LOG.exists():
+        print(f"📂 Parsing event log: {ENTIRE_LOG}")
+        sessions = parse_event_log(ENTIRE_LOG)
+        print(f"   Found {len(sessions)} sessions from .entire/ event log")
+    else:
+        print("⏭  .entire/ not configured — using JSONL-only mode")
 
-    if not TRANSCRIPTS_DIR.exists():
-        print(f"⏭  Transcripts dir not found: {TRANSCRIPTS_DIR}")
-        print("   No Claude Code sessions found for this project — skipping.")
-        sys.exit(0)
+    # Source 2: JSONL transcripts — discover sessions not in event log
+    if TRANSCRIPTS_DIR.exists():
+        jsonl_files = sorted(TRANSCRIPTS_DIR.glob("*.jsonl"))
+        discovered = 0
+        for jsonl_file in jsonl_files:
+            sid = jsonl_file.stem
+            if sid not in sessions:
+                transcript = parse_transcript(jsonl_file)
+                if transcript.get("total_messages", 0) >= 3:
+                    sessions[sid] = _synthetic_meta(sid, transcript)
+                    _transcript_cache[sid] = transcript
+                    discovered += 1
+        if discovered:
+            print(f"   Discovered {discovered} sessions from JSONL transcripts")
+    else:
+        if not sessions:
+            print(f"⏭  No transcripts at {TRANSCRIPTS_DIR} and no .entire/ logs — nothing to do.")
+            sys.exit(0)
 
-    sessions = parse_event_log(ENTIRE_LOG)
-    print(f"   Found {len(sessions)} sessions")
+    print(f"   Total: {len(sessions)} sessions")
 
-    # Filter to sessions with meaningful activity (at least 1 turn)
-    active_sessions = {
-        sid: meta for sid, meta in sessions.items()
-        if len(meta.get("turns", [])) >= 1
-    }
-    print(f"   {len(active_sessions)} sessions with ≥1 turn")
+    # Filter to sessions with meaningful activity
+    active_sessions = {}
+    for sid, meta in sessions.items():
+        turns = len(meta.get("turns", []))
+        msgs = meta.get("total_messages", 0)
+        if turns >= 1 or msgs >= 3:
+            active_sessions[sid] = meta
+    print(f"   {len(active_sessions)} active sessions")
 
     if args.limit:
         # Take the most recent N
@@ -851,10 +905,11 @@ def main():
 
     if args.dry_run:
         print("\n📊 Dry run — would generate:")
-        for sid, meta in sorted(active_sessions.items(), key=lambda x: x[1].get("first_seen", "")):
+        for sid, meta in sorted(active_sessions.items(), key=lambda x: x[1].get("first_seen", "") or ""):
             turns = len(meta.get("turns", []))
-            ts = meta.get("first_seen", "?")[:19]
-            print(f"   {sid[:8]} | {ts} | {turns} turns")
+            ts = (meta.get("first_seen") or "?")[:19]
+            source = "jsonl" if meta.get("_source") == "jsonl" else "entire"
+            print(f"   {sid[:8]} | {ts} | {turns} turns | {source}")
         print(f"\n   Total: {len(active_sessions)} session docs + 1 MOC")
         return
 
@@ -884,9 +939,8 @@ def main():
             session_docs_meta.append(_read_existing_meta(filepath, filename, sid, meta))
             continue
 
-        # Parse transcript
-        transcript_path = TRANSCRIPTS_DIR / f"{sid}.jsonl"
-        transcript = parse_transcript(transcript_path)
+        # Parse transcript (use cache if available from discovery)
+        transcript = _get_transcript(sid)
 
         # Generate doc
         doc_content = generate_session_doc(sid, meta, transcript)
@@ -897,8 +951,8 @@ def main():
 
         # Compute duration for MOC
         duration = ""
-        start_ts = meta.get("first_seen", "")
-        end_ts = meta.get("last_seen", "")
+        start_ts = meta.get("first_seen", "") or transcript.get("first_timestamp", "")
+        end_ts = meta.get("last_seen", "") or transcript.get("last_timestamp", "")
         if start_ts and end_ts:
             try:
                 s = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
@@ -922,8 +976,8 @@ def main():
             "filename": filename,
             "session_id": sid,
             "date": date_str,
-            "time": ts,
-            "branch": transcript.get("git_branch", ""),
+            "time": ts or transcript.get("first_timestamp", ""),
+            "branch": transcript.get("git_branch", "") or meta.get("branch", ""),
             "turns": len(meta.get("turns", [])),
             "duration": duration,
             "title": title,
