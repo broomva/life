@@ -1,3 +1,14 @@
+---
+tags:
+  - broomva
+  - life
+  - roadmap
+type: operations
+status: active
+area: system
+created: 2026-03-17
+---
+
 # Broomva Life: Implementation Status
 
 **Date**: 2026-03-04**Version**: 0.2.0 (canonical baseline)**Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)**Tests**: 1038 passing (+5 ignored) across 30 crates + Spaces (32 crates total)
@@ -254,6 +265,14 @@ Current suite validates:
 - No unit tests (reducer tests, integration tests planned).
 - No DM/private messaging.
 - arcan-spaces bridge uses mock hub only — concrete SpacetimeDB SDK adapter not yet implemented. (SpacetimeDB HTTP adapter COMPLETE — `SpacetimeDbClient` via REST API with backend selection).
+
+## Architecture Scorecard
+
+- Agent loop: 9/10 | Persistence: 10/10 | Tool harness: 9/10
+- Memory: 8/10 | Context quality: 9/10 | Self-learning: 2/10 — EGRI substrate wired (autoany-aios + autoany-lago adapters), cross-run inheritance available. No live self-improvement loop yet.
+- Observability: 2/10 | Security: 4/10 | Operational tooling: 8/10
+
+---
 
 ## Remaining Work (Post-Baseline)
 

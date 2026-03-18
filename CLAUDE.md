@@ -139,7 +139,7 @@ aiOS (kernel contract — types, traits, event taxonomy)
 **Architecture scorecard**:
 
 - Agent loop: 9/10 | Persistence: 10/10 | Tool harness: 9/10
-- Memory: 8/10 | Context quality: 9/10 | Self-learning: 0/10
+- Memory: 8/10 | Context quality: 9/10 | Self-learning: 2/10 — EGRI substrate wired (autoany-aios + autoany-lago adapters), cross-run inheritance available. No live self-improvement loop yet.
 - Observability: 8/10 | Security: 4/10 | Operational tooling: 8/10
 
 **Known gaps** (blocks Phase 0 stabilization):
