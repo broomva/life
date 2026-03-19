@@ -133,6 +133,16 @@ Validation gates currently pass:
 
 - Journal, blob store, policy engine, API, and file/manifest subsystems are operational and tested.
 
+### Context Engine (2026-03-19)
+
+- 12 crates total (was 10): added `lago-knowledge` (34 tests) and `lago-auth` (5 tests).
+- `lago-knowledge`: YAML frontmatter parsing, `[[wikilink]]` extraction, in-memory knowledge index, scored search (+2 name, +1 body, +1 tag), BFS graph traversal.
+- `lago-auth`: JWT validation (HS256 shared secret), axum auth middleware, user→session mapping (`vault:{user_id}`).
+- `lago-api`: Auth-protected `/v1/memory/*` routes (manifest, file CRUD, search, traverse, note resolution).
+- `lagod`: `LAGO_JWT_SECRET` env var or `[auth]` TOML section. Session map rebuilt on startup. Backward-compatible when no secret set.
+- `lago-cli`: 7 `lago memory` subcommands (status, ls, search, read, store, ingest, delete). Token from `BROOMVA_API_TOKEN` env or `~/.broomva/config.json`.
+- Full workspace: 371+ tests passing, 0 clippy warnings.
+
 ## Governance and Dependency Control
 
 Architecture dependency gate is active:

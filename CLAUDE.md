@@ -34,8 +34,8 @@ Event-sourced persistence substrate for the Agent OS.
 
 - **Language**: Rust 2024 Edition (`rust-version = "1.85"`)
 - **Stack**: redb v2 | tonic+prost (gRPC) | axum (HTTP/SSE) | ULID | SHA-256+zstd
-- **Workspace crates**: `lago-core`, `lago-journal`, `lago-store`, `lago-fs`, `lago-ingest`, `lago-api`, `lago-policy`, `lago-aios-eventstore-adapter`, `lago-cli`, `lagod`
-- **Key concepts**: Append-only event journal, content-addressed blob storage, filesystem manifests with branching, SSE format adapters (OpenAI/Anthropic/Vercel/Lago), RBAC policy
+- **Workspace crates**: `lago-core`, `lago-journal`, `lago-store`, `lago-fs`, `lago-ingest`, `lago-api`, `lago-policy`, `lago-knowledge`, `lago-auth`, `lago-aios-eventstore-adapter`, `lago-cli`, `lagod`
+- **Key concepts**: Append-only event journal, content-addressed blob storage, filesystem manifests with branching, SSE format adapters (OpenAI/Anthropic/Vercel/Lago), RBAC policy, knowledge index (frontmatter + wikilinks + scored search + graph traversal), JWT auth with per-user vault sessions
 - **Critical pattern**: redb is synchronous — always use `spawn_blocking`; Journal trait uses `BoxFuture` for dyn-compatibility
 
 ### Praxis (`praxis/`) — PLANNED
@@ -245,8 +245,10 @@ arcan-core → arcan-harness, arcan-store, arcan-provider
 ```
 lago-core (zero external deps)
   → lago-store, lago-journal, lago-fs, lago-policy
+  → lago-knowledge (core + store — frontmatter, wikilinks, search, traversal)
+  → lago-auth (core + axum + jsonwebtoken — JWT validation, session mapping)
   → lago-ingest (journal + core)
-  → lago-api (journal + store + fs + policy)
+  → lago-api (journal + store + fs + policy + knowledge + auth)
   → lago-cli, lagod (binaries — depend on all)
 ```
 
