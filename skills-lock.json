@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "control-metalayer-loop": {
+      "source": "broomva/agent-control-metalayer-skill",
+      "sourceType": "github",
+      "computedHash": "c40b0fd329c5b11b438d6d6efb4e693fee88acbbc7b31a09d721dc93f7aee8ee"
+    },
+    "harness-engineering-playbook": {
+      "source": "broomva/harness-engineering-skill",
+      "sourceType": "github",
+      "computedHash": "594a978630b13d74fdab8cef4517177a7f7639dbfb0fb39d9262ff720dfeaccc"
+    }
+  }
+}

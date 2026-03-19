@@ -1,0 +1,16 @@
+name: Control Nightly Audit
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Baseline audit
+        run: scripts/audit_control.sh .
+      - name: Strict audit
+        run: scripts/audit_control.sh . --strict

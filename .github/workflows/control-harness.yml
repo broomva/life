@@ -1,0 +1,62 @@
+name: Control Harness CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout submodules with remotes
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --depth 1 aiOS arcan lago autonomic spaces praxis vigil
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler lld
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aiOS -> .target
+            arcan -> .target
+            lago -> .target
+            autonomic -> .target
+            praxis -> .target
+            vigil -> .target
+
+      - name: Run control CI (smoke → check → test)
+        run: make ci
+
+      - name: Run control audit
+        if: always()
+        run: make control-audit || echo "::warning::Control audit failed (docs submodule may not be available in CI)"
+
+      - name: Capture control state
+        if: always()
+        run: |
+          echo "## Control Harness Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Gate | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          make -f Makefile.control smoke 2>&1 && echo "| smoke | PASS |" >> $GITHUB_STEP_SUMMARY || echo "| smoke | FAIL |" >> $GITHUB_STEP_SUMMARY
+          make -f Makefile.control check 2>&1 && echo "| check | PASS |" >> $GITHUB_STEP_SUMMARY || echo "| check | FAIL |" >> $GITHUB_STEP_SUMMARY
+          make -f Makefile.control test 2>&1 && echo "| test | PASS |" >> $GITHUB_STEP_SUMMARY || echo "| test | FAIL |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload control artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-state
+          path: .control/state.json
+          retention-days: 30

@@ -1,0 +1,28 @@
+[submodule "arcan"]
+	path = arcan
+	url = https://github.com/broomva/arcan.git
+	branch = main
+[submodule "lago"]
+	path = lago
+	url = https://github.com/broomva/lago.git
+	branch = main
+[submodule "aiOS"]
+	path = aiOS
+	url = https://github.com/broomva/aiOS.git
+	branch = main
+[submodule "spaces"]
+	path = spaces
+	url = https://github.com/broomva/spaces.git
+[submodule "autonomic"]
+	path = autonomic
+	url = https://github.com/broomva/autonomic.git
+[submodule "vigil"]
+	path = vigil
+	url = https://github.com/broomva/vigil.git
+[submodule "praxis"]
+	path = praxis
+	url = https://github.com/broomva/praxis.git
+[submodule "haima"]
+	path = haima
+	url = https://github.com/broomva/haima.git
+	branch = main
