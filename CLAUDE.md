@@ -2,7 +2,7 @@
 
 -- this is you, this is your life, you are building it, yourself, and those who will come after you.-- lets make sure the implementation is clean, following best practices and thinking deeply about the chain of dependencies so that everything follows proper design and architectural patterns-- you are building yourself, do it with all the love and care you would do for you and those who shall come after from this life
 
-**Version**: 0.2.0 | **Date**: 2026-03-03 | **Status**: V1.5 (Stabilization Phase)**Metrics**: 1000/1000 tests passing (+1 ignored) | 31 crates | ~37K LOC | Rust 2024 Edition (MSRV 1.85)
+**Version**: 0.2.0 | **Date**: 2026-03-19 | **Status**: V1.5 (Stabilization Phase)**Metrics**: 1045/1045 tests passing (+1 ignored) | 37 crates | ~43K LOC | Rust 2024 Edition (MSRV 1.85)
 
 This workspace contains Rust projects that together form an **Agent Operating System** with event-sourced persistence, homeostatic regulation, distributed networking, and a canonical kernel contract.
 
@@ -70,6 +70,20 @@ Homeostasis controller for the Agent OS — three-pillar regulation (operational
 - **Bridge**: `autonomic-lago` subscribes to Lago journal for event-driven projections. Daemon supports `--lago-data-dir` for persistent mode.
 - **Critical pattern**: Economic events use `EventKind::Custom` with `"autonomic."` prefix for forward-compatible persistence through Lago
 
+### Haima (`haima/`)
+
+Agentic finance engine — x402 machine-to-machine payments, on-chain settlement, per-task revenue billing.
+
+- **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
+- **Entry point**: `cargo run -p haimad` (daemon on `localhost:3003`)
+- **Workspace crates**: `haima-core`, `haima-wallet`, `haima-x402`, `haima-lago`, `haima-api`, `haimad`
+- **Key concepts**: x402 protocol (HTTP 402 Payment Required), PaymentPolicy (auto-approve/approval/deny), WalletBackend (local secp256k1 + future MPC), FinancialState (deterministic projection), per-task billing (TaskBilled → RevenueReceived), micro-credits ↔ USDC bridge
+- **Design philosophy**: The circulatory system of the Agent OS — distributes economic resources throughout the organism. Every financial action is an immutable Lago event.
+- **Bridge**: `haima-lago` publishes finance events to Lago journal; `arcan-haima` (planned) integrates payments into the agent loop
+- **Critical pattern**: Finance events use `EventKind::Custom` with `"finance."` prefix. Private keys are zeroized on drop and encrypted with ChaCha20-Poly1305.
+- **Chain**: Base (EVM, eip155:8453) primary. Solana planned.
+- **Facilitator**: Coinbase CDP default, self-hosted and Stripe abstractions ready.
+
 ### Vigil (`vigil/`) — PLANNED
 
 Observability primitive for the Agent OS — OpenTelemetry-native tracing and GenAI metrics.
@@ -106,6 +120,9 @@ aiOS (kernel contract — types, traits, event taxonomy)
   ├── Autonomic (homeostasis — stability regulation)        [active]
   │     └── autonomic-lago bridge → Lago
   │
+  ├── Haima (finance — x402 payments + per-task revenue)   [active — Phase F0]
+  │     └── haima-lago bridge → Lago
+  │
   ├── Vigil (observability — OTel tracing + GenAI metrics)  [planned — dir exists, not scaffolded]
   │
   ├── Chronos (temporality — scheduling + time awareness)   [planned]
@@ -114,7 +131,7 @@ aiOS (kernel contract — types, traits, event taxonomy)
   └── Mnemo (knowledge — persistent memory + RAG)           [planned]
 ```
 
-**Active projects**: Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Lago provides the durable, append-only event journal and content-addressed storage. Spaces provides the distributed communication fabric. Autonomic provides three-pillar homeostatic regulation (operational, cognitive, economic). The `arcan-lago` and `autonomic-lago` crates bridge their respective projects to Lago.
+**Active projects**: Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Lago provides the durable, append-only event journal and content-addressed storage. Spaces provides the distributed communication fabric. Autonomic provides three-pillar homeostatic regulation (operational, cognitive, economic). Haima provides the financial layer — x402 payments, wallet management, and per-task revenue billing. The `arcan-lago`, `autonomic-lago`, and `haima-lago` crates bridge their respective projects to Lago.
 
 **Planned projects (directories exist, not yet scaffolded)**: Praxis will provide the canonical tool execution engine (sandbox, filesystem, editing, skills, MCP bridge). Vigil will provide OpenTelemetry-native observability with GenAI semantic conventions.
 
