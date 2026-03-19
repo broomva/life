@@ -10,14 +10,22 @@ description = "MCP (Model Context Protocol) server bridge for the Praxis tool en
 
 [dependencies]
 aios-protocol.workspace = true
+axum.workspace = true
+praxis-core.workspace = true
+praxis-tools.workspace = true
 rmcp.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
+praxis-core.workspace = true
+praxis-tools.workspace = true
 tempfile.workspace = true
 
 [lints]
