@@ -103,6 +103,10 @@ typed_id!(
     /// Unique identifier for a checkpoint.
     CheckpointId
 );
+typed_id!(
+    /// Unique identifier for a hive collaborative task.
+    HiveTaskId
+);
 
 impl BranchId {
     /// The default "main" branch.

@@ -17,6 +17,7 @@
 //! - [`sandbox`] — SandboxTier, SandboxLimits, NetworkPolicy
 //! - [`memory`] — SoulProfile, Observation, Provenance, MemoryScope
 //! - [`session`] — SessionManifest, BranchInfo, CheckpointManifest
+//! - [`payment`] — PaymentPort for agent financial operations (x402, MPP)
 //! - [`ports`] — Runtime boundary ports (event store, provider, tools, policy, approvals, memory)
 //! - [`error`] — KernelError, KernelResult
 
@@ -25,6 +26,7 @@ pub mod event;
 pub mod ids;
 pub mod memory;
 pub mod mode;
+pub mod payment;
 pub mod policy;
 pub mod ports;
 pub mod sandbox;
@@ -39,8 +41,8 @@ pub use event::{
     LoopPhase, PolicyDecisionKind, RiskLevel, SnapshotType, SpanStatus, TokenUsage,
 };
 pub use ids::{
-    AgentId, ApprovalId, BlobHash, BranchId, CheckpointId, EventId, MemoryId, RunId, SeqNo,
-    SessionId, SnapshotId, ToolRunId,
+    AgentId, ApprovalId, BlobHash, BranchId, CheckpointId, EventId, HiveTaskId, MemoryId, RunId,
+    SeqNo, SessionId, SnapshotId, ToolRunId,
 };
 pub use memory::{FileProvenance, MemoryScope, Observation, Provenance, SoulProfile};
 pub use mode::{GatingProfile, OperatingMode};
@@ -50,6 +52,10 @@ pub use ports::{
     EventStorePort, ModelCompletion, ModelCompletionRequest, ModelDirective, ModelProviderPort,
     ModelStopReason, PolicyGateDecision, PolicyGatePort, ToolExecutionReport, ToolExecutionRequest,
     ToolHarnessPort,
+};
+pub use payment::{
+    PaymentAuthorizationDecision, PaymentAuthorizationRequest, PaymentPort,
+    PaymentSettlementReceipt, WalletBalanceInfo,
 };
 pub use sandbox::{NetworkPolicy, SandboxLimits, SandboxTier};
 pub use session::{

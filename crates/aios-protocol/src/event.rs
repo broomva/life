@@ -556,6 +556,37 @@ pub enum EventKind {
         reasons: Vec<String>,
     },
 
+    // ── Hive collaborative evolution ──
+    HiveTaskCreated {
+        hive_task_id: HiveTaskId,
+        objective: String,
+        agent_count: u32,
+    },
+    HiveArtifactShared {
+        hive_task_id: HiveTaskId,
+        source_session_id: SessionId,
+        score: f32,
+        mutation_summary: String,
+    },
+    HiveSelectionMade {
+        hive_task_id: HiveTaskId,
+        winning_session_id: SessionId,
+        winning_score: f32,
+        generation: u32,
+    },
+    HiveGenerationCompleted {
+        hive_task_id: HiveTaskId,
+        generation: u32,
+        best_score: f32,
+        agent_results: serde_json::Value,
+    },
+    HiveTaskCompleted {
+        hive_task_id: HiveTaskId,
+        total_generations: u32,
+        total_trials: u32,
+        final_score: f32,
+    },
+
     // ── Error ──
     ErrorRaised {
         message: String,
@@ -958,6 +989,35 @@ enum EventKindKnown {
         intent_id: String,
         #[serde(default)]
         reasons: Vec<String>,
+    },
+    HiveTaskCreated {
+        hive_task_id: HiveTaskId,
+        objective: String,
+        agent_count: u32,
+    },
+    HiveArtifactShared {
+        hive_task_id: HiveTaskId,
+        source_session_id: SessionId,
+        score: f32,
+        mutation_summary: String,
+    },
+    HiveSelectionMade {
+        hive_task_id: HiveTaskId,
+        winning_session_id: SessionId,
+        winning_score: f32,
+        generation: u32,
+    },
+    HiveGenerationCompleted {
+        hive_task_id: HiveTaskId,
+        generation: u32,
+        best_score: f32,
+        agent_results: serde_json::Value,
+    },
+    HiveTaskCompleted {
+        hive_task_id: HiveTaskId,
+        total_generations: u32,
+        total_trials: u32,
+        final_score: f32,
     },
     ErrorRaised {
         message: String,
@@ -1418,6 +1478,59 @@ impl From<EventKindKnown> for EventKind {
             EventKindKnown::IntentRejected { intent_id, reasons } => {
                 Self::IntentRejected { intent_id, reasons }
             }
+            EventKindKnown::HiveTaskCreated {
+                hive_task_id,
+                objective,
+                agent_count,
+            } => Self::HiveTaskCreated {
+                hive_task_id,
+                objective,
+                agent_count,
+            },
+            EventKindKnown::HiveArtifactShared {
+                hive_task_id,
+                source_session_id,
+                score,
+                mutation_summary,
+            } => Self::HiveArtifactShared {
+                hive_task_id,
+                source_session_id,
+                score,
+                mutation_summary,
+            },
+            EventKindKnown::HiveSelectionMade {
+                hive_task_id,
+                winning_session_id,
+                winning_score,
+                generation,
+            } => Self::HiveSelectionMade {
+                hive_task_id,
+                winning_session_id,
+                winning_score,
+                generation,
+            },
+            EventKindKnown::HiveGenerationCompleted {
+                hive_task_id,
+                generation,
+                best_score,
+                agent_results,
+            } => Self::HiveGenerationCompleted {
+                hive_task_id,
+                generation,
+                best_score,
+                agent_results,
+            },
+            EventKindKnown::HiveTaskCompleted {
+                hive_task_id,
+                total_generations,
+                total_trials,
+                final_score,
+            } => Self::HiveTaskCompleted {
+                hive_task_id,
+                total_generations,
+                total_trials,
+                final_score,
+            },
             EventKindKnown::ErrorRaised { message } => Self::ErrorRaised { message },
             EventKindKnown::Custom { event_type, data } => Self::Custom { event_type, data },
         }
@@ -1551,6 +1664,83 @@ mod tests {
         let json = r#"{"event_id":"E1","session_id":"S1","branch_id":"main","seq":0,"timestamp":100,"kind":{"type":"ErrorRaised","message":"x"},"metadata":{}}"#;
         let envelope: EventEnvelope = serde_json::from_str(json).unwrap();
         assert_eq!(envelope.schema_version, 1);
+    }
+
+    #[test]
+    fn hive_task_created_roundtrip() {
+        let kind = EventKind::HiveTaskCreated {
+            hive_task_id: HiveTaskId::from_string("HIVE001"),
+            objective: "optimize scoring".into(),
+            agent_count: 3,
+        };
+        let json = serde_json::to_string(&kind).unwrap();
+        assert!(json.contains("\"type\":\"HiveTaskCreated\""));
+        let back: EventKind = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, EventKind::HiveTaskCreated { agent_count: 3, .. }));
+    }
+
+    #[test]
+    fn hive_artifact_shared_roundtrip() {
+        let kind = EventKind::HiveArtifactShared {
+            hive_task_id: HiveTaskId::from_string("HIVE001"),
+            source_session_id: SessionId::from_string("SESS-A"),
+            score: 0.87,
+            mutation_summary: "rewrote parser".into(),
+        };
+        let json = serde_json::to_string(&kind).unwrap();
+        let back: EventKind = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, EventKind::HiveArtifactShared { .. }));
+    }
+
+    #[test]
+    fn hive_selection_made_roundtrip() {
+        let kind = EventKind::HiveSelectionMade {
+            hive_task_id: HiveTaskId::from_string("HIVE001"),
+            winning_session_id: SessionId::from_string("SESS-B"),
+            winning_score: 0.92,
+            generation: 2,
+        };
+        let json = serde_json::to_string(&kind).unwrap();
+        let back: EventKind = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, EventKind::HiveSelectionMade { generation: 2, .. }));
+    }
+
+    #[test]
+    fn hive_generation_completed_roundtrip() {
+        let kind = EventKind::HiveGenerationCompleted {
+            hive_task_id: HiveTaskId::from_string("HIVE001"),
+            generation: 3,
+            best_score: 0.95,
+            agent_results: serde_json::json!({"agents": 3, "improved": true}),
+        };
+        let json = serde_json::to_string(&kind).unwrap();
+        let back: EventKind = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, EventKind::HiveGenerationCompleted { generation: 3, .. }));
+    }
+
+    #[test]
+    fn hive_task_completed_roundtrip() {
+        let kind = EventKind::HiveTaskCompleted {
+            hive_task_id: HiveTaskId::from_string("HIVE001"),
+            total_generations: 5,
+            total_trials: 15,
+            final_score: 0.98,
+        };
+        let json = serde_json::to_string(&kind).unwrap();
+        let back: EventKind = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, EventKind::HiveTaskCompleted { total_generations: 5, .. }));
+    }
+
+    #[test]
+    fn hive_full_envelope_roundtrip() {
+        let envelope = make_envelope(EventKind::HiveTaskCreated {
+            hive_task_id: HiveTaskId::from_string("HIVE-ENV"),
+            objective: "test envelope".into(),
+            agent_count: 5,
+        });
+        let json = serde_json::to_string(&envelope).unwrap();
+        let back: EventEnvelope = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back.kind, EventKind::HiveTaskCreated { agent_count: 5, .. }));
     }
 
     #[test]
