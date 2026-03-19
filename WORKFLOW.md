@@ -20,6 +20,8 @@ hooks:
     gh repo clone broomva/life . -- --depth 50 --recurse-submodules
     git submodule update --init --recursive
     git checkout -b "$SYMPHONY_ISSUE_ID"
+    # Load env vars from .env if present
+    if [ -f .env ]; then set -a; . ./.env; set +a; fi
   before_run: |
     git add -A
     git stash || true
@@ -61,12 +63,12 @@ hooks:
       gh api repos/broomva/life/pulls/$PR_NUM/comments --jq '.[].body' 2>/dev/null || true
       gh pr view "$SYMPHONY_ISSUE_ID" --json reviews -q '.reviews[].body' 2>/dev/null || true
     fi
-  timeout_ms: 300000
+  timeout_ms: 600000
 agent:
   max_concurrent_agents: 2
   max_turns: 5
 codex:
-  command: claude --dangerously-skip-permissions
+  command: claude -p --dangerously-skip-permissions
 server:
   port: 8081
 ---
