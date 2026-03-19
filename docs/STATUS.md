@@ -30,7 +30,7 @@ The baseline unification is active and enforced in production paths:
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Build | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Tests | PASS (96) | PASS (465+16 w/ spacetimedb) | PASS (332) | PASS (69) | PASS (58) | PASS (26+2 ignored) | N/A (0 tests) |
+| Tests | PASS (96) | PASS (465+16 w/ spacetimedb) | PASS (332) | PASS (69) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
 | Clippy (-D warnings) | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | CROSS-CUTTING | BRIDGED (arcan-spaces) |
 | Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | OBSERVABILITY | NETWORKING |
@@ -203,7 +203,8 @@ Current suite validates:
 ### Canonical Tool Execution Engine
 
 - Standalone tool execution and sandbox engine extracted from `arcan-harness`.
-- 4 crates: `praxis-core` (17 tests), `praxis-tools` (28 tests), `praxis-skills` (11 tests), `praxis-mcp` (2 tests).
+- 4 crates: `praxis-core` (21 tests), `praxis-tools` (24 tests), `praxis-skills` (11 tests), `praxis-mcp` (34 tests).
+- **90 tests total** across all crates.
 - Depends only on `aios-protocol` — no dependency on Arcan, Lago, or Autonomic.
 - Implements canonical `Tool` trait from `aios-protocol::tool`.
 
@@ -212,7 +213,13 @@ Current suite validates:
 - **praxis-core**: Sandbox policy enforcement, workspace boundary checks (FsPolicy), FsPort abstraction (pluggable filesystem), command runner abstraction.
 - **praxis-tools**: ReadFile, WriteFile, ListDir, Glob, Grep, EditFile (hashline/Blake3), Bash, ReadMemory, WriteMemory.
 - **praxis-skills**: SKILL.md frontmatter parser, skill registry with discovery and activation.
-- **praxis-mcp**: MCP server connection management, McpTool bridge wrapping external tools via rmcp 0.15.
+- **praxis-mcp**: Full MCP server + client bridge via rmcp 0.15.
+  - **Server**: `PraxisMcpServer` (`ServerHandler`) exposes any `ToolRegistry` as an MCP server.
+  - **Transports**: stdio (Claude Desktop/CLI) and Streamable HTTP (axum) with session management.
+  - **Client**: `connect_mcp_stdio()` connects to external MCP servers via subprocess.
+  - **Bridge**: `McpTool` wraps external MCP tools as canonical `Tool` trait implementations.
+  - **Conversions**: Bidirectional canonical ↔ MCP type mapping (definitions, results, annotations, content).
+  - **Tests**: 24 unit + 9 integration + 1 doctest, including full MCP protocol roundtrip via duplex transport.
 
 ### Integration Points
 
@@ -223,7 +230,7 @@ Current suite validates:
 ### Known Gaps
 
 - Not yet wired into Arcan (arcan-harness now bridges to Praxis tools).
-- No integration tests with live MCP servers.
+- No integration tests with live external MCP servers (roundtrip tests use in-process duplex transport).
 
 ## Vigil
 
