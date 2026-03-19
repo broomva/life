@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "${CONTROL_PREPUSH_CMD:-}" ]; then
+  eval "$CONTROL_PREPUSH_CMD"
+  exit 0
+fi
+
+# Host-friendly default: run smoke gate locally; full test matrix remains CI-authoritative.
+if [ -x ./scripts/control/smoke.sh ]; then
+  ./scripts/control/smoke.sh
+  exit 0
+fi
+
+if command -v make >/dev/null 2>&1; then
+  make smoke
+  exit 0
+fi
+
+echo "No smoke command available for pre-push." >&2
+exit 1

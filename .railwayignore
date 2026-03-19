@@ -1,0 +1,12 @@
+.git
+.github
+.claude
+**/.claude
+skills
+**/skills
+memory
+**/target
+**/.target
+**/*.log
+.control/runtime
+.agent-*

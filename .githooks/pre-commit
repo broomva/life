@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -x ./scripts/control/check.sh ]; then
+  ./scripts/control/check.sh
+  exit 0
+fi
+
+if command -v make >/dev/null 2>&1; then
+  make check
+  exit 0
+fi
+
+echo "No check command available for pre-commit." >&2
+exit 1
