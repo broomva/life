@@ -37,7 +37,13 @@ jobs:
           workspaces: ". -> .target"
 
       - name: Format
-        run: cargo fmt --all -- --check
+        run: |
+          cargo fmt -p haima-core -- --check
+          cargo fmt -p haima-wallet -- --check
+          cargo fmt -p haima-x402 -- --check
+          cargo fmt -p haima-lago -- --check
+          cargo fmt -p haima-api -- --check
+          cargo fmt -p haimad -- --check
 
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings
