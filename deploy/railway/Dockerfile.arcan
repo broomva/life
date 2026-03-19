@@ -1,0 +1,17 @@
+FROM rust:1.88-bookworm AS builder
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler clang lld pkg-config libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY . .
+RUN cd arcan && cargo build --release -p arcan
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /app/.target/release/arcan /usr/local/bin/arcan
+ENV AIOS_STATE_ROOT=/data/.aios
+ENV PORT=3000
+ENV ARCAN_PROVIDER=mock
+ENV ARCAN_AUTONOMIC_URL=http://autonomicd.railway.internal:3002
+EXPOSE 3000
+CMD ["sh","-lc","/usr/local/bin/arcan serve --provider mock --port ${PORT} --autonomic-url ${ARCAN_AUTONOMIC_URL} --data-dir /data/.aios/tenants/default/projects/life/sessions/prod"]

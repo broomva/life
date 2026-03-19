@@ -1,0 +1,18 @@
+version: 2
+# Calibrated 2026-02-28 against actual performance (596/596 tests = 100% pass rate)
+metrics:
+  pass_at_1:
+    target: 1.00
+    alert_below: 0.90
+  retry_rate:
+    target: 0.10
+    alert_above: 0.30
+  merge_cycle_time_hours:
+    target: 24
+    alert_above: 48
+  revert_rate:
+    target: 0.03
+    alert_above: 0.08
+  human_intervention_rate:
+    target: 0.15
+    alert_above: 0.35

@@ -1,0 +1,36 @@
+name: Web E2E
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  web-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout submodules with remotes
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --depth 1 aiOS arcan lago autonomic spaces praxis vigil
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler lld
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aiOS -> .target
+            arcan -> .target
+            lago -> .target
+            autonomic -> .target
+            praxis -> .target
+            vigil -> .target
+
+      - name: Run Web E2E tests
+        run: ./scripts/control/web_e2e.sh
