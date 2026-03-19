@@ -1,0 +1,9 @@
+#!/bin/sh
+# Entire CLI hooks
+# Commit-msg hook: strip trailer if no user content (allows aborting empty commits)
+# Environment-first behavior: if `entire` is unavailable, do not block commits.
+if command -v entire >/dev/null 2>&1; then
+  entire hooks git commit-msg "$1" || exit 1
+else
+  exit 0
+fi

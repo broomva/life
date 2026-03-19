@@ -1,0 +1,4 @@
+interface:
+  display_name: "Control Metalayer Loop"
+  short_description: "Control-loop harness for autonomous code agents"
+  default_prompt: "Set up this repository with a control-system metalayer, policy rules, commands, and folder topology for stable autonomous agent development."

@@ -1,0 +1,37 @@
+.PHONY: smoke check test recover hooks-install web-e2e cli-e2e heartbeat ci-e2e control-audit architecture-audit audit ci
+
+smoke:
+	@./scripts/control/smoke.sh
+
+check:
+	@./scripts/control/check.sh
+
+test:
+	@./scripts/control/test.sh
+
+recover:
+	@if [ -x ./scripts/control/recover.sh ]; then ./scripts/control/recover.sh; else echo "recover primitive not installed"; exit 2; fi
+
+hooks-install:
+	@if [ -x ./scripts/control/install_hooks.sh ]; then ./scripts/control/install_hooks.sh; else echo "hooks primitive not installed"; exit 2; fi
+
+web-e2e:
+	@if [ -x ./scripts/control/web_e2e.sh ]; then ./scripts/control/web_e2e.sh; else echo "web primitive not installed"; exit 2; fi
+
+cli-e2e:
+	@if [ -x ./scripts/control/cli_e2e.sh ]; then ./scripts/control/cli_e2e.sh; else echo "cli primitive not installed"; exit 2; fi
+
+heartbeat:
+	@./scripts/control/heartbeat.sh
+
+control-audit:
+	@./scripts/audit_control.sh .
+
+architecture-audit:
+	@./scripts/architecture/verify_dependencies.sh
+
+audit: control-audit architecture-audit
+
+ci: smoke check test
+
+ci-e2e: ci web-e2e cli-e2e

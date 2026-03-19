@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "943404d4dc7f",
+  "session_id": "c16ae322-f569-4a0e-becd-41483ff7865f",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-19T22:01:50.020175Z",
+  "branch": "BRO-32",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "praxis"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "f6ecaa65cba5",
+  "token_usage": {
+    "input_tokens": 77,
+    "cache_creation_tokens": 111900,
+    "cache_read_tokens": 6536432,
+    "output_tokens": 20717,
+    "api_call_count": 72
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-19T22:01:49.898836Z",
+    "agent_lines": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 0,
+    "agent_percentage": 0
+  }
+}

@@ -1,0 +1,17 @@
+version: 1
+zones:
+  product_code:
+    paths:
+      - src/
+      - app/
+      - packages/
+  control_plane:
+    paths:
+      - .control/
+      - docs/control/
+      - scripts/control/
+      - evals/
+ownership:
+  policy_owner: engineering
+  command_owner: platform
+  observability_owner: sre

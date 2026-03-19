@@ -1,0 +1,39 @@
+name: Harness CI
+# push to main, all PRs, manual dispatch
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout submodules with remotes
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --depth 1 aiOS arcan lago autonomic spaces praxis vigil
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler lld
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aiOS -> .target
+            arcan -> .target
+            lago -> .target
+            autonomic -> .target
+            praxis -> .target
+            vigil -> .target
+
+      - name: Run harness pipeline (smoke → check → test)
+        run: make ci

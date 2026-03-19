@@ -1,0 +1,8 @@
+/target
+/.target
+/.aios
+/.aios-*/
+.venv/
+.DS_Store
+/.arcan
+/.lake
