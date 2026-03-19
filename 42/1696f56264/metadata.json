@@ -1,0 +1,65 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "421696f56264",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 8,
+  "files_touched": [
+    "CLAUDE.md",
+    "docs",
+    "docs/ARCHITECTURE.md",
+    "docs/CONTRACT.md",
+    "docs/FEATURE_CONWAY_ACTUATION.md",
+    "docs/METALAYER.md",
+    "docs/NAVIGATION.md",
+    "docs/OBSERVABILITY.md",
+    "docs/PLAN.md",
+    "docs/PLANS.md",
+    "docs/PLATFORM.md",
+    "docs/ROADMAP.md",
+    "docs/STATUS.md",
+    "docs/TESTING.md",
+    "docs/arcan.md",
+    "docs/control/ARCHITECTURE.md",
+    "docs/control/CONTROL_LOOP.md",
+    "docs/control/OBSERVABILITY.md",
+    "docs/raw-dumps/lago-lakehouse-memory.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/42/1696f56264/0/metadata.json",
+      "transcript": "/42/1696f56264/0/full.jsonl",
+      "context": "/42/1696f56264/0/context.md",
+      "content_hash": "/42/1696f56264/0/content_hash.txt",
+      "prompt": "/42/1696f56264/0/prompt.txt"
+    },
+    {
+      "metadata": "/42/1696f56264/1/metadata.json",
+      "transcript": "/42/1696f56264/1/full.jsonl",
+      "context": "/42/1696f56264/1/context.md",
+      "content_hash": "/42/1696f56264/1/content_hash.txt",
+      "prompt": "/42/1696f56264/1/prompt.txt"
+    },
+    {
+      "metadata": "/42/1696f56264/2/metadata.json",
+      "transcript": "/42/1696f56264/2/full.jsonl",
+      "context": "/42/1696f56264/2/context.md",
+      "content_hash": "/42/1696f56264/2/content_hash.txt",
+      "prompt": "/42/1696f56264/2/prompt.txt"
+    },
+    {
+      "metadata": "/42/1696f56264/3/metadata.json",
+      "transcript": "/42/1696f56264/3/full.jsonl",
+      "context": "/42/1696f56264/3/context.md",
+      "content_hash": "/42/1696f56264/3/content_hash.txt",
+      "prompt": "/42/1696f56264/3/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1229,
+    "cache_creation_tokens": 885020,
+    "cache_read_tokens": 37062090,
+    "output_tokens": 34403,
+    "api_call_count": 425
+  }
+}

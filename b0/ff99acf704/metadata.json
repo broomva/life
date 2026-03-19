@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.4.5",
+  "checkpoint_id": "b0ff99acf704",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "AGENTS.md",
+    "PLANS.md",
+    "arcan",
+    "docs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b0/ff99acf704/0/metadata.json",
+      "transcript": "/b0/ff99acf704/0/full.jsonl",
+      "context": "/b0/ff99acf704/0/context.md",
+      "content_hash": "/b0/ff99acf704/0/content_hash.txt",
+      "prompt": "/b0/ff99acf704/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 528,
+    "cache_creation_tokens": 81643,
+    "cache_read_tokens": 3884538,
+    "output_tokens": 10620,
+    "api_call_count": 65
+  }
+}

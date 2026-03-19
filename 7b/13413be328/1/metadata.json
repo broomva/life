@@ -1,0 +1,47 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "7b13413be328",
+  "session_id": "0dbe2caa-9bbc-4321-ace3-5eee7e33fcdb",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T14:18:42.041194Z",
+  "branch": "successful-sole",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "METALAYER.md",
+    "docs/ARCHITECTURE.md",
+    "docs/PLAN.md",
+    "docs/PLANS.md",
+    "docs/PLATFORM.md",
+    "docs/STATUS.md",
+    "praxis/crates/praxis-core/src/sandbox.rs",
+    "praxis/crates/praxis-tools/src/fs.rs",
+    "praxis/crates/praxis-tools/src/shell.rs",
+    "vigil/Cargo.lock",
+    "vigil/Cargo.toml",
+    "vigil/src/config.rs",
+    "vigil/src/lib.rs",
+    "vigil/src/metrics.rs",
+    "vigil/src/semconv.rs",
+    "vigil/src/spans.rs"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "54845f361502",
+  "token_usage": {
+    "input_tokens": 50,
+    "cache_creation_tokens": 122777,
+    "cache_read_tokens": 4667051,
+    "output_tokens": 530,
+    "api_call_count": 48
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T14:18:41.815106Z",
+    "agent_lines": 3864,
+    "human_added": 254,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 4118,
+    "agent_percentage": 93.83195726080622
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "7fe17b2d02e3",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "praxis/CLAUDE.md",
+    "praxis/Cargo.lock",
+    "praxis/Cargo.toml",
+    "praxis/crates/praxis-core/Cargo.toml",
+    "praxis/crates/praxis-core/src/error.rs",
+    "praxis/crates/praxis-core/src/lib.rs",
+    "praxis/crates/praxis-core/src/sandbox.rs",
+    "praxis/crates/praxis-core/src/workspace.rs",
+    "praxis/crates/praxis-mcp/Cargo.toml",
+    "praxis/crates/praxis-mcp/src/connection.rs",
+    "praxis/crates/praxis-mcp/src/lib.rs",
+    "praxis/crates/praxis-mcp/src/tool.rs",
+    "praxis/crates/praxis-skills/Cargo.toml",
+    "praxis/crates/praxis-skills/src/lib.rs",
+    "praxis/crates/praxis-skills/src/parser.rs",
+    "praxis/crates/praxis-skills/src/registry.rs",
+    "praxis/crates/praxis-tools/Cargo.toml",
+    "praxis/crates/praxis-tools/src/edit.rs",
+    "praxis/crates/praxis-tools/src/fs.rs",
+    "praxis/crates/praxis-tools/src/lib.rs",
+    "praxis/crates/praxis-tools/src/memory.rs",
+    "praxis/crates/praxis-tools/src/shell.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/7f/e17b2d02e3/0/metadata.json",
+      "transcript": "/7f/e17b2d02e3/0/full.jsonl",
+      "context": "/7f/e17b2d02e3/0/context.md",
+      "content_hash": "/7f/e17b2d02e3/0/content_hash.txt",
+      "prompt": "/7f/e17b2d02e3/0/prompt.txt"
+    },
+    {
+      "metadata": "/7f/e17b2d02e3/1/metadata.json",
+      "transcript": "/7f/e17b2d02e3/1/full.jsonl",
+      "context": "/7f/e17b2d02e3/1/context.md",
+      "content_hash": "/7f/e17b2d02e3/1/content_hash.txt",
+      "prompt": "/7f/e17b2d02e3/1/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 929,
+    "cache_creation_tokens": 538447,
+    "cache_read_tokens": 32004438,
+    "output_tokens": 63079,
+    "api_call_count": 290
+  }
+}

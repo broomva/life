@@ -1,0 +1,46 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "bf51976d95e1",
+  "session_id": "61e034af-afc5-4135-8170-7e62692a9d30",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-01T01:42:37.218848Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".control/state.json",
+    ".cursor/hooks.json",
+    ".gemini/settings.json",
+    ".github/workflows/cli-e2e.yml",
+    ".github/workflows/control-nightly.yml",
+    ".github/workflows/web-e2e.yml",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "METALAYER.md",
+    "PLANS.md",
+    "docs",
+    "playwright.config.ts",
+    "scripts/control/cli_e2e.sh",
+    "scripts/control/recover.sh",
+    "scripts/control/web_e2e.sh",
+    "tests/e2e/cli/smoke.sh",
+    "tests/e2e/web/smoke.spec.ts"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "9669f0d2a8b0",
+  "token_usage": {
+    "input_tokens": 792,
+    "cache_creation_tokens": 40678,
+    "cache_read_tokens": 1737735,
+    "output_tokens": 2351,
+    "api_call_count": 36
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-01T01:42:36.960103Z",
+    "agent_lines": 377,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 377,
+    "agent_percentage": 100
+  }
+}

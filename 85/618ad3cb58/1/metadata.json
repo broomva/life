@@ -1,0 +1,36 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "85618ad3cb58",
+  "session_id": "9b42ce14-b290-4a7f-b248-2a7c67578a96",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-01T01:52:55.363471Z",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".github/workflows/cli-e2e.yml",
+    ".github/workflows/control-harness.yml",
+    ".github/workflows/control-nightly.yml",
+    ".github/workflows/harness.yml",
+    "METALAYER.md",
+    "docs",
+    "evals/control-metrics.yaml"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "1b22d9d35b85",
+  "token_usage": {
+    "input_tokens": 97,
+    "cache_creation_tokens": 86595,
+    "cache_read_tokens": 5987151,
+    "output_tokens": 3773,
+    "api_call_count": 81
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-01T01:52:55.139327Z",
+    "agent_lines": 3,
+    "human_added": 76,
+    "human_modified": 9,
+    "human_removed": 0,
+    "total_committed": 88,
+    "agent_percentage": 3.4090909090909087
+  }
+}

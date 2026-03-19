@@ -1,0 +1,33 @@
+please update the root claude settings to include this mcp \
+\
+{
+  "mcpServers": {
+    "basic-memory": {
+      "command": "uvx",
+      "args": [
+        "basic-memory",
+        "mcp"
+      ]
+    }
+  }
+}
+
+---
+
+please read basic memory folder details and set it up correctly
+
+---
+
+how to use it?
+
+---
+
+lets create a note about the current live projects state
+
+---
+
+edit it and add it please
+
+---
+
+good, was the note created?

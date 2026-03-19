@@ -1,0 +1,48 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "68ee78356f59",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 10,
+  "files_touched": [
+    "docs/STATUS.md",
+    "docs/control/ARCHITECTURE.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/68/ee78356f59/0/metadata.json",
+      "transcript": "/68/ee78356f59/0/full.jsonl",
+      "context": "/68/ee78356f59/0/context.md",
+      "content_hash": "/68/ee78356f59/0/content_hash.txt",
+      "prompt": "/68/ee78356f59/0/prompt.txt"
+    },
+    {
+      "metadata": "/68/ee78356f59/1/metadata.json",
+      "transcript": "/68/ee78356f59/1/full.jsonl",
+      "context": "/68/ee78356f59/1/context.md",
+      "content_hash": "/68/ee78356f59/1/content_hash.txt",
+      "prompt": "/68/ee78356f59/1/prompt.txt"
+    },
+    {
+      "metadata": "/68/ee78356f59/2/metadata.json",
+      "transcript": "/68/ee78356f59/2/full.jsonl",
+      "context": "/68/ee78356f59/2/context.md",
+      "content_hash": "/68/ee78356f59/2/content_hash.txt",
+      "prompt": "/68/ee78356f59/2/prompt.txt"
+    },
+    {
+      "metadata": "/68/ee78356f59/3/metadata.json",
+      "transcript": "/68/ee78356f59/3/full.jsonl",
+      "context": "/68/ee78356f59/3/context.md",
+      "content_hash": "/68/ee78356f59/3/content_hash.txt",
+      "prompt": "/68/ee78356f59/3/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2291,
+    "cache_creation_tokens": 811482,
+    "cache_read_tokens": 29897132,
+    "output_tokens": 44977,
+    "api_call_count": 274
+  }
+}

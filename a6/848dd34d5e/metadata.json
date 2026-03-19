@@ -1,0 +1,41 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "a6848dd34d5e",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "docs/STATUS.md",
+    "scripts/architecture/verify_dependencies.sh"
+  ],
+  "sessions": [
+    {
+      "metadata": "/a6/848dd34d5e/0/metadata.json",
+      "transcript": "/a6/848dd34d5e/0/full.jsonl",
+      "context": "/a6/848dd34d5e/0/context.md",
+      "content_hash": "/a6/848dd34d5e/0/content_hash.txt",
+      "prompt": "/a6/848dd34d5e/0/prompt.txt"
+    },
+    {
+      "metadata": "/a6/848dd34d5e/1/metadata.json",
+      "transcript": "/a6/848dd34d5e/1/full.jsonl",
+      "context": "/a6/848dd34d5e/1/context.md",
+      "content_hash": "/a6/848dd34d5e/1/content_hash.txt",
+      "prompt": "/a6/848dd34d5e/1/prompt.txt"
+    },
+    {
+      "metadata": "/a6/848dd34d5e/2/metadata.json",
+      "transcript": "/a6/848dd34d5e/2/full.jsonl",
+      "context": "/a6/848dd34d5e/2/context.md",
+      "content_hash": "/a6/848dd34d5e/2/content_hash.txt",
+      "prompt": "/a6/848dd34d5e/2/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 11538,
+    "cache_creation_tokens": 1085039,
+    "cache_read_tokens": 55192307,
+    "output_tokens": 68326,
+    "api_call_count": 463
+  }
+}

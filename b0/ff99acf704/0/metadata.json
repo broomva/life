@@ -1,0 +1,34 @@
+{
+  "cli_version": "0.4.5",
+  "checkpoint_id": "b0ff99acf704",
+  "session_id": "b8e672ce-61a3-4937-ae75-e54b38ab5b7a",
+  "strategy": "manual-commit",
+  "created_at": "2026-02-21T22:35:26.120304Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "AGENTS.md",
+    "PLANS.md",
+    "arcan",
+    "docs"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "78f2a788894e",
+  "token_usage": {
+    "input_tokens": 528,
+    "cache_creation_tokens": 81643,
+    "cache_read_tokens": 3884538,
+    "output_tokens": 10620,
+    "api_call_count": 65
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-02-21T22:35:25.964547Z",
+    "agent_lines": 0,
+    "human_added": 14,
+    "human_modified": 19,
+    "human_removed": 0,
+    "total_committed": 14,
+    "agent_percentage": 0
+  },
+  "transcript_path": ".claude/projects/-Users-broomva-broomva-tech-live/b8e672ce-61a3-4937-ae75-e54b38ab5b7a.jsonl"
+}
