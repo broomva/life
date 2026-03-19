@@ -3,9 +3,12 @@
   "checkpoint_id": "8d690fe19aba",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 1,
+  "checkpoints_count": 2,
   "files_touched": [
-    "docs/conversations/Conversations.md"
+    "WORKFLOW.md",
+    "arcan",
+    "docs/conversations/Conversations.md",
+    "docs/conversations/session-2026-03-19-c6013dee.md"
   ],
   "sessions": [
     {
@@ -14,13 +17,20 @@
       "context": "/8d/690fe19aba/0/context.md",
       "content_hash": "/8d/690fe19aba/0/content_hash.txt",
       "prompt": "/8d/690fe19aba/0/prompt.txt"
+    },
+    {
+      "metadata": "/8d/690fe19aba/1/metadata.json",
+      "transcript": "/8d/690fe19aba/1/full.jsonl",
+      "context": "/8d/690fe19aba/1/context.md",
+      "content_hash": "/8d/690fe19aba/1/content_hash.txt",
+      "prompt": "/8d/690fe19aba/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 3,
-    "cache_creation_tokens": 25804,
-    "cache_read_tokens": 6443,
-    "output_tokens": 410,
-    "api_call_count": 1
+    "input_tokens": 4966,
+    "cache_creation_tokens": 172897,
+    "cache_read_tokens": 2651665,
+    "output_tokens": 17103,
+    "api_call_count": 39
   }
 }
