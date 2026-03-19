@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "66b848806145",
+  "strategy": "manual-commit",
+  "branch": "BRO-32",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "arcan",
+    "lago",
+    "vigil"
+  ],
+  "sessions": [
+    {
+      "metadata": "/66/b848806145/0/metadata.json",
+      "transcript": "/66/b848806145/0/full.jsonl",
+      "context": "/66/b848806145/0/context.md",
+      "content_hash": "/66/b848806145/0/content_hash.txt",
+      "prompt": "/66/b848806145/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 13,
+    "cache_creation_tokens": 34629,
+    "cache_read_tokens": 573083,
+    "output_tokens": 3555,
+    "api_call_count": 12
+  }
+}
