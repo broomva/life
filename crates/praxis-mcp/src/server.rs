@@ -194,7 +194,6 @@ mod tests {
     use aios_protocol::tool::{
         Tool, ToolAnnotations, ToolCall, ToolContext, ToolDefinition, ToolError, ToolResult,
     };
-    use rmcp::ServiceExt;
     use serde_json::json;
 
     /// A simple echo tool for testing.
@@ -314,10 +313,53 @@ mod tests {
         assert!(tools.is_empty());
     }
 
-    // --- Integration tests: full MCP protocol via in-process duplex transport ---
+    // --- Tool dispatch tests: exercise the same code path as MCP call_tool ---
+
+    #[test]
+    fn call_tool_echo_dispatches_correctly() {
+        let server = test_server();
+        let tool = server.registry().get("echo").unwrap();
+        let call = ToolCall::new("echo", json!({"message": "hello world"}), vec![]);
+        let ctx = ToolContext {
+            run_id: "test".into(),
+            session_id: "test".into(),
+            iteration: 0,
+        };
+        let result = tool.execute(&call, &ctx).unwrap();
+        assert!(!result.is_error);
+
+        let mcp_result = crate::convert::tool_result_to_call_result(&result);
+        assert_eq!(mcp_result.is_error, Some(false));
+        let text = mcp_result.content.first().unwrap().as_text().unwrap();
+        assert_eq!(text.text, "hello world");
+    }
+
+    #[test]
+    fn call_tool_fail_returns_error() {
+        let server = test_server();
+        let tool = server.registry().get("fail").unwrap();
+        let call = ToolCall::new("fail", json!({}), vec![]);
+        let ctx = ToolContext {
+            run_id: "test".into(),
+            session_id: "test".into(),
+            iteration: 0,
+        };
+        let err = tool.execute(&call, &ctx).unwrap_err();
+        assert!(err.to_string().contains("intentional failure"));
+    }
+
+    #[test]
+    fn registry_lookup_missing_returns_none() {
+        let server = test_server();
+        assert!(server.registry().get("nonexistent").is_none());
+    }
+
+    // --- Full MCP protocol tests via in-process duplex transport ---
 
     #[tokio::test]
-    async fn call_tool_echo_via_mcp() {
+    async fn mcp_protocol_echo_roundtrip() {
+        use rmcp::ServiceExt;
+
         let server = test_server();
         let (s1, s2) = tokio::io::duplex(8192);
 
@@ -333,7 +375,7 @@ mod tests {
             .call_tool(CallToolRequestParams {
                 name: std::borrow::Cow::Borrowed("echo"),
                 arguments: Some(
-                    serde_json::json!({"message": "hello world"})
+                    json!({"message": "protocol test"})
                         .as_object()
                         .unwrap()
                         .clone(),
@@ -346,11 +388,13 @@ mod tests {
 
         assert_eq!(result.is_error, Some(false));
         let text = result.content.first().unwrap().as_text().unwrap();
-        assert_eq!(text.text, "hello world");
+        assert_eq!(text.text, "protocol test");
     }
 
     #[tokio::test]
-    async fn call_tool_fail_returns_error_content() {
+    async fn mcp_protocol_error_propagation() {
+        use rmcp::ServiceExt;
+
         let server = test_server();
         let (s1, s2) = tokio::io::duplex(8192);
 
@@ -361,6 +405,7 @@ mod tests {
 
         let client = ().serve(s2).await.unwrap();
 
+        // Tool that exists but always fails → returns error content, not protocol error
         let result = client
             .peer()
             .call_tool(CallToolRequestParams {
@@ -373,12 +418,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.is_error, Some(true));
-        let text = result.content.first().unwrap().as_text().unwrap();
-        assert!(text.text.contains("intentional failure"));
     }
 
     #[tokio::test]
-    async fn call_tool_not_found_returns_mcp_error() {
+    async fn mcp_protocol_not_found() {
+        use rmcp::ServiceExt;
+
         let server = test_server();
         let (s1, s2) = tokio::io::duplex(8192);
 
@@ -389,6 +434,7 @@ mod tests {
 
         let client = ().serve(s2).await.unwrap();
 
+        // Nonexistent tool → protocol-level error
         let err = client
             .peer()
             .call_tool(CallToolRequestParams {
@@ -400,12 +446,13 @@ mod tests {
             .await
             .unwrap_err();
 
-        let err_str = err.to_string();
-        assert!(err_str.contains("tool not found"), "got: {err_str}");
+        assert!(err.to_string().contains("tool not found"), "got: {err}");
     }
 
     #[tokio::test]
-    async fn list_tools_via_mcp() {
+    async fn mcp_protocol_list_tools() {
+        use rmcp::ServiceExt;
+
         let server = test_server();
         let (s1, s2) = tokio::io::duplex(8192);
 

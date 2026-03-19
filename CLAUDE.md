@@ -1,7 +1,7 @@
 # Praxis — Canonical Tool Execution Engine
 
 **Version**: 0.1.0 | **Date**: 2026-03-19 | **Status**: Active (Phase 4 — MCP server complete)
-**Tests**: 77 passing | 4 crates | Rust 2024 Edition (MSRV 1.85)
+**Tests**: 90 passing | 4 crates | Rust 2024 Edition (MSRV 1.85)
 
 Praxis is the canonical tool execution and sandbox engine for the Agent OS. It implements the `Tool` trait from `aios-protocol` and provides filesystem, editing, shell, memory, MCP server/client, and skill discovery tools.
 
@@ -45,7 +45,7 @@ aios-protocol (Tool trait, ToolDefinition, ToolCall, ToolResult, ToolError)
 - **parse_skill_md**: frontmatter extractor + validator
 - **SkillRegistry**: directory discovery, activation, system prompt catalog generation
 
-### praxis-mcp (31 tests — 21 unit + 9 integration + 1 doctest)
+### praxis-mcp (34 tests — 24 unit + 9 integration + 1 doctest)
 
 **Server** (exposing tools to MCP clients):
 - **PraxisMcpServer**: implements rmcp `ServerHandler`, wraps `ToolRegistry` as an MCP server
