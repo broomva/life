@@ -22,3 +22,7 @@
 [submodule "praxis"]
 	path = praxis
 	url = https://github.com/broomva/praxis.git
+[submodule "haima"]
+	path = haima
+	url = https://github.com/broomva/haima.git
+	branch = main
