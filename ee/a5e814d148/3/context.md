@@ -1,0 +1,18 @@
+# Session Context
+
+## User Prompts
+
+### Prompt 1
+
+how is this project so heavy? I see its mostly targets and debugs, but its pilling up. Are we missing a best practice for rust projects development?
+
+### Prompt 2
+
+[Image: source: /var/folders/g9/_dhv_jzj5ljd5nywv14y31hm0000gn/T/TemporaryItems/NSIRD_screencaptureui_NTg9g0/Screenshot 2026-03-02 at 12.41.12 PM.png]
+
+[Image: source: /var/folders/g9/_dhv_jzj5ljd5nywv14y31hm0000gn/T/TemporaryItems/NSIRD_screencaptureui_K3Jn31/Screenshot 2026-03-02 at 12.41.25 PM.png]
+
+### Prompt 3
+
+yeah
+

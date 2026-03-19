@@ -1,0 +1,126 @@
+Implement the following plan:
+
+# Plan: arcan-spaces Bridge Crate
+
+## Context
+
+Spaces (SpacetimeDB 2.0 distributed networking) has 11 tables, 20+ reducers, 48 validation tests, and DM support — but no integration with the Arcan agent runtime. The bridge enables agents to communicate through Spaces channels, read messages, and send DMs as tool calls.
+
+The key architectural challenge: SpacetimeDB's client SDK requires **generated module bindings** (BSATN serialization, schema-specific types) that live in `spaces/src/module_bindings/`. These can't be imported across workspace boundaries without fragile path deps. The solution is a **port-based abstraction** with bridge-local types, matching the arcan-lago pattern.
+
+## Architecture
+
+```
+arcan/crates/arcan-spaces/
+├── Cargo.toml
+└── src/
+    ├── lib.rs          # Module exports, register_spaces_tools() helper
+    ├── error.rs        # SpacesBridgeError + From<> into CoreError
+    ├── port.rs         # SpacesPort trait + bridge value types
+    ├── tools.rs        # 4 Tool implementations + tests
+    ├── middleware.rs    # SpacesActivityMiddleware + tests
+    └── mock.rs         # MockSpacesClient for testing
+```
+
+**Dependency**: Only `arcan-core` (for `Tool`, `Middleware`, `CoreError`, protocol types). No `spacetimedb-sdk`. No cross-workspace deps. Minimal surface: `serde`, `serde_json`, `thiserror`, `tracing`.
+
+## Files to Create/Modify
+
+### New: `arcan/crates/arcan-spaces/Cargo.toml`
+Minimal deps: `arcan-core`, `serde`, `serde_json`, `thiserror`, `tracing`. Workspace version/edition/lints.
+
+### New: `arcan/crates/arcan-spaces/src/error.rs`
+`SpacesBridgeError` enum with variants: `Connection`, `ChannelNotFound`, `ServerNotFound`, `RecipientNotFound`, `Validation`, `ReducerFailed`. `From<SpacesBridgeError> for CoreError` maps to `CoreError::ToolExecution`.
+
+### New: `arcan/crates/arcan-spaces/src/port.rs`
+- Bridge types (no SDK deps): `SpacesChannel`, `SpacesChannelType`, `SpacesMessage`, `SpacesMessageType`, `SpacesDirectMessage`
+- `SpacesPort` trait with 4 methods: `send_message`, `list_channels`, `read_messages`, `send_dm`
+- All methods sync (matching `Tool` trait). Concrete impl handles async internally.
+- Identities as hex `String`, timestamps as `i64` micros
+
+### New: `arcan/crates/arcan-spaces/src/tools.rs`
+4 tools implementing `arcan_core::runtime::Tool`:
+
+| Tool | Name | Category | Read-only | Schema |
+|------|------|----------|-----------|--------|
+| `SpacesSendMessageTool` | `spaces_send_message` | spaces | No | `channel_id` (required), `content` (required, ≤4000), `thread_id`, `reply_to_id` |
+| `SpacesListChannelsTool` | `spaces_list_channels` | spaces | Yes | `server_id` (default: 1) |
+| `SpacesReadMessagesTool` | `spaces_read_messages` | spaces | Yes | `channel_id` (required), `limit` (default 50, max 200), `before_id` |
+| `SpacesSendDmTool` | `spaces_send_dm` | spaces | No | `recipient` (required, hex), `content` (required, ≤4000) |
+
+Each holds `Arc<dyn SpacesPort>`. Input validation in tools (user-facing errors), domain errors from port.
+
+### New: `arcan/crates/arcan-spaces/src/middleware.rs`
+`SpacesActivityMiddleware` implements `arcan_core::runtime::Middleware`:
+- `post_tool_call`: Sends `"[agent] Tool '{name}' {status}"` as `AgentEvent` type to configured `agent_log_channel_id`
+- `on_run_finished`: Sends run summary with stop reason and iteration count
+- **Error handling**: Swallow port errors (`tracing::warn!`), never propagate — observability must not block the agent loop
+
+### New: `arcan/crates/arcan-spaces/src/mock.rs`
+`MockSpacesClient` implements `SpacesPort`:
+- State: `Mutex<Vec<SpacesChannel>>`, `Mutex<Vec<SpacesMessage>>`, `Mutex<Vec<SpacesDirectMessage>>`
+- Deterministic IDs via atomic counters
+- `default_hub()` constructor pre-seeds 3 channels (general, agent-logs, system)
+- Error injection via `force_error` field
+- Inspection: `sent_messages()`, `sent_dms()`, `message_count()`, `dm_count()`
+
+### New: `arcan/crates/arcan-spaces/src/lib.rs`
+Module declarations + `register_spaces_tools(registry, port)` helper function.
+
+### Modify: `arcan/Cargo.toml`
+- Add `"crates/arcan-spaces"` to `workspace.members`
+
+### Modify: `arcan/crates/arcan/Cargo.toml`
+- Add `arcan-spaces = { path = "../arcan-spaces", version = "0.2.1", optional = true }`
+- Add `spaces = ["dep:arcan-spaces"]` feature
+
+### Modify: `arcan/crates/arcan/src/main.rs`
+Feature-gated block (`#[cfg(feature = "spaces")]`) before `ArcanHarnessAdapter` construction:
+```rust
+#[cfg(feature = "spaces")]
+{
+    let spaces_port: Arc<dyn arcan_spaces::SpacesPort> =
+        Arc::new(arcan_spaces::MockSpacesClient::default_hub());
+    arcan_spaces::register_spaces_tools(&mut registry, spaces_port);
+}
+```
+
+## Test Plan (14 tests)
+
+**Tool tests** (8): send_message success, empty content validation, content length validation, list_channels returns seeded, list_channels default server_id, read_messages empty, read_messages with limit, send_dm success.
+
+**Middleware tests** (3): logs tool activity, logs run finished, swallows port errors.
+
+**Edge/error tests** (3): send_dm validates empty recipient, port error surfaces as CoreError, all definitions have correct name/category/schema.
+
+## Implementation Order
+
+1. Cargo.toml + lib.rs scaffold
+2. error.rs
+3. port.rs (types + trait)
+4. mock.rs
+5. tools.rs (4 tools + 8 tests)
+6. middleware.rs (+ 3 tests)
+7. 3 remaining edge tests
+8. Wire into workspace (Cargo.toml members, binary feature gate, main.rs)
+9. `cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace`
+
+## Verification
+
+```bash
+cd arcan
+cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace
+cargo check --features spaces  # binary with spaces feature
+cargo test -p arcan-spaces     # 14 tests passing
+```
+
+## Future: Concrete SDK Implementation
+
+When the SpacetimeDB module is published and bindings regenerated, the concrete `SpacetimeDbSpacesClient: SpacesPort` can be added. Two paths:
+1. **Option A**: Adapter in Spaces workspace (`spaces/crates/spaces-arcan-adapter/`) with SDK + generated bindings → implements `SpacesPort`
+2. **Option B**: HTTP facade on the Spaces CLI, then `reqwest`-based client in arcan-spaces
+
+The port abstraction supports both without changes.
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-life/656c7ca6-8c5c-4c79-945e-2960aaa1f530.jsonl

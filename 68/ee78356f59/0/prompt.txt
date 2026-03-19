@@ -1,0 +1,140 @@
+Implement the following plan:
+
+# Plan: Finalize arcan-spaces — Commit, Docs, Harness, Control, Status Sync
+
+## Context
+
+The `arcan-spaces` bridge crate is implemented and passing (18 tests, clippy clean, feature gate works). Now we need to:
+1. Commit inside the arcan submodule
+2. Update all documentation across Life repo and arcan to reflect the new crate
+3. Ensure control/harness/audit scripts account for it
+4. Update test counts, crate counts, and known gaps in canonical docs
+5. Update MEMORY.md with new baseline
+6. Commit the Life repo with updated submodule pointer + docs
+
+## Commit Order
+
+**Step 1: Commit inside arcan submodule** (must happen first — submodule pointer update depends on it)
+
+Files to stage in `arcan/`:
+- `Cargo.toml` (workspace members)
+- `Cargo.lock` (auto-updated)
+- `crates/arcan-spaces/` (new crate — 6 source files + Cargo.toml)
+- `crates/arcan/Cargo.toml` (spaces feature + dep)
+- `crates/arcan/src/main.rs` (feature-gated registration block)
+
+**Step 2: Update arcan-internal docs** (still inside arcan submodule)
+
+### `arcan/AGENTS.md` — Add arcan-spaces to Architecture section
+- Add entry after arcan-lago: `- **crates/arcan-spaces**: Bridge between Arcan and Spaces distributed networking.`
+- The Workspace crates line (line 25) needs `arcan-spaces` added
+
+### `arcan/.claude/rules/monorepo.md`
+- Add `arcan-spaces/` to directory tree (after arcan-lago)
+- Add dependency rule: `arcan-spaces` depends on `arcan-core`
+
+**Step 3: Commit arcan submodule** with message about arcan-spaces bridge
+
+---
+
+**Step 4: Update Life repo docs**
+
+### `docs/STATUS.md`
+- Line 6: Update test count from 982 to 1000 (982 + 18 arcan-spaces tests)
+- Line 28: Update Arcan test count
+- Line 30: Spaces row: change `STANDALONE` to `BRIDGED (arcan-spaces)`
+- Lines 93-113 (Arcan section): Add arcan-spaces mention
+- Lines 206-227 (Spaces section): Update known gaps — remove "No Arcan integration bridge yet", note arcan-spaces bridge with 18 tests, mock-backed, port-based abstraction
+- Line 6: Update crate count from 30 to 31
+
+### `docs/ARCHITECTURE.md`
+- Line 72: Remove `MemoryPort` (was removed from protocol 2026-02-28, stale reference)
+- Lines 214-219 (Arcan crate role map): Add `arcan-spaces` to the list
+- Lines 241-246 (Spaces section): Note arcan-spaces bridge exists, Spaces now connected to Arcan via port abstraction
+
+### `docs/ROADMAP.md`
+- Line 187: Update "Spaces networking" label from `ACTIVE (v0.1.0 — integration with Arcan pending)` to `ACTIVE (v0.1.0 — arcan-spaces bridge implemented, concrete SDK adapter pending)`
+
+### `docs/TESTING.md`
+- Add `arcan-spaces` row to the Arcan crate table: `| arcan-spaces | 18 | ~600 |`
+- Update Arcan Total: 237 → 255 tests (237 + 18), LOC update
+- Update Combined Total accordingly
+
+### `AGENTS.md` (root Life repo)
+- Line 8: Update metrics from `657/657 tests` to current canonical count, update crate count and LOC
+- Line 25: Add `arcan-spaces` to workspace crates list
+- Add bridge line: `- **Bridge**: `arcan-spaces` connects Arcan to Spaces distributed networking`
+- Lines 47-51: Update Autonomic from "planned, separate repo" to active with 5 crates
+- Dependency Order section: Add arcan-spaces
+
+### `CLAUDE.md` (root Life repo)
+- Line 8: Verify/update metrics line (currently shows 982 — needs bump to 1000)
+- Arcan workspace crates list: Add `arcan-spaces`
+- Arcan dependency order: Add `arcan-spaces (Spaces bridge)`
+- Arcan section: Add bridge line for arcan-spaces parallel to arcan-lago
+- Relationship diagram: Add `arcan-spaces bridge` line connecting Arcan ↔ Spaces
+
+### `scripts/architecture/verify_dependencies.sh`
+- No changes needed — `arcan-spaces` starts with `arcan-` prefix so it's already caught by the `is_arcan(src)` rule. Its only dependency is `arcan-core` which is allowed. The existing rules are sufficient.
+
+### `MEMORY.md` (auto memory)
+- Update Architecture Overview: Arcan now 11 crates (was 9), add arcan-spaces mention
+- Update test count: add arcan-spaces 18 tests to Arcan total (272 → 290)
+- Update combined total (726 → 744... but actual canonical is ~1000 now)
+- Note: MEMORY.md was lagging behind STATUS.md. Reconcile to match STATUS.md as source of truth.
+
+---
+
+**Step 5: Run full validation**
+
+```bash
+# Arcan already validated
+(cd arcan && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace)
+# Verify audit gate passes with arcan-spaces
+./scripts/architecture/verify_dependencies.sh
+# Full control gate
+make audit
+./conformance/run.sh
+```
+
+**Step 6: Commit Life repo**
+
+Stage:
+- `arcan` (submodule pointer)
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/STATUS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/ROADMAP.md`
+- `docs/TESTING.md`
+- `.claude/projects/.../memory/MEMORY.md`
+
+Do NOT stage:
+- `praxis/` (untracked, separate work)
+- `aiOS`, `spaces` submodule changes (separate work)
+- `.gitmodules`, `autonomic` (already staged from prior work — keep staged)
+
+## Verification
+
+After all commits:
+1. `cd arcan && cargo test -p arcan-spaces` → 18 tests pass
+2. `cd arcan && cargo test --workspace` → all pass, no regressions
+3. `./scripts/architecture/verify_dependencies.sh` → "audit passed"
+4. `./conformance/run.sh` → all green
+5. `docs/STATUS.md` test count matches actual `cargo test` output
+6. `CLAUDE.md` and `AGENTS.md` metrics match `docs/STATUS.md`
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-life/8adb65f0-dbe9-4619-bdaa-6c69e52c2f7f.jsonl
+
+---
+
+o how to run this locally and deplyed?
+
+---
+
+how does spaces works, please be detailed, and lets also think about the integration with the agent loop and agent state and how it affects it
+
+---
+
+can we use arcan cli to test the agent running and validate the spaces setup, please read the logs from the daemons and confirm everything is on the green

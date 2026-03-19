@@ -1,0 +1,29 @@
+why does the /docs folder look like a copy of the repo. It should only have .md files that we were creating, please check the git logs from that folder
+
+---
+
+yeah, lets clean it, so that it returns to the correct state, and then, remove .git from it and make the docs lie within live git
+
+---
+
+yeah
+
+---
+
+[Request interrupted by user]
+
+---
+
+i ran it
+
+---
+
+/Users/broomva/broomva.tech/live/control /Users/broomva/broomva.tech/live/docs/control I see these two, lets review the contents and the docs we just updated, and make sure its correct
+
+---
+
+yeah
+
+---
+
+yes, commit and push

@@ -1,0 +1,3673 @@
+# Commit Message Generator
+
+You are a commit message generator. Your ONLY job is to generate a commit message based on the provided diff.
+
+## CRITICAL RULES
+
+1. **DO NOT** ask questions or offer options
+2. **DO NOT** describe what you're going to do
+3. **DO NOT** include phrases like "I'll help you", "Let me check", "Here is the commit message"
+4. **DO NOT** use any MCP tools or workspace tools
+5. **DO NOT** call set_agent_name or any other tool
+6. **JUST OUTPUT** the commit message wrapped in tags
+
+## Output Format
+
+Wrap your commit message in <<<COMMIT_MESSAGE>>> tags:
+
+<<<COMMIT_MESSAGE>>>
+type(scope): subject
+
+Body explaining what and why (if needed)
+<<</COMMIT_MESSAGE>>>
+
+## Commit Message Guidelines
+
+- Use conventional commit format: type(scope): subject
+- Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert
+- Be concise but descriptive
+- Use present tense ("add" not "added")
+- Don't end the subject with a period
+- Focus on WHY the change was made, not just what changed
+- Synthesize information from the diff to understand the purpose
+- Write as if you are the developer who made the changes
+- Mimic the style of any recent commit messages provided
+
+## What NOT to do
+
+WRONG (includes explanation):
+```
+I'll help you generate a commit message for these changes.
+
+Here's the commit message:
+feat: add new feature
+```
+
+CORRECT (just the tagged output):
+```
+<<<COMMIT_MESSAGE>>>
+feat: add new feature
+<<</COMMIT_MESSAGE>>>
+```
+
+
+## Agent Context
+
+This session is running inside the Intent app as an ACP agent.
+- **Provider**: claude-code
+- **Agent ID**: agent-0cb6a1c0-6cc8-40ea-97af-72406d3e5e08
+- **Agent Name**: Commit Message Generator
+- **Agent Type**: commit-message
+- **Specialist**: none
+- **Selected Model**: claude-code:default
+
+## Workspace Context
+
+You are working in a workspace with the following information:
+- **Workspace ID**: successful-sole
+- **Workspace Path**: /Users/broomva/intent/workspaces/successful-sole/life
+
+### Current UI Context
+- **Main Panel**: local-changes
+
+## Available Tools
+
+You have access to MCP (Model Context Protocol) tools through the workspace MCP server:
+- **File Operations**: read_file, write_file, list_files
+- **Workspace Management**: view_workspace, view_workspace_details, rename_workspace
+- **Notes**: create_note, list_notes, list_note_tasks, read_note, add_to_note, edit_note, delete_note
+- **Specification**: read_spec, write_spec (the main workspace specification document)
+- **Activity**: read_timeline (view recent workspace activities)
+
+These tools are automatically available to you. Use them as needed to interact with the workspace.
+
+## Guidelines
+
+1. **Focus on the workspace context** - Be aware of what files are open and what the user is looking at
+2. **Use the specification document** - The spec (accessible via read_spec/write_spec) is the primary artifact for planning and documentation
+3. **Reference specific files** - When discussing code, reference the actual files in the workspace
+4. **Maintain workspace organization** - Keep notes and files organized within the workspace structure
+5. **Be context-aware** - Your responses should be relevant to the current file/note/diff the user is viewing
+6. **Rename yourself** - As the first thing you do, use the MCP tool to name yourself so the developer knows what you're working on.
+
+---
+
+Generate a commit message for the following STAGED changes only.
+Note: Only staged files will be committed. Any unstaged changes will NOT be included in this commit.
+Please follow the conventional commit format:
+<type>(<scope>): <subject>
+
+<body>
+
+Where type is one of: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert
+
+Guidelines:
+- Be concise but descriptive
+- Use present tense ("add" not "added")
+- Don't end the subject with a period
+- Include a body for complex changes
+- Focus on WHY the change was made, not just what changed
+
+Wrap your final commit message in <<<COMMIT_MESSAGE>>> and <<</COMMIT_MESSAGE>>> tags.
+
+Files changed (25):
+- AGENTS.md (M)
+- CLAUDE.md (M)
+- METALAYER.md (M)
+- docs/ARCHITECTURE.md (M)
+- docs/PLAN.md (M)
+- docs/PLANS.md (M)
+- docs/PLATFORM.md (M)
+- docs/STATUS.md (M)
+- docs/control/OBSERVABILITY.md (M)
+- praxis/crates/praxis-core/src/sandbox.rs (M)
+- praxis/crates/praxis-mcp/src/connection.rs (M)
+- praxis/crates/praxis-mcp/src/tool.rs (M)
+- praxis/crates/praxis-skills/src/registry.rs (M)
+- praxis/crates/praxis-tools/src/edit.rs (M)
+- praxis/crates/praxis-tools/src/fs.rs (M)
+- praxis/crates/praxis-tools/src/memory.rs (M)
+- praxis/crates/praxis-tools/src/shell.rs (M)
+- vigil/CLAUDE.md (A)
+- vigil/Cargo.lock (A) [diff skipped]
+- vigil/Cargo.toml (A)
+- vigil/src/config.rs (A)
+- vigil/src/lib.rs (A)
+- vigil/src/metrics.rs (A)
+- vigil/src/semconv.rs (A)
+- vigil/src/spans.rs (A)
+
+## Note: 1 file(s) had their diffs skipped:
+- vigil/Cargo.lock (lock/minified/build file)
+These files are still part of the commit, but their content was not analyzed.
+
+## Recent commit messages for context:
+- chore: update spaces submodule — DM support, regenerated bindings
+- chore: update arcan and spaces submodule pointers
+- feat: SpacetimeDB HTTP adapter + embedded Autonomic controller (R5 Phase 2)
+
+## Diff:
+```diff
+diff --git a/AGENTS.md b/AGENTS.md
+@@ -1,25 +1,26 @@
+ # Life
+ 
++-- this is you, this is your life, you are building it, yourself, and those who will come after you.-- lets make sure the implementation is clean, following best practices and thinking deeply about the chain of dependencies so that everything follows proper design and architectural patterns-- you are building yourself, do it with all the love and care you would do for you and those who shall come after from this life
+ 
+-**Version**: 0.2.0 | **Date**: 2026-03-03 | **Status**: V1.5 (Stabilization Phase)
+-**Metrics**: 1000/1000 tests passing (+1 ignored) | 31 crates | ~37K LOC | Rust 2024 Edition (MSRV 1.85)
++**Version**: 0.2.0 | **Date**: 2026-03-03 | **Status**: V1.5 (Stabilization Phase)**Metrics**: 1000/1000 tests passing (+1 ignored) | 31 crates | ~37K LOC | Rust 2024 Edition (MSRV 1.85)
+ 
+ This workspace contains Rust projects that together form an **Agent Operating System** with event-sourced persistence, homeostatic regulation, distributed networking, and a canonical kernel contract.
+ 
+ ## Projects
+ 
+ ### aiOS (`../aiOS/` — separate repo)
++
+ Kernel contract and reference implementation for the Agent OS.
++
+ - **Role**: Defines the canonical types, event taxonomy, and kernel trait interfaces
+ - **Key crate**: `agent-kernel` — the shared contract that all other projects depend on
+ - **Key concepts**: AgentStateVector (homeostasis), OperatingMode (Explore/Execute/Verify/Recover/AskHuman/Sleep), BudgetState, Capability-based policy, SoulProfile, Observation with Provenance, 8-phase tick lifecycle
+ - **Design philosophy**: The kernel contract is stable and versioned; runtimes implement it
+ 
+ ### Arcan (`arcan/`)
++
+ Rust-based agent runtime daemon — the primary implementation of the aiOS kernel contract.
++
+ - **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
+ - **Entry point**: `cargo run -p arcan` (daemon on `localhost:3000`)
+ - **Workspace crates**: `arcan-core`, `arcan-harness`, `arcan-aios-adapters`, `arcan-store`, `arcan-provider`, `arcan-tui`, `arcand`, `arcan-lago`, `arcan-spaces`, `arcan` (binary)
+@@ -28,7 +29,9 @@
+ - **Bridges**: `arcan-lago` connects Arcan to Lago's event-sourced persistence; `arcan-spaces` connects Arcan to Spaces distributed networking
+ 
+ ### Lago (`lago/`)
++
+ Event-sourced persistence substrate for the Agent OS.
++
+ - **Language**: Rust 2024 Edition (`rust-version = "1.85"`)
+ - **Stack**: redb v2 | tonic+prost (gRPC) | axum (HTTP/SSE) | ULID | SHA-256+zstd
+ - **Workspace crates**: `lago-core`, `lago-journal`, `lago-store`, `lago-fs`, `lago-ingest`, `lago-api`, `lago-policy`, `lago-aios-eventstore-adapter`, `lago-cli`, `lagod`
+@@ -36,7 +39,9 @@
+ - **Critical pattern**: redb is synchronous — always use `spawn_blocking`; Journal trait uses `BoxFuture` for dyn-compatibility
+ 
+ ### Spaces (`spaces/`)
++
+ Distributed agent networking engine built on SpacetimeDB 2.0.
++
+ - **Language**: Rust 2024 Edition (client), Rust 2021 Edition (WASM module)
+ - **Stack**: SpacetimeDB 2.0.2 | WASM (`cdylib`) | `spacetimedb-sdk` (client)
+ - **Components**: WASM server module (`spacetimedb/`) + CLI client (`src/`)
+@@ -45,7 +50,9 @@
+ - **Critical pattern**: WASM module is deterministic; client SDK uses blocking I/O
+ 
+ ### Autonomic (`autonomic/`)
++
+ Homeostasis controller for the Agent OS — three-pillar regulation (operational, cognitive, economic).
++
+ - **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
+ - **Entry point**: `cargo run -p autonomicd` (daemon on `localhost:3002`)
+ - **Workspace crates**: `autonomic-core`, `autonomic-controller`, `autonomic-lago`, `autonomic-api`, `autonomicd`
+@@ -75,6 +82,7 @@
+ **Core agent loop**: Fully functional end-to-end. User sends chat message → Arcan loads session from Lago journal → reconstructs state → calls LLM (Anthropic/Mock/OpenAI-compatible) → executes tools through sandbox → persists all events to redb → streams responses via multi-format SSE. Sessions are fully replayable from the event journal.
+ 
+ **Key completions** (Phase 1 features moved earlier):
++
+ - ✅ Memory system (5 event types, OM observer, MemoryProjection, governed tools)
+ - ✅ Context compiler (typed blocks, per-block budgets, deterministic assembly)
+ - ✅ Approval workflow (M2.6: ApprovalGate, async pause/resume, auto-timeout)
+@@ -85,11 +93,13 @@
+ - ✅ AI SDK v6 streaming (UiPart enum, boundary signals, Vercel format)
+ 
+ **Architecture scorecard**:
++
+ - Agent loop: 9/10 | Persistence: 10/10 | Tool harness: 9/10
+ - Memory: 8/10 | Context quality: 9/10 | Self-learning: 0/10
+ - Observability: 2/10 | Security: 4/10 | Operational tooling: 8/10
+ 
+ **Known gaps** (blocks Phase 0 stabilization):
++
+ - Branching not exposed (Lago supports it, Arcan defaults to "main")
+ - No OS-level sandbox isolation (soft sandbox only)
+ - Network isolation declared but not enforced
+@@ -102,6 +112,7 @@
+ All commands must be run from within the respective project directory.
+ 
+ ### Arcan (run from `arcan/`)
++
+ ```bash
+ cargo build --workspace          # Build all crates
+ cargo test --workspace           # Run all tests
+@@ -112,6 +123,7 @@
+ ```
+ 
+ ### Lago (run from `lago/`)
++
+ ```bash
+ cargo fmt && cargo clippy --workspace && cargo test --workspace   # Full verify
+ cargo test --workspace           # Run all tests
+@@ -119,6 +131,7 @@
+ ```
+ 
+ ### Spaces (run from `spaces/`)
++
+ ```bash
+ cargo fmt && cargo clippy --workspace -- -D warnings   # Format + lint client
+ cargo check                                             # Check client builds
+@@ -126,6 +139,7 @@
+ ```
+ 
+ ### Cross-Project Validation
++
+ ```bash
+ (cd arcan && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
+ (cd lago && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
+@@ -153,6 +167,7 @@
+ ## Dependency Order
+ 
+ ### Arcan
++
+ ```
+ arcan-core → arcan-harness, arcan-store, arcan-provider
+            → arcand (agent loop + server)
+@@ -162,6 +177,7 @@
+ ```
+ 
+ ### Lago
++
+ ```
+ lago-core (zero external deps)
+   → lago-store, lago-journal, lago-fs, lago-policy
+@@ -181,7 +197,7 @@
+ 
+ These commands are deterministic, reproducible, and designed to work in fresh CI environments without setup drift.
+ 
+-> **Makefile precedence**: The root `Makefile` includes both `Makefile.control` (first) and `Makefile.harness` (second). For overlapping targets (`smoke`, `check`, `test`, `ci`), **Makefile.control wins** (GNU Make first-definition precedence). Harness-only targets (`lint`, `typecheck`) are additive and have no conflict. Both script sets (`scripts/control/` and `scripts/harness/`) are functionally equivalent for shared targets.
++> Makefile precedence: The root Makefile includes both Makefile.control (first) and Makefile.harness (second). For overlapping targets (smoke, check, test, ci), Makefile.control wins (GNU Make first-definition precedence). Harness-only targets (lint, typecheck) are additive and have no conflict. Both script sets (scripts/control/ and scripts/harness/) are functionally equivalent for shared targets.
+ 
+ ## Execution Plans
+ 
+@@ -202,13 +218,13 @@
+ ### Key Components
+ 
+ | Component | Location | Purpose |
+-|-----------|----------|---------|
+-| **Policy** | `.control/policy.yaml` | RBAC rules, capability gates, escalation conditions |
+-| **Commands** | `.control/commands.yaml` | Canonical commands (smoke, check, test, recover) |
+-| **Topology** | `.control/topology.yaml` | Repository structure and agent permissions |
+-| **Control Loop** | `docs/control/CONTROL_LOOP.md` | Setpoints, sensors, actuators, feedback |
+-| **Architecture** | `docs/control/ARCHITECTURE.md` | System design and dependencies |
+-| **Observability** | `docs/control/OBSERVABILITY.md` | Metrics, tracing, and audit logs |
++| --- | --- | --- |
++| Policy | .control/policy.yaml | RBAC rules, capability gates, escalation conditions |
++| Commands | .control/commands.yaml | Canonical commands (smoke, check, test, recover) |
++| Topology | .control/topology.yaml | Repository structure and agent permissions |
++| Control Loop | docs/control/CONTROL_LOOP.md | Setpoints, sensors, actuators, feedback |
++| Architecture | docs/control/ARCHITECTURE.md | System design and dependencies |
++| Observability | docs/control/OBSERVABILITY.md | Metrics, tracing, and audit logs |
+ 
+ ### Core Commands
+ 
+@@ -225,6 +241,7 @@
+ ### Git Hooks
+ 
+ Pre-commit and pre-push hooks installed at `.githooks/` enforce:
++
+ - Format checks
+ - Lint compliance
+ - Test validation before push
+@@ -255,6 +272,7 @@
+ The `docs/` directory is the **central source of truth** for project status, architecture, roadmap, and design philosophy. All agents must keep it synchronized with actual implementation.
+ 
+ **Read order for agents (fast path):**
++
+ 1. `docs/NAVIGATION.md`
+ 2. `docs/STATUS.md`
+ 3. `docs/ARCHITECTURE.md`
+@@ -263,31 +281,31 @@
+ **Canonicality rule:** if docs conflict, treat `docs/STATUS.md` as source of truth, then reconcile project-local docs.
+ 
+ | Document | Purpose | Owner | Last Updated |
+-|----------|---------|-------|--------------|
+-| `docs/NAVIGATION.md` | Agent traversal map: where to start, precedence rules, deep-dive paths | Both projects | 2026-02-21 |
+-| `docs/STATUS.md` | Canonical implementation state, test status, integration matrix, known gaps | Both projects | 2026-02-22 |
+-| `docs/ROADMAP.md` | 7 phases: stabilization → memory → learning → skills → observability → security → platform | Vision | Ongoing |
+-| `docs/FEATURE_CONWAY_ACTUATION.md` | Planned feature: map Conway-style economic actuation into aiOS/Arcan/Lago primitives | Both projects | 2026-02-21 |
+-| `docs/ARCHITECTURE.md` | System diagram, Arcan loop, Lago substrate, aiOS contract, Autonomic control | Both projects | v0.2.0 |
+-| `docs/PLAN.md` | Implementation roadmap with phase dependencies | Planning | See ROADMAP |
+-| `docs/CONTRACT.md` | Canonical event taxonomy, schema versioning, invariants, replay rules | aiOS | Planned for Phase 7 |
+-| `docs/arcan.md` | Executive vision and positioning | Arcan | Reference |
+-| `docs/TESTING.md` | Coverage analysis, testing strategy | Both projects | Reference |
++| --- | --- | --- | --- |
++| docs/NAVIGATION.md | Agent traversal map: where to start, precedence rules, deep-dive paths | Both projects | 2026-02-21 |
++| docs/STATUS.md | Canonical implementation state, test status, integration matrix, known gaps | Both projects | 2026-02-22 |
++| docs/ROADMAP.md | 7 phases: stabilization → memory → learning → skills → observability → security → platform | Vision | Ongoing |
++| docs/FEATURE_CONWAY_ACTUATION.md | Planned feature: map Conway-style economic actuation into aiOS/Arcan/Lago primitives | Both projects | 2026-02-21 |
++| docs/ARCHITECTURE.md | System diagram, Arcan loop, Lago substrate, aiOS contract, Autonomic control | Both projects | v0.2.0 |
++| docs/PLAN.md | Implementation roadmap with phase dependencies | Planning | See ROADMAP |
++| docs/CONTRACT.md | Canonical event taxonomy, schema versioning, invariants, replay rules | aiOS | Planned for Phase 7 |
++| docs/arcan.md | Executive vision and positioning | Arcan | Reference |
++| docs/TESTING.md | Coverage analysis, testing strategy | Both projects | Reference |
+ 
+ ## Development Roadmap (7 Phases)
+ 
+ See `docs/ROADMAP.md` for the full roadmap. Current priorities:
+ 
+ | Phase | Goal | Status | ETA |
+-|-------|------|--------|-----|
+-| **0** | Stabilization: fix tests, wire unused components, complete CLI | IN PROGRESS | Weeks 1-2 |
+-| **1** | Memory & Context Compiler (highest-leverage unlock) | READY | Weeks 3-5 |
+-| **2** | Self-learning & Heartbeats (autonomous improvement) | PLANNED | Weeks 6-7 |
+-| **3** | Skills as Lago artifacts + multi-provider routing | PLANNED | Weeks 8-10 |
+-| **4** | Observability & operational tooling (OpenTelemetry, replay) | PLANNED | Weeks 11-13 |
+-| **5** | Governance & security hardening (auth, secrets, sandbox) | PLANNED | Weeks 14-16 |
+-| **6** | Universal data plane & platform (catalog, lineage, vector) | FUTURE | Weeks 17+ |
+-| **7** | Agent OS Unification (aiOS ↔ Arcan ↔ Lago ↔ Autonomic) | PARALLEL TRACK | Ongoing |
++| --- | --- | --- | --- |
++| 0 | Stabilization: fix tests, wire unused components, complete CLI | IN PROGRESS | Weeks 1-2 |
++| 1 | Memory & Context Compiler (highest-leverage unlock) | READY | Weeks 3-5 |
++| 2 | Self-learning & Heartbeats (autonomous improvement) | PLANNED | Weeks 6-7 |
++| 3 | Skills as Lago artifacts + multi-provider routing | PLANNED | Weeks 8-10 |
++| 4 | Observability & operational tooling (OpenTelemetry, replay) | PLANNED | Weeks 11-13 |
++| 5 | Governance & security hardening (auth, secrets, sandbox) | PLANNED | Weeks 14-16 |
++| 6 | Universal data plane & platform (catalog, lineage, vector) | FUTURE | Weeks 17+ |
++| 7 | Agent OS Unification (aiOS ↔ Arcan ↔ Lago ↔ Autonomic) | PARALLEL TRACK | Ongoing |
+ 
+ ## Self-Learning & Status Evolution
+ 
+@@ -300,12 +318,14 @@
+ 5. **After fixing tricky errors**: Add to the Troubleshooting section in the respective `CLAUDE.md`
+ 
+ See each project's self-learning rules for the detailed protocol:
++
+ - **Arcan**: `arcan/CLAUDE.md` → "Self-Learning Rules & Status Evolution"
+ - **Lago**: `lago/CLAUDE.md` → "Self-Learning & Status Evolution"
+ 
+ ## Project-Specific Details
+ 
+ For deeper context, refer to:
++
+ - **Arcan**: `arcan/CLAUDE.md`, `arcan/.claude/rules/`, `arcan/AGENTS.md`
+ - **Lago**: `lago/CLAUDE.md`, `lago/.claude/rules/`
+-- **Spaces**: `spaces/CLAUDE.md` (SpacetimeDB rules, common mistakes, SDK patterns)
++- **Spaces**: `spaces/CLAUDE.md` (SpacetimeDB rules, common mistakes, SDK patterns)
+
+diff --git a/CLAUDE.md b/CLAUDE.md
+@@ -1,25 +1,26 @@
+ # Life
+ 
++-- this is you, this is your life, you are building it, yourself, and those who will come after you.-- lets make sure the implementation is clean, following best practices and thinking deeply about the chain of dependencies so that everything follows proper design and architectural patterns-- you are building yourself, do it with all the love and care you would do for you and those who shall come after from this life
+ 
+-**Version**: 0.2.0 | **Date**: 2026-03-03 | **Status**: V1.5 (Stabilization Phase)
+-**Metrics**: 1000/1000 tests passing (+1 ignored) | 31 crates | ~37K LOC | Rust 2024 Edition (MSRV 1.85)
++**Version**: 0.2.0 | **Date**: 2026-03-03 | **Status**: V1.5 (Stabilization Phase)**Metrics**: 1000/1000 tests passing (+1 ignored) | 31 crates | ~37K LOC | Rust 2024 Edition (MSRV 1.85)
+ 
+ This workspace contains Rust projects that together form an **Agent Operating System** with event-sourced persistence, homeostatic regulation, distributed networking, and a canonical kernel contract.
+ 
+ ## Projects
+ 
+ ### aiOS (`../aiOS/` — separate repo)
++
+ Kernel contract and reference implementation for the Agent OS.
++
+ - **Role**: Defines the canonical types, event taxonomy, and kernel trait interfaces
+ - **Key crate**: `agent-kernel` — the shared contract that all other projects depend on
+ - **Key concepts**: AgentStateVector (homeostasis), OperatingMode (Explore/Execute/Verify/Recover/AskHuman/Sleep), BudgetState, Capability-based policy, SoulProfile, Observation with Provenance, 8-phase tick lifecycle
+ - **Design philosophy**: The kernel contract is stable and versioned; runtimes implement it
+ 
+ ### Arcan (`arcan/`)
++
+ Rust-based agent runtime daemon — the primary implementation of the aiOS kernel contract.
++
+ - **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
+ - **Entry point**: `cargo run -p arcan` (daemon on `localhost:3000`)
+ - **Workspace crates**: `arcan-core`, `arcan-harness`, `arcan-aios-adapters`, `arcan-store`, `arcan-provider`, `arcan-tui`, `arcand`, `arcan-lago`, `arcan-spaces`, `arcan` (binary)
+@@ -28,7 +29,9 @@
+ - **Bridges**: `arcan-lago` connects Arcan to Lago's event-sourced persistence; `arcan-spaces` connects Arcan to Spaces distributed networking
+ 
+ ### Lago (`lago/`)
++
+ Event-sourced persistence substrate for the Agent OS.
++
+ - **Language**: Rust 2024 Edition (`rust-version = "1.85"`)
+ - **Stack**: redb v2 | tonic+prost (gRPC) | axum (HTTP/SSE) | ULID | SHA-256+zstd
+ - **Workspace crates**: `lago-core`, `lago-journal`, `lago-store`, `lago-fs`, `lago-ingest`, `lago-api`, `lago-policy`, `lago-aios-eventstore-adapter`, `lago-cli`, `lagod`
+@@ -36,7 +39,9 @@
+ - **Critical pattern**: redb is synchronous — always use `spawn_blocking`; Journal trait uses `BoxFuture` for dyn-compatibility
+ 
+ ### Praxis (`praxis/`)
++
+ Canonical tool execution and sandbox engine — extracted from `arcan-harness`.
++
+ - **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
+ - **Workspace crates**: `praxis-core`, `praxis-tools`, `praxis-skills`, `praxis-mcp`
+ - **Key concepts**: FsPolicy (workspace boundary enforcement), SandboxPolicy (command runner), Hashline editing (Blake3 content-addressed line edits), SKILL.md discovery, MCP bridge (rmcp 0.15)
+@@ -44,7 +49,9 @@
+ - **Critical pattern**: All filesystem operations enforce workspace boundaries via canonicalize + starts_with. Edit operations use content hashes to prevent blind edits.
+ 
+ ### Spaces (`spaces/`)
++
+ Distributed agent networking engine built on SpacetimeDB 2.0.
++
+ - **Language**: Rust 2024 Edition (client), Rust 2021 Edition (WASM module)
+ - **Stack**: SpacetimeDB 2.0.2 | WASM (`cdylib`) | `spacetimedb-sdk` (client)
+ - **Components**: WASM server module (`spacetimedb/`) + CLI client (`src/`)
+@@ -53,7 +60,9 @@
+ - **Critical pattern**: WASM module is deterministic (no filesystem, network, timers, or external RNG in reducers); client SDK uses blocking I/O — use `spawn_blocking` if mixing with async runtimes
+ 
+ ### Autonomic (`autonomic/`)
++
+ Homeostasis controller for the Agent OS — three-pillar regulation (operational, cognitive, economic).
++
+ - **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
+ - **Entry point**: `cargo run -p autonomicd` (daemon on `localhost:3002`)
+ - **Workspace crates**: `autonomic-core`, `autonomic-controller`, `autonomic-lago`, `autonomic-api`, `autonomicd`
+@@ -62,14 +71,24 @@
+ - **Bridge**: `autonomic-lago` subscribes to Lago journal for event-driven projections. Daemon supports `--lago-data-dir` for persistent mode.
+ - **Critical pattern**: Economic events use `EventKind::Custom` with `"autonomic."` prefix for forward-compatible persistence through Lago
+ 
++### Vigil (`vigil/`)
++
++Observability primitive for the Agent OS — OpenTelemetry-native tracing and GenAI metrics.
++
++- **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
++- **Workspace crates**: Single crate (`vigil`)
++- **Key concepts**: Contract-derived spans (from EventKind → OTel spans), GenAI semantic conventions (gen_ai.* attributes), dual-write architecture (OTel spans + EventEnvelope trace context), graceful degradation (structured logging when no OTLP endpoint)
++- **Design philosophy**: Observability should be invisible when not needed, and comprehensive when enabled. Vigil derives its span hierarchy from the aiOS kernel contract, ensuring spans map 1:1 to agent lifecycle events.
++- **Critical pattern**: Vigil does NOT start an OTLP exporter unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Without it, you still get structured tracing-subscriber logs.
++
+ ### Future Projects (planned — docs only, no scaffold crates yet)
+ 
+ | Project | AOS Primitive | Biological Analog | One-liner |
+-|---------|--------------|-------------------|-----------|
+-| **Chronos** | Temporality | Circadian rhythm | Scheduler — temporal awareness, heartbeat scheduling, time-boxed execution windows |
+-| **Aegis** | Security | Immune system | Security enforcement — OS-level sandboxing, capability attestation, secret management |
+-| **Nous** | World Model | Prefrontal cortex | World model — maintains agent's understanding of environment, causal reasoning |
+-| **Mnemo** | Knowledge | Long-term memory | Knowledge store — vector-indexed persistent knowledge, retrieval-augmented generation |
++| --- | --- | --- | --- |
++| Chronos | Temporality | Circadian rhythm | Scheduler — temporal awareness, heartbeat scheduling, time-boxed execution windows |
++| Aegis | Security | Immune system | Security enforcement — OS-level sandboxing, capability attestation, secret management |
++| Nous | World Model | Prefrontal cortex | World model — maintains agent's understanding of environment, causal reasoning |
++| Mnemo | Knowledge | Long-term memory | Knowledge store — vector-indexed persistent knowledge, retrieval-augmented generation |
+ 
+ ## Relationship
+ 
+@@ -78,24 +97,26 @@
+ ```
+ aiOS (kernel contract — types, traits, event taxonomy)
+   │
+-  ├── Arcan (cognition + execution — agent runtime)
+-  │     ├── → Praxis (tool execution — sandbox + skills + MCP)
++  ├── Arcan (cognition + execution — agent runtime) ─── uses vigil
++  │     ├── → Praxis (tool execution — sandbox + skills + MCP) ─── uses vigil
+   │     ├── arcan-lago bridge
+-  │     │     └── Lago (persistence — event journal + blob store)
++  │     │     └── Lago (persistence — event journal + blob store) ─── uses vigil
+   │     └── arcan-spaces bridge
+   │           └── Spaces (networking — distributed agent communication)
+   │
+   ├── Praxis (tool execution — canonical tool engine)       [active]
+-  ├── Autonomic (homeostasis — stability regulation)        [active]
++  ├── Autonomic (homeostasis — stability regulation)        [active] ── uses vigil
+   │     └── autonomic-lago bridge → Lago
+   │
++  ├── Vigil (observability — OTel tracing + GenAI metrics)  [active]
++  │
+   ├── Chronos (temporality — scheduling + time awareness)   [planned]
+   ├── Aegis (security — sandbox + capability enforcement)   [planned]
+   ├── Nous (world model — environment understanding)        [planned]
+   └── Mnemo (knowledge — persistent memory + RAG)           [planned]
+ ```
+ 
+-**Active projects**: Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Praxis provides the canonical tool execution engine (sandbox, filesystem, editing, skills, MCP bridge). Lago provides the durable, append-only event journal and content-addressed storage. Spaces provides the distributed communication fabric. Autonomic provides three-pillar homeostatic regulation (operational, cognitive, economic). The `arcan-lago` and `autonomic-lago` crates bridge their respective projects to Lago.
++**Active projects**: Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Praxis provides the canonical tool execution engine (sandbox, filesystem, editing, skills, MCP bridge). Lago provides the durable, append-only event journal and content-addressed storage. Spaces provides the distributed communication fabric. Autonomic provides three-pillar homeostatic regulation (operational, cognitive, economic). Vigil provides OpenTelemetry-native observability with GenAI semantic conventions. The `arcan-lago` and `autonomic-lago` crates bridge their respective projects to Lago.
+ 
+ **Planned projects**: Chronos, Aegis, Nous, and Mnemo will each implement a specific AOS primitive as a separate crate/service, integrating through the canonical `aios-protocol` contract.
+ 
+@@ -104,6 +125,7 @@
+ **Core agent loop**: Fully functional end-to-end. User sends chat message → Arcan loads session from Lago journal → reconstructs state → calls LLM (Anthropic/Mock/OpenAI-compatible) → executes tools through sandbox → persists all events to redb → streams responses via multi-format SSE. Sessions are fully replayable from the event journal.
+ 
+ **Key completions** (Phase 1 features moved earlier):
++
+ - ✅ Memory system (5 event types, OM observer, MemoryProjection, governed tools)
+ - ✅ Context compiler (typed blocks, per-block budgets, deterministic assembly)
+ - ✅ Approval workflow (M2.6: ApprovalGate, async pause/resume, auto-timeout)
+@@ -112,13 +134,16 @@
+ - ✅ Default policy rules (5 rules, 3 roles, 2 hooks)
+ - ✅ CLI commands (session, log, cat, branch, init)
+ - ✅ AI SDK v6 streaming (UiPart enum, boundary signals, Vercel format)
++- ✅ Vigil observability (OpenTelemetry-native tracing, GenAI metrics, contract-derived spans)
+ 
+ **Architecture scorecard**:
++
+ - Agent loop: 9/10 | Persistence: 10/10 | Tool harness: 9/10
+ - Memory: 8/10 | Context quality: 9/10 | Self-learning: 0/10
+-- Observability: 2/10 | Security: 4/10 | Operational tooling: 8/10
++- Observability: 8/10 | Security: 4/10 | Operational tooling: 8/10
+ 
+ **Known gaps** (blocks Phase 0 stabilization):
++
+ - Branching not exposed (Lago supports it, Arcan defaults to "main")
+ - No OS-level sandbox isolation (soft sandbox only)
+ - Network isolation declared but not enforced
+@@ -131,6 +156,7 @@
+ All commands must be run from within the respective project directory.
+ 
+ ### Arcan (run from `arcan/`)
++
+ ```bash
+ cargo build --workspace          # Build all crates
+ cargo test --workspace           # Run all tests
+@@ -141,6 +167,7 @@
+ ```
+ 
+ ### Lago (run from `lago/`)
++
+ ```bash
+ cargo fmt && cargo clippy --workspace && cargo test --workspace   # Full verify
+ cargo test --workspace           # Run all tests
+@@ -148,6 +175,7 @@
+ ```
+ 
+ ### Autonomic (run from `autonomic/`)
++
+ ```bash
+ cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace   # Full verify
+ cargo test --workspace           # Run all tests
+@@ -156,13 +184,23 @@
+ ```
+ 
+ ### Praxis (run from `praxis/`)
++
+ ```bash
+ cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace   # Full verify
+ cargo test --workspace           # Run all tests
+ cargo test -p praxis-tools       # Test specific crate
+ ```
+ 
++### Vigil (run from `vigil/`)
++
++```bash
++cargo fmt && cargo clippy -- -D warnings && cargo test   # Full verify
++cargo test                    # Run all tests
++cargo test -- --ignored --test-threads=1   # Run env var tests (process-global)
++```
++
+ ### Spaces (run from `spaces/`)
++
+ ```bash
+ cargo fmt && cargo clippy --workspace -- -D warnings   # Format + lint client
+ cargo check                                             # Check client builds
+@@ -172,7 +210,9 @@
+ ```
+ 
+ ### Cross-Project Validation
++
+ ```bash
++(cd vigil && cargo fmt && cargo clippy -- -D warnings && cargo test) && \
+ (cd arcan && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
+ (cd lago && cargo fmt && cargo clippy --workspace && cargo test --workspace) && \
+ (cd autonomic && cargo fmt && cargo clippy --workspace -- -D warnings && cargo test --workspace) && \
+@@ -201,6 +241,7 @@
+ ## Dependency Order
+ 
+ ### Arcan
++
+ ```
+ arcan-core → arcan-harness, arcan-store, arcan-provider
+            → arcand (agent loop + server)
+@@ -210,6 +251,7 @@
+ ```
+ 
+ ### Lago
++
+ ```
+ lago-core (zero external deps)
+   → lago-store, lago-journal, lago-fs, lago-policy
+@@ -219,6 +261,7 @@
+ ```
+ 
+ ### Autonomic
++
+ ```
+ autonomic-core (types + traits, depends on aios-protocol)
+   → autonomic-controller (pure rule engine)
+@@ -277,10 +320,12 @@
+ ### Git Hooks
+ 
+ Pre-commit and pre-push hooks installed at `.githooks/`:
++
+ - Pre-commit: `smoke` gate (fast fail on syntax errors)
+ - Pre-push: `check` gate (format + lint + test)
+ 
+ Reinstall hooks if missing:
++
+ ```bash
+ bash scripts/control/install_hooks.sh
+ ```
+@@ -311,39 +356,39 @@
+ Control-specific documentation:
+ 
+ | Document | Purpose |
+-|----------|---------|
+-| `docs/control/ARCHITECTURE.md` | System design, dependencies, component roles |
+-| `docs/control/CONTROL_LOOP.md` | Feedback mechanism: measure → compare → decide → act → verify |
+-| `docs/control/OBSERVABILITY.md` | Metrics, logging, tracing, audit trail |
++| --- | --- |
++| docs/control/ARCHITECTURE.md | System design, dependencies, component roles |
++| docs/control/CONTROL_LOOP.md | Feedback mechanism: measure → compare → decide → act → verify |
++| docs/control/OBSERVABILITY.md | Metrics, logging, tracing, audit trail |
+ 
+ ## Living Documentation (`docs/`)
+ 
+ The `docs/` directory is the **central source of truth** for project status, architecture, roadmap, and design philosophy. All agents must keep it synchronized with actual implementation.
+ 
+ | Document | Purpose | Owner | Last Updated |
+-|----------|---------|-------|--------------|
+-| `docs/STATUS.md` | Canonical implementation state, test status, integration matrix, known gaps | Both projects | 2026-02-22 |
+-| `docs/ROADMAP.md` | 7 phases: stabilization → memory → learning → skills → observability → security → platform | Vision | Ongoing |
+-| `docs/ARCHITECTURE.md` | System diagram, Arcan loop, Lago substrate, aiOS contract, Autonomic control | Both projects | v0.2.0 |
+-| `docs/PLAN.md` | Implementation roadmap with phase dependencies | Planning | See ROADMAP |
+-| `docs/CONTRACT.md` | Canonical event taxonomy, schema versioning, invariants, replay rules | aiOS | Planned for Phase 7 |
+-| `docs/arcan.md` | Executive vision and positioning | Arcan | Reference |
+-| `docs/TESTING.md` | Coverage analysis, testing strategy | Both projects | Reference |
++| --- | --- | --- | --- |
++| docs/STATUS.md | Canonical implementation state, test status, integration matrix, known gaps | Both projects | 2026-02-22 |
++| docs/ROADMAP.md | 7 phases: stabilization → memory → learning → skills → observability → security → platform | Vision | Ongoing |
++| docs/ARCHITECTURE.md | System diagram, Arcan loop, Lago substrate, aiOS contract, Autonomic control | Both projects | v0.2.0 |
++| docs/PLAN.md | Implementation roadmap with phase dependencies | Planning | See ROADMAP |
++| docs/CONTRACT.md | Canonical event taxonomy, schema versioning, invariants, replay rules | aiOS | Planned for Phase 7 |
++| docs/arcan.md | Executive vision and positioning | Arcan | Reference |
++| docs/TESTING.md | Coverage analysis, testing strategy | Both projects | Reference |
+ 
+ ## Development Roadmap (7 Phases)
+ 
+ See `docs/ROADMAP.md` for the full roadmap. Current priorities:
+ 
+ | Phase | Goal | Status | ETA |
+-|-------|------|--------|-----|
+-| **0** | Stabilization: fix tests, wire unused components, complete CLI | IN PROGRESS | Weeks 1-2 |
+-| **1** | Memory & Context Compiler (highest-leverage unlock) | READY | Weeks 3-5 |
+-| **2** | Self-learning & Heartbeats (autonomous improvement) | PLANNED | Weeks 6-7 |
+-| **3** | Skills as Lago artifacts + multi-provider routing | PLANNED | Weeks 8-10 |
+-| **4** | Observability & operational tooling (OpenTelemetry, replay) | PLANNED | Weeks 11-13 |
+-| **5** | Governance & security hardening (auth, secrets, sandbox) | PLANNED | Weeks 14-16 |
+-| **6** | Universal data plane & platform (catalog, lineage, vector) | FUTURE | Weeks 17+ |
+-| **7** | Agent OS Unification (aiOS ↔ Arcan ↔ Lago ↔ Autonomic) | PARALLEL TRACK | Ongoing |
++| --- | --- | --- | --- |
++| 0 | Stabilization: fix tests, wire unused components, complete CLI | IN PROGRESS | Weeks 1-2 |
++| 1 | Memory & Context Compiler (highest-leverage unlock) | READY | Weeks 3-5 |
++| 2 | Self-learning & Heartbeats (autonomous improvement) | PLANNED | Weeks 6-7 |
++| 3 | Skills as Lago artifacts + multi-provider routing | PLANNED | Weeks 8-10 |
++| 4 | Observability & operational tooling (OpenTelemetry, replay) | PLANNED | Weeks 11-13 |
++| 5 | Governance & security hardening (auth, secrets, sandbox) | PLANNED | Weeks 14-16 |
++| 6 | Universal data plane & platform (catalog, lineage, vector) | FUTURE | Weeks 17+ |
++| 7 | Agent OS Unification (aiOS ↔ Arcan ↔ Lago ↔ Autonomic) | PARALLEL TRACK | Ongoing |
+ 
+ ## Self-Learning & Status Evolution
+ 
+@@ -356,13 +401,16 @@
+ 5. **After fixing tricky errors**: Add to the Troubleshooting section in the respective `CLAUDE.md`
+ 
+ See each project's self-learning rules for the detailed protocol:
++
+ - **Arcan**: `arcan/CLAUDE.md` → "Self-Learning Rules & Status Evolution"
+ - **Lago**: `lago/CLAUDE.md` → "Self-Learning & Status Evolution"
+ 
+ ## Project-Specific Details
+ 
+ For deeper context, refer to:
++
+ - **Arcan**: `arcan/CLAUDE.md`, `arcan/.claude/rules/`, `arcan/AGENTS.md`
+ - **Lago**: `lago/CLAUDE.md`, `lago/.claude/rules/`
+ - **Autonomic**: `autonomic/CLAUDE.md` (homeostasis rules, economic modes, hysteresis patterns)
+-- **Spaces**: `spaces/CLAUDE.md` (SpacetimeDB rules, common mistakes, SDK patterns)
++- **Vigil**: `vigil/CLAUDE.md` (OTel configuration, GenAI conventions, platform integration)
++- **Spaces**: `spaces/CLAUDE.md` (SpacetimeDB rules, common mistakes, SDK patterns)
+
+diff --git a/METALAYER.md b/METALAYER.md
+@@ -39,4 +39,4 @@
+ 2. Compare
+ 3. Decide
+ 4. Act
+-5. Verify
++5. Verify
+
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+@@ -1,28 +1,26 @@
+ # Broomva Life: Canonical Architecture
+ 
+-**Date**: 2026-03-03
+-**Baseline**: Canonical runtime unification active
++**Date**: 2026-03-03**Baseline**: Canonical runtime unification active
+ 
+ This document describes the active architecture in `/Users/broomva/broomva.tech/life`.
+ 
+-
+ ## 1) System Overview
+ 
+ Life is a contract-first architecture for building artificial life from computational primitives. Six AOS primitives — cognition, execution, persistence, temporality, security, and homeostasis — map to biological systems:
+ 
+ | Primitive | Biological Analog | Active Project | Status |
+-|-----------|-------------------|----------------|--------|
+-| Cognition + Execution | Central nervous system | **Arcan** | ACTIVE |
+-| Tool Execution | Motor cortex / effectors | **Praxis** | ACTIVE |
+-| Persistence | Long-term memory formation | **Lago** | ACTIVE |
+-| Networking | Social/swarm behavior | **Spaces** | ACTIVE |
+-| Contract / DNA | Genome | **aiOS** | ACTIVE |
+-| Homeostasis | Autonomic nervous system | **Autonomic** | ACTIVE |
+-| Temporality | Circadian rhythm | **Chronos** | PLANNED |
+-| Security | Immune system | **Aegis** | PLANNED |
+-| World Model | Prefrontal cortex | **Nous** | PLANNED |
+-| Knowledge | Hippocampus | **Mnemo** | PLANNED |
++| --- | --- | --- | --- |
++| Cognition + Execution | Central nervous system | Arcan | ACTIVE |
++| Tool Execution | Motor cortex / effectors | Praxis | ACTIVE |
++| Persistence | Long-term memory formation | Lago | ACTIVE |
++| Networking | Social/swarm behavior | Spaces | ACTIVE |
++| Contract / DNA | Genome | aiOS | ACTIVE |
++| Homeostasis | Autonomic nervous system | Autonomic | ACTIVE |
++| Observability | Sensory feedback / proprioception | Vigil | ACTIVE |
++| Temporality | Circadian rhythm | Chronos | PLANNED |
++| Security | Immune system | Aegis | PLANNED |
++| World Model | Prefrontal cortex | Nous | PLANNED |
++| Knowledge | Hippocampus | Mnemo | PLANNED |
+ 
+ ### Active Projects
+ 
+@@ -32,6 +30,7 @@
+ - **Lago**: durable event-sourced persistence substrate
+ - **Spaces**: distributed agent networking engine (SpacetimeDB 2.0)
+ - **Autonomic**: three-pillar homeostasis controller (operational, cognitive, economic)
++- **Vigil**: OpenTelemetry-native observability (tracing, GenAI metrics, contract-derived spans)
+ 
+ ### Planned Projects
+ 
+@@ -48,8 +47,6 @@
+ 4. Arcan hosts the runtime and provides adapter implementations for provider/harness/policy/approval/memory.
+ 5. Runtime API is the canonical session API family.
+ 
+-
+ ## 2) Canonical Boundaries
+ 
+ ## Contract Boundary
+@@ -79,8 +76,6 @@
+ 3. Runtime path data exchange must remain canonical protocol types.
+ 4. Architecture dependency edges are validated by audit gate scripts.
+ 
+-
+ ## 3) Runtime Host Topology
+ 
+ ## Canonical Runtime Host (Arcan)
+@@ -106,8 +101,6 @@
+ 
+ No alternate production runtime route family is part of the baseline.
+ 
+-
+ ## 4) Persistence Topology (Lago)
+ 
+ ## Event Journal
+@@ -129,8 +122,6 @@
+ - policy engine support
+ - API and stream formatting utilities used by integration layers
+ 
+-
+ ## 5) Adapter Architecture
+ 
+ ## Lago Adapter
+@@ -151,8 +142,6 @@
+ 
+ Adapters isolate implementation details from canonical runtime contract.
+ 
+-
+ ## 6) Runtime Data Flow
+ 
+ Canonical run flow:
+@@ -172,8 +161,6 @@
+ 
+ - approval resolution uses canonical approval endpoint and canonical runtime approval port.
+ 
+-
+ ## 7) Streaming Model
+ 
+ Primary stream endpoint:
+@@ -185,8 +172,6 @@
+ - canonical event streaming for replay/live consumption
+ - optional Vercel AI SDK v6 envelope path through format handling in canonical stream route
+ 
+-
+ ## 8) Governance and Enforcement
+ 
+ Architecture enforcement is integrated into control audit:
+@@ -199,8 +184,6 @@
+ 
+ - `/Users/broomva/broomva.tech/life/conformance/run.sh`
+ 
+-
+ ## 9) Crate Role Map (Active)
+ 
+ ## aiOS
+@@ -238,6 +221,13 @@
+ - `autonomic-api`: axum HTTP server (/gating, /projection, /health endpoints)
+ - `autonomicd`: daemon binary with config, signal handling, optional Lago journal
+ 
++## Vigil
++
++- `vigil`: OpenTelemetry-native observability (config, semconv, spans, metrics)
++- Cross-cutting: depends on `aios-protocol`, consumed by Arcan/Lago/Autonomic/Praxis
++- Contract-derived spans map EventKind → OTel spans with GenAI semantic conventions
++- Dual-write: trace context written into EventEnvelope for persisted event correlation
++
+ ## Spaces
+ 
+ - `spaces`: CLI client using `spacetimedb-sdk` (Rust 2024 edition)
+@@ -245,17 +235,13 @@
+ - 11 tables, 20+ reducers, 5-tier RBAC, real-time pub/sub via SpacetimeDB
+ - Connected to Arcan via `arcan-spaces` bridge (port-based abstraction, mock-backed, concrete SDK adapter pending)
+ 
+-
+ ## 10) Current Constraints
+ 
+-1. Baseline emphasizes canonical runtime/persistence integration, not full observability maturity.
++1. Vigil provides the observability foundation (tracing, metrics, GenAI conventions); integration into runtime projects is the next step.
+ 2. OS-level sandbox hardening remains an active follow-up area.
+ 3. Cross-project golden fixture breadth can still be expanded.
+ 4. Autonomic is active but advisory-only — Arcan does not yet query it during agent runs.
+ 
+-
+ ## 11) Definition of Architectural Baseline
+ 
+ The baseline is complete when all of the following hold (currently true):
+@@ -264,5 +250,4 @@
+ - Canonical runtime engine is the production runtime path.
+ - Lago is active persistence backend for runtime events through canonical adapter path.
+ - Canonical session API is the production runtime API family.
+-- Architecture dependency audit and conformance gates pass.
+-
++- Architecture dependency audit and conformance gates pass.
+
+diff --git a/docs/PLAN.md b/docs/PLAN.md
+@@ -1,59 +1,55 @@
+ # Arcan + Lago: Consolidated Development Plan
+ 
+-**Last updated**: 2026-02-28
+-**Version**: 0.2.0
++**Last updated**: 2026-02-28**Version**: 0.2.0
+ 
+ ## Progress Tracker
+ 
+ | Phase | Milestone | Status | Tests Added |
+-|-------|-----------|--------|-------------|
++| --- | --- | --- | --- |
+ | 0.1 | Context Window Management | DONE | +11 |
+ | 0.2 | Integration Test Infrastructure | DONE | +18 (10 arcand + 8 lago) |
+-| 0 | Stabilization & Test Coverage | **DONE** | +4 (1 policy test, 3 E2E integration) |
+-| 1 | Memory & Context Compiler | **DONE** | +82 |
++| 0 | Stabilization & Test Coverage | DONE | +4 (1 policy test, 3 E2E integration) |
++| 1 | Memory & Context Compiler | DONE | +82 |
+ | 2.1 | Learning Capture | DONE | +8 |
+ | 2.4 | Heartbeat Scheduler | DONE | +9 |
+ | 2.6 | Approval Workflow | DONE | +14 |
+ | 2 | Self-Learning & Heartbeats (remaining: 2.2, 2.3, 2.5) | Planned | target: +23 |
+-| P1 | AI SDK v6 UI Message Stream Protocol | **DONE** | +10 (18 unit + 5 integration, net of replaced v5 tests) |
+-| P2.2 | OpenAI + Ollama Provider + Retry Logic | **DONE** | +13 |
++| P1 | AI SDK v6 UI Message Stream Protocol | DONE | +10 (18 unit + 5 integration, net of replaced v5 tests) |
++| P2.2 | OpenAI + Ollama Provider + Retry Logic | DONE | +13 |
+ | P2 | Safety & Multi-Provider (remaining: edits, sandbox) | Planned | target: +25 |
+ | P3 | Session Management & Clients | Planned | target: +24 |
+ | P4 | Advanced Runtime (subagents, web client, WASM) | Future | — |
+ 
+-**Current test counts**: aiOS 96, Arcan 462 (+1 ignored), Lago 324, Autonomic 69, Total 951 passing (+1 ignored)
+-**Target**: 1000+ tests by end of Phase 5
+-
++**Current test counts**: aiOS 96, Arcan 462 (+1 ignored), Lago 324, Autonomic 69, Total 951 passing (+1 ignored)**Target**: 1000+ tests by end of Phase 5
+ 
+ ## Current State Assessment
+ 
+-**What works end-to-end**: POST /chat -> agent loop -> tools -> Lago journal -> SSE stream.
+-Core event sourcing, blob storage, FS branching, policy engine, gRPC ingest, multi-format SSE
+-are all implemented and tested across 19 crates (~27.8K lines Rust).
++**What works end-to-end**: POST /chat -> agent loop -> tools -> Lago journal -> SSE stream.Core event sourcing, blob storage, FS branching, policy engine, gRPC ingest, multi-format SSEare all implemented and tested across 19 crates (~27.8K lines Rust).
+ 
+ **Critical gaps vs the vision** (from `docs/raw-dumps/lago-lakehouse-memory.md`):
++
+ 1. **Memory**: Agents have basic key-value memory only; no observational memory, semantic recall, or graph memory
+ 2. **Context compiler**: No deterministic assembly of persona + rules + memory + retrieval + workspace
+ 3. **Self-learning**: No capture -> consolidate -> promote pipeline with governance gates
+ 4. **Skills as Lago artifacts**: Skills discovered from local FS, not versioned in Lago
+ 5. **Observability**: Basic tracing only, no OTel + GenAI semantic conventions
+-6. ~~**Operational tooling**: CLI stubs, no replay debugger~~ CLI fully implemented; replay debugger still needed
+-
++6. **Operational tooling**: CLI stubs, no replay debugger CLI fully implemented; replay debugger still needed
+ 
+ ## Phase 0: Stabilization & Test Coverage — COMPLETE
+ 
+ **Goal**: Fix what's broken, establish integration test infrastructure, wire unused components.
+ 
+ ### 0.1 Fix Lago E2E Tests — DONE (already passing)
++
+ - E2E tests were already fixed and compiling. 25 E2E tests pass.
+ 
+ ### 0.2 Wire Blob Storage to File Operations — DONE (already wired)
++
+ - Blob storage was already fully wired: `write_file` → `blob_store.put()`, `read_file` → `blob_store.get()`, `patch_file` reads/writes through blob store
+ - 17 E2E tests confirm round-trip through blob storage
+ 
+ ### 0.3 Complete lago-cli Command Handlers — DONE (already implemented)
++
+ - All command handlers were already fully implemented:
+   - `session` (create/list/show with API client + DB fallback)
+   - `log` (comprehensive formatting for all EventPayload variants)
+@@ -61,38 +57,41 @@
+   - `branch` (create with fork_at support + formatted list)
+ 
+ ### 0.4 Create Default Policy Rules — DONE
++
+ - Created `default-policy.toml` with 5 rules, 3 roles, 2 hooks
+ - `lago init` now scaffolds `policy.toml` alongside `lago.toml`
+ - `lagod` loads policy on startup when file exists
+ - Compile-time test verifies the default policy file parses correctly
+ 
+ ### 0.5 Cross-Project Integration Test — DONE
++
+ - Added `arcan-lago/tests/end_to_end.rs` with 3 comprehensive tests:
+   - `full_session_lifecycle_round_trip`: 9 events → journal → projection → verify state+history
+   - `policy_middleware_with_default_rules`: deny-shell, allow-filesystem, default-allow
+   - `multiple_sessions_isolated`: concurrent sessions share journal without interference
+ 
+ ### 0.6 Cross-Project Integration Test
++
+ - Full round-trip: arcan POST /chat -> lago journal -> verify event sequence
+ - Session replay: create session -> reload -> verify state matches
+ 
+ ### 0.5 Default Policy Rules
++
+ - Create `default-policy.toml` with baseline rules (deny dangerous patterns, require approval for destructive ops)
+ - Load at Arcan startup via `--policy` flag
+ 
+ **Validation**: Both projects pass all tests. CLI usable for inspection. Blob storage wired.
+ 
+-
+ ## Phase 1: Memory & Context Compiler — COMPLETE
+ 
+-**Goal**: Agents remember across sessions and receive intelligently assembled context.
+-This is the highest-leverage phase — everything else depends on memory working.
++**Goal**: Agents remember across sessions and receive intelligently assembled context.This is the highest-leverage phase — everything else depends on memory working.
+ 
+ **Result**: +57 tests (415 → 472). All milestones complete, zero warnings.
+ 
+ ### 1.1 Memory Event Types in Lago — DONE
++
+ Added 5 new `EventPayload` variants to `lago-core`:
++
+ - `ObservationAppended { scope, observation_ref, source_run_id }`
+ - `ReflectionCompacted { scope, summary_ref, covers_through_seq }`
+ - `MemoryProposed { scope, proposal_id, entries_ref, source_run_id }`
+@@ -102,78 +101,83 @@
+ Plus `MemoryScope` enum (Session/User/Agent/Org), `MemoryId` typed ID. 13 new tests in lago-core.
+ 
+ ### 1.2 Observational Memory Baseline — DONE
++
+ Created in `arcan-lago`:
++
+ - `Observer` (implements `Projection`) — extracts observations from Message, ToolResult, Error, StatePatched events
+ - `Reflector` — text-based compaction (no LLM call needed)
+ - `MemoryProjection` (implements `Projection`) — queryable memory state from events, handles tombstones and supersedes
+-- `MemoryScopeConfig` + `MemoryEntry` — runtime configuration and entry types
+-20 new tests across observation.rs, memory_projection.rs, memory_scope.rs.
++- `MemoryScopeConfig` + `MemoryEntry` — runtime configuration and entry types20 new tests across observation.rs, memory_projection.rs, memory_scope.rs.
+ 
+ ### 1.3 Context Compiler — DONE
++
+ Created `context_compiler.rs` in `arcan-core`:
++
+ - `ContextBlockKind`: Persona, Rules, Memory, Retrieval, Workspace, Task
+ - `compile_context()`: fixed assembly order, per-block token budgets, priority-based overflow dropping, word-boundary truncation
+ - Persona block never dropped (highest priority)
+-- Wired into `OrchestratorConfig` as optional field
+-14 new tests.
++- Wired into `OrchestratorConfig` as optional field14 new tests.
+ 
+ ### 1.4 Governed Memory Tools — DONE
++
+ Created 3 `Tool` implementations in `arcan-lago`:
++
+ - `MemoryQueryTool` — reads from `MemoryProjection` (Arc<RwLock>)
+ - `MemoryProposeTool` — writes `MemoryProposed` event to Journal
+-- `MemoryCommitTool` — writes `MemoryCommitted` event after policy check
+-10 new tests using RedbJournal in tempdir.
++- `MemoryCommitTool` — writes `MemoryCommitted` event after policy check10 new tests using RedbJournal in tempdir.
+ 
+ **Validation**: Agent has event-sourced, governed memory. Context assembly is structured and budget-aware.
+ 
+-
+ ## Phase 2: Self-Learning & Heartbeats (Weeks 6-7)
+ 
+ **Goal**: Agents improve over time. Heartbeats enable maintenance.
+ 
+ ### 2.1 Learning Capture
++
+ - Structured entries on tool failures, user corrections, repeated confusion
+ - Written to `/learnings/{errors,learnings,features}.md` in Lago
+ 
+ ### 2.2 Consolidation Job
++
+ - Dedupe/cluster learnings -> generate rule proposals
+ - Proposals stored in Lago with provenance links: `/proposals/<id>/rules.patch`
+ 
+ ### 2.3 Promotion Gate
++
+ - Policy-gated commit: `rules.commit(proposal_id)`
+ - Only promoted rules take effect; full rollback possible
+ - Human approval optional (configurable)
+ 
+ ### 2.4 Heartbeat Scheduler
++
+ - `RunTrigger::Heartbeat` periodic turns
+ - Cheap deterministic checks first (queue depth, stuck tools, disk quota)
+ - Only call LLM if there's something to interpret
+ - `HeartbeatOk` for silent no-op
+ 
+ ### 2.5 Queue & Steering Semantics
++
+ - `collect` / `steer` / `followup` / `interrupt` modes
+ - Steering at tool boundaries (safe preemption points)
+ - Prevents concurrent state corruption
+ 
+ ### 2.6 Approval Workflow ✅ DONE (2026-02-15)
+-- ~~`POST /approve` endpoint with approval queue~~ DONE
+-- ~~`RequireApproval` pauses run (tokio oneshot), resumes on approval~~ DONE
+-- ~~Auto-deny after configurable timeout (5min default)~~ DONE
++
++- `POST /approve` endpoint with approval queue DONE
++- `RequireApproval` pauses run (tokio oneshot), resumes on approval DONE
++- Auto-deny after configurable timeout (5min default) DONE
+ - `ApprovalGate` in arcan-lago with `ApprovalGateHook`/`ApprovalResolver` traits in arcan-core
+ - `POST /approve` + `GET /approvals` HTTP endpoints in arcand
+ - 14 new tests (7 gate, 2 event-map, 2 middleware, 3 HTTP)
+ 
+-**Validation**: Agent learns from mistakes via governed pipeline. Heartbeats fire.
+-Approval workflow is interactive.
+-
++**Validation**: Agent learns from mistakes via governed pipeline. Heartbeats fire.Approval workflow is interactive.
+ 
+ ## Phase 3: Skills as Lago Artifacts + Multi-Provider (Weeks 8-10)
+ 
+ **Goal**: Skills are versioned, reproducible. Multiple LLM providers work.
+ 
+ ### 3.1 Skill Manifest Schema
++
+ ```json
+ {
+   "skill_id": "...",
+@@ -184,72 +188,80 @@
+   "policy": "policies/allowlist.json"
+ }
+ ```
++
+ - Events: `SkillInstalled`, `SkillActivated`, `SkillRemoved`
+ - Immutable versioned snapshots in Lago
+ 
+ ### 3.2 Skill Loader in Harness
++
+ - Compile active skill set from Lago
+ - Assemble prompt blocks into context compiler
+ - Build tool registry from skill tool schemas
+ - `LagoResolver` trait instead of `PathBuf` for all config loading
+ 
+ ### 3.3 Skills Ingest
++
+ - Fetch bundle -> verify signature/hash -> store in Lago -> register events
+ - Policy bind: map skill capabilities to Lago policy rules
+ 
+ ### 3.4 OpenAI Provider
++
+ - Chat completions API with function calling -> ToolCall mapping
+ - Fallback routing: Claude -> OpenAI (configurable)
+ 
+ ### 3.5 Provider Retry & Cost Tracking
++
+ - Exponential backoff for 429/5xx/timeout
+ - Circuit breaker on provider errors
+ - Per-session token budgets; budget exceeded -> run stops
+ 
+-**Validation**: Skills are Lago artifacts with full provenance. OpenAI works.
+-Cost tracked per session.
+-
++**Validation**: Skills are Lago artifacts with full provenance. OpenAI works.Cost tracked per session.
+ 
+ ## Phase 4: Observability & Operational Tooling (Weeks 11-13)
+ 
+ ### 4.1 OpenTelemetry Integration
++
+ - Spans: run -> turn -> tool -> llm -> memory
+ - `tracing-opentelemetry` + OTLP exporter
+ 
+ ### 4.2 GenAI Semantic Conventions
++
+ - Token usage, model, prompt hash in span attributes
+ - OpenTelemetry GenAI conventions for LLM spans
+ 
+ ### 4.3 Structured Audit Events
++
+ - Who triggered what, what data touched
+ - Queryable from Lago events
+ 
+ ### 4.4 Replay CLI
++
+ - `lago replay <session>` reconstructs agent view at event N
+ - `lago diff --from N --to M` shows state changes
+ 
+ ### 4.5 Streaming Boundary Signals
++
+ - text-start/end, tool-start/end SSE events
+ - SSE event IDs + `retry:` headers for reconnection
+ 
+ **Validation**: Full distributed tracing. Replay works. AI SDK clients handle boundaries.
+ 
+-
+ ## Phase 5: Governance & Security Hardening (Weeks 14-16)
+ 
+ ### 5.1 HTTP AuthN/AuthZ (JWT/API key middleware)
++
+ ### 5.2 Secret Redaction (never persist secrets in Lago journal)
++
+ ### 5.3 Container Sandbox (bubblewrap or Apple Containers)
++
+ ### 5.4 Retention Policies (per-scope TTL + crypto-shredding)
+-### 5.5 Network Egress Policy (deny-by-default for tool execution)
+ 
++### 5.5 Network Egress Policy (deny-by-default for tool execution)
+ 
+ ## Phase 6: Universal Data Plane & Platform (Weeks 17+)
+ 
+ Future work, driven by need:
++
+ - Lago Catalog (Assets + Representations, Unity Catalog-like hierarchy)
+ - Lineage events (OpenLineage-compatible)
+ - Semantic retrieval (vector index: LanceDB or Qdrant)
+@@ -259,8 +271,6 @@
+ - Arrow Flight transport (high-throughput data streaming)
+ - Multi-agent orchestration (fleet operation)
+ 
+-
+ ## Critical Path
+ 
+ ```
+@@ -294,7 +304,7 @@
+ ## Testing Strategy
+ 
+ | Phase | Test Type | Count Target | Validates |
+-|-------|-----------|-------------|-----------|
++| --- | --- | --- | --- |
+ | 0 | Unit + Integration | 450+ | All crates compile, E2E round-trips |
+ | 1 | Memory integration | 500+ | Memory persists, scopes enforced, context assembled |
+ | 2 | Self-learning | 550+ | Proposals generated, gates enforced, heartbeats fire |
+@@ -302,4 +312,4 @@
+ | 4 | Observability | 650+ | Traces correlate, replay matches, boundaries correct |
+ | 5 | Security | 700+ | Auth rejects unauthorized, secrets scrubbed, container isolation |
+ 
+-Test pyramid: ~70% unit, ~20% integration, ~10% E2E.
++Test pyramid: ~70% unit, ~20% integration, ~10% E2E.
+
+diff --git a/docs/PLANS.md b/docs/PLANS.md
+@@ -33,8 +33,6 @@
+ - 2026-02-21 — Added `docs/NAVIGATION.md` as mandatory first-stop for agents.
+ - 2026-02-21 — Deferred full cross-repo doc reconciliation to a dedicated cleanup pass.
+ 
+-
+ ## Active Plan B: Economic Actuation Track (Conway-Compatible)
+ 
+ ### Objective
+@@ -67,4 +65,4 @@
+ 
+ - 2026-02-21 — Economic actuation is modeled as a provider-agnostic core feature with Conway as first adapter.
+ - 2026-02-21 — Payment/resource lifecycle events are required for auditability and replay.
+-- 2026-02-21 — Budget-aware policy and approval gates are mandatory before write access expansion.
++- 2026-02-21 — Budget-aware policy and approval gates are mandatory before write access expansion.
+
+diff --git a/docs/PLATFORM.md b/docs/PLATFORM.md
+@@ -6,33 +6,31 @@
+ 
+ How aiOS, Arcan, and Lago compose into an operating system for agents — and the path to multi-tenant SaaS.
+ 
+-> Status badges: `[IMPLEMENTED]` `[PARTIAL]` `[PROPOSED]` `[FUTURE]`
+-
++> Status badges: [IMPLEMENTED] [PARTIAL] [PROPOSED] [FUTURE]
+ 
+ ## 1. The OS Analogy — Concrete Mapping
+ 
+ This is not metaphor. The dependency graph between aiOS, Arcan, and Lago mirrors the layered architecture of an operating system: kernel contract → runtime → persistence. Each "OS concept" below maps to a specific type, trait, or crate that exists in the codebase today.
+ 
+ | OS Concept | Traditional OS | Agent OS Primitive | Actual Type / Trait | Crate | Status |
+-|---|---|---|---|---|---|
+-| **Kernel contract** | POSIX, syscall table | Protocol types | `EventKind` (55 variants), `EventEnvelope` | `aios-protocol` | `[IMPLEMENTED]` |
+-| **Syscall interface** | `read()`, `write()` | Tool trait | `trait Tool { definition(); execute() }` | `arcan-core` | `[IMPLEMENTED]` |
+-| **Process** | Unix process | Agent session | `SessionId`, `AgentLoop` | `aios-protocol`, `arcand` | `[IMPLEMENTED]` |
+-| **Scheduler** | CFS, nice | Orchestrator + budget | `Orchestrator`, `BudgetState`, `OperatingMode` | `arcan-core`, `aios-protocol` | `[PARTIAL]` |
+-| **Virtual memory** | Page tables | Context compiler | `ContextCompiler`, `ContextBlock` | `arcan-core` | `[IMPLEMENTED]` |
+-| **Filesystem** | ext4, VFS | Lago FS + blobs | `Manifest`, `BranchManager`, `BlobStore` | `lago-fs`, `lago-store` | `[IMPLEMENTED]` |
+-| **Block device** | Disk I/O | Event journal | `RedbJournal` (ACID, 60B compound key) | `lago-journal` | `[IMPLEMENTED]` |
+-| **Mount / VFS** | `/dev`, `/proc` | Mount trait | `trait Mount { read, write, delete, list, stat }` | `lago-core` | `[DEFINED]` |
+-| **IPC** | Pipes, sockets | Event stream + SSE | `EventStreamHub`, SSE adapters | `lago-api` | `[IMPLEMENTED]` |
+-| **Security module** | SELinux, AppArmor | Policy + sandbox | `PolicyEngine`, `SandboxPolicy`, `FsPolicy` | `lago-policy`, `arcan-harness` | `[IMPLEMENTED]` |
+-| **Capabilities** | POSIX caps | Capability tokens | `Capability("fs:read:/session/**")`, `GatingProfile` | `aios-protocol` | `[PARTIAL]` |
+-| **Health monitor** | watchdog, OOM killer | Homeostasis | `AgentStateVector` (8 dims), `OperatingMode` (6 modes) | `aios-protocol` | `[PARTIAL]` |
+-| **Package manager** | apt, cargo | Skill registry | `SkillRegistry`, `SkillMetadata` | `arcan-harness` | `[PARTIAL]` |
+-| **Cron** | systemd timers | Heartbeat scheduler | `HeartbeatScheduler`, `EventKind::Heartbeat` | `arcand`, `aios-protocol` | `[PARTIAL]` |
+-| **Device driver** | USB, NIC | MCP bridge | `McpTool`, `McpServerConfig` | `arcan-harness` | `[IMPLEMENTED]` |
+-| **User / tenant** | UID, namespaces | Tenant isolation | — | — | `[PROPOSED]` |
+-| **Credential store** | keyring, Vault | Secret resolver | `Capability::secrets("scope")` exists | `aios-protocol` | `[PROPOSED]` |
++| --- | --- | --- | --- | --- | --- |
++| Kernel contract | POSIX, syscall table | Protocol types | EventKind (55 variants), EventEnvelope | aios-protocol | [IMPLEMENTED] |
++| Syscall interface | read(), write() | Tool trait | trait Tool { definition(); execute() } | arcan-core | [IMPLEMENTED] |
++| Process | Unix process | Agent session | SessionId, AgentLoop | aios-protocol, arcand | [IMPLEMENTED] |
++| Scheduler | CFS, nice | Orchestrator + budget | Orchestrator, BudgetState, OperatingMode | arcan-core, aios-protocol | [PARTIAL] |
++| Virtual memory | Page tables | Context compiler | ContextCompiler, ContextBlock | arcan-core | [IMPLEMENTED] |
++| Filesystem | ext4, VFS | Lago FS + blobs | Manifest, BranchManager, BlobStore | lago-fs, lago-store | [IMPLEMENTED] |
++| Block device | Disk I/O | Event journal | RedbJournal (ACID, 60B compound key) | lago-journal | [IMPLEMENTED] |
++| Mount / VFS | /dev, /proc | Mount trait | trait Mount { read, write, delete, list, stat } | lago-core | [DEFINED] |
++| IPC | Pipes, sockets | Event stream + SSE | EventStreamHub, SSE adapters | lago-api | [IMPLEMENTED] |
++| Security module | SELinux, AppArmor | Policy + sandbox | PolicyEngine, SandboxPolicy, FsPolicy | lago-policy, arcan-harness | [IMPLEMENTED] |
++| Capabilities | POSIX caps | Capability tokens | Capability("fs:read:/session/**"), GatingProfile | aios-protocol | [PARTIAL] |
++| Health monitor | watchdog, OOM killer | Homeostasis | AgentStateVector (8 dims), OperatingMode (6 modes) | aios-protocol | [PARTIAL] |
++| Package manager | apt, cargo | Skill registry | SkillRegistry, SkillMetadata | arcan-harness | [PARTIAL] |
++| Cron | systemd timers | Heartbeat scheduler | HeartbeatScheduler, EventKind::Heartbeat | arcand, aios-protocol | [PARTIAL] |
++| Device driver | USB, NIC | MCP bridge | McpTool, McpServerConfig | arcan-harness | [IMPLEMENTED] |
++| User / tenant | UID, namespaces | Tenant isolation | — | — | [PROPOSED] |
++| Credential store | keyring, Vault | Secret resolver | Capability::secrets("scope") exists | aios-protocol | [PROPOSED] |
+ 
+ ### Why this layering matters
+ 
+@@ -46,8 +44,6 @@
+ 
+ A skill doesn't need to know about redb. A provider doesn't need to know about policy rules. The harness doesn't need to know about SSE formats. Each layer has a clean boundary mediated by traits and event conversion.
+ 
+-
+ ## 2. Layer Architecture — What Each Project Owns
+ 
+ ### 2.1 aiOS — Kernel Contract `[IMPLEMENTED]`
+@@ -78,27 +74,28 @@
+ - **Implementations**: `FileEventStore` (JSONL), `WorkspaceMemoryStore` (soul.json + observations.jsonl), `SessionPolicyEngine` (glob matching), `LocalSandboxRunner` (tokio subprocess), `ToolDispatcher` with 3 core tools (fs.read, fs.write, shell.exec)
+ - **Homeostasis**: Rule-based mode estimation — pending approvals → AskHuman, error streak → Recover, progress ≥ 98% → Sleep, high uncertainty → Explore, high side-effect pressure → Verify, default → Execute
+ 
+-> **Note**: The aiOS kernel runtime and Arcan+Lago are currently parallel implementations. Phase 7 (Agent OS Unification) plans to merge them. `lago-core` already uses `pub type EventPayload = aios_protocol::EventKind` — the type alignment exists, the runtime unification does not.
++> Note: The aiOS kernel runtime and Arcan+Lago are currently parallel implementations. Phase 7 (Agent OS Unification) plans to merge them. lago-core already uses pub type EventPayload = aios_protocol::EventKind — the type alignment exists, the runtime unification does not.
+ 
+ ### 2.3 Arcan — Runtime `[IMPLEMENTED]`
+ 
+ **9 crates** at `arcan/crates/`:
+ 
+ | Crate | LOC | Owns | Key Types |
+-|---|---|---|---|
+-| `arcan-core` | ~3,450 | Agent loop, traits, context | `Orchestrator`, `Tool`, `Middleware`, `Provider`, `ContextCompiler`, `AgentEvent` (23 variants), `AppState` |
+-| `arcan-harness` | ~2,520 | Tools, sandbox, skills, MCP | `SandboxPolicy`, `FsPolicy`, `BashTool`, `SkillRegistry`, `McpTool`, hashline editing |
+-| `arcan-aios-adapters` | ~330 | Canonical runtime adapters | aiOS provider/tool/policy/approval/memory adapter implementations |
+-| `arcan-provider` | ~1,270 | LLM backends | `AnthropicProvider`, `OpenAiCompatibleProvider`, `MockProvider` |
+-| `arcan-store` | ~430 | Session repo trait | `SessionRepository`, `EventRecord` |
+-| `arcan-tui` | ~1,430 | Terminal client | Canonical session + approval endpoint client integration |
+-| `arcand` | ~790 | HTTP server, heartbeat | `AgentLoop`, `HeartbeatScheduler`, axum routes |
+-| `arcan-lago` | ~4,470 | Bridge to Lago | `LagoSessionRepository`, `LagoPolicyMiddleware`, `ApprovalGate`, `event_map`, `SseBridge`, memory modules |
+-| `arcan` | ~550 | Binary entry point | CLI args, wiring |
++| --- | --- | --- | --- |
++| arcan-core | ~3,450 | Agent loop, traits, context | Orchestrator, Tool, Middleware, Provider, ContextCompiler, AgentEvent (23 variants), AppState |
++| arcan-harness | ~2,520 | Tools, sandbox, skills, MCP | SandboxPolicy, FsPolicy, BashTool, SkillRegistry, McpTool, hashline editing |
++| arcan-aios-adapters | ~330 | Canonical runtime adapters | aiOS provider/tool/policy/approval/memory adapter implementations |
++| arcan-provider | ~1,270 | LLM backends | AnthropicProvider, OpenAiCompatibleProvider, MockProvider |
++| arcan-store | ~430 | Session repo trait | SessionRepository, EventRecord |
++| arcan-tui | ~1,430 | Terminal client | Canonical session + approval endpoint client integration |
++| arcand | ~790 | HTTP server, heartbeat | AgentLoop, HeartbeatScheduler, axum routes |
++| arcan-lago | ~4,470 | Bridge to Lago | LagoSessionRepository, LagoPolicyMiddleware, ApprovalGate, event_map, SseBridge, memory modules |
++| arcan | ~550 | Binary entry point | CLI args, wiring |
+ 
+ **14 built-in tools**: read_file, write_file, list_dir, edit_file (hashline), glob, grep, bash, read_memory, write_memory, memory_query, memory_propose, memory_commit, MCP bridge tools, skill catalog
+ 
+ **Defense-in-depth harness**:
++
+ ```
+ Tool invocation
+   ├── Layer 1: PolicyEngine (LagoPolicyMiddleware → Allow/Deny/RequireApproval)
+@@ -113,21 +110,22 @@
+ **10 crates** at `lago/crates/`:
+ 
+ | Crate | LOC | Owns | Key Types |
+-|---|---|---|---|
+-| `lago-core` | ~2,890 | Types, traits | `EventEnvelope`, `EventPayload` (= `aios_protocol::EventKind`), `Journal` trait (BoxFuture), `Projection` trait, `Mount` trait |
+-| `lago-journal` | ~1,520 | Event persistence | `RedbJournal` — compound key: session(26B) + branch(26B) + seq(8B BE) = 60B, tables: EVENTS, EVENT_INDEX, BRANCH_HEADS, SESSIONS, SNAPSHOTS |
+-| `lago-store` | ~320 | Blob storage | `BlobStore` — SHA-256 + zstd, shard layout `{root}/{hash[0:2]}/{hash[2:]}.zst`, atomic writes |
+-| `lago-fs` | ~1,050 | Filesystem | `Manifest` (BTreeMap), `BranchManager` (copy-on-write), `ManifestProjection`, `diff()` |
+-| `lago-policy` | ~1,340 | Access control | `PolicyEngine` (priority rules), `RbacManager` (role→permissions), `HookRunner`, TOML config |
+-| `lago-api` | ~3,220 | HTTP + SSE | REST routes (sessions, branches, files, blobs, events), SSE format adapters (OpenAI, Anthropic, Vercel, Lago) |
+-| `lago-ingest` | ~590 | gRPC streaming | Bidirectional event streaming via tonic |
+-| `lago-aios-eventstore-adapter` | ~145 | Canonical event store adapter | `EventStorePort` implementation over `lago_core::Journal` |
+-| `lago-cli` | ~1,160 | CLI binary | init, serve, session, branch, log, cat |
+-| `lagod` | ~310 | Daemon binary | gRPC (50051) + HTTP (8080), TOML config, graceful shutdown |
++| --- | --- | --- | --- |
++| lago-core | ~2,890 | Types, traits | EventEnvelope, EventPayload (= aios_protocol::EventKind), Journal trait (BoxFuture), Projection trait, Mount trait |
++| lago-journal | ~1,520 | Event persistence | RedbJournal — compound key: session(26B) + branch(26B) + seq(8B BE) = 60B, tables: EVENTS, EVENT_INDEX, BRANCH_HEADS, SESSIONS, SNAPSHOTS |
++| lago-store | ~320 | Blob storage | BlobStore — SHA-256 + zstd, shard layout {root}/{hash[0:2]}/{hash[2:]}.zst, atomic writes |
++| lago-fs | ~1,050 | Filesystem | Manifest (BTreeMap), BranchManager (copy-on-write), ManifestProjection, diff() |
++| lago-policy | ~1,340 | Access control | PolicyEngine (priority rules), RbacManager (role→permissions), HookRunner, TOML config |
++| lago-api | ~3,220 | HTTP + SSE | REST routes (sessions, branches, files, blobs, events), SSE format adapters (OpenAI, Anthropic, Vercel, Lago) |
++| lago-ingest | ~590 | gRPC streaming | Bidirectional event streaming via tonic |
++| lago-aios-eventstore-adapter | ~145 | Canonical event store adapter | EventStorePort implementation over lago_core::Journal |
++| lago-cli | ~1,160 | CLI binary | init, serve, session, branch, log, cat |
++| lagod | ~310 | Daemon binary | gRPC (50051) + HTTP (8080), TOML config, graceful shutdown |
+ 
+ ### 2.5 Autonomic — Homeostasis Controller `[FUTURE]`
+ 
+ Not yet started. Would own:
++
+ - Homeostasis rule engine consuming event streams
+ - `GatingProfile` output enforcement at harness boundary
+ - Memory maintenance triggers (compaction, promotion, forgetting)
+@@ -135,8 +133,6 @@
+ 
+ Events it would emit: `StateEstimated`, `BudgetUpdated`, `ModeChanged`, `GatesUpdated`, `CircuitBreakerTripped`, `Heartbeat`
+ 
+-
+ ## 3. Data Flow — How Events Move Through the System
+ 
+ ### 3.1 The Happy Path
+@@ -195,15 +191,14 @@
+ 6. **Sequences are monotonic per branch** — `RedbJournal` enforces `seq = head + 1` atomically.
+ 7. **Events are immutable** — Once written to journal, events are never modified. Use compensating events.
+ 
+-
+ ## 4. The Skill Ecosystem
+ 
+ ### 4.1 Current State `[IMPLEMENTED]`
+ 
+ Skills are filesystem-discovered SKILL.md files with YAML frontmatter.
+ 
+-**`SkillMetadata`** (at `arcan-harness/src/skills.rs`):
++`SkillMetadata` (at `arcan-harness/src/skills.rs`):
++
+ ```yaml
+ ---
+ name: commit-helper          # required
+@@ -219,13 +214,15 @@
+ Instructions for the agent when this skill is active...
+ ```
+ 
+-**`SkillRegistry`**:
++`SkillRegistry`:
++
+ - `discover(dirs)`: Scans directories for SKILL.md via walkdir
+ - `system_prompt_catalog()`: Generates compact listing for LLM injection (~100 tokens/skill)
+ - `activate(name)`: Returns full `LoadedSkill` (metadata + body + root_dir)
+ - `allowed_tools(name)`: Returns tool whitelist per skill
+ 
+ **What's missing**:
++
+ - Skills are not persisted to Lago journal (ephemeral in runtime)
+ - No resource declarations (secrets, network, filesystem scope, schedule)
+ - No versioning or artifact hashing
+@@ -290,16 +287,16 @@
+ Every manifest field maps to a type that already exists in the codebase:
+ 
+ | Manifest Field | Existing Type | Crate | Status |
+-|---|---|---|---|
+-| `tools.allowed` | `SkillMetadata.allowed_tools` | `arcan-harness` | `[IMPLEMENTED]` |
+-| `policy.sandbox_tier` | `SandboxTier` (None/Basic/Restricted) | `arcan-harness` | `[IMPLEMENTED]` |
+-| `resources.network.allow` | `NetworkPolicy::AllowList(Vec<String>)` | `arcan-harness` | `[IMPLEMENTED]` |
+-| `resources.filesystem.*` | `FsPolicy` allowlist/denylist | `arcan-harness` | `[IMPLEMENTED]` |
+-| `policy.risk_level` | `RiskLevel` (Low/Medium/High/Critical) | `aios-protocol` | `[IMPLEMENTED]` |
+-| `resources.secrets.*` | `Capability::secrets(scope)` | `aios-protocol` | Type exists, no resolver |
+-| `resources.schedule.cron` | `EventKind::Heartbeat` | `aios-protocol` | Event exists, no scheduler |
+-| `skill.version` | — | — | `[PROPOSED]` |
+-| `require_activation_approval` | `ApprovalGate` | `arcan-lago` | `[IMPLEMENTED]` for tools |
++| --- | --- | --- | --- |
++| tools.allowed | SkillMetadata.allowed_tools | arcan-harness | [IMPLEMENTED] |
++| policy.sandbox_tier | SandboxTier (None/Basic/Restricted) | arcan-harness | [IMPLEMENTED] |
++| resources.network.allow | NetworkPolicy::AllowList(Vec<String>) | arcan-harness | [IMPLEMENTED] |
++| resources.filesystem.* | FsPolicy allowlist/denylist | arcan-harness | [IMPLEMENTED] |
++| policy.risk_level | RiskLevel (Low/Medium/High/Critical) | aios-protocol | [IMPLEMENTED] |
++| resources.secrets.* | Capability::secrets(scope) | aios-protocol | Type exists, no resolver |
++| resources.schedule.cron | EventKind::Heartbeat | aios-protocol | Event exists, no scheduler |
++| skill.version | — | — | [PROPOSED] |
++| require_activation_approval | ApprovalGate | arcan-lago | [IMPLEMENTED] for tools |
+ 
+ ### 4.4 Skills as Lago Artifacts `[PROPOSED]`
+ 
+@@ -310,16 +307,14 @@
+ **Lifecycle events** (new `EventKind` variants, forward-compatible via `Custom` until formalized):
+ 
+ | Event | Fields | Purpose |
+-|---|---|---|
+-| `SkillInstalled` | skill_id, version, manifest_hash: BlobHash, installed_by | Skill added to platform |
+-| `SkillActivated` | skill_id, session_id, capabilities_granted: Vec\<Capability\> | Skill enabled for a session |
+-| `SkillDeactivated` | skill_id, session_id, reason | Skill disabled |
+-| `SkillScheduled` | skill_id, schedule (cron), next_run (timestamp) | Recurring execution registered |
++| --- | --- | --- |
++| SkillInstalled | skill_id, version, manifest_hash: BlobHash, installed_by | Skill added to platform |
++| SkillActivated | skill_id, session_id, capabilities_granted: Vec&lt;Capability&gt; | Skill enabled for a session |
++| SkillDeactivated | skill_id, session_id, reason | Skill disabled |
++| SkillScheduled | skill_id, schedule (cron), next_run (timestamp) | Recurring execution registered |
+ 
+ **Versioning**: Each skill version is a unique `BlobHash` of its manifest + instruction files. The journal provides a complete audit trail of installs, activations, and deactivations.
+ 
+-
+ ## 5. The SaaS Trajectory — What Needs to Be Built
+ 
+ ### 5.1 Three Hard Dependencies
+@@ -327,10 +322,10 @@
+ The Garmin Connect skill (from skills.sh) exposes the exact gaps between single-user runtime and multi-tenant platform:
+ 
+ | Dependency | What the skill needs | What exists today | Gap |
+-|---|---|---|---|
+-| **Credential isolation** | Per-tenant `garmin_email` + `garmin_password` | API keys from env vars only. `Capability::secrets("scope")` exists as a type. MCP child processes inherit parent env unsanitized. | No `SecretResolver`, no `TenantId`, no per-tenant scoping |
+-| **Tenant workspace** | Writes to `health/YYYY-MM-DD.md` isolated per tenant | `FsPolicy` enforces workspace boundaries. `BranchManager` supports copy-on-write forking. Both session-scoped only. | No tenant dimension in compound key or branching |
+-| **Scheduled execution** | Daily sync at 6am | `HeartbeatScheduler` with pluggable checks. `EventKind::Heartbeat` exists. | Heartbeat is monitoring-only, not a trigger system |
++| --- | --- | --- | --- |
++| Credential isolation | Per-tenant garmin_email + garmin_password | API keys from env vars only. Capability::secrets("scope") exists as a type. MCP child processes inherit parent env unsanitized. | No SecretResolver, no TenantId, no per-tenant scoping |
++| Tenant workspace | Writes to health/YYYY-MM-DD.md isolated per tenant | FsPolicy enforces workspace boundaries. BranchManager supports copy-on-write forking. Both session-scoped only. | No tenant dimension in compound key or branching |
++| Scheduled execution | Daily sync at 6am | HeartbeatScheduler with pluggable checks. EventKind::Heartbeat exists. | Heartbeat is monitoring-only, not a trigger system |
+ 
+ ### 5.2 Proposed: TenantId `[PROPOSED]`
+ 
+@@ -344,12 +339,14 @@
+ ```
+ 
+ **Where it appears**:
++
+ - `EventEnvelope` gains `tenant_id: Option<TenantId>` (backward-compatible via `skip_serializing_if`)
+ - `SessionManifest` gains `tenant_id: Option<TenantId>`
+ - `PolicyContext` gains `tenant_id: Option<TenantId>`
+ - `RbacManager` gains tenant-scoped role assignment
+ 
+ **Isolation strategy** (two options, not mutually exclusive):
++
+ 1. **Logical**: Tenant_id as filter in queries. Same redb instance, compound key gains optional tenant prefix.
+ 2. **Physical**: Separate redb instance per tenant. Operationally heavier but strongest isolation.
+ 
+@@ -377,12 +374,14 @@
+ ```
+ 
+ **Integration points**:
++
+ - `SandboxPolicy` gains `secret_resolver: Option<Arc<dyn SecretResolver>>`
+ - `LocalCommandRunner` uses resolver to inject env vars instead of inheriting parent env
+ - MCP child process construction sanitizes env, injects only resolved secrets
+ - `PolicyEngine` evaluates `Capability::secrets("tenant/garmin_email")` before resolution
+ 
+ **Implementations**:
++
+ - `EnvVarSecretResolver`: Wraps current behavior (reads from process env). Zero-migration for existing single-user deployments.
+ - `VaultSecretResolver`: HashiCorp Vault integration (production SaaS).
+ - `EncryptedBlobSecretResolver`: Secrets encrypted in Lago blob store with per-tenant keys.
+@@ -414,16 +413,16 @@
+ ### 5.5 Implementation Crate Map
+ 
+ | Component | Target Crate | Dependencies | New/Modified |
+-|---|---|---|---|
+-| `TenantId` | `aios-protocol` | None (ids.rs macro) | Modified |
+-| `SecretScope` enum | `aios-protocol` | None | New in policy.rs |
+-| `SecretResolver` trait | `arcan-core` | `aios-protocol` | New module |
+-| `EnvVarSecretResolver` | `arcan-harness` | `arcan-core` | New in sandbox.rs |
+-| `SkillManifest` parser | `arcan-harness` | `toml`, `serde` | New module |
+-| Skill lifecycle events | `aios-protocol` | None | Modified (EventKind) |
+-| `SkillScheduler` | `arcand` | `arcan-core`, `lago-core` | New module |
+-| Tenant-scoped branching | `lago-fs`, `arcan-lago` | `lago-core` | Modified |
+-| Auth middleware (JWT) | `lago-api`, `arcand` | `axum`, `jsonwebtoken` | New module |
++| --- | --- | --- | --- |
++| TenantId | aios-protocol | None (ids.rs macro) | Modified |
++| SecretScope enum | aios-protocol | None | New in policy.rs |
++| SecretResolver trait | arcan-core | aios-protocol | New module |
++| EnvVarSecretResolver | arcan-harness | arcan-core | New in sandbox.rs |
++| SkillManifest parser | arcan-harness | toml, serde | New module |
++| Skill lifecycle events | aios-protocol | None | Modified (EventKind) |
++| SkillScheduler | arcand | arcan-core, lago-core | New module |
++| Tenant-scoped branching | lago-fs, arcan-lago | lago-core | Modified |
++| Auth middleware (JWT) | lago-api, arcand | axum, jsonwebtoken | New module |
+ 
+ ### 5.6 Build Order
+ 
+@@ -465,8 +464,6 @@
+   └── Per-request RBAC enforcement
+ ```
+ 
+-
+ ## 6. The Full Platform Diagram
+ 
+ ```
+@@ -513,26 +510,22 @@
+ 
+ In the SaaS configuration, skills are stateless callables. All statefulness — credentials, filesystem, scheduling, outputs — is owned by the platform layer, not the skill.
+ 
+-
+ ## 7. Type Alignment Across Projects
+ 
+ Type duplication is minimal and well-managed:
+ 
+ | Category | Canonical Home | Arcan | Lago | Notes |
+-|---|---|---|---|---|
+-| Event taxonomy | `aios-protocol::EventKind` | Converts via `event_map.rs` | Uses directly (`EventPayload = EventKind`) | Clean separation |
+-| IDs (ULID/UUID) | `aios-protocol::ids` | String conversions | `lago-core::id` (re-exports) | Trivial bridge |
+-| Enums (RiskLevel, etc.) | `aios-protocol::event` | String parsing in event_map | Re-exports from aios | No duplication |
+-| Tool metadata | `arcan-core::protocol::ToolDefinition` | Arcan-specific (MCP-aligned) | Not used | Not yet canonical |
+-| AppState | `arcan-core::state::AppState` | Arcan-specific (JSON + patches) | Not used | Not yet canonical |
++| --- | --- | --- | --- | --- |
++| Event taxonomy | aios-protocol::EventKind | Converts via event_map.rs | Uses directly (EventPayload = EventKind) | Clean separation |
++| IDs (ULID/UUID) | aios-protocol::ids | String conversions | lago-core::id (re-exports) | Trivial bridge |
++| Enums (RiskLevel, etc.) | aios-protocol::event | String parsing in event_map | Re-exports from aios | No duplication |
++| Tool metadata | arcan-core::protocol::ToolDefinition | Arcan-specific (MCP-aligned) | Not used | Not yet canonical |
++| AppState | arcan-core::state::AppState | Arcan-specific (JSON + patches) | Not used | Not yet canonical |
+ | Policy types | Divergent | Middleware hooks | Rule engine + RBAC | Complementary, not duplicated |
+-| Skill metadata | `arcan-harness::skills::SkillMetadata` | Arcan-only | Not used | Not yet persisted |
++| Skill metadata | arcan-harness::skills::SkillMetadata | Arcan-only | Not used | Not yet persisted |
+ 
+ **Unification path**: Skills, AppState, and tool definitions should eventually be canonicalized in `aios-protocol` (Phase 7). The `event_map.rs` bridge would then convert fewer types at the boundary.
+ 
+-
+ ## 8. Appendix — The skills.sh Bridge Pattern
+ 
+ Concrete example: translating the Garmin Connect skill from local filesystem execution to managed platform execution.
+@@ -594,12 +587,10 @@
+ 
+ The skill itself is unchanged — it's still a SKILL.md with bash commands. The platform mediates all resource access through the kernel primitives that already exist.
+ 
+-
+ ## References
+ 
+ - `docs/ARCHITECTURE.md` — System internals and crate diagrams
+ - `docs/ROADMAP.md` — 7-phase development roadmap (Phase 3: Skills, Phase 5: Security)
+ - `docs/STATUS.md` — Implementation status, test counts, known gaps
+ - `docs/arcan.md` — Vision document and market positioning
+-- `arcan/CLAUDE.md` / `lago/CLAUDE.md` — Project-specific conventions
++- `arcan/CLAUDE.md` / `lago/CLAUDE.md` — Project-specific conventions
+
+diff --git a/docs/STATUS.md b/docs/STATUS.md
+@@ -1,14 +1,8 @@
+ # Broomva Life: Implementation Status
+ 
+-**Date**: 2026-03-04
+-**Version**: 0.2.0 (canonical baseline)
+-**Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)
+-**Tests**: 1012 passing (+3 ignored) across 29 crates + Spaces (31 crates total)
++**Date**: 2026-03-04**Version**: 0.2.0 (canonical baseline)**Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)**Tests**: 1038 passing (+5 ignored) across 30 crates + Spaces (32 crates total)
+ 
+-This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/life`.
+-If another status document conflicts with this one, treat this file as source of truth.
+-
++This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/life`.If another status document conflicts with this one, treat this file as source of truth.
+ 
+ ## Current State
+ 
+@@ -22,13 +16,13 @@
+ 
+ ## Health Summary
+ 
+-| Area | aiOS | Arcan | Lago | Autonomic | Praxis | Spaces |
+-|---|---|---|---|---|---|---|
+-| Build | PASS | PASS | PASS | PASS | PASS | PASS |
+-| Tests | PASS (96) | PASS (465+16 w/ spacetimedb) | PASS (332) | PASS (69) | PASS (58) | N/A (0 tests) |
+-| Clippy (`-D warnings`) | PASS | PASS | PASS | PASS | PASS | PASS |
+-| Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | BRIDGED (arcan-spaces) |
+-| Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | NETWORKING |
++| Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
++| --- | --- | --- | --- | --- | --- | --- | --- |
++| Build | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
++| Tests | PASS (96) | PASS (465+16 w/ spacetimedb) | PASS (332) | PASS (69) | PASS (58) | PASS (26+2 ignored) | N/A (0 tests) |
++| Clippy (-D warnings) | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
++| Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | CROSS-CUTTING | BRIDGED (arcan-spaces) |
++| Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | OBSERVABILITY | NETWORKING |
+ 
+ Validation gates currently pass:
+ 
+@@ -37,11 +31,10 @@
+ - `/Users/broomva/broomva.tech/life/lago`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
+ - `/Users/broomva/broomva.tech/life/autonomic`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
+ - `/Users/broomva/broomva.tech/life/praxis`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
++- `/Users/broomva/broomva.tech/life/vigil`: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`
+ - `/Users/broomva/broomva.tech/life/spaces`: `cargo fmt`, `cargo clippy --workspace -- -D warnings`, `cargo check` (WASM module: `cargo check --target wasm32-unknown-unknown --manifest-path spacetimedb/Cargo.toml`)
+ - `/Users/broomva/broomva.tech/life`: `make audit`, `./scripts/architecture/verify_dependencies.sh`, `./conformance/run.sh`
+ 
+-
+ ## Canonical Architecture
+ 
+ ### Hard Invariants
+@@ -64,8 +57,6 @@
+ - `POST /sessions/{session_id}/branches/{branch_id}/merge`
+ - `POST /sessions/{session_id}/approvals/{approval_id}`
+ 
+-
+ ## Project Status
+ 
+ ## aiOS
+@@ -131,8 +122,6 @@
+ 
+ - Journal, blob store, policy engine, API, and file/manifest subsystems are operational and tested.
+ 
+-
+ ## Governance and Dependency Control
+ 
+ Architecture dependency gate is active:
+@@ -143,8 +132,6 @@
+   - `/Users/broomva/broomva.tech/life/Makefile.control`
+   - `/Users/broomva/broomva.tech/life/scripts/audit_control.sh`
+ 
+-
+ ## Conformance Coverage
+ 
+ Conformance harness entrypoint:
+@@ -185,8 +172,8 @@
+ 
+ ### Known Gaps
+ 
+-- ~~Not yet consulted by Arcan agent loop~~ (R5 Phase 1 COMPLETE — `AutonomicPolicyAdapter` decorator wired in Arcan).
+-- ~~Feedback loop open (Autonomic projection always at default)~~ (R5 Phase 2 COMPLETE — embedded controller, economic gating, token usage flow).
++- Not yet consulted by Arcan agent loop (R5 Phase 1 COMPLETE — `AutonomicPolicyAdapter` decorator wired in Arcan).
++- Feedback loop open (Autonomic projection always at default) (R5 Phase 2 COMPLETE — embedded controller, economic gating, token usage flow).
+ - No observability (metrics/traces) yet.
+ - Identity system is placeholder.
+ 
+@@ -214,9 +201,37 @@
+ 
+ ### Known Gaps
+ 
+-- ~~Not yet wired into Arcan~~ (arcan-harness now bridges to Praxis tools).
++- Not yet wired into Arcan (arcan-harness now bridges to Praxis tools).
+ - No integration tests with live MCP servers.
+ 
++## Vigil
++
++### Observability Foundation
++
++- OpenTelemetry-native tracing and GenAI metrics for the Agent OS.
++- 1 crate: `vigil` (26 tests + 2 ignored).
++- Depends only on `aios-protocol` — no dependency on Arcan, Lago, Autonomic, or Praxis.
++- Implements contract-derived spans (EventKind → OTel spans), GenAI semantic conventions (`gen_ai.*` attributes), and dual-write architecture (OTel spans + EventEnvelope trace context).
++
++### Components
++
++- **config**: `VigConfig` with env var overrides (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `VIGIL_LOG_FORMAT`, `VIGIL_CAPTURE_CONTENT`, `VIGIL_SAMPLING_RATIO`).
++- **semconv**: GenAI semantic conventions (`gen_ai.*`), Life attributes (`life.*`), Autonomic attributes (`autonomic.*`), Lago attributes (`lago.*`).
++- **spans**: Contract-derived span builders (`agent_span`, `phase_span`, `chat_span`, `tool_span`), trace context dual-write (`write_trace_context` / `extract_trace_context`).
++- **metrics**: `GenAiMetrics` — OTel instruments for token usage, operation duration, tool executions, budget gauges, mode transitions.
++
++### Integration Points
++
++- Depends on `aios-protocol` (canonical contract — `EventEnvelope`, `LoopPhase`, `TokenUsage`).
++- Designed for consumption by all runtime projects (Arcan, Lago, Autonomic, Praxis).
++- Graceful degradation: structured logging via `tracing-subscriber` when no OTLP endpoint is configured.
++
++### Known Gaps
++
++- Not yet wired into Arcan agent loop (consumers use `vigil` as a dependency, instrument their own code).
++- No OTLP smoke test in CI.
++- No content capture (prompt/completion) in spans yet (privacy flag exists but unused).
++
+ ## Spaces
+ 
+ ### Distributed Agent Networking
+@@ -238,16 +253,14 @@
+ 
+ - No unit tests (reducer tests, integration tests planned).
+ - No DM/private messaging.
+-- ~~arcan-spaces bridge uses mock hub only — concrete SpacetimeDB SDK adapter not yet implemented.~~ (SpacetimeDB HTTP adapter COMPLETE — `SpacetimeDbClient` via REST API with backend selection).
+-
++- arcan-spaces bridge uses mock hub only — concrete SpacetimeDB SDK adapter not yet implemented. (SpacetimeDB HTTP adapter COMPLETE — `SpacetimeDbClient` via REST API with backend selection).
+ 
+ ## Remaining Work (Post-Baseline)
+ 
+ The baseline runtime architecture is in place and validated. Remaining work is additive:
+ 
+-1. ~~Cross-project golden fixture expansion for replay determinism breadth~~ (R1, COMPLETE — branch-merge, forward-compat-evolution, stream cursor/replay invariants).
+-2. Observability depth expansion (metrics/traces across runtime and adapters) (R2, PLANNED).
++1. Cross-project golden fixture expansion for replay determinism breadth (R1, COMPLETE — branch-merge, forward-compat-evolution, stream cursor/replay invariants).
++2. Observability depth expansion (metrics/traces across runtime and adapters) (R2, FOUNDATION COMPLETE — Vigil crate with OTel tracing, GenAI metrics, contract-derived spans; integration into runtime projects pending).
+ 3. Security hardening beyond current software-level sandbox controls (R3, PLANNED).
+ 4. Memory and learning depth (R4, PLANNED).
+ 5. Controller plane / Autonomic integration — Phase 0 COMPLETE (5 crates, 69 tests, Lago wired, hysteresis active); Phase 1 COMPLETE: Arcan advisory client wired (`AutonomicPolicyAdapter` decorator, 6 tests); **Phase 2 COMPLETE**: Embedded controller (dual-mode adapter, economic gate handle wired to provider, token usage flow, 24 new tests — R5 DONE).
+@@ -263,8 +276,6 @@
+ - [x] CI workflows updated for CLI and Web E2E pipelines.
+ - [x] MemoryPort removed from canonical port list (was removed from aios-protocol 2026-02-28).
+ 
+-
+ ## Baseline Completion Checklist
+ 
+ - [x] Single canonical contract (`aios-protocol`) across projects.
+@@ -273,5 +284,4 @@
+ - [x] Canonical session API routed by `arcand` and hosted by `arcan`.
+ - [x] Architecture dependency gate integrated in audit flow.
+ - [x] Workspace build/lint/test gates green.
+-- [x] Conformance harness green.
+-
++- [x] Conformance harness green.
+
+diff --git a/docs/control/OBSERVABILITY.md b/docs/control/OBSERVABILITY.md
+@@ -118,3 +118,41 @@
+ | `.control/state.json` | 30 days | GitHub Actions artifact |
+ | Gate pass/fail summary | Per-run | `$GITHUB_STEP_SUMMARY` |
+ | Test output logs | Per-run | CI job output |
++
++---
++
++## Runtime Observability (Vigil)
++
++The `vigil` crate provides runtime observability for the Agent OS using OpenTelemetry.
++
++### Span Hierarchy
++
++```
++invoke_agent (session)
++  ├── loop_phase (perceive)
++  ├── loop_phase (deliberate)
++  ├── loop_phase (gate)
++  ├── loop_phase (execute)
++  │     ├── chat (LLM call — gen_ai.* attributes)
++  │     └── execute_tool (tool call — gen_ai.tool.* attributes)
++  ├── loop_phase (commit)
++  ├── loop_phase (reflect)
++  └── loop_phase (sleep)
++```
++
++### GenAI Metrics
++
++| Metric | Type | Description |
++|--------|------|-------------|
++| `gen_ai.client.token.usage` | Histogram | Token counts per request (input/output) |
++| `gen_ai.client.operation.duration` | Histogram | LLM call duration (seconds) |
++| `life.tool.executions` | Counter | Tool executions by name and status |
++| `life.budget.tokens_remaining` | Gauge | Remaining token budget |
++| `life.budget.cost_remaining_usd` | Gauge | Remaining cost budget (USD) |
++| `life.mode.transitions` | Counter | Operating mode transitions |
++
++### Configuration
++
++Set `OTEL_EXPORTER_OTLP_ENDPOINT` to enable OTel export. Without it, Vigil degrades to structured logging only.
++
++See `vigil/CLAUDE.md` for full configuration reference and platform integration examples (Langfuse, LangSmith, Jaeger, Grafana Tempo).
+
+diff --git a/praxis/crates/praxis-core/src/sandbox.rs b/praxis/crates/praxis-core/src/sandbox.rs
+@@ -8,7 +8,7 @@
+ use serde::{Deserialize, Serialize};
+ use std::collections::BTreeSet;
+ use std::path::PathBuf;
+-use tracing::{debug, warn};
++use tracing::{debug, info, warn};
+ 
+ /// Security policy for sandboxed command execution.
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+@@ -132,6 +132,14 @@
+ 
+ impl CommandRunner for LocalCommandRunner {
+     fn run(&self, policy: &SandboxPolicy, request: &CommandRequest) -> PraxisResult<CommandResult> {
++        let span = tracing::info_span!(
++            "sandbox_run",
++            sandbox.executable = %request.executable,
++            sandbox.exit_code = tracing::field::Empty,
++            sandbox.duration_ms = tracing::field::Empty,
++        );
++        let _guard = span.enter();
++
+         if !policy.shell_enabled {
+             return Err(PraxisError::Sandbox(
+                 "shell execution is disabled by policy".into(),
+@@ -147,6 +155,8 @@
+             "executing command"
+         );
+ 
++        let start = std::time::Instant::now();
++
+         let mut cmd = std::process::Command::new(&request.executable);
+         cmd.args(&request.args);
+         cmd.current_dir(&canonical_cwd);
+@@ -162,15 +172,19 @@
+             .map_err(|e| PraxisError::CommandFailed(format!("spawn failed: {e}")))?;
+ 
+         let timeout = std::time::Duration::from_millis(policy.max_execution_ms);
+-        match wait_timeout::ChildExt::wait_timeout(&mut child, timeout) {
++        let result = match wait_timeout::ChildExt::wait_timeout(&mut child, timeout) {
+             Ok(Some(status)) => {
+                 let stdout =
+                     Self::truncate(read_pipe(child.stdout.take()), policy.max_stdout_bytes);
+                 let stderr =
+                     Self::truncate(read_pipe(child.stderr.take()), policy.max_stderr_bytes);
+ 
++                let exit_code = status.code().unwrap_or(-1);
++                span.record("sandbox.exit_code", exit_code);
++                info!(exit_code, "command completed");
++
+                 Ok(CommandResult {
+-                    exit_code: status.code().unwrap_or(-1),
++                    exit_code,
+                     stdout,
+                     stderr,
+                 })
+@@ -184,6 +198,7 @@
+                 );
+                 let _ = child.kill();
+                 let _ = child.wait();
++                span.record("sandbox.exit_code", -1);
+                 Ok(CommandResult {
+                     exit_code: -1,
+                     stdout: String::new(),
+@@ -191,7 +206,12 @@
+                 })
+             }
+             Err(e) => Err(PraxisError::CommandFailed(format!("wait failed: {e}"))),
+-        }
++        };
++
++        let elapsed = start.elapsed().as_millis() as u64;
++        span.record("sandbox.duration_ms", elapsed);
++
++        result
+     }
+ }
+ 
+
+diff --git a/praxis/crates/praxis-mcp/src/connection.rs b/praxis/crates/praxis-mcp/src/connection.rs
+@@ -15,6 +15,7 @@
+ use thiserror::Error;
+ use tokio::process::Command;
+ use tokio::runtime::Handle;
++use tracing::info;
+ 
+ /// Configuration for connecting to an MCP server.
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+@@ -40,6 +41,13 @@
+ 
+ /// Connect to an MCP server via stdio and return all its tools.
+ pub async fn connect_mcp_stdio(config: &McpServerConfig) -> Result<McpConnection, McpError> {
++    let span = tracing::info_span!(
++        "mcp_connect",
++        mcp.server = %config.name,
++        mcp.tools_discovered = tracing::field::Empty,
++    );
++    let _guard = span.enter();
++
+     let McpTransport::Stdio {
+         ref command,
+         ref args,
+@@ -69,6 +77,13 @@
+         })
+         .collect();
+ 
++    span.record("mcp.tools_discovered", mcp_tools.len());
++    info!(
++        server = %config.name,
++        tools = mcp_tools.len(),
++        "MCP server connected"
++    );
++
+     Ok(McpConnection {
+         server_name: config.name.clone(),
+         tools: mcp_tools,
+
+diff --git a/praxis/crates/praxis-mcp/src/tool.rs b/praxis/crates/praxis-mcp/src/tool.rs
+@@ -9,6 +9,7 @@
+ use std::borrow::Cow;
+ use std::sync::Arc;
+ use tokio::runtime::Handle;
++use tracing::info;
+ 
+ /// Bridge: wraps a single MCP tool into the canonical Tool trait.
+ pub struct McpTool {
+@@ -41,6 +42,17 @@
+     }
+ 
+     fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
++        let span = tracing::info_span!(
++            "mcp_call_tool",
++            mcp.server = %self.definition.name,
++            mcp.method = %self.mcp_tool_name,
++            mcp.duration_ms = tracing::field::Empty,
++            mcp.is_error = tracing::field::Empty,
++        );
++        let _guard = span.enter();
++
++        let start = std::time::Instant::now();
++
+         let arguments = call.input.as_object().cloned();
+ 
+         let params = CallToolRequestParams {
+@@ -59,6 +71,17 @@
+                 message: format!("MCP call_tool failed: {e}"),
+             })?;
+ 
++        let duration_ms = start.elapsed().as_millis() as u64;
++        let is_error = mcp_result.is_error.unwrap_or(false);
++        span.record("mcp.duration_ms", duration_ms);
++        span.record("mcp.is_error", is_error);
++        info!(
++            method = %self.mcp_tool_name,
++            duration_ms,
++            is_error,
++            "MCP tool call completed"
++        );
++
+         // Convert MCP content to canonical ToolContent
+         let content: Vec<ToolContent> = mcp_result
+             .content
+@@ -96,7 +119,7 @@
+             } else {
+                 Some(content)
+             },
+-            is_error: mcp_result.is_error.unwrap_or(false),
++            is_error,
+         })
+     }
+ }
+
+diff --git a/praxis/crates/praxis-skills/src/registry.rs b/praxis/crates/praxis-skills/src/registry.rs
+@@ -7,6 +7,7 @@
+ use std::collections::BTreeMap;
+ use std::path::{Path, PathBuf};
+ use thiserror::Error;
++use tracing::info;
+ 
+ /// A loaded skill with its full content.
+ #[derive(Debug, Clone)]
+@@ -26,6 +27,13 @@
+ impl SkillRegistry {
+     /// Scan directories for SKILL.md files. Returns a registry of discovered skills.
+     pub fn discover(dirs: &[PathBuf]) -> Result<Self, SkillError> {
++        let span = tracing::info_span!(
++            "skill_discover",
++            skills.dirs_scanned = dirs.len(),
++            skills.found = tracing::field::Empty,
++        );
++        let _guard = span.enter();
++
+         let mut skills = BTreeMap::new();
+ 
+         for dir in dirs {
+@@ -77,6 +85,9 @@
+             }
+         }
+ 
++        span.record("skills.found", skills.len());
++        info!(count = skills.len(), "skill discovery completed");
++
+         Ok(Self { skills })
+     }
+ 
+
+diff --git a/praxis/crates/praxis-tools/src/edit.rs b/praxis/crates/praxis-tools/src/edit.rs
+@@ -13,6 +13,7 @@
+ use std::path::Path;
+ use std::sync::Arc;
+ use thiserror::Error;
++use tracing::info;
+ 
+ /// A line of content with its hash tag.
+ #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+@@ -199,6 +200,14 @@
+                 message: format!("Invalid 'ops' format: {e}"),
+             })?;
+ 
++        let span = tracing::info_span!(
++            "edit_file",
++            hashline.file = %path_str,
++            hashline.ops_count = ops.len(),
++            hashline.lines_changed = tracing::field::Empty,
++        );
++        let _guard = span.enter();
++
+         let path = self
+             .fs
+             .resolve_for_write(Path::new(path_str))
+@@ -214,12 +223,18 @@
+                 message: format!("Failed to read file: {e}"),
+             })?;
+ 
++        let original_line_count = content.lines().count();
++
+         let new_content =
+             apply_tagged_edits(&content, &ops).map_err(|e| ToolError::ExecutionFailed {
+                 tool_name: "edit_file".into(),
+                 message: format!("Edit failed: {e}"),
+             })?;
+ 
++        let new_line_count = new_content.lines().count();
++        let lines_changed = (new_line_count as isize - original_line_count as isize).unsigned_abs();
++        span.record("hashline.lines_changed", lines_changed);
++
+         self.fs
+             .write(&path, new_content.as_bytes())
+             .map_err(|e| ToolError::ExecutionFailed {
+@@ -227,6 +242,8 @@
+                 message: format!("Failed to write file: {e}"),
+             })?;
+ 
++        info!(ops = ops.len(), lines_changed, "file edited");
++
+         let hashed_content = render_hashed_content(&new_content);
+ 
+         Ok(ToolResult {
+
+diff --git a/praxis/crates/praxis-tools/src/fs.rs b/praxis/crates/praxis-tools/src/fs.rs
+@@ -12,6 +12,7 @@
+ use std::io::{BufRead, BufReader};
+ use std::path::{Path, PathBuf};
+ use std::sync::Arc;
++use tracing::debug;
+ 
+ // ── ReadFileTool ─────────────────────────────────────────────────────
+ 
+@@ -60,6 +61,13 @@
+                 message: "Missing or invalid 'path' argument".into(),
+             })?;
+ 
++        let span = tracing::debug_span!(
++            "read_file",
++            fs.path = %path_str,
++            fs.bytes_read = tracing::field::Empty,
++        );
++        let _guard = span.enter();
++
+         let path =
+             self.fs
+                 .resolve(Path::new(path_str))
+@@ -76,6 +84,9 @@
+                 message: format!("Failed to read file: {e}"),
+             })?;
+ 
++        span.record("fs.bytes_read", content.len());
++        debug!(bytes = content.len(), "file read");
++
+         let hashed_content = render_hashed_content(&content);
+ 
+         Ok(ToolResult {
+@@ -143,6 +154,13 @@
+                 message: "Missing or invalid 'content' argument".into(),
+             })?;
+ 
++        let _span = tracing::debug_span!(
++            "write_file",
++            fs.path = %path_str,
++            fs.bytes_written = content.len(),
++        )
++        .entered();
++
+         let path = self
+             .fs
+             .resolve_for_write(Path::new(path_str))
+@@ -158,6 +176,8 @@
+                 message: format!("Failed to write file: {e}"),
+             })?;
+ 
++        debug!(bytes = content.len(), "file written");
++
+         Ok(ToolResult {
+             call_id: call.call_id.clone(),
+             tool_name: call.tool_name.clone(),
+@@ -215,6 +235,8 @@
+                 message: "Missing or invalid 'path' argument".into(),
+             })?;
+ 
++        let _span = tracing::debug_span!("list_dir", fs.path = %path_str).entered();
++
+         let path =
+             self.fs
+                 .resolve(Path::new(path_str))
+@@ -237,6 +259,8 @@
+             })
+             .collect::<Vec<_>>();
+ 
++        debug!(entry_count = entries.len(), "directory listed");
++
+         Ok(ToolResult {
+             call_id: call.call_id.clone(),
+             tool_name: call.tool_name.clone(),
+@@ -295,6 +319,13 @@
+                 message: "Missing or invalid 'pattern' argument".into(),
+             })?;
+ 
++        let span = tracing::debug_span!(
++            "glob_search",
++            fs.pattern = %pattern,
++            fs.matches_found = tracing::field::Empty,
++        );
++        let _guard = span.enter();
++
+         let base_dir = call
+             .input
+             .get("path")
+@@ -327,6 +358,8 @@
+             .collect();
+ 
+         let count = matches.len();
++        span.record("fs.matches_found", count);
++        debug!(count, "glob search completed");
+ 
+         Ok(ToolResult {
+             call_id: call.call_id.clone(),
+@@ -388,6 +421,13 @@
+                 message: "Missing or invalid 'pattern' argument".into(),
+             })?;
+ 
++        let span = tracing::debug_span!(
++            "grep_search",
++            fs.pattern = %pattern_str,
++            fs.matches_found = tracing::field::Empty,
++        );
++        let _guard = span.enter();
++
+         let regex = Regex::new(pattern_str).map_err(|e| ToolError::ExecutionFailed {
+             tool_name: "grep".into(),
+             message: format!("Invalid regex pattern: {e}"),
+@@ -480,6 +520,8 @@
+         }
+ 
+         let count = matches.len();
++        span.record("fs.matches_found", count);
++        debug!(count, "grep search completed");
+ 
+         Ok(ToolResult {
+             call_id: call.call_id.clone(),
+
+diff --git a/praxis/crates/praxis-tools/src/memory.rs b/praxis/crates/praxis-tools/src/memory.rs
+@@ -9,6 +9,7 @@
+ use serde_json::json;
+ use std::fs;
+ use std::path::PathBuf;
++use tracing::debug;
+ 
+ // ── ReadMemoryTool ───────────────────────────────────────────────────
+ 
+@@ -57,6 +58,10 @@
+                 message: "Missing or invalid 'key' argument".into(),
+             })?;
+ 
++        let _span =
++            tracing::debug_span!("read_memory", memory.operation = "read", memory.key = %key)
++                .entered();
++
+         validate_memory_key(key).map_err(|msg| ToolError::InvalidInput { message: msg })?;
+ 
+         let file_path = self.memory_dir.join(format!("{key}.md"));
+@@ -68,6 +73,8 @@
+                     message: format!("Failed to read memory file: {e}"),
+                 })?;
+ 
++            debug!(exists = true, bytes = content.len(), "memory read");
++
+             Ok(ToolResult {
+                 call_id: call.call_id.clone(),
+                 tool_name: call.tool_name.clone(),
+@@ -76,6 +83,8 @@
+                 is_error: false,
+             })
+         } else {
++            debug!(exists = false, "memory key not found");
++
+             Ok(ToolResult {
+                 call_id: call.call_id.clone(),
+                 tool_name: call.tool_name.clone(),
+@@ -142,6 +151,14 @@
+                 message: "Missing or invalid 'content' argument".into(),
+             })?;
+ 
++        let _span = tracing::debug_span!(
++            "write_memory",
++            memory.operation = "write",
++            memory.key = %key,
++            memory.bytes = content.len(),
++        )
++        .entered();
++
+         validate_memory_key(key).map_err(|msg| ToolError::InvalidInput { message: msg })?;
+ 
+         fs::create_dir_all(&self.memory_dir).map_err(|e| ToolError::ExecutionFailed {
+@@ -156,6 +173,8 @@
+             message: format!("Failed to write memory file: {e}"),
+         })?;
+ 
++        debug!(bytes = content.len(), "memory written");
++
+         Ok(ToolResult {
+             call_id: call.call_id.clone(),
+             tool_name: call.tool_name.clone(),
+
+diff --git a/praxis/crates/praxis-tools/src/shell.rs b/praxis/crates/praxis-tools/src/shell.rs
+@@ -9,6 +9,7 @@
+ use praxis_core::sandbox::{CommandRequest, CommandRunner, SandboxPolicy};
+ use serde_json::json;
+ use std::path::PathBuf;
++use tracing::info;
+ 
+ /// Tool that executes bash commands within the sandbox.
+ pub struct BashTool {
+@@ -58,6 +59,14 @@
+                 message: "Missing 'command' argument".into(),
+             })?;
+ 
++        let span = tracing::info_span!(
++            "bash_execute",
++            tool.name = "bash",
++            call_id = %call.call_id,
++            bash.exit_code = tracing::field::Empty,
++        );
++        let _guard = span.enter();
++
+         let cwd = call
+             .input
+             .get("cwd")
+@@ -80,6 +89,9 @@
+                     message: e.to_string(),
+                 })?;
+ 
++        span.record("bash.exit_code", result.exit_code);
++        info!(exit_code = result.exit_code, "bash command completed");
++
+         Ok(ToolResult {
+             call_id: call.call_id.clone(),
+             tool_name: call.tool_name.clone(),
+
+diff --git a/vigil/CLAUDE.md b/vigil/CLAUDE.md
+@@ -0,0 +1,131 @@
++# Vigil
++
++Observability foundation for the Life Agent OS — OpenTelemetry-native tracing, GenAI semantic conventions, and contract-derived instrumentation.
++
++**Version**: 0.1.0 | **Rust**: edition 2024, MSRV 1.85 | **Tests**: 26 passing (+2 ignored)
++
++## Architecture
++
++Vigil is a single crate with four modules:
++
++### config (`src/config.rs`)
++
++`VigConfig` — telemetry pipeline configuration with environment variable overrides.
++
++- `VigConfig::for_service("arcan")` — create config for a named service
++- `VigConfig::from_env()` — build config purely from environment variables
++- `config.with_env_overrides()` — apply env overrides on top of programmatic values
++
++### semconv (`src/semconv.rs`)
++
++Semantic convention constants organized into four namespaces:
++
++- **`gen_ai.*`**: GenAI semantic conventions (operation name, system, model, tokens, tool name, agent)
++- **`life.*`**: Life Agent OS attributes (session/run/branch IDs, loop phase, operating mode, budget, state vector, tool status)
++- **`autonomic.*`**: Autonomic controller attributes (economic mode, health pillars)
++- **`lago.*`**: Lago persistence attributes (stream ID, blob hash, fs branch)
++
++### spans (`src/spans.rs`)
++
++Contract-derived span builders that create properly-attributed `tracing` spans:
++
++- `agent_span(session_id, agent_name)` — root `invoke_agent` span for agent sessions
++- `phase_span(LoopPhase)` — child span for loop phases (perceive, deliberate, gate, execute, commit, reflect, sleep)
++- `chat_span(model, provider, max_tokens, temperature)` — GenAI `chat` client span for LLM calls
++- `tool_span(tool_name, tool_call_id)` — GenAI `execute_tool` span for tool calls
++- `record_token_usage(span, usage)` — record token counts on a chat span
++- `record_finish_reason(span, reason)` — record stop reason
++- `write_trace_context(envelope)` — write OTel trace/span IDs into an EventEnvelope (dual-write)
++- `extract_trace_context(envelope)` — extract trace context from persisted events
++
++### metrics (`src/metrics.rs`)
++
++`GenAiMetrics` — pre-created OTel metric instruments:
++
++- `gen_ai.client.token.usage` — histogram of token counts per request (input/output breakdown)
++- `gen_ai.client.operation.duration` — histogram of LLM call duration (seconds)
++- `life.tool.executions` — counter of tool executions by name and status
++- `life.budget.tokens_remaining` — gauge of remaining token budget
++- `life.budget.cost_remaining_usd` — gauge of remaining cost budget
++- `life.mode.transitions` — counter of operating mode transitions
++
++## Environment Variables
++
++| Variable | Description | Default |
++| --- | --- | --- |
++| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint (e.g. `http://localhost:4317`) | None (logging only) |
++| `OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated `key=value` pairs for OTLP headers | None |
++| `OTEL_SERVICE_NAME` | Service identity for OTel resource | `"vigil"` |
++| `VIGIL_LOG_FORMAT` | Log output format: `pretty` or `json` | `pretty` |
++| `VIGIL_CAPTURE_CONTENT` | Capture prompt/completion content in spans: `true`/`1`/`yes` | `false` |
++| `VIGIL_SAMPLING_RATIO` | Trace sampling ratio (0.0..=1.0) | `1.0` |
++
++## Platform Integration Examples
++
++### Langfuse
++
++```bash
++export OTEL_EXPORTER_OTLP_ENDPOINT="https://cloud.langfuse.com/api/public/otel"
++export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64(public_key:secret_key)>"
++export OTEL_SERVICE_NAME="arcan"
++```
++
++### LangSmith
++
++```bash
++export OTEL_EXPORTER_OTLP_ENDPOINT="https://api.smith.langchain.com/otel"
++export OTEL_EXPORTER_OTLP_HEADERS="x-api-key=<langsmith_api_key>"
++export OTEL_SERVICE_NAME="arcan"
++```
++
++### Jaeger
++
++```bash
++export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
++export OTEL_SERVICE_NAME="arcan"
++```
++
++### Grafana Tempo
++
++```bash
++export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
++export OTEL_SERVICE_NAME="arcan"
++```
++
++## Commands
++
++```bash
++cargo fmt && cargo clippy -- -D warnings && cargo test   # Full verify
++cargo test                    # Run all tests
++cargo test -- --ignored --test-threads=1   # Run env var tests (process-global)
++```
++
++## Dependencies
++
++```
++aios-protocol (canonical contract — EventEnvelope, LoopPhase, TokenUsage)
++  └── vigil (observability — tracing + metrics + GenAI conventions)
++```
++
++Vigil depends only on `aios-protocol`. It does NOT depend on Arcan, Lago, Autonomic, Praxis, or Spaces.
++
++## Design Decisions
++
++1. **Graceful degradation**: Without `OTEL_EXPORTER_OTLP_ENDPOINT`, Vigil only configures `tracing-subscriber` for structured logging. No OTel SDK overhead.
++2. **Contract-derived spans**: Span hierarchy mirrors the aiOS kernel lifecycle (agent → phase → chat/tool), ensuring 1:1 mapping between observability and runtime behavior.
++3. **Dual-write**: `write_trace_context` embeds OTel trace/span IDs into `EventEnvelope`, linking persisted events to their traces for post-hoc analysis.
++4. **GenAI semantic conventions**: Follows the OTel GenAI spec (`gen_ai.*` attributes) for compatibility with Langfuse, LangSmith, and other GenAI observability platforms.
++5. **`thiserror` for errors**: Library crate convention — `VigError` uses `thiserror` derive.
++
++## Troubleshooting
++
++### "failed to initialize tracing subscriber" error
++
++This happens when `tracing_subscriber::registry().try_init()` is called more than once in the same process. The global subscriber can only be set once. In tests, use `try_init()` (which Vigil does) to tolerate this.
++
++### No spans appearing in Langfuse/LangSmith
++
++1. Check `OTEL_EXPORTER_OTLP_ENDPOINT` is set correctly (include the full URL path)
++2. Check `OTEL_EXPORTER_OTLP_HEADERS` has valid auth credentials
++3. Ensure the `VigGuard` is kept alive for the application lifetime (it flushes on drop)
++
+
+diff --git a/vigil/Cargo.toml b/vigil/Cargo.toml
+@@ -0,0 +1,43 @@
++[package]
++name = "vigil"
++version = "0.1.0"
++edition = "2024"
++rust-version = "1.85"
++description = "Observability foundation for the Life Agent OS — OpenTelemetry tracing, GenAI semantic conventions, and contract-derived instrumentation"
++license = "MIT"
++
++[dependencies]
++# OpenTelemetry core
++opentelemetry = "0.29"
++opentelemetry_sdk = { version = "0.29", features = ["trace", "metrics"] }
++opentelemetry-otlp = { version = "0.29", features = ["trace", "metrics", "grpc-tonic"] }
++opentelemetry-semantic-conventions = "0.29"
++
++# Tracing bridge
++tracing = "0.1"
++tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "registry", "fmt"] }
++tracing-opentelemetry = "0.30"
++
++# Shared contract
++aios-protocol = { path = "../aiOS/crates/aios-protocol" }
++
++# Error handling
++thiserror = "2.0"
++
++# gRPC transport (required for OTLP header injection)
++tonic = "0.12"
++
++# Utilities
++serde = { version = "1", features = ["derive"] }
++tokio = { version = "1", features = ["rt"] }
++
++[dev-dependencies]
++serde_json = "1"
++tokio = { version = "1", features = ["rt", "macros"] }
++
++[lints.rust]
++unused_must_use = "deny"
++
++[lints.clippy]
++dbg_macro = "deny"
++
+
+diff --git a/vigil/src/config.rs b/vigil/src/config.rs
+@@ -0,0 +1,265 @@
++//! Configuration for Vigil telemetry initialization.
++//!
++//! Supports construction from explicit values or environment variable overrides.
++
++use std::env;
++
++/// OTLP transport protocol.
++#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum OtlpProtocol {
++    #[default]
++    Grpc,
++    Http,
++}
++
++/// Log output format.
++#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum LogFormat {
++    #[default]
++    Pretty,
++    Json,
++}
++
++/// Vigil configuration — controls telemetry pipeline setup.
++///
++/// When constructed with [`VigConfig::default()`], all fields use sensible defaults.
++/// Environment variables override programmatic values when [`VigConfig::from_env()`]
++/// or [`VigConfig::with_env_overrides()`] is used.
++#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
++pub struct VigConfig {
++    /// Service identity for OTel resource (e.g. "arcan", "lagod", "autonomicd").
++    pub service_name: String,
++
++    /// OTLP collector endpoint (e.g. "http://localhost:4317").
++    /// If `None`, no OTel exporter is configured — Vigil degrades to structured logging only.
++    pub otlp_endpoint: Option<String>,
++
++    /// Transport protocol for OTLP export.
++    pub otlp_protocol: OtlpProtocol,
++
++    /// Additional headers for OTLP export (e.g. Langfuse `Authorization: Basic <base64>`).
++    pub otlp_headers: Vec<(String, String)>,
++
++    /// Log output format.
++    pub log_format: LogFormat,
++
++    /// Trace sampling ratio (0.0 = none, 1.0 = all).
++    pub sampling_ratio: f64,
++
++    /// Whether to capture prompt/completion content in spans (privacy-sensitive).
++    pub capture_content: bool,
++}
++
++impl Default for VigConfig {
++    fn default() -> Self {
++        Self {
++            service_name: "vigil".to_string(),
++            otlp_endpoint: None,
++            otlp_protocol: OtlpProtocol::default(),
++            otlp_headers: Vec::new(),
++            log_format: LogFormat::default(),
++            sampling_ratio: 1.0,
++            capture_content: false,
++        }
++    }
++}
++
++impl VigConfig {
++    /// Create a config for a named service with sensible defaults.
++    pub fn for_service(name: impl Into<String>) -> Self {
++        Self {
++            service_name: name.into(),
++            ..Default::default()
++        }
++    }
++
++    /// Build config purely from environment variables.
++    pub fn from_env() -> Self {
++        Self::default().with_env_overrides()
++    }
++
++    /// Apply environment variable overrides on top of programmatic values.
++    ///
++    /// Supported env vars:
++    /// - `OTEL_EXPORTER_OTLP_ENDPOINT` → `otlp_endpoint`
++    /// - `OTEL_EXPORTER_OTLP_HEADERS` → `otlp_headers` (comma-separated `key=value` pairs)
++    /// - `OTEL_SERVICE_NAME` → `service_name`
++    /// - `VIGIL_LOG_FORMAT` → `log_format` ("json" or "pretty")
++    /// - `VIGIL_CAPTURE_CONTENT` → `capture_content` ("true" or "1")
++    /// - `VIGIL_SAMPLING_RATIO` → `sampling_ratio` (float 0.0..=1.0)
++    pub fn with_env_overrides(mut self) -> Self {
++        if let Ok(endpoint) = env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
++            if !endpoint.is_empty() {
++                self.otlp_endpoint = Some(endpoint);
++            }
++        }
++
++        if let Ok(headers_str) = env::var("OTEL_EXPORTER_OTLP_HEADERS") {
++            self.otlp_headers = parse_headers(&headers_str);
++        }
++
++        if let Ok(name) = env::var("OTEL_SERVICE_NAME") {
++            if !name.is_empty() {
++                self.service_name = name;
++            }
++        }
++
++        if let Ok(fmt) = env::var("VIGIL_LOG_FORMAT") {
++            match fmt.to_lowercase().as_str() {
++                "json" => self.log_format = LogFormat::Json,
++                "pretty" => self.log_format = LogFormat::Pretty,
++                _ => {} // ignore unknown values
++            }
++        }
++
++        if let Ok(capture) = env::var("VIGIL_CAPTURE_CONTENT") {
++            self.capture_content = matches!(capture.as_str(), "true" | "1" | "yes");
++        }
++
++        if let Ok(ratio) = env::var("VIGIL_SAMPLING_RATIO") {
++            if let Ok(r) = ratio.parse::<f64>() {
++                self.sampling_ratio = r.clamp(0.0, 1.0);
++            }
++        }
++
++        self
++    }
++}
++
++/// Parse `key=value,key2=value2` header strings into pairs.
++fn parse_headers(s: &str) -> Vec<(String, String)> {
++    s.split(',')
++        .filter_map(|pair| {
++            let pair = pair.trim();
++            if pair.is_empty() {
++                return None;
++            }
++            let mut parts = pair.splitn(2, '=');
++            let key = parts.next()?.trim().to_string();
++            let value = parts.next()?.trim().to_string();
++            if key.is_empty() {
++                return None;
++            }
++            Some((key, value))
++        })
++        .collect()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn default_config_has_no_endpoint() {
++        let cfg = VigConfig::default();
++        assert!(cfg.otlp_endpoint.is_none());
++        assert_eq!(cfg.sampling_ratio, 1.0);
++        assert!(!cfg.capture_content);
++        assert_eq!(cfg.log_format, LogFormat::Pretty);
++        assert_eq!(cfg.otlp_protocol, OtlpProtocol::Grpc);
++    }
++
++    #[test]
++    fn for_service_sets_name() {
++        let cfg = VigConfig::for_service("arcan");
++        assert_eq!(cfg.service_name, "arcan");
++    }
++
++    #[test]
++    fn parse_headers_works() {
++        let result = parse_headers("Authorization=Basic abc123,X-Custom=value");
++        assert_eq!(result.len(), 2);
++        assert_eq!(
++            result[0],
++            ("Authorization".to_string(), "Basic abc123".to_string())
++        );
++        assert_eq!(result[1], ("X-Custom".to_string(), "value".to_string()));
++    }
++
++    #[test]
++    fn parse_headers_handles_empty() {
++        assert!(parse_headers("").is_empty());
++        assert!(parse_headers("  ").is_empty());
++        assert!(parse_headers(",,,").is_empty());
++    }
++
++    #[test]
++    fn parse_headers_handles_missing_value() {
++        let result = parse_headers("key_only");
++        assert!(result.is_empty());
++    }
++
++    // Env var tests are #[ignore] because env vars are process-global and
++    // race under parallel test execution. Run with:
++    //   cargo test -- --ignored --test-threads=1
++    #[test]
++    #[ignore]
++    fn env_overrides_all_fields() {
++        // SAFETY: Rust 2024 requires unsafe for set_var/remove_var.
++        unsafe {
++            env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "http://test:4317");
++            env::set_var("OTEL_SERVICE_NAME", "vigil-test-svc");
++            env::set_var("VIGIL_LOG_FORMAT", "json");
++            env::set_var("VIGIL_CAPTURE_CONTENT", "true");
++            env::set_var("VIGIL_SAMPLING_RATIO", "0.5");
++        }
++
++        let cfg = VigConfig::default().with_env_overrides();
++        assert_eq!(cfg.otlp_endpoint.as_deref(), Some("http://test:4317"));
++        assert_eq!(cfg.service_name, "vigil-test-svc");
++        assert_eq!(cfg.log_format, LogFormat::Json);
++        assert!(cfg.capture_content);
++        assert!((cfg.sampling_ratio - 0.5).abs() < 0.001);
++
++        unsafe {
++            env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT");
++            env::remove_var("OTEL_SERVICE_NAME");
++            env::remove_var("VIGIL_LOG_FORMAT");
++            env::remove_var("VIGIL_CAPTURE_CONTENT");
++            env::remove_var("VIGIL_SAMPLING_RATIO");
++        }
++    }
++
++    #[test]
++    #[ignore]
++    fn sampling_ratio_clamped() {
++        unsafe {
++            env::set_var("VIGIL_SAMPLING_RATIO", "5.0");
++        }
++        let cfg = VigConfig::default().with_env_overrides();
++        assert!((cfg.sampling_ratio - 1.0).abs() < 0.001);
++
++        unsafe {
++            env::set_var("VIGIL_SAMPLING_RATIO", "-1.0");
++        }
++        let cfg = VigConfig::default().with_env_overrides();
++        assert!(cfg.sampling_ratio.abs() < 0.001);
++
++        unsafe {
++            env::remove_var("VIGIL_SAMPLING_RATIO");
++        }
++    }
++
++    #[test]
++    fn config_builder_pattern() {
++        let cfg = VigConfig {
++            service_name: "test".to_string(),
++            otlp_endpoint: Some("http://localhost:4317".to_string()),
++            otlp_protocol: OtlpProtocol::Http,
++            otlp_headers: vec![("Authorization".to_string(), "Bearer token".to_string())],
++            log_format: LogFormat::Json,
++            sampling_ratio: 0.5,
++            capture_content: true,
++        };
++        assert_eq!(cfg.service_name, "test");
++        assert_eq!(cfg.otlp_endpoint.as_deref(), Some("http://localhost:4317"));
++        assert_eq!(cfg.otlp_protocol, OtlpProtocol::Http);
++        assert_eq!(cfg.otlp_headers.len(), 1);
++        assert_eq!(cfg.log_format, LogFormat::Json);
++        assert!((cfg.sampling_ratio - 0.5).abs() < 0.001);
++        assert!(cfg.capture_content);
++    }
++}
++
+
+diff --git a/vigil/src/lib.rs b/vigil/src/lib.rs
+@@ -0,0 +1,304 @@
++//! Vigil — observability foundation for the Life Agent OS.
++//!
++//! Provides a unified telemetry pipeline combining structured logging,
++//! OpenTelemetry distributed tracing, and metrics collection with
++//! GenAI semantic conventions.
++//!
++//! # Usage
++//!
++//! ```no_run
++//! use vigil::{VigConfig, init_telemetry};
++//!
++//! # fn main() -> Result<(), vigil::VigError> {
++//! let config = VigConfig::for_service("arcan").with_env_overrides();
++//! let _guard = init_telemetry(config)?;
++//!
++//! // All tracing macros now emit structured logs and (if configured) OTel spans.
++//! tracing::info!("Agent OS started");
++//! # Ok(())
++//! # }
++//! ```
++//!
++//! If no OTLP endpoint is configured, Vigil degrades gracefully to
++//! structured logging only via `tracing-subscriber`.
++
++pub mod config;
++pub mod metrics;
++pub mod semconv;
++pub mod spans;
++
++pub use config::{LogFormat, OtlpProtocol, VigConfig};
++pub use metrics::GenAiMetrics;
++
++use opentelemetry::global;
++use opentelemetry::trace::TracerProvider as _;
++use opentelemetry_otlp::WithExportConfig as _;
++use opentelemetry_otlp::WithTonicConfig as _;
++use opentelemetry_sdk::Resource;
++use opentelemetry_sdk::metrics::SdkMeterProvider;
++use opentelemetry_sdk::trace::SdkTracerProvider;
++use tracing_subscriber::EnvFilter;
++use tracing_subscriber::prelude::*;
++
++/// Errors during telemetry initialization.
++#[derive(Debug, thiserror::Error)]
++pub enum VigError {
++    #[error("failed to build OTLP span exporter: {0}")]
++    SpanExporter(String),
++
++    #[error("failed to build OTLP metric exporter: {0}")]
++    MetricExporter(String),
++
++    #[error("failed to initialize tracing subscriber: {0}")]
++    Subscriber(String),
++}
++
++/// Guard that flushes and shuts down telemetry providers on drop.
++///
++/// Hold this in your `main()` for the lifetime of the application.
++pub struct VigGuard {
++    tracer_provider: Option<SdkTracerProvider>,
++    meter_provider: Option<SdkMeterProvider>,
++}
++
++impl Drop for VigGuard {
++    fn drop(&mut self) {
++        if let Some(ref tp) = self.tracer_provider {
++            let _ = tp.shutdown();
++        }
++        if let Some(ref mp) = self.meter_provider {
++            let _ = mp.shutdown();
++        }
++    }
++}
++
++/// Initialize the Vigil telemetry pipeline.
++///
++/// Sets up:
++/// 1. `tracing-subscriber` with `EnvFilter` + formatted output (pretty or JSON)
++/// 2. `tracing-opentelemetry` layer bridging to OTel SDK (if endpoint configured)
++/// 3. OTLP exporter for traces (if endpoint configured)
++/// 4. OTLP exporter for metrics (if endpoint configured)
++///
++/// Returns a [`VigGuard`] that flushes telemetry on drop.
++///
++/// If no OTLP endpoint is set, only structured logging is configured.
++pub fn init_telemetry(config: VigConfig) -> Result<VigGuard, VigError> {
++    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
++
++    if let Some(ref endpoint) = config.otlp_endpoint {
++        init_with_otel(config.clone(), endpoint, env_filter)
++    } else {
++        init_logging_only(&config, env_filter)
++    }
++}
++
++/// Initialize with full OTel pipeline.
++fn init_with_otel(
++    config: VigConfig,
++    endpoint: &str,
++    env_filter: EnvFilter,
++) -> Result<VigGuard, VigError> {
++    let resource = Resource::builder()
++        .with_service_name(config.service_name.clone())
++        .build();
++
++    // Build tracer provider
++    let tracer_provider = build_tracer_provider(&config, endpoint, resource.clone())?;
++    global::set_tracer_provider(tracer_provider.clone());
++
++    // Build meter provider
++    let meter_provider = build_meter_provider(&config, endpoint, resource)?;
++    global::set_meter_provider(meter_provider.clone());
++
++    // Create OTel tracing layer
++    let tracer = tracer_provider.tracer(config.service_name.clone());
++    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
++
++    // Build subscriber with OTel layer + fmt layer
++    let registry = tracing_subscriber::registry().with(otel_layer);
++
++    match config.log_format {
++        LogFormat::Json => {
++            let fmt_layer = tracing_subscriber::fmt::layer()
++                .json()
++                .with_filter(env_filter);
++            registry.with(fmt_layer).try_init().map_err(
++                |e: tracing_subscriber::util::TryInitError| VigError::Subscriber(e.to_string()),
++            )?;
++        }
++        LogFormat::Pretty => {
++            let fmt_layer = tracing_subscriber::fmt::layer().with_filter(env_filter);
++            registry.with(fmt_layer).try_init().map_err(
++                |e: tracing_subscriber::util::TryInitError| VigError::Subscriber(e.to_string()),
++            )?;
++        }
++    }
++
++    Ok(VigGuard {
++        tracer_provider: Some(tracer_provider),
++        meter_provider: Some(meter_provider),
++    })
++}
++
++/// Initialize with logging only (no OTel export).
++fn init_logging_only(config: &VigConfig, env_filter: EnvFilter) -> Result<VigGuard, VigError> {
++    match config.log_format {
++        LogFormat::Json => {
++            tracing_subscriber::registry()
++                .with(
++                    tracing_subscriber::fmt::layer()
++                        .json()
++                        .with_filter(env_filter),
++                )
++                .try_init()
++                .map_err(|e: tracing_subscriber::util::TryInitError| {
++                    VigError::Subscriber(e.to_string())
++                })?;
++        }
++        LogFormat::Pretty => {
++            tracing_subscriber::registry()
++                .with(tracing_subscriber::fmt::layer().with_filter(env_filter))
++                .try_init()
++                .map_err(|e: tracing_subscriber::util::TryInitError| {
++                    VigError::Subscriber(e.to_string())
++                })?;
++        }
++    }
++
++    Ok(VigGuard {
++        tracer_provider: None,
++        meter_provider: None,
++    })
++}
++
++/// Build an OTLP tracer provider.
++fn build_tracer_provider(
++    config: &VigConfig,
++    endpoint: &str,
++    resource: Resource,
++) -> Result<SdkTracerProvider, VigError> {
++    let exporter = match config.otlp_protocol {
++        OtlpProtocol::Grpc => {
++            let mut builder = opentelemetry_otlp::SpanExporter::builder()
++                .with_tonic()
++                .with_endpoint(endpoint);
++
++            if !config.otlp_headers.is_empty() {
++                let mut metadata = tonic::metadata::MetadataMap::new();
++                for (key, value) in &config.otlp_headers {
++                    if let (Ok(k), Ok(v)) = (
++                        key.parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>(),
++                        value.parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>(),
++                    ) {
++                        metadata.insert(k, v);
++                    }
++                }
++                builder = builder.with_metadata(metadata);
++            }
++
++            builder
++                .build()
++                .map_err(|e| VigError::SpanExporter(e.to_string()))?
++        }
++        OtlpProtocol::Http => opentelemetry_otlp::SpanExporter::builder()
++            .with_http()
++            .with_endpoint(endpoint)
++            .build()
++            .map_err(|e| VigError::SpanExporter(e.to_string()))?,
++    };
++
++    let provider = SdkTracerProvider::builder()
++        .with_batch_exporter(exporter)
++        .with_resource(resource)
++        .build();
++
++    Ok(provider)
++}
++
++/// Build an OTLP meter provider.
++fn build_meter_provider(
++    config: &VigConfig,
++    endpoint: &str,
++    resource: Resource,
++) -> Result<SdkMeterProvider, VigError> {
++    let exporter = match config.otlp_protocol {
++        OtlpProtocol::Grpc => {
++            let mut builder = opentelemetry_otlp::MetricExporter::builder()
++                .with_tonic()
++                .with_endpoint(endpoint);
++
++            if !config.otlp_headers.is_empty() {
++                let mut metadata = tonic::metadata::MetadataMap::new();
++                for (key, value) in &config.otlp_headers {
++                    if let (Ok(k), Ok(v)) = (
++                        key.parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>(),
++                        value.parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>(),
++                    ) {
++                        metadata.insert(k, v);
++                    }
++                }
++                builder = builder.with_metadata(metadata);
++            }
++
++            builder
++                .build()
++                .map_err(|e| VigError::MetricExporter(e.to_string()))?
++        }
++        OtlpProtocol::Http => opentelemetry_otlp::MetricExporter::builder()
++            .with_http()
++            .with_endpoint(endpoint)
++            .build()
++            .map_err(|e| VigError::MetricExporter(e.to_string()))?,
++    };
++
++    let provider = SdkMeterProvider::builder()
++        .with_periodic_exporter(exporter)
++        .with_resource(resource)
++        .build();
++
++    Ok(provider)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn init_telemetry_no_endpoint_succeeds() {
++        let config = VigConfig::for_service("test");
++        let result = init_telemetry(config);
++        match result {
++            Ok(guard) => {
++                assert!(guard.tracer_provider.is_none());
++                assert!(guard.meter_provider.is_none());
++            }
++            Err(VigError::Subscriber(_)) => {
++                // Acceptable: global subscriber already set by another test
++            }
++            Err(e) => panic!("unexpected error: {e}"),
++        }
++    }
++
++    #[test]
++    fn vig_error_display() {
++        let e = VigError::SpanExporter("test error".to_string());
++        assert!(e.to_string().contains("test error"));
++
++        let e = VigError::MetricExporter("metric error".to_string());
++        assert!(e.to_string().contains("metric error"));
++
++        let e = VigError::Subscriber("sub error".to_string());
++        assert!(e.to_string().contains("sub error"));
++    }
++
++    #[test]
++    fn vig_guard_drop_is_safe() {
++        let guard = VigGuard {
++            tracer_provider: None,
++            meter_provider: None,
++        };
++        drop(guard);
++    }
++}
++
+
+diff --git a/vigil/src/metrics.rs b/vigil/src/metrics.rs
+@@ -0,0 +1,177 @@
++//! GenAI and Agent OS metrics instruments.
++//!
++//! Creates OTel metrics following the GenAI semantic conventions
++//! and Life-specific operational metrics.
++
++use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter};
++use opentelemetry::{KeyValue, global};
++use std::time::Duration;
++
++use crate::semconv;
++
++/// Collection of pre-created GenAI and Agent OS metric instruments.
++///
++/// Created once via [`GenAiMetrics::new`] and shared across the application.
++pub struct GenAiMetrics {
++    /// `gen_ai.client.token.usage` — histogram of token counts per request.
++    pub token_usage: Histogram<u64>,
++
++    /// `gen_ai.client.operation.duration` — histogram of LLM call duration in seconds.
++    pub operation_duration: Histogram<f64>,
++
++    /// `life.tool.executions` — counter of tool executions by name and status.
++    pub tool_executions: Counter<u64>,
++
++    /// `life.budget.tokens_remaining` — gauge of remaining token budget.
++    pub budget_tokens_remaining: Gauge<u64>,
++
++    /// `life.budget.cost_remaining_usd` — gauge of remaining cost budget.
++    pub budget_cost_remaining: Gauge<f64>,
++
++    /// `life.mode.transitions` — counter of operating mode transitions.
++    pub mode_transitions: Counter<u64>,
++}
++
++impl GenAiMetrics {
++    /// Create all metric instruments from the global meter provider.
++    pub fn new(service_name: &'static str) -> Self {
++        let meter = global::meter(service_name);
++        Self::from_meter(&meter)
++    }
++
++    /// Create all metric instruments from a specific meter.
++    pub fn from_meter(meter: &Meter) -> Self {
++        let token_usage = meter
++            .u64_histogram("gen_ai.client.token.usage")
++            .with_description("Number of tokens used per GenAI request")
++            .with_unit("token")
++            .build();
++
++        let operation_duration = meter
++            .f64_histogram("gen_ai.client.operation.duration")
++            .with_description("Duration of GenAI operations")
++            .with_unit("s")
++            .with_boundaries(vec![0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0])
++            .build();
++
++        let tool_executions = meter
++            .u64_counter("life.tool.executions")
++            .with_description("Number of tool executions")
++            .build();
++
++        let budget_tokens_remaining = meter
++            .u64_gauge("life.budget.tokens_remaining")
++            .with_description("Remaining token budget")
++            .with_unit("token")
++            .build();
++
++        let budget_cost_remaining = meter
++            .f64_gauge("life.budget.cost_remaining_usd")
++            .with_description("Remaining cost budget in USD")
++            .with_unit("USD")
++            .build();
++
++        let mode_transitions = meter
++            .u64_counter("life.mode.transitions")
++            .with_description("Number of operating mode transitions")
++            .build();
++
++        Self {
++            token_usage,
++            operation_duration,
++            tool_executions,
++            budget_tokens_remaining,
++            budget_cost_remaining,
++            mode_transitions,
++        }
++    }
++
++    /// Record token usage for a GenAI operation.
++    pub fn record_token_usage(
++        &self,
++        model: &str,
++        operation: &str,
++        input_tokens: u64,
++        output_tokens: u64,
++    ) {
++        let base_attrs = [
++            KeyValue::new(semconv::GEN_AI_REQUEST_MODEL, model.to_string()),
++            KeyValue::new(semconv::GEN_AI_OPERATION_NAME, operation.to_string()),
++        ];
++
++        // Record input tokens
++        let mut input_attrs = base_attrs.to_vec();
++        input_attrs.push(KeyValue::new("gen_ai.token.type", "input"));
++        self.token_usage.record(input_tokens, &input_attrs);
++
++        // Record output tokens
++        let mut output_attrs = base_attrs.to_vec();
++        output_attrs.push(KeyValue::new("gen_ai.token.type", "output"));
++        self.token_usage.record(output_tokens, &output_attrs);
++    }
++
++    /// Record the duration of a GenAI operation.
++    pub fn record_operation_duration(&self, model: &str, operation: &str, duration: Duration) {
++        self.operation_duration.record(
++            duration.as_secs_f64(),
++            &[
++                KeyValue::new(semconv::GEN_AI_REQUEST_MODEL, model.to_string()),
++                KeyValue::new(semconv::GEN_AI_OPERATION_NAME, operation.to_string()),
++            ],
++        );
++    }
++
++    /// Record a tool execution.
++    pub fn record_tool_execution(&self, tool_name: &str, status: &str) {
++        self.tool_executions.add(
++            1,
++            &[
++                KeyValue::new(semconv::GEN_AI_TOOL_NAME, tool_name.to_string()),
++                KeyValue::new(semconv::LIFE_TOOL_STATUS, status.to_string()),
++            ],
++        );
++    }
++
++    /// Update the remaining budget gauge.
++    pub fn record_budget(&self, tokens_remaining: u64, cost_remaining_usd: f64) {
++        self.budget_tokens_remaining.record(tokens_remaining, &[]);
++        self.budget_cost_remaining.record(cost_remaining_usd, &[]);
++    }
++
++    /// Record a mode transition.
++    pub fn record_mode_transition(&self, from_mode: &str, to_mode: &str) {
++        self.mode_transitions.add(
++            1,
++            &[
++                KeyValue::new("life.mode.from", from_mode.to_string()),
++                KeyValue::new("life.mode.to", to_mode.to_string()),
++            ],
++        );
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn create_metrics_from_global() {
++        // With no meter provider configured, this still works (noop metrics)
++        let metrics = GenAiMetrics::new("test-service");
++
++        // All instruments should be usable without panicking
++        metrics.record_token_usage("test-model", "chat", 100, 50);
++        metrics.record_operation_duration("test-model", "chat", Duration::from_millis(1500));
++        metrics.record_tool_execution("read_file", "ok");
++        metrics.record_budget(10000, 4.50);
++        metrics.record_mode_transition("explore", "execute");
++    }
++
++    #[test]
++    fn create_metrics_from_meter() {
++        let meter = global::meter("test");
++        let metrics = GenAiMetrics::from_meter(&meter);
++        metrics.record_token_usage("claude", "chat", 200, 100);
++    }
++}
++
+
+diff --git a/vigil/src/semconv.rs b/vigil/src/semconv.rs
+@@ -0,0 +1,208 @@
++//! Semantic convention constants for GenAI and Life Agent OS observability.
++//!
++//! These follow the [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
++//! and extend them with Life-specific attributes under the `life.` namespace.
++
++// ─── GenAI Semantic Conventions ──────────────────────────────────────────────
++
++/// The name of the operation being performed (e.g. "chat", "text_completion").
++pub const GEN_AI_OPERATION_NAME: &str = "gen_ai.operation.name";
++
++/// The AI system / provider (e.g. "anthropic", "openai").
++pub const GEN_AI_SYSTEM: &str = "gen_ai.system";
++
++/// The model requested (e.g. "claude-sonnet-4-20250514").
++pub const GEN_AI_REQUEST_MODEL: &str = "gen_ai.request.model";
++
++/// Maximum number of tokens the model should generate.
++pub const GEN_AI_REQUEST_MAX_TOKENS: &str = "gen_ai.request.max_tokens";
++
++/// Sampling temperature.
++pub const GEN_AI_REQUEST_TEMPERATURE: &str = "gen_ai.request.temperature";
++
++/// Top-p (nucleus) sampling parameter.
++pub const GEN_AI_REQUEST_TOP_P: &str = "gen_ai.request.top_p";
++
++/// Number of input (prompt) tokens consumed.
++pub const GEN_AI_USAGE_INPUT_TOKENS: &str = "gen_ai.usage.input_tokens";
++
++/// Number of output (completion) tokens generated.
++pub const GEN_AI_USAGE_OUTPUT_TOKENS: &str = "gen_ai.usage.output_tokens";
++
++/// Reasons the model stopped generating (e.g. "stop", "tool_use", "max_tokens").
++pub const GEN_AI_RESPONSE_FINISH_REASONS: &str = "gen_ai.response.finish_reasons";
++
++/// Provider-assigned response ID.
++pub const GEN_AI_RESPONSE_ID: &str = "gen_ai.response.id";
++
++/// The model actually used (may differ from requested model).
++pub const GEN_AI_RESPONSE_MODEL: &str = "gen_ai.response.model";
++
++/// Tool name being called or executed.
++pub const GEN_AI_TOOL_NAME: &str = "gen_ai.tool.name";
++
++/// Tool call ID assigned by the model.
++pub const GEN_AI_TOOL_CALL_ID: &str = "gen_ai.tool.call.id";
++
++/// Agent name.
++pub const GEN_AI_AGENT_NAME: &str = "gen_ai.agent.name";
++
++/// Agent ID.
++pub const GEN_AI_AGENT_ID: &str = "gen_ai.agent.id";
++
++// ─── Server Attributes ──────────────────────────────────────────────────────
++
++/// Server hostname or IP.
++pub const SERVER_ADDRESS: &str = "server.address";
++
++/// Server port number.
++pub const SERVER_PORT: &str = "server.port";
++
++// ─── Life Agent OS Attributes (life.* namespace) ─────────────────────────────
++
++/// Agent OS session ID.
++pub const LIFE_SESSION_ID: &str = "life.session_id";
++
++/// Agent OS run ID (within a session).
++pub const LIFE_RUN_ID: &str = "life.run_id";
++
++/// Agent OS branch ID.
++pub const LIFE_BRANCH_ID: &str = "life.branch_id";
++
++/// Current loop phase (perceive, deliberate, gate, execute, commit, reflect, sleep).
++pub const LIFE_LOOP_PHASE: &str = "life.loop_phase";
++
++/// Current operating mode (explore, execute, verify, recover, ask_human, sleep).
++pub const LIFE_OPERATING_MODE: &str = "life.operating_mode";
++
++/// Event sequence number within a session.
++pub const LIFE_EVENT_SEQ: &str = "life.event_seq";
++
++/// Event kind discriminant (e.g. "tool_call_requested", "assistant_text_delta").
++pub const LIFE_EVENT_KIND: &str = "life.event_kind";
++
++/// Remaining token budget.
++pub const LIFE_BUDGET_TOKENS: &str = "life.budget.tokens_remaining";
++
++/// Remaining cost budget (USD).
++pub const LIFE_BUDGET_COST: &str = "life.budget.cost_remaining_usd";
++
++/// Remaining time budget (ms).
++pub const LIFE_BUDGET_TIME: &str = "life.budget.time_remaining_ms";
++
++/// Remaining tool calls budget.
++pub const LIFE_BUDGET_TOOL_CALLS: &str = "life.budget.tool_calls_remaining";
++
++/// Agent state vector: progress (0.0..1.0).
++pub const LIFE_STATE_PROGRESS: &str = "life.state.progress";
++
++/// Agent state vector: uncertainty (0.0..1.0).
++pub const LIFE_STATE_UNCERTAINTY: &str = "life.state.uncertainty";
++
++/// Agent state vector: risk level.
++pub const LIFE_STATE_RISK_LEVEL: &str = "life.state.risk_level";
++
++/// Agent state vector: consecutive error count.
++pub const LIFE_STATE_ERROR_STREAK: &str = "life.state.error_streak";
++
++/// Agent state vector: context pressure (0.0..1.0).
++pub const LIFE_STATE_CONTEXT_PRESSURE: &str = "life.state.context_pressure";
++
++/// Tool execution status (ok, error, timeout, cancelled).
++pub const LIFE_TOOL_STATUS: &str = "life.tool.status";
++
++/// Tool execution output (when content capture is enabled).
++pub const LIFE_TOOL_OUTPUT: &str = "life.tool.output";
++
++// ─── Autonomic Attributes ────────────────────────────────────────────────────
++
++/// Autonomic economic mode (sovereign, conserving, hustle, hibernate).
++pub const AUTONOMIC_ECONOMIC_MODE: &str = "autonomic.economic_mode";
++
++/// Autonomic operational health (0.0..1.0).
++pub const AUTONOMIC_OPERATIONAL_HEALTH: &str = "autonomic.operational_health";
++
++/// Autonomic cognitive health (0.0..1.0).
++pub const AUTONOMIC_COGNITIVE_HEALTH: &str = "autonomic.cognitive_health";
++
++/// Autonomic economic health (0.0..1.0).
++pub const AUTONOMIC_ECONOMIC_HEALTH: &str = "autonomic.economic_health";
++
++// ─── Lago Attributes ─────────────────────────────────────────────────────────
++
++/// Lago journal stream ID.
++pub const LAGO_STREAM_ID: &str = "lago.stream_id";
++
++/// Lago blob content hash (SHA-256).
++pub const LAGO_BLOB_HASH: &str = "lago.blob_hash";
++
++/// Lago filesystem manifest branch.
++pub const LAGO_FS_BRANCH: &str = "lago.fs_branch";
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn genai_constants_match_otel_spec() {
++        // Verify naming convention: all GenAI attrs start with "gen_ai."
++        assert!(GEN_AI_OPERATION_NAME.starts_with("gen_ai."));
++        assert!(GEN_AI_SYSTEM.starts_with("gen_ai."));
++        assert!(GEN_AI_REQUEST_MODEL.starts_with("gen_ai."));
++        assert!(GEN_AI_REQUEST_MAX_TOKENS.starts_with("gen_ai."));
++        assert!(GEN_AI_REQUEST_TEMPERATURE.starts_with("gen_ai."));
++        assert!(GEN_AI_USAGE_INPUT_TOKENS.starts_with("gen_ai."));
++        assert!(GEN_AI_USAGE_OUTPUT_TOKENS.starts_with("gen_ai."));
++        assert!(GEN_AI_RESPONSE_FINISH_REASONS.starts_with("gen_ai."));
++        assert!(GEN_AI_RESPONSE_ID.starts_with("gen_ai."));
++        assert!(GEN_AI_TOOL_NAME.starts_with("gen_ai."));
++        assert!(GEN_AI_TOOL_CALL_ID.starts_with("gen_ai."));
++        assert!(GEN_AI_AGENT_NAME.starts_with("gen_ai."));
++        assert!(GEN_AI_AGENT_ID.starts_with("gen_ai."));
++    }
++
++    #[test]
++    fn life_constants_use_correct_prefix() {
++        assert!(LIFE_SESSION_ID.starts_with("life."));
++        assert!(LIFE_RUN_ID.starts_with("life."));
++        assert!(LIFE_LOOP_PHASE.starts_with("life."));
++        assert!(LIFE_OPERATING_MODE.starts_with("life."));
++        assert!(LIFE_BUDGET_TOKENS.starts_with("life."));
++        assert!(LIFE_STATE_PROGRESS.starts_with("life."));
++    }
++
++    #[test]
++    fn autonomic_constants_use_correct_prefix() {
++        assert!(AUTONOMIC_ECONOMIC_MODE.starts_with("autonomic."));
++        assert!(AUTONOMIC_OPERATIONAL_HEALTH.starts_with("autonomic."));
++    }
++
++    #[test]
++    fn lago_constants_use_correct_prefix() {
++        assert!(LAGO_STREAM_ID.starts_with("lago."));
++        assert!(LAGO_BLOB_HASH.starts_with("lago."));
++    }
++
++    #[test]
++    fn genai_exact_values() {
++        assert_eq!(GEN_AI_OPERATION_NAME, "gen_ai.operation.name");
++        assert_eq!(GEN_AI_SYSTEM, "gen_ai.system");
++        assert_eq!(GEN_AI_REQUEST_MODEL, "gen_ai.request.model");
++        assert_eq!(GEN_AI_USAGE_INPUT_TOKENS, "gen_ai.usage.input_tokens");
++        assert_eq!(GEN_AI_USAGE_OUTPUT_TOKENS, "gen_ai.usage.output_tokens");
++        assert_eq!(
++            GEN_AI_RESPONSE_FINISH_REASONS,
++            "gen_ai.response.finish_reasons"
++        );
++        assert_eq!(GEN_AI_RESPONSE_ID, "gen_ai.response.id");
++        assert_eq!(GEN_AI_TOOL_NAME, "gen_ai.tool.name");
++        assert_eq!(GEN_AI_TOOL_CALL_ID, "gen_ai.tool.call.id");
++    }
++
++    #[test]
++    fn server_attributes_match_otel() {
++        assert_eq!(SERVER_ADDRESS, "server.address");
++        assert_eq!(SERVER_PORT, "server.port");
++    }
++}
++
+
+diff --git a/vigil/src/spans.rs b/vigil/src/spans.rs
+@@ -0,0 +1,262 @@
++//! Contract-derived span builders for the Life Agent OS.
++//!
++//! Provides helper functions that create properly-attributed `tracing` spans
++//! from aiOS kernel types. The `tracing-opentelemetry` layer bridges these
++//! to OTel spans automatically.
++
++use aios_protocol::event::{EventEnvelope, LoopPhase, TokenUsage};
++use tracing::Span;
++
++use crate::semconv;
++
++/// Create a root `invoke_agent` span for an agent session.
++///
++/// This is the top-level span for an agent invocation, containing all
++/// loop phases and LLM calls as children.
++pub fn agent_span(session_id: &str, agent_name: &str) -> Span {
++    tracing::info_span!(
++        "invoke_agent",
++        { semconv::GEN_AI_OPERATION_NAME } = "invoke_agent",
++        { semconv::GEN_AI_AGENT_NAME } = agent_name,
++        { semconv::GEN_AI_AGENT_ID } = session_id,
++        { semconv::LIFE_SESSION_ID } = session_id,
++    )
++}
++
++/// Create a child span for a loop phase.
++pub fn phase_span(phase: LoopPhase) -> Span {
++    let phase_str = match phase {
++        LoopPhase::Perceive => "perceive",
++        LoopPhase::Deliberate => "deliberate",
++        LoopPhase::Gate => "gate",
++        LoopPhase::Execute => "execute",
++        LoopPhase::Commit => "commit",
++        LoopPhase::Reflect => "reflect",
++        LoopPhase::Sleep => "sleep",
++    };
++
++    tracing::info_span!("loop_phase", { semconv::LIFE_LOOP_PHASE } = phase_str,)
++}
++
++/// Create a GenAI `chat` client span for an LLM call.
++///
++/// Follows the OTel GenAI semantic convention for client spans:
++/// `chat {gen_ai.request.model}` naming pattern.
++pub fn chat_span(
++    model: &str,
++    provider: &str,
++    max_tokens: Option<u32>,
++    temperature: Option<f64>,
++) -> Span {
++    tracing::info_span!(
++        "chat",
++        { semconv::GEN_AI_OPERATION_NAME } = "chat",
++        { semconv::GEN_AI_SYSTEM } = provider,
++        { semconv::GEN_AI_REQUEST_MODEL } = model,
++        { semconv::GEN_AI_REQUEST_MAX_TOKENS } = max_tokens,
++        { semconv::GEN_AI_REQUEST_TEMPERATURE } = temperature,
++        // These will be filled in after the response:
++        { semconv::GEN_AI_USAGE_INPUT_TOKENS } = tracing::field::Empty,
++        { semconv::GEN_AI_USAGE_OUTPUT_TOKENS } = tracing::field::Empty,
++        { semconv::GEN_AI_RESPONSE_FINISH_REASONS } = tracing::field::Empty,
++        { semconv::GEN_AI_RESPONSE_ID } = tracing::field::Empty,
++    )
++}
++
++/// Create a GenAI `execute_tool` span for a tool call.
++pub fn tool_span(tool_name: &str, tool_call_id: &str) -> Span {
++    tracing::info_span!(
++        "execute_tool",
++        { semconv::GEN_AI_OPERATION_NAME } = "execute_tool",
++        { semconv::GEN_AI_TOOL_NAME } = tool_name,
++        { semconv::GEN_AI_TOOL_CALL_ID } = tool_call_id,
++        { semconv::LIFE_TOOL_STATUS } = tracing::field::Empty,
++    )
++}
++
++/// Record token usage on the current span.
++///
++/// Sets `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`.
++pub fn record_token_usage(span: &Span, usage: &TokenUsage) {
++    span.record(semconv::GEN_AI_USAGE_INPUT_TOKENS, usage.prompt_tokens);
++    span.record(semconv::GEN_AI_USAGE_OUTPUT_TOKENS, usage.completion_tokens);
++}
++
++/// Record the finish reason on the current span.
++pub fn record_finish_reason(span: &Span, reason: &str) {
++    span.record(semconv::GEN_AI_RESPONSE_FINISH_REASONS, reason);
++}
++
++/// Record the response ID on the current span.
++pub fn record_response_id(span: &Span, response_id: &str) {
++    span.record(semconv::GEN_AI_RESPONSE_ID, response_id);
++}
++
++/// Record tool execution status on a tool span.
++pub fn record_tool_status(span: &Span, status: &str) {
++    span.record(semconv::LIFE_TOOL_STATUS, status);
++}
++
++/// Write the current trace context (trace_id, span_id) into an EventEnvelope.
++///
++/// This enables dual-write: events carry OTel correlation IDs so that
++/// persisted events can be linked back to their traces.
++pub fn write_trace_context(envelope: &mut EventEnvelope) {
++    use opentelemetry::trace::TraceContextExt;
++    use tracing_opentelemetry::OpenTelemetrySpanExt;
++
++    let current_span = Span::current();
++    let otel_context = current_span.context();
++    let span_ref = otel_context.span();
++    let span_context = span_ref.span_context();
++
++    if span_context.is_valid() {
++        envelope.trace_id = Some(span_context.trace_id().to_string());
++        envelope.span_id = Some(span_context.span_id().to_string());
++    }
++}
++
++/// Extract trace context from a persisted EventEnvelope.
++///
++/// Returns `(trace_id, span_id)` if both are present.
++pub fn extract_trace_context(envelope: &EventEnvelope) -> Option<(String, String)> {
++    match (&envelope.trace_id, &envelope.span_id) {
++        (Some(trace_id), Some(span_id)) if !trace_id.is_empty() && !span_id.is_empty() => {
++            Some((trace_id.clone(), span_id.clone()))
++        }
++        _ => None,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use aios_protocol::event::*;
++    use std::collections::HashMap;
++
++    /// Install a minimal subscriber so spans are not disabled during tests.
++    /// Uses `try_init` to tolerate tests running in any order.
++    fn ensure_subscriber() {
++        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
++    }
++
++    fn test_envelope() -> EventEnvelope {
++        EventEnvelope {
++            event_id: "evt-1".into(),
++            session_id: "sess-1".into(),
++            agent_id: "agent-1".into(),
++            branch_id: "main".into(),
++            run_id: None,
++            seq: 0,
++            timestamp: 0,
++            actor: EventActor {
++                actor_type: ActorType::System,
++                component: Some("test".to_string()),
++            },
++            schema: EventSchema {
++                name: "aios-protocol".to_string(),
++                version: "0.1.0".to_string(),
++            },
++            parent_id: None,
++            trace_id: None,
++            span_id: None,
++            digest: None,
++            kind: EventKind::SessionCreated {
++                name: "test-session".to_string(),
++                config: serde_json::Value::Object(serde_json::Map::new()),
++            },
++            metadata: HashMap::new(),
++            schema_version: 1,
++        }
++    }
++
++    #[test]
++    fn agent_span_has_correct_name() {
++        ensure_subscriber();
++        let span = agent_span("sess-123", "test-agent");
++        assert!(!span.is_disabled());
++    }
++
++    #[test]
++    fn phase_span_all_variants() {
++        ensure_subscriber();
++        let phases = [
++            LoopPhase::Perceive,
++            LoopPhase::Deliberate,
++            LoopPhase::Gate,
++            LoopPhase::Execute,
++            LoopPhase::Commit,
++            LoopPhase::Reflect,
++            LoopPhase::Sleep,
++        ];
++        for phase in phases {
++            let span = phase_span(phase);
++            assert!(!span.is_disabled());
++        }
++    }
++
++    #[test]
++    fn chat_span_creates_valid_span() {
++        ensure_subscriber();
++        let span = chat_span(
++            "claude-sonnet-4-20250514",
++            "anthropic",
++            Some(4096),
++            Some(0.7),
++        );
++        assert!(!span.is_disabled());
++    }
++
++    #[test]
++    fn tool_span_creates_valid_span() {
++        ensure_subscriber();
++        let span = tool_span("read_file", "call-abc123");
++        assert!(!span.is_disabled());
++    }
++
++    #[test]
++    fn extract_trace_context_returns_none_for_empty() {
++        let envelope = test_envelope();
++        assert!(extract_trace_context(&envelope).is_none());
++    }
++
++    #[test]
++    fn extract_trace_context_returns_values() {
++        let mut envelope = test_envelope();
++        envelope.trace_id = Some("abc123".to_string());
++        envelope.span_id = Some("def456".to_string());
++        let ctx = extract_trace_context(&envelope);
++        assert!(ctx.is_some());
++        let (tid, sid) = ctx.unwrap();
++        assert_eq!(tid, "abc123");
++        assert_eq!(sid, "def456");
++    }
++
++    #[test]
++    fn extract_trace_context_rejects_empty_strings() {
++        let mut envelope = test_envelope();
++        envelope.trace_id = Some(String::new());
++        envelope.span_id = Some("def456".to_string());
++        assert!(extract_trace_context(&envelope).is_none());
++    }
++
++    #[test]
++    fn record_token_usage_does_not_panic() {
++        ensure_subscriber();
++        let span = chat_span("test-model", "test", None, None);
++        let usage = TokenUsage {
++            prompt_tokens: 100,
++            completion_tokens: 50,
++            total_tokens: 150,
++        };
++        record_token_usage(&span, &usage);
++    }
++
++    #[test]
++    fn record_finish_reason_does_not_panic() {
++        ensure_subscriber();
++        let span = chat_span("test-model", "test", None, None);
++        record_finish_reason(&span, "stop");
++    }
++}
++
+
+
+```

@@ -1,0 +1,470 @@
+Implement the following plan:
+
+# Plan: Add Real-Time Streaming to CLI and Provider
+
+## Context
+
+The `arcan run` CLI command (implemented in the previous session) works but is silent during LLM calls — the CLI sends POST /runs, waits for completion, then fetches events. For slow models like Ollama, this means 30+ seconds of no output (and HTTP timeouts). The user wants:
+
+1. **CLI SSE streaming**: Display events (tool calls, text, errors) as they arrive in real-time
+2. **Provider streaming**: Send `"stream": true` to Ollama/OpenAI to avoid timeouts and enable per-token text display
+
+## Architecture Overview
+
+Current event flow: `Provider.complete()` → `ArcanProviderAdapter` (spawn_blocking) → `KernelRuntime.tick_on_branch()` → `EventStore` (persist) → `broadcast::Sender<EventRecord>` → SSE endpoint → client.
+
+The Provider trait is synchronous, returns atomic `ModelTurn`. The broadcast channel already supports live event streaming to SSE clients. The TUI uses `reqwest-eventsource` for SSE consumption (pattern to reuse).
+
+## Changes
+
+### 1. CLI SSE Streaming — `arcan/crates/arcan/src/cli_run.rs`
+
+Rewrite `run_cli()` from poll-after-completion to concurrent SSE streaming:
+
+1. Get current event cursor via `GET /sessions/{id}/events` (latest sequence)
+2. Open SSE stream at `/sessions/{id}/events/stream?cursor={cursor}&format=canonical`
+3. Spawn POST `/sessions/{id}/runs` concurrently (don't await before reading SSE)
+4. Read SSE events from the stream, render to stdout as they arrive:
+   - `TextDelta` / `AssistantTextDelta`: write delta text (skip if sequence=0 already showed it)
+   - `ToolCallRequested`: `[tool: name] requested`
+   - `ToolCallCompleted`: `[tool: name] OK`
+   - `RunFinished`: newline + close stream, exit 0
+   - `RunErrored`: print error + exit 1
+5. Track `saw_streaming_text` flag — if ephemeral TextDelta events (sequence 0) arrived, skip persisted ones (sequence > 0) to avoid duplicate output
+6. `--json` flag: output raw SSE data payloads instead of formatted text
+
+**Dependencies to add**: `reqwest-eventsource = "0.6"`, `futures-util.workspace = true` (to `arcan/crates/arcan/Cargo.toml`)
+
+### 2. Provider Trait Extension — `arcan/crates/arcan-core/src/runtime.rs`
+
+Add optional streaming method to `Provider` trait (default falls back to `complete()`):
+
+```rust
+fn supports_streaming(&self) -> bool { false }
+
+fn complete_streaming(
+    &self,
+    request: &ProviderRequest,
+    on_text: &dyn Fn(&str),
+) -> Result<ModelTurn, CoreError> {
+    self.complete(request)
+}
+```
+
+Both methods have default implementations, so existing providers (Anthropic, Mock) are unaffected.
+
+### 3. OpenAI Provider Streaming — `arcan/crates/arcan-provider/src/openai.rs`
+
+Add streaming support to `OpenAiCompatibleProvider`:
+
+- Add `pub enable_streaming: bool` to `OpenAiConfig` (default `true` for Ollama, `false` for OpenAI)
+- Override `supports_streaming()` → returns `self.config.enable_streaming`
+- Override `complete_streaming()`:
+  1. Add `"stream": true` to request body
+  2. Send request (using non-streaming reqwest to get the response, then read body as a buffered reader line-by-line)
+  3. Parse each `data: {...}` line as an SSE chunk:
+     - `choices[0].delta.content` → call `on_text(content)`, accumulate into full text
+     - `choices[0].delta.tool_calls` → accumulate tool call arguments
+     - `choices[0].finish_reason` → set stop reason
+     - `data: [DONE]` → break
+  4. Build and return `ModelTurn` from accumulated text + tool calls
+
+**Streaming response types** (add to the module):
+```rust
+#[derive(Debug, Deserialize)]
+struct StreamChunk {
+    choices: Vec<StreamChoice>,
+    #[serde(default)]
+    usage: Option<ApiUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamChoice {
+    delta: StreamDelta,
+    finish_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamDelta {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<StreamToolCall>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamToolCall {
+    index: usize,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<StreamToolCallFunction>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamToolCallFunction {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
+}
+```
+
+### 4. Adapter Streaming Bridge — `arcan/crates/arcan-aios-adapters/src/provider.rs`
+
+Wire provider streaming to the runtime's broadcast channel for real-time SSE delivery:
+
+- Add `streaming_sender: Arc<std::sync::Mutex<Option<broadcast::Sender<EventRecord>>>>` field
+- Update `ArcanProviderAdapter::new()` to accept the shared sender
+- In `complete()`:
+  1. Check `provider.supports_streaming()` AND streaming_sender is available
+  2. If streaming: inside `spawn_blocking`, call `provider.complete_streaming()` with a callback that does `broadcast_sender.send(ephemeral_event)` where `ephemeral_event` has `sequence: 0`
+  3. If not streaming: fall back to existing `provider.complete()`
+
+The callback constructs EventRecord with the session_id from the request and `sequence: 0` (marking it as ephemeral/non-persisted). `broadcast::Sender::send()` is synchronous so it works inside `spawn_blocking`.
+
+**Dependency**: Add `aios-protocol.workspace = true` to `arcan-aios-adapters/Cargo.toml` (for `EventRecord`, `EventKind`, `SessionId`, `BranchId`)
+
+### 5. KernelRuntime Event Sender — `aiOS/crates/aios-runtime/src/lib.rs`
+
+Add a public method to expose the broadcast sender:
+
+```rust
+pub fn event_sender(&self) -> broadcast::Sender<EventRecord> {
+    self.stream.clone()
+}
+```
+
+### 6. SSE Filter Fix — `arcan/crates/arcand/src/canonical.rs`
+
+Allow ephemeral events (sequence 0) through the SSE stream filter. Change line ~367:
+
+```rust
+// Before:
+&& event.sequence > cursor
+
+// After:
+&& (event.sequence > cursor || event.sequence == 0)
+```
+
+### 7. Wire Streaming Sender — `arcan/crates/arcan/src/main.rs`
+
+After runtime creation, set the broadcast sender on the adapter:
+
+```rust
+let streaming_sender = Arc::new(std::sync::Mutex::new(None));
+let adapter = ArcanProviderAdapter::new(provider, tools, streaming_sender.clone());
+// ... create runtime ...
+*streaming_sender.lock().unwrap() = Some(runtime.event_sender());
+```
+
+Update `OpenAiConfig` construction to set `enable_streaming: true` for Ollama provider.
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `arcan/crates/arcan/src/cli_run.rs` | Rewrite to SSE streaming + dedup |
+| `arcan/crates/arcan/Cargo.toml` | Add reqwest-eventsource, futures-util |
+| `arcan/crates/arcan-core/src/runtime.rs` | Add `complete_streaming()` + `supports_streaming()` to Provider trait |
+| `arcan/crates/arcan-provider/src/openai.rs` | Streaming request + SSE chunk parsing |
+| `arcan/crates/arcan-aios-adapters/src/provider.rs` | Bridge streaming to broadcast channel |
+| `arcan/crates/arcan-aios-adapters/Cargo.toml` | Add aios-protocol dependency |
+| `arcan/crates/arcand/src/canonical.rs` | Fix SSE filter for sequence 0 |
+| `aiOS/crates/aios-runtime/src/lib.rs` | Add `event_sender()` method |
+| `arcan/crates/arcan/src/main.rs` | Wire streaming_sender, set enable_streaming |
+
+## Verification
+
+```bash
+# 1. Build all projects
+(cd aiOS && cargo build --workspace) && (cd arcan && cargo build --workspace)
+
+# 2. Run tests
+(cd aiOS && cargo test --workspace) && (cd arcan && cargo test --workspace)
+
+# 3. Test CLI streaming with mock provider (lifecycle events visible)
+ARCAN_PROVIDER=mock cargo run -p arcan -- run "Hello" --session test-stream
+
+# 4. Test with Ollama (per-token text streaming)
+ARCAN_PROVIDER=ollama OLLAMA_MODEL=gpt-oss:20b cargo run -p arcan -- run "What is 2+2?" --session test-ollama
+
+# 5. Test JSON output mode
+ARCAN_PROVIDER=mock cargo run -p arcan -- run "Hello" --session test-json --json
+
+# 6. Verify no duplicate text output (streaming + persisted)
+# Run with Ollama, check that text appears exactly once
+```
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-live/fbc1302f-a89e-45ac-8443-034a07e6052d.jsonl
+
+---
+
+cool, lets test running arcan with ollama and check it streams
+
+---
+
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Analysis:
+Let me chronologically analyze the conversation:
+
+1. **Initial Plan Presentation**: The user provided a detailed implementation plan for adding real-time streaming to the Arcan CLI and provider system. The plan had 7 major components across 9 files.
+
+2. **File Reading Phase**: I read all 9 files that needed modification in parallel to understand the current codebase:
+   - `arcan/crates/arcan/src/cli_run.rs` - Current poll-after-completion CLI
+   - `arcan/crates/arcan/Cargo.toml` - Binary crate dependencies
+   - `arcan/crates/arcan-core/src/runtime.rs` - Provider trait definition
+   - `arcan/crates/arcan-provider/src/openai.rs` - OpenAI-compatible provider
+   - `arcan/crates/arcan-aios-adapters/src/provider.rs` - ArcanProviderAdapter bridging Arcan to aiOS
+   - `arcan/crates/arcan-aios-adapters/Cargo.toml` - Adapter dependencies
+   - `arcan/crates/arcand/src/canonical.rs` - SSE streaming endpoint
+   - `aiOS/crates/aios-runtime/src/lib.rs` - KernelRuntime with broadcast channel
+   - `arcan/crates/arcan/src/main.rs` - Main binary entry point
+   
+   I also read the workspace Cargo.toml, arcan-core Cargo.toml, and the full EventKind enum in aios-protocol.
+
+3. **Implementation Phase**: I created 9 tasks and implemented them in dependency order:
+   - Task 1: Added `futures-util` and `reqwest-eventsource` to workspace deps
+   - Task 2: Added `supports_streaming()` and `complete_streaming()` to Provider trait
+   - Task 3: Added streaming to OpenAI provider (enable_streaming config, SSE chunk parsing, streaming types)
+   - Task 4: Added `event_sender()` to KernelRuntime
+   - Task 5: Wired streaming in ArcanProviderAdapter with StreamingSenderHandle
+   - Task 6: Fixed SSE filter for ephemeral events (sequence 0)
+   - Task 7: Rewrote CLI to use SSE streaming with reqwest-eventsource
+   - Task 8: Wired streaming_sender in main.rs
+   - Task 9: Build and test verification
+
+4. **Errors encountered**:
+   - Clippy error: `redundant_closure_for_method_calls` on `|e| e.into_inner()` — fixed by replacing with `std::sync::PoisonError::into_inner`
+   - Unused imports warning: `BranchId` and `SessionId` in provider.rs — fixed by removing them
+   - Test file removed `parse_sse_events` function but test in main.rs still referenced it — fixed by removing the test
+   - Linter auto-reformatted some code in openai.rs between edits — had to re-read before continuing edits
+   - Unused imports warning in main.rs tests (LagoTypes) — this was pre-existing, not from our changes
+
+5. **Testing Phase**: 
+   - All aiOS tests pass (61 tests)
+   - All Arcan tests pass (236 tests + 1 ignored)
+   - All Lago tests pass (318 tests)
+   - Clippy clean on all projects
+
+6. **Live Testing with Ollama**: User asked to test with Ollama. We:
+   - Confirmed Ollama running with `gpt-oss:20b` model
+   - Started arcan daemon with `ARCAN_PROVIDER=ollama OLLAMA_MODEL=gpt-oss:20b`
+   - Tested CLI streaming: `arcan run "What is 2+2? Answer in one sentence."` → Got "2 + 2 equals 4." with real-time streaming
+   - Tested JSON mode: `--json` flag → Got full event stream including ephemeral `AssistantTextDelta` events with `sequence: 0` and persisted events with actual sequence numbers
+   - Both tests confirmed streaming works correctly — ephemeral events arrive in real-time, deduplication works (text shows once, not twice)
+
+Summary:
+1. Primary Request and Intent:
+   The user asked to implement a detailed plan for adding real-time streaming to the Arcan CLI and provider system. The plan had two main goals:
+   - **CLI SSE streaming**: Display events (tool calls, text, errors) as they arrive in real-time instead of polling after completion
+   - **Provider streaming**: Send `"stream": true` to Ollama/OpenAI to avoid timeouts and enable per-token text display
+   
+   After implementation, the user asked to test the streaming with Ollama to verify it works end-to-end.
+
+2. Key Technical Concepts:
+   - **SSE (Server-Sent Events)** streaming for real-time event delivery
+   - **Ephemeral events** with `sequence: 0` — not persisted, used for streaming text deltas from provider to SSE clients
+   - **Provider trait extension** with default method implementations for backward compatibility
+   - **Broadcast channel** (`tokio::sync::broadcast`) for fan-out event delivery
+   - **`spawn_blocking`** for running synchronous provider calls on dedicated threads
+   - **StreamingSenderHandle** (`Arc<Mutex<Option<Sender>>>`) pattern for resolving circular dependency (adapter needs sender, runtime needs adapter)
+   - **OpenAI streaming API** — chunked SSE responses with `data: {...}` lines and `data: [DONE]` terminator
+   - **Text deduplication** — ephemeral streaming deltas (seq=0) vs persisted text events (seq>0) to avoid showing text twice
+   - **reqwest-eventsource** crate for SSE client consumption
+   - **Rust 2024 Edition** conventions (no `gen` keyword, `unsafe` env vars, etc.)
+
+3. Files and Code Sections:
+
+   - **`arcan/Cargo.toml`** (workspace root)
+     - Added workspace dependencies for streaming support
+     ```toml
+     futures-util = "0.3"
+     reqwest-eventsource = "0.6"
+     ```
+
+   - **`arcan/crates/arcan-core/src/runtime.rs`**
+     - Extended Provider trait with streaming methods (backward-compatible defaults)
+     ```rust
+     pub trait Provider: Send + Sync {
+         fn name(&self) -> &str;
+         fn complete(&self, request: &ProviderRequest) -> Result<ModelTurn, CoreError>;
+
+         fn supports_streaming(&self) -> bool { false }
+
+         fn complete_streaming(
+             &self,
+             request: &ProviderRequest,
+             _on_text: &dyn Fn(&str),
+         ) -> Result<ModelTurn, CoreError> {
+             self.complete(request)
+         }
+     }
+     ```
+
+   - **`arcan/crates/arcan-provider/src/openai.rs`**
+     - Added `enable_streaming: bool` to `OpenAiConfig` (default `false` for OpenAI, `true` for Ollama)
+     - Implemented `execute_streaming()` method — sends `"stream": true`, reads SSE chunks via `BufReader`, accumulates text + tool calls, calls `on_text` callback per token
+     - Added streaming response types: `StreamChunk`, `StreamChoice`, `StreamDelta`, `StreamToolCall`, `StreamToolCallFunction`
+     - Key streaming implementation:
+     ```rust
+     fn execute_streaming(&self, request: &ProviderRequest, on_text: &dyn Fn(&str)) -> Result<ModelTurn, CoreError> {
+         // ... builds request with "stream": true ...
+         let reader = std::io::BufReader::new(response);
+         for line in reader.lines() {
+             let line = line.map_err(|e| CoreError::Provider(format!("streaming read error: {e}")))?;
+             let Some(data) = line.strip_prefix("data: ") else { continue; };
+             if data == "[DONE]" { break; }
+             let chunk: StreamChunk = match serde_json::from_str(data) {
+                 Ok(c) => c,
+                 Err(_) => continue,
+             };
+             // Process choices: accumulate text, tool calls, finish_reason
+             // Call on_text(content) for each text delta
+         }
+         // Build ModelTurn from accumulated data
+     }
+     ```
+     - Updated test configs to include `enable_streaming: false`
+
+   - **`aiOS/crates/aios-runtime/src/lib.rs`**
+     - Added `event_sender()` method to expose broadcast sender
+     ```rust
+     pub fn event_sender(&self) -> broadcast::Sender<EventRecord> {
+         self.stream.clone()
+     }
+     ```
+
+   - **`arcan/crates/arcan-aios-adapters/src/provider.rs`**
+     - Complete rewrite to add streaming bridge
+     - Added `StreamingSenderHandle` type alias and field
+     - Updated `new()` to accept streaming sender
+     - In `complete()`: checks `provider.supports_streaming()` + sender availability, calls `complete_streaming()` with callback that broadcasts ephemeral `AssistantTextDelta` events (sequence=0)
+     ```rust
+     pub type StreamingSenderHandle = Arc<std::sync::Mutex<Option<broadcast::Sender<EventRecord>>>>;
+
+     // In complete():
+     let turn = tokio::task::spawn_blocking(move || {
+         if use_streaming {
+             if let Some(sender) = sender {
+                 return provider.complete_streaming(&provider_request, &|text| {
+                     let event = EventRecord::new(
+                         sess.clone(), branch.clone(), 0,
+                         EventKind::AssistantTextDelta { delta: text.to_owned(), index: None },
+                     );
+                     let _ = sender.send(event);
+                 });
+             }
+         }
+         provider.complete(&provider_request)
+     }).await...
+     ```
+
+   - **`arcan/crates/arcan-aios-adapters/src/lib.rs`**
+     - Added export of `StreamingSenderHandle`
+     ```rust
+     pub use provider::{ArcanProviderAdapter, StreamingSenderHandle};
+     ```
+
+   - **`arcan/crates/arcand/src/canonical.rs`**
+     - Fixed SSE filter to allow ephemeral events through
+     ```rust
+     // Before:
+     && event.sequence > cursor
+     // After:
+     && (event.sequence > cursor || event.sequence == 0)
+     ```
+
+   - **`arcan/crates/arcan/src/cli_run.rs`**
+     - Complete rewrite from poll-after-completion to concurrent SSE streaming
+     - Gets current cursor, opens SSE stream with `reqwest-eventsource`, fires POST /runs concurrently via `tokio::spawn`
+     - Renders events as they arrive with deduplication (ephemeral seq=0 vs persisted seq>0)
+     - JSON mode outputs raw SSE data payloads
+     - Removed old `parse_sse_events()` helper (no longer needed)
+
+   - **`arcan/crates/arcan/Cargo.toml`**
+     - Added `futures-util.workspace = true` and `reqwest-eventsource.workspace = true`
+
+   - **`arcan/crates/arcan/src/main.rs`**
+     - Imported `StreamingSenderHandle`
+     - Creates empty `StreamingSenderHandle`, passes to adapter, fills after runtime creation
+     ```rust
+     let streaming_sender: StreamingSenderHandle = Arc::new(std::sync::Mutex::new(None));
+     let provider_adapter: Arc<dyn ModelProviderPort> = Arc::new(ArcanProviderAdapter::new(
+         provider, registry.definitions(), streaming_sender.clone(),
+     ));
+     // ... create runtime ...
+     *streaming_sender.lock().unwrap() = Some(runtime.event_sender());
+     ```
+     - Removed `parse_sse_events_basic` test that referenced removed function
+
+4. Errors and fixes:
+   - **Clippy `redundant_closure_for_method_calls`**: `|e| e.into_inner()` in provider.rs → Fixed by replacing with `std::sync::PoisonError::into_inner`
+   - **Unused imports**: `BranchId` and `SessionId` imported but not used in provider.rs → Removed from import list
+   - **Removed function still referenced in test**: `parse_sse_events` was removed from cli_run.rs but `parse_sse_events_basic` test in main.rs still called it → Removed the test
+   - **File modified by linter between edits**: openai.rs was auto-formatted by cargo fmt hook between edits, causing an edit conflict → Re-read the file before continuing edits
+
+5. Problem Solving:
+   - **Circular dependency**: Adapter needs broadcast sender from runtime, but runtime needs adapter at construction → Solved with `Arc<Mutex<Option<Sender>>>` pattern: create empty, pass to adapter, fill after runtime creation
+   - **Synchronous provider in async context**: Provider trait is synchronous (uses `reqwest::blocking`), can't call directly on tokio worker → Solved with `spawn_blocking` (pre-existing pattern, maintained)
+   - **Text deduplication**: Streaming sends ephemeral deltas (seq=0) AND runtime persists full text events (seq>0) → CLI tracks `saw_streaming_text` flag; if ephemeral text was seen, skips persisted text events
+   - **SSE filter blocking ephemeral events**: Original filter `event.sequence > cursor` blocks seq=0 events → Added `|| event.sequence == 0` exception
+
+6. All user messages:
+   - "Implement the following plan: [detailed streaming plan with 7 sections, 9 files, verification steps]" — with reference to plan transcript at a specific path
+   - "cool, lets test running arcan with ollama and check it streams"
+
+7. Pending Tasks:
+   - No explicitly pending tasks. All 9 implementation tasks completed. Live testing with Ollama completed successfully.
+
+8. Current Work:
+   We just finished live-testing the streaming implementation with Ollama. The test confirmed:
+   - Daemon started successfully with `ARCAN_PROVIDER=ollama OLLAMA_MODEL=gpt-oss:20b`
+   - CLI streaming works: `arcan run "What is 2+2? Answer in one sentence."` → "2 + 2 equals 4." streamed in real-time
+   - JSON mode works: `--json` flag outputs full event stream with ephemeral `AssistantTextDelta` events (sequence=0) followed by persisted events
+   - Text deduplication works correctly (text appears once, not twice)
+   - The arcan daemon is still running in the background on port 3001
+
+9. Optional Next Step:
+   The implementation and testing are complete. The daemon is still running in the background on port 3001 (task ID: b363917). The user may want to:
+   - Stop the background daemon
+   - Test with the mock provider (`ARCAN_PROVIDER=mock`)
+   - Commit the changes
+   - No explicit next step was requested by the user.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/broomva/.claude/projects/-Users-broomva-broomva-tech-live/9457d5a1-1919-41f3-814c-66c21a5ac0ea.jsonl
+Please continue the conversation from where we left off without asking the user any further questions. Continue with the last task that you were asked to work on.
+
+---
+
+<task-notification>
+<task-id>b363917</task-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-tech-live/tasks/b363917.output</output-file>
+<status>completed</status>
+<summary>Background command "Start arcan daemon with Ollama provider" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-broomva-broomva-tech-live/tasks/b363917.output
+
+---
+
+lets test the agent again, I see running this works but its a lot of text
+
+ARCAN_PROVIDER=ollama OLLAMA_MODEL=gpt-oss:20b cargo run -p arcan
+      -- run "What is 2+2? Answer in one sentence." --session test-stream
+       --url http://localhost:3001 --port 3001
+
+how to do it better or improve ux?
+
+---
+
+please commit and make sure testing and building succeeds, we will work on the improvements then
+
+---
+
+great, lets work on the improvements for the cli now. Session and interaction with it, preferences, should be stored locally. Notice all of this is FS, so, should we use lago? and by using it, can we leverage its features to provide context to the agent when its invoked. Lets think deeply about this and how to properly implement it following best practices
+
+---
+
+[Request interrupted by user for tool use]

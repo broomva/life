@@ -1,0 +1,36 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "fa4169114b03",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/cli-e2e.yml",
+    ".github/workflows/control-harness.yml",
+    ".github/workflows/control-nightly.yml",
+    ".github/workflows/harness.yml"
+  ],
+  "sessions": [
+    {
+      "metadata": "/fa/4169114b03/0/metadata.json",
+      "transcript": "/fa/4169114b03/0/full.jsonl",
+      "context": "/fa/4169114b03/0/context.md",
+      "content_hash": "/fa/4169114b03/0/content_hash.txt",
+      "prompt": "/fa/4169114b03/0/prompt.txt"
+    },
+    {
+      "metadata": "/fa/4169114b03/1/metadata.json",
+      "transcript": "/fa/4169114b03/1/full.jsonl",
+      "context": "/fa/4169114b03/1/context.md",
+      "content_hash": "/fa/4169114b03/1/content_hash.txt",
+      "prompt": "/fa/4169114b03/1/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 105,
+    "cache_creation_tokens": 103644,
+    "cache_read_tokens": 6260687,
+    "output_tokens": 3811,
+    "api_call_count": 85
+  }
+}

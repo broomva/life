@@ -1,0 +1,33 @@
+# Session Context
+
+## User Prompts
+
+### Prompt 1
+
+please fix this
+
+ Stop hook error: Failed with non-blocking status code:
+  failed to get git author: failed to open git repository: failed
+   to open repository: failed to open repository:
+  core.repositoryformatversion does not support extension:
+  worktreeconfig
+
+Its related to entire hooks
+
+### Prompt 2
+
+fix this entire enable
+
+Selected agents: Claude Code, Cursor, Gemini CLI
+
+Info: Project settings exist. Saving to settings.local.json instead.
+  Use --project to update the project settings file.
+✓ Hooks installed
+✓ Project configured (.entire/settings.local.json)
+
+failed to setup strategy: failed to open git repository: failed to open repository: core.repositoryformatversion does not support extension: worktreeconfig
+
+### Prompt 3
+
+good, thanks
+

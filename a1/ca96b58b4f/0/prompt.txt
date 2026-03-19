@@ -1,0 +1,97 @@
+how to run arcan via cli?
+
+---
+
+how to run it with ollama? what are the defaults when running the arcan cli command?
+
+---
+
+how does cli config persistance works?
+
+---
+
+aleight, and how does oauth works towards login with openai provider
+
+---
+
+lets test the device login flow, please run the cli and check that it works
+
+---
+
+whats the error?
+
+---
+
+how is this best addressed? what are the best practices? how does openai exposes docs to properly connect
+
+---
+
+yes, implement it
+
+---
+
+lets test it
+
+---
+
+[Request interrupted by user for tool use]
+
+---
+
+try again
+
+---
+
+<task-notification>
+<task-id>b85dcd6</task-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-tech-live/tasks/b85dcd6.output</output-file>
+<status>completed</status>
+<summary>Background command "Test device login flow" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-broomva-broomva-tech-live/tasks/b85dcd6.output
+
+---
+
+great, now, when running arcan, since we logged in, thats is configured as the new default?
+
+---
+
+if we logged in via oauth, it should be set as the new default. in general, when the user logs into a given provider, that should be the new default
+
+---
+
+<task-notification>
+<task-id>b8edfbc</task-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-tech-live/tasks/b8edfbc.output</output-file>
+<status>completed</status>
+<summary>Background command "Test login sets default provider" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-broomva-broomva-tech-live/tasks/b8edfbc.output
+
+---
+
+good, lets commit amd push, make sure all harness is updated and properly handled
+
+---
+
+use gh, im logged in
+
+---
+
+i just pushed, please check that crates hot updated
+
+---
+
+how to run arcan locally where it picks up latest changes?
+
+---
+
+does cargo run -p arcan -- serve restarts the daemon and inits the cli?
+
+---
+
+from a client perspective, if they install arcan, and then run the arcan command, does it inits the daemon if its not running?
+
+---
+
+alright, now, from development, running arcan command after having made changes to the code, does the daemon picks changes too?

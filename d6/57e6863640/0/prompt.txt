@@ -1,0 +1,39 @@
+whats the project status?
+
+---
+
+please fix it
+
+---
+
+good, whats next?
+
+---
+
+lets commit and make sure harness are updated across all 4 repos (live, arcan, aios, lago). Please also confirm that typing, testing and buiilding works across
+
+---
+
+please commit and update all
+
+---
+
+<task-notification>
+<task-id>ba67b8c</task-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-tech-live/tasks/ba67b8c.output</output-file>
+<status>completed</status>
+<summary>Background command "Push root" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-broomva-broomva-tech-live/tasks/ba67b8c.output
+
+---
+
+great, are plans and docs used by you and agents to maintain this project all up to date? Are references, documentation routing and proper structure so that you are always ready to work on this project
+
+---
+
+awesome, what should we do next?
+
+---
+
+lets do the first and then second
