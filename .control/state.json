@@ -1,9 +1,22 @@
 {
-  "version": 1,
-  "last_audit_at": "2026-02-28T00:00:00Z",
+  "version": 2,
+  "schema": "agentic-control-kernel/v1",
+  "last_audit_at": "2026-03-19T00:00:00Z",
   "last_entropy_review_at": null,
   "controller_mode": "autonomous",
+  "active_profile": "autonomous",
+  "plant_id": "life-agent-os",
+  "runtime": "arcan",
+  "ledger": "lago",
+  "schemas_installed": [
+    "schemas/state.schema.json",
+    "schemas/action.schema.json",
+    "schemas/trace.schema.json",
+    "schemas/evaluator.schema.json",
+    "schemas/egri-event.schema.json"
+  ],
   "notes": [
-    "2026-02-28: Upgraded from governed to autonomous profile. Strict audit passing."
+    "2026-02-28: Upgraded from governed to autonomous profile. Strict audit passing.",
+    "2026-03-19: Upgraded to agentic-control-kernel v1. Typed schemas, plant interface, runtime config installed."
   ]
 }

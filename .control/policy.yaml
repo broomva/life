@@ -1,13 +1,145 @@
-version: 1
+version: 2
+schema: agentic-control-kernel/v1
+
+# --- Profiles ---
+# Three governance profiles as defined by the agentic-control-kernel.
+# Active profile is set in state.json. Gates and autonomy vary by profile.
+
+profiles:
+  baseline:
+    description: "Minimal — smoke/check/test gates only, no control kernel"
+    gates: [smoke, check, test]
+    egri: disabled
+    shield: policy-gate
+    approval: required_for_all
+
+  governed:
+    description: "Standard — all gates active, EGRI in sandbox mode"
+    gates: [smoke, check, test, audit]
+    egri: sandbox
+    shield: composite
+    approval: required_for_destructive
+
+  autonomous:
+    description: "Full — auto-promote EGRI, reduced human approval"
+    gates: [smoke, check, test, audit]
+    egri: auto-promote
+    shield: composite
+    approval: required_for_irreversible
+
+active_profile: autonomous
+
+# --- Controller ---
+
 controller:
   gate_sequence:
     - smoke
     - check
     - test
+    - audit
   retry_budget: 2
   escalation:
     trigger: retry_budget_exhausted
     owner: human_oncall
+
+# --- Setpoints ---
+
+setpoints:
+  gate_pass_rate:
+    target: 1.00
+    alert_below: 0.90
+    description: "All gates must pass"
+  audit_pass_rate:
+    target: 1.00
+    alert_below: 0.95
+    description: "Control audit must pass all sections"
+  constraint_violation_rate:
+    target: 0.00
+    alert_above: 0.05
+    description: "Hard constraint violations per run"
+  shield_intervention_rate:
+    target: 0.00
+    alert_above: 0.10
+    description: "Frequency of shield modifying proposed actions"
+  shield_feasibility_rate:
+    target: 1.00
+    alert_below: 0.95
+    description: "Shield must find feasible safe actions"
+  pass_at_1:
+    target: 1.00
+    alert_below: 0.90
+    description: "Primary test success rate"
+  retry_rate:
+    target: 0.10
+    alert_above: 0.30
+  merge_cycle_time_hours:
+    target: 24
+    alert_above: 48
+  revert_rate:
+    target: 0.03
+    alert_above: 0.08
+  human_intervention_rate:
+    target: 0.15
+    alert_above: 0.35
+
+# --- Gates ---
+
+gates:
+  hard:
+    - id: no-merge-with-failing-checks
+      condition: "check == fail or test == fail"
+      action: block_merge
+    - id: require-plan-for-long-task
+      condition: "task_duration_minutes > 30 and plan_missing"
+      action: block_execution
+    - id: environment-first-triage
+      condition: "gate_failure_detected and environment_not_verified"
+      action: run_environment_remediation
+    - id: no-unsafe-without-justification
+      condition: "unsafe_block_detected and justification_missing"
+      action: block_merge
+    - id: dependency-boundary-enforcement
+      condition: "architecture_audit == fail"
+      action: block_merge
+
+  soft:
+    - id: budget-awareness
+      condition: "budget_remaining_usd < 5.00"
+      action: warn_and_suggest_conserving_mode
+    - id: test-count-regression
+      condition: "test_count < 1045"
+      action: warn_test_regression
+
+  budget:
+    - id: token-budget
+      condition: "session_tokens > 500000"
+      action: suggest_session_end
+    - id: cost-budget
+      condition: "session_cost_usd > 10.00"
+      action: escalate_to_human
+
+  approval:
+    - id: force-push-approval
+      condition: "git_force_push_requested"
+      action: require_human_approval
+    - id: production-deployment
+      condition: "deploy_target == production"
+      action: require_human_approval
+
+# --- Shield Configuration ---
+
+shield:
+  type: composite
+  layers:
+    - policy-gate
+    - capability-gate
+    - budget-gate
+    - sandbox-boundary
+  fallback: recover_mode
+  saturation_alert: shield_intervention_rate > 0.10
+
+# --- Rules ---
+
 rules:
   - id: no-merge-with-failing-checks
     type: hard
