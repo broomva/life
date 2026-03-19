@@ -1,0 +1,58 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "d313463e1846",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".claude/skills/life-agent-os",
+    ".claude/skills/life-aios",
+    ".claude/skills/life-arcan",
+    ".claude/skills/life-autonomic",
+    ".claude/skills/life-haima",
+    ".claude/skills/life-lago",
+    ".claude/skills/life-praxis",
+    ".claude/skills/life-spaces",
+    ".claude/skills/life-vigil",
+    ".control/plant.yaml",
+    ".control/policy.yaml",
+    ".control/runtime.yaml",
+    ".control/state.json",
+    ".gitignore",
+    "METALAYER.md",
+    "WORKFLOW.md",
+    "assets/templates/problem-spec.control.yaml",
+    "docs/conversations/Conversations.md",
+    "docs/conversations/session-2026-03-19-a63ee9a3.md",
+    "lago",
+    "schemas/action.schema.json",
+    "schemas/egri-event.schema.json",
+    "schemas/evaluator.schema.json",
+    "schemas/state.schema.json",
+    "schemas/trace.schema.json",
+    "vigil"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d3/13463e1846/0/metadata.json",
+      "transcript": "/d3/13463e1846/0/full.jsonl",
+      "context": "/d3/13463e1846/0/context.md",
+      "content_hash": "/d3/13463e1846/0/content_hash.txt",
+      "prompt": "/d3/13463e1846/0/prompt.txt"
+    },
+    {
+      "metadata": "/d3/13463e1846/1/metadata.json",
+      "transcript": "/d3/13463e1846/1/full.jsonl",
+      "context": "/d3/13463e1846/1/context.md",
+      "content_hash": "/d3/13463e1846/1/content_hash.txt",
+      "prompt": "/d3/13463e1846/1/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 4955,
+    "cache_creation_tokens": 168908,
+    "cache_read_tokens": 1705744,
+    "output_tokens": 15537,
+    "api_call_count": 28
+  }
+}
