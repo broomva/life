@@ -1,0 +1,36 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "8d690fe19aba",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "WORKFLOW.md",
+    "arcan",
+    "docs/conversations/Conversations.md",
+    "docs/conversations/session-2026-03-19-c6013dee.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/8d/690fe19aba/0/metadata.json",
+      "transcript": "/8d/690fe19aba/0/full.jsonl",
+      "context": "/8d/690fe19aba/0/context.md",
+      "content_hash": "/8d/690fe19aba/0/content_hash.txt",
+      "prompt": "/8d/690fe19aba/0/prompt.txt"
+    },
+    {
+      "metadata": "/8d/690fe19aba/1/metadata.json",
+      "transcript": "/8d/690fe19aba/1/full.jsonl",
+      "context": "/8d/690fe19aba/1/context.md",
+      "content_hash": "/8d/690fe19aba/1/content_hash.txt",
+      "prompt": "/8d/690fe19aba/1/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 4966,
+    "cache_creation_tokens": 172897,
+    "cache_read_tokens": 2651665,
+    "output_tokens": 17103,
+    "api_call_count": 39
+  }
+}
