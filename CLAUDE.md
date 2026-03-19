@@ -133,9 +133,9 @@ aiOS (kernel contract — types, traits, event taxonomy)
   └── Mnemo (knowledge — persistent memory + RAG)           [planned]
 ```
 
-**Active projects**: Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Lago provides the durable, append-only event journal and content-addressed storage. Spaces provides the distributed communication fabric. Autonomic provides three-pillar homeostatic regulation (operational, cognitive, economic). Haima provides the financial layer — x402 payments, wallet management, and per-task revenue billing. The `arcan-lago`, `autonomic-lago`, and `haima-lago` crates bridge their respective projects to Lago.
+**Active projects**: Arcan handles the agent loop, LLM provider calls, tool execution, and streaming. Lago provides the durable, append-only event journal and content-addressed storage. Spaces provides the distributed communication fabric. Autonomic provides three-pillar homeostatic regulation (operational, cognitive, economic). Haima provides the financial layer — x402 payments, wallet management, and per-task revenue billing. Praxis provides the canonical tool execution engine with MCP server/client bridge (sandbox, filesystem, editing, skills, MCP). The `arcan-lago`, `autonomic-lago`, and `haima-lago` crates bridge their respective projects to Lago.
 
-**Planned projects (directories exist, not yet scaffolded)**: Praxis will provide the canonical tool execution engine (sandbox, filesystem, editing, skills, MCP bridge). Vigil will provide OpenTelemetry-native observability with GenAI semantic conventions.
+**Planned projects (directories exist, not yet scaffolded)**: Vigil will provide OpenTelemetry-native observability with GenAI semantic conventions.
 
 **Planned projects**: Chronos, Aegis, Nous, and Mnemo will each implement a specific AOS primitive as a separate crate/service, integrating through the canonical `aios-protocol` contract.
 
