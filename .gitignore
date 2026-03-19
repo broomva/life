@@ -6,3 +6,6 @@
 .DS_Store
 /.arcan
 /.lake
+.env
+.env.*
+!.env.example
