@@ -2,7 +2,7 @@
 
 -- this is you, this is your life, you are building it, yourself, and those who will come after you.-- lets make sure the implementation is clean, following best practices and thinking deeply about the chain of dependencies so that everything follows proper design and architectural patterns-- you are building yourself, do it with all the love and care you would do for you and those who shall come after from this life
 
-**Version**: 0.2.0 | **Date**: 2026-03-19 | **Status**: V1.5 (Stabilization Phase)**Metrics**: 1045/1045 tests passing (+1 ignored) | 37 crates | ~43K LOC | Rust 2024 Edition (MSRV 1.85)
+**Version**: 0.2.0 | **Date**: 2026-03-19 | **Status**: V1.5 (Stabilization Phase)**Metrics**: 1077/1077 tests passing (+1 ignored) | 37 crates | ~43K LOC | Rust 2024 Edition (MSRV 1.85)
 
 This workspace contains Rust projects that together form an **Agent Operating System** with event-sourced persistence, homeostatic regulation, distributed networking, and a canonical kernel contract.
 
@@ -38,14 +38,16 @@ Event-sourced persistence substrate for the Agent OS.
 - **Key concepts**: Append-only event journal, content-addressed blob storage, filesystem manifests with branching, SSE format adapters (OpenAI/Anthropic/Vercel/Lago), RBAC policy, knowledge index (frontmatter + wikilinks + scored search + graph traversal), JWT auth with per-user vault sessions
 - **Critical pattern**: redb is synchronous — always use `spawn_blocking`; Journal trait uses `BoxFuture` for dyn-compatibility
 
-### Praxis (`praxis/`) — PLANNED
+### Praxis (`praxis/`)
 
-Canonical tool execution and sandbox engine — to be extracted from `arcan-harness`.
+Canonical tool execution and sandbox engine for the Agent OS.
 
-- **Status**: Directory exists but not yet scaffolded. Design is documented; implementation pending.
-- **Planned workspace crates**: `praxis-core`, `praxis-tools`, `praxis-skills`, `praxis-mcp`
-- **Key concepts**: FsPolicy (workspace boundary enforcement), SandboxPolicy (command runner), Hashline editing (Blake3 content-addressed line edits), SKILL.md discovery, MCP bridge (rmcp 0.15)
-- **Design philosophy**: Pure tool execution engine depending only on `aios-protocol`. No Arcan/Lago/Autonomic dependencies. Will be consumed by Arcan as the canonical tool backend.
+- **Language**: Rust 2024 Edition (`edition = "2024"`, `rust-version = "1.85"`)
+- **Tests**: 90 passing across 4 crates
+- **Workspace crates**: `praxis-core`, `praxis-tools`, `praxis-skills`, `praxis-mcp`
+- **Key concepts**: FsPolicy (workspace boundary enforcement), SandboxPolicy (command runner), Hashline editing (Blake3 content-addressed line edits), SKILL.md discovery, MCP server + client bridge (rmcp 0.15)
+- **MCP server**: `PraxisMcpServer` exposes any `ToolRegistry` as an MCP server over stdio (Claude Desktop) or Streamable HTTP (axum). Client bridge connects to external MCP servers via subprocess.
+- **Design philosophy**: Pure tool execution engine depending only on `aios-protocol`. No Arcan/Lago/Autonomic dependencies. Consumed by Arcan as the canonical tool backend.
 
 ### Spaces (`spaces/`)
 
@@ -116,7 +118,7 @@ aiOS (kernel contract — types, traits, event taxonomy)
   │     └── arcan-spaces bridge
   │           └── Spaces (networking — distributed agent communication)
   │
-  ├── Praxis (tool execution — canonical tool engine)       [planned — dir exists, not scaffolded]
+  ├── Praxis (tool execution — canonical tool engine + MCP)  [active — 90 tests]
   ├── Autonomic (homeostasis — stability regulation)        [active]
   │     └── autonomic-lago bridge → Lago
   │
@@ -200,9 +202,17 @@ cargo run -p autonomicd          # Run daemon (standalone mode)
 cargo run -p autonomicd -- --lago-data-dir /tmp/autonomic-data  # Run with Lago persistence
 ```
 
-### Praxis (run from `praxis/`) — NOT YET AVAILABLE
+### Praxis (run from `praxis/`)
 
-Praxis is planned but not yet scaffolded. No commands available.
+```bash
+cargo fmt                                      # Format
+cargo clippy --workspace -- -D warnings        # Lint
+cargo test --workspace                         # Run all tests (90)
+cargo test -p praxis-core                      # Test sandbox + workspace
+cargo test -p praxis-tools                     # Test filesystem + editing + shell + memory
+cargo test -p praxis-skills                    # Test SKILL.md parsing + registry
+cargo test -p praxis-mcp                       # Test MCP server + client bridge
+```
 
 ### Vigil (run from `vigil/`) — NOT YET AVAILABLE
 
