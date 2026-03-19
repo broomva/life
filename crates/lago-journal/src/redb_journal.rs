@@ -174,6 +174,8 @@ impl RedbJournal {
             .open_table(EVENTS)
             .map_err(|e| LagoError::Journal(format!("open events table: {e}")))?;
 
+        let has_post_filters = query.metadata_filters.is_some() || query.kind_filter.is_some();
+
         let mut results = Vec::new();
 
         // Build the key range based on query parameters
@@ -204,6 +206,10 @@ impl RedbJournal {
                     if let Some(before_seq) = query.before_seq
                         && envelope.seq >= before_seq
                     {
+                        continue;
+                    }
+                    // Post-deserialization filters (metadata + kind)
+                    if has_post_filters && !query.matches_filters(&envelope) {
                         continue;
                     }
 
@@ -245,6 +251,9 @@ impl RedbJournal {
                     {
                         continue;
                     }
+                    if has_post_filters && !query.matches_filters(&envelope) {
+                        continue;
+                    }
 
                     results.push(envelope);
                     if let Some(limit) = query.limit
@@ -284,6 +293,9 @@ impl RedbJournal {
                     if let Some(before_seq) = query.before_seq
                         && envelope.seq >= before_seq
                     {
+                        continue;
+                    }
+                    if has_post_filters && !query.matches_filters(&envelope) {
                         continue;
                     }
 

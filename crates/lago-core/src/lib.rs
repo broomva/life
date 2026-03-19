@@ -1,6 +1,7 @@
 pub mod error;
 pub mod event;
 pub mod hashline;
+pub mod hive;
 pub mod id;
 pub mod journal;
 pub mod mount;
@@ -14,6 +15,7 @@ pub mod tool_span;
 pub use error::{LagoError, LagoResult};
 pub use event::{EventEnvelope, EventPayload, MemoryScope};
 pub use hashline::{HashLineEdit, HashLineError, HashLineFile};
+pub use hive::HiveTask;
 pub use id::*;
 pub use journal::{EventQuery, EventStream, Journal};
 pub use mount::{FileStat, ManifestEntry, Mount};
