@@ -19,7 +19,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "regis
 tracing-opentelemetry = "0.30"
 
 # Shared contract
-aios-protocol = { path = "../aiOS/crates/aios-protocol" }
+aios-protocol = { version = "0.1.0", path = "../aiOS/crates/aios-protocol" }
 
 # Error handling
 thiserror = "2.0"
