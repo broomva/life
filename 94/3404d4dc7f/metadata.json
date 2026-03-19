@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "943404d4dc7f",
+  "strategy": "manual-commit",
+  "branch": "BRO-32",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "praxis"
+  ],
+  "sessions": [
+    {
+      "metadata": "/94/3404d4dc7f/0/metadata.json",
+      "transcript": "/94/3404d4dc7f/0/full.jsonl",
+      "context": "/94/3404d4dc7f/0/context.md",
+      "content_hash": "/94/3404d4dc7f/0/content_hash.txt",
+      "prompt": "/94/3404d4dc7f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 77,
+    "cache_creation_tokens": 111900,
+    "cache_read_tokens": 6536432,
+    "output_tokens": 20717,
+    "api_call_count": 72
+  }
+}
