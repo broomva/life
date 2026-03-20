@@ -881,10 +881,12 @@ dependencies = [
  "base64",
  "haima-core",
  "haima-wallet",
+ "hex",
  "reqwest",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "tracing",
  "url",
 ]
