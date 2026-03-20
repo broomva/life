@@ -1,0 +1,310 @@
+lets work on upgrading this repo to use /bstack /agentic-control-kernel
+
+---
+
+Base directory for this skill: /Users/broomva/.claude/skills/bstack
+
+# bstack — The Broomva Stack
+
+24 agent skills across 7 layers for complete AI-native development.
+
+**Installing bstack is not just a skill install — it activates the full control harness.**
+
+## Preamble
+
+Run this first to detect current state:
+
+```bash
+AGENTS_DIR="${HOME}/.agents/skills"
+CLAUDE_DIR="${HOME}/.claude/skills"
+ROSTER=(agentic-control-kernel control-metalayer-loop harness-engineering-playbook agent-consciousness knowledge-graph-memory prompt-library symphony symphony-forge autoany deep-dive-research-orchestrator skills skills-showcase arcan-glass next-forge alkosto-wait-optimizer content-creation pre-mortem braindump morning-briefing drift-check strategy-critique stakeholder-update decision-log weekly-review)
+INSTALLED=0; MISSING=()
+for s in "${ROSTER[@]}"; do
+  if [ -d "$AGENTS_DIR/$s" ] || [ -d "$CLAUDE_DIR/$s" ]; then
+    INSTALLED=$((INSTALLED + 1))
+  else
+    MISSING+=("$s")
+  fi
+done
+echo "bstack: $INSTALLED/${#ROSTER[@]} skills installed (24 total)"
+[ ${#MISSING[@]} -gt 0 ] && echo "Missing: ${MISSING[*]}"
+```
+
+Report the count. If all 24 present, say "bstack fully installed."
+If any missing, list them and offer the `bootstrap` command.
+
+After skill check, run the harness validation:
+
+```bash
+cd ~/broomva && make bstack-check 2>&1
+```
+
+Report results. If any checks fail, fix them before proceeding.
+
+## Commands
+
+### `bootstrap` — Install all 24 skills + activate control harness
+
+Run `scripts/bootstrap.sh` to install every skill in the roster.
+Skips already-installed skills. Creates symlinks from `~/.claude/skills/` to `~/.agents/skills/`.
+
+**After skill install, bootstrap ALSO:**
+1. Verifies governance files exist (CLAUDE.md, AGENTS.md, METALAYER.md, `.control/policy.yaml`)
+2. Installs pre-commit hooks via `git config core.hooksPath .githooks`
+3. Validates Claude Code hooks in `.claude/settings.json` (Stop + Notification for conversation bridge)
+4. Runs conversation bridge to ensure knowledge graph indexing is active
+5. Runs `make control-audit` to verify full compliance
+6. Reports bstack-check results
+
+### `status` — Show installed vs missing + harness health
+
+Re-run the preamble. For each skill show: name, layer, installed/missing.
+Then run `make bstack-check` and report the harness health status.
+
+### `validate` — Full health check
+
+Run `scripts/validate.sh`. Verifies each skill has a valid SKILL.md with proper frontmatter.
+Then run the full bstack-check harness validation.
+
+### `revamp` — Full agent reconfiguration
+
+Triggers a complete workspace reconfiguration:
+1. Reinstall all 24 skills (force mode)
+2. Regenerate governance files from templates
+3. Rewire hooks (git pre-commit + Claude Code Stop/Notification)
+4. Force-run conversation bridge across all 9 projects
+5. Run full control audit
+6. Update AGENTS.md with current state
+
+## Stack Layers
+
+| Layer | Skills | Purpose |
+|-------|--------|---------|
+| Foundation | agentic-control-kernel, control-metalayer-loop, harness-engineering-playbook | Safety, governance, workflow |
+| Memory | agent-consciousness, knowledge-graph-memory, prompt-library | Persistence across sessions |
+| Orchestration | symphony, symphony-forge, autoany | Agent dispatch, scaffolding, self-improvement |
+| Research | deep-dive-research-orchestrator, skills, skills-showcase | Multi-dim research, inventory |
+| Design | arcan-glass, next-forge | Design system, production templates |
+| Platform | alkosto-wait-optimizer, content-creation | Decision tools, content pipeline |
+| Strategy | pre-mortem, braindump, morning-briefing, drift-check, strategy-critique, stakeholder-update, decision-log, weekly-review | Strategic thinking, decision intelligence, personal productivity |
+
+## Metalayer Integration
+
+bstack is not just skills — it is the **measurement substrate** for the agentic-control-kernel.
+
+### What bstack Measures
+
+| Metric | Target | How |
+|--------|--------|-----|
+| Skills installed | 24/24 | Preamble roster check |
+| Governance files | 5/5 | CLAUDE.md, AGENTS.md, METALAYER.md, .control/policy.yaml, schemas/ |
+| Hooks wired | 3/3 | Stop hook, Notification hook, pre-commit hook |
+| Bridge operational | fresh < 120s | `~/.cache/broomva-bridge-stamp` mtime check |
+| Control audit | 5/5 sections | `make control-audit` exit code |
+| Conversations indexed | ≥1 session | `docs/conversations/Conversations.md` exists with entries |
+
+### Self-Improvement Loop
+
+```
+bstack install
+  → skills registered (24/24)
+  → hooks wired (conversation capture active)
+  → control audit passing
+  → every session captured to knowledge graph
+  → agent reads prior sessions on next start
+  → agent discovers better patterns
+  → agent proposes governance updates
+  → bstack validates the update (control audit)
+  → improvement promoted (AGENTS.md / policy.yaml updated)
+  → next agent inherits the improvement
+```
+
+This is the EGRI loop at the workspace level:
+- **Mutable artifact**: Agent behavior, AGENTS.md rules, policy gates
+- **Immutable evaluator**: `make bstack-check` (24 skills + 5 governance + 3 hooks + bridge + audit)
+- **Promotion policy**: Changes that pass all checks get committed
+
+## Browse
+
+Full roster with install commands: https://broomva.tech/skills
+For architecture diagram, read `references/stack-architecture.md`.
+For first-time setup, read `references/quickstart.md`.
+
+---
+
+Base directory for this skill: /Users/broomva/.claude/skills/agentic-control-kernel
+
+# Agentic Control Kernel
+
+A purely knowledge-based metalayer that unifies six subsystems into a single
+installable skill for any project:
+
+| Layer | Source / Crates | Role |
+|-------|----------------|------|
+| Governance | control-metalayer-loop | Setpoints, sensors, gates, policy, profiles |
+| Improvement | `autoany_core` + `autoany-aios` + `autoany-lago` | EGRI microkernel, Arcan execution, Lago ledger |
+| Orchestration | `symphony-orchestrator` + `symphony-arcan` | Poll/dispatch/worker/reconcile via Arcan HTTP |
+| Runtime | Life (`arcan`, `lago`, `autonomic`, `praxis`, `spaces`) | Agent sessions, event journal, homeostasis, networking |
+| Protocol | `aios-protocol` | Canonical types — shared vocabulary across all crates |
+| Episodic Memory | knowledge-graph-memory | Conversation logs -> Obsidian bridge |
+| Consciousness | agent-consciousness | Three-substrate persistent context |
+| QA/Actuation | gstack | Headless browser, workflow skills |
+| **Control Kernel** | **this skill** | Plant interface, safety shields, typed schemas, multi-rate hierarchy |
+
+## Core Law
+
+> Do not grant an agent more mutation freedom than your evaluator can reliably judge.
+> In control terms: do not let the LLM's action space exceed what your runtime monitors,
+> safety filters, and evaluators can certify.
+
+## Quick Start
+
+### 1. Bootstrap a project
+
+```bash
+python3 scripts/control_kernel_init.py <repo-path> [--profile governed] [--runtime arcan] [--ledger lago]
+```
+
+This installs into the target repo:
+- `.control/policy.yaml` — control-systems-aware setpoints
+- `schemas/` — state, action, trace, evaluator JSON schemas
+- `METALAYER.md` — control loop definition with plant/shield/estimator sections
+- Harness gates wired to `make smoke`, `make check`, `make control-audit`
+
+### 2. Define the plant interface
+
+Edit `.control/plant.yaml` with typed state and action schemas for your system.
+See [references/plant-interface.md](references/plant-interface.md) for the full API spec.
+
+### 3. Wire safety shields
+
+See [references/safety-shields.md](references/safety-shields.md) for CBF-QP patterns,
+policy gates, and containment invariants.
+
+### 4. Set up EGRI for controller improvement
+
+Use the problem-spec template in `assets/templates/problem-spec.control.yaml`
+to define an autoany loop over your controller artifacts.
+See [references/egri-for-controllers.md](references/egri-for-controllers.md).
+
+## Architecture Overview
+
+The LLM emits typed **control directives** `θ_t` — not raw actuations `u_t`.
+Deterministic controller modules execute, safety shields filter, and the runtime
+logs traces to an append-only ledger.
+
+```
+Plant → observe() → Runtime → update estimator → b_t
+  → LLM Agent: request decision(b_t) → θ_t (typed directive)
+  → Controller: propose(b_t, θ_t) → proposed u_t
+  → Safety Shield: filter(u_t, b_t) → safe u_t + certificate
+  → Plant: apply(safe u_t) → result
+  → Evaluator/Ledger: append trace + score
+```
+
+See [references/architecture.md](references/architecture.md) for the full 5-layer diagram.
+
+## Multi-Rate Hierarchy
+
+| Loop | Cadence | LLM here? | What runs |
+|------|---------|-----------|-----------|
+| Servo | ms | No | PID, state feedback, deterministic |
+| Constrained execution | 10-100ms | No (param updates only) | MPC/CBF-QP solvers |
+| Supervisory planning | seconds | Yes | Goal setting, mode switching, tool selection |
+| Auto-tuning (EGRI) | minutes-days | Yes | Controller synthesis, model learning |
+
+See [references/multi-rate-hierarchy.md](references/multi-rate-hierarchy.md).
+
+## LLM Roles in the Control Stack
+
+| Role | Outputs | When to use |
+|------|---------|-------------|
+| Supervisory controller | setpoints, mode switches, constraints | Default — long-horizon reasoning |
+| Meta-controller | tool/module selection, identification triggers | Modular systems with multiple controllers |
+| Controller synthesizer | code, configs, tests | Offline — gated by harness CI |
+| EGRI loop compiler | problem-spec, evaluator design, promotion rules | Continuous improvement cycles |
+
+See [references/architecture.md](references/architecture.md) for the full role table.
+
+## Reference Guide
+
+- **[architecture.md](references/architecture.md)** — 5-layer stack, realized crate graph, control-flow diagram, component mapping
+- **[integration-map.md](references/integration-map.md)** — Adapter crate boundary map, configuration, direction rule
+- **[plant-interface.md](references/plant-interface.md)** — Plant/Estimator/Controller/Shield/Evaluator API specs
+- **[safety-shields.md](references/safety-shields.md)** — CBF-QP, policy gates, containment, failure modes
+- **[multi-rate-hierarchy.md](references/multi-rate-hierarchy.md)** — Loop rates, LLM placement, heuristics
+- **[world-models.md](references/world-models.md)** — Koopman, DeePC, digital twins, learned dynamics
+- **[egri-for-controllers.md](references/egri-for-controllers.md)** — Autoany applied to controller optimization
+- **[orchestration-patterns.md](references/orchestration-patterns.md)** — Symphony daemon patterns for multi-agent dispatch
+- **[consciousness-stack.md](references/consciousness-stack.md)** — Memory/knowledge/episodic integration
+- **[failure-modes.md](references/failure-modes.md)** — Mitigations catalog for LLM-in-the-loop control
+- **[deep-research-report.md](references/deep-research-report.md)** — Original research report and project plan: formal control theory, literature survey, prototype roadmap
+
+## Schemas
+
+JSON Schemas in `schemas/` enforce typed interfaces:
+- `state.schema.json` — Plant/belief state
+- `action.schema.json` — Control directives (θ_t)
+- `trace.schema.json` — Ledger entries (autoany-compatible)
+- `evaluator.schema.json` — Score vectors, promotion decisions
+- `egri-event.schema.json` — EGRI trial events for Lago persistence via EventKind::Custom
+
+## Existing Skill Dependencies
+
+This skill synthesizes and references (does not duplicate) these existing skills:
+- **control-metalayer-loop** — Use for `.control/` bootstrapping and governance primitives
+- **autoany** — EGRI loop execution via `autoany-aios` (Arcan sessions) and `autoany-lago` (Lago ledger)
+- **symphony** — Orchestration dispatch via `symphony-arcan` (Arcan HTTP runtime)
+- **life** — `arcan` (agent sessions), `lago` (event journal), `autonomic` (homeostasis), `spaces` (networking)
+- **aios-protocol** — Canonical types shared across all adapter crates
+- **agent-consciousness** — Use for consciousness stack setup
+- **knowledge-graph-memory** — Use for conversation bridge to Obsidian
+- **gstack** — Use for QA actuation via headless browser
+
+---
+
+<task-notification>
+<task-id>b3qzdaxn3</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-core-life/c6013dee-9c55-4ed7-a3a0-f2efb9372aae/tasks/b3qzdaxn3.output</output-file>
+<status>killed</status>
+<summary>Background command "find /Users/broomva -type d -name "*agentic*control*kernel*" 2&gt;/dev/null | head -20" was stopped</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-broomva-broomva-core-life/c6013dee-9c55-4ed7-a3a0-f2efb9372aae/tasks/b3qzdaxn3.output
+
+---
+
+<task-notification>
+<task-id>bg1r1q9w1</task-id>
+<tool-use-id>toolu_012rsQ26w8W72DvxNk8KxnK5</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-core-life/c6013dee-9c55-4ed7-a3a0-f2efb9372aae/tasks/bg1r1q9w1.output</output-file>
+<status>killed</status>
+<summary>Background command "find /Users/broomva -type f -name "*SKILL.md" 2&gt;/dev/null | grep -i control" was stopped</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-broomva-broomva-core-life/c6013dee-9c55-4ed7-a3a0-f2efb9372aae/tasks/bg1r1q9w1.output
+
+---
+
+<task-notification>
+<task-id>bp6zybj9i</task-id>
+<tool-use-id>toolu_018yVHknRSkKwDnku2MeBHX4</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-core-life/c6013dee-9c55-4ed7-a3a0-f2efb9372aae/tasks/bp6zybj9i.output</output-file>
+<status>killed</status>
+<summary>Background command "find /Users/broomva -type d -path "*/.agents/skills*" 2&gt;/dev/null" was stopped</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-broomva-broomva-core-life/c6013dee-9c55-4ed7-a3a0-f2efb9372aae/tasks/bp6zybj9i.output
+
+---
+
+great, lets commit and make sure PR checks and cicd is all green
+
+---
+
+<task-notification>
+<task-id>b4figm7e2</task-id>
+<tool-use-id>toolu_01QSGMqMPLoLfhxZa6DPYa6s</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-core-life/c6013dee-9c55-4ed7-a3a0-f2efb9372aae/tasks/b4figm7e2.output</output-file>
+<status>completed</status>
+<summary>Background command "Watch Harness CI run" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-broomva-broomva-core-life/c6013dee-9c55-4ed7-a3a0-f2efb9372aae/tasks/b4figm7e2.output
