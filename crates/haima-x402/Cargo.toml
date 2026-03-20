@@ -20,6 +20,10 @@ tracing.workspace = true
 reqwest.workspace = true
 base64.workspace = true
 url.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true
