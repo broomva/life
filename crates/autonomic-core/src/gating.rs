@@ -101,6 +101,23 @@ impl Default for CognitiveState {
     }
 }
 
+/// Strategy event tracking state.
+///
+/// Accumulated from `strategy.*` custom events emitted by strategy skills
+/// to Lago. Used by advisory rules to inform risk assessment and suggest
+/// setpoint reviews.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StrategyState {
+    /// Count of drift-check alerts received.
+    pub drift_alerts: u32,
+    /// Count of decisions logged.
+    pub decisions_logged: u32,
+    /// Count of strategy critiques completed.
+    pub critiques_completed: u32,
+    /// Timestamp of the most recent strategy event (ms since epoch).
+    pub last_strategy_event_ms: u64,
+}
+
 /// The three-pillar homeostatic state for an agent session.
 ///
 /// This is the projection state: accumulated from the event stream
@@ -115,6 +132,8 @@ pub struct HomeostaticState {
     pub cognitive: CognitiveState,
     /// Economic health.
     pub economic: EconomicState,
+    /// Strategy event tracking.
+    pub strategy: StrategyState,
     /// Sequence number of the last event processed.
     pub last_event_seq: u64,
     /// Timestamp of the last event processed (ms since epoch).
@@ -171,5 +190,39 @@ mod tests {
         assert_eq!(state.agent_id, "agent-1");
         assert_eq!(state.operational.mode, OperatingMode::Execute);
         assert_eq!(state.economic.mode, EconomicMode::Sovereign);
+    }
+
+    #[test]
+    fn strategy_state_default_is_zeroed() {
+        let strategy = StrategyState::default();
+        assert_eq!(strategy.drift_alerts, 0);
+        assert_eq!(strategy.decisions_logged, 0);
+        assert_eq!(strategy.critiques_completed, 0);
+        assert_eq!(strategy.last_strategy_event_ms, 0);
+    }
+
+    #[test]
+    fn homeostatic_state_includes_strategy() {
+        let state = HomeostaticState::for_agent("agent-1");
+        assert_eq!(state.strategy.drift_alerts, 0);
+        assert_eq!(state.strategy.decisions_logged, 0);
+        assert_eq!(state.strategy.critiques_completed, 0);
+        assert_eq!(state.strategy.last_strategy_event_ms, 0);
+    }
+
+    #[test]
+    fn strategy_state_serde_roundtrip() {
+        let strategy = StrategyState {
+            drift_alerts: 5,
+            decisions_logged: 12,
+            critiques_completed: 3,
+            last_strategy_event_ms: 1_700_000_000_000,
+        };
+        let json = serde_json::to_string(&strategy).unwrap();
+        let back: StrategyState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.drift_alerts, 5);
+        assert_eq!(back.decisions_logged, 12);
+        assert_eq!(back.critiques_completed, 3);
+        assert_eq!(back.last_strategy_event_ms, 1_700_000_000_000);
     }
 }

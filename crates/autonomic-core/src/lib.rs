@@ -18,6 +18,7 @@ pub use error::{AutonomicError, AutonomicResult};
 pub use events::AutonomicEvent;
 pub use gating::{
     AutonomicGatingProfile, CognitiveState, EconomicGates, HomeostaticState, OperationalState,
+    StrategyState,
 };
 pub use hysteresis::HysteresisGate;
 pub use identity::EconomicIdentity;

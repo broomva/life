@@ -10,6 +10,7 @@ pub mod economic_rules;
 pub mod engine;
 pub mod operational_rules;
 pub mod projection;
+pub mod strategy_rules;
 
 // Re-exports
 pub use cognitive_rules::{ContextPressureRule, TokenExhaustionRule};
@@ -17,3 +18,4 @@ pub use economic_rules::{BudgetExhaustionRule, SpendVelocityRule, SurvivalRule};
 pub use engine::evaluate;
 pub use operational_rules::ErrorStreakRule;
 pub use projection::fold;
+pub use strategy_rules::StrategyRule;
