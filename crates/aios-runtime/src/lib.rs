@@ -17,7 +17,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::sync::broadcast;
-use tracing::{debug, info, instrument, warn};
+use tracing::{Instrument, debug, info, instrument, warn};
 
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
@@ -40,6 +40,10 @@ impl RuntimeConfig {
 pub struct TickInput {
     pub objective: String,
     pub proposed_tool: Option<ToolCall>,
+    /// Optional per-request system prompt (active skill body, liquid prompt).
+    pub system_prompt: Option<String>,
+    /// Tool whitelist from active skill. When set, only these tools are sent to the LLM.
+    pub allowed_tools: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -255,10 +259,24 @@ impl KernelRuntime {
         };
 
         let mut emitted = 0_u64;
+        #[allow(unused_assignments)]
+        let mut previous_mode: Option<OperatingMode> = None;
+        let mut _tool_calls_this_tick = 0_u32;
+        let mut _file_mutations_this_tick = 0_u32;
 
         emitted += self
             .emit_phase(session_id, branch_id, LoopPhase::Perceive)
             .await?;
+
+        // Record initial budget metrics during the Perceive phase.
+        {
+            let metrics = vigil::metrics::GenAiMetrics::new("arcan");
+            metrics.record_budget(
+                state.budget.tokens_remaining,
+                state.budget.cost_remaining_usd,
+            );
+        }
+
         emitted += self
             .emit_phase(session_id, branch_id, LoopPhase::Deliberate)
             .await?;
@@ -280,6 +298,7 @@ impl KernelRuntime {
             .await
             .unwrap_or_default();
         let mut mode = self.estimate_mode(&state, pending_approvals.len());
+        previous_mode = Some(mode);
 
         self.append_event(
             session_id,
@@ -335,6 +354,8 @@ impl KernelRuntime {
                     step_index: 0,
                     objective: input.objective.clone(),
                     proposed_tool: None,
+                    system_prompt: input.system_prompt.clone(),
+                    allowed_tools: input.allowed_tools.clone(),
                 })
                 .await
                 .map_err(|error| anyhow::anyhow!(error.to_string()))
@@ -392,6 +413,8 @@ impl KernelRuntime {
                                 .await
                                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
 
+                            // Track tool calls for per-tick Autonomic limits.
+                            _tool_calls_this_tick += 1;
                             if !policy.denied.is_empty() {
                                 mode = OperatingMode::Recover;
                                 state.error_streak += 1;
@@ -473,13 +496,40 @@ impl KernelRuntime {
                                             session_id, branch_id, &manifest, &report,
                                         )
                                         .await?;
+                                    if let ToolOutcome::Success { output } = &report.outcome
+                                        && output.get("path").is_some()
+                                    {
+                                        _file_mutations_this_tick += 1;
+                                    }
                                     self.apply_homeostasis_controllers(&mut state, &report);
-                                    mode = self.estimate_mode(&state, 0);
+                                    let new_mode = self.estimate_mode(&state, 0);
+                                    if let Some(prev) = previous_mode
+                                        && prev != new_mode
+                                    {
+                                        self.append_event(
+                                            session_id,
+                                            branch_id,
+                                            EventKind::ModeChanged {
+                                                from: prev,
+                                                to: new_mode,
+                                                reason: format!(
+                                                    "post-tool homeostasis: tool={} exit={}",
+                                                    report.tool_name, report.exit_status
+                                                ),
+                                            },
+                                        )
+                                        .await?;
+                                        emitted += 1;
+                                    }
+                                    mode = new_mode;
+                                    previous_mode = Some(mode);
                                     info!(
                                         tool_name = %report.tool_name,
                                         tool_run_id = %report.tool_run_id,
                                         exit_status = report.exit_status,
                                         mode = ?mode,
+                                        tool_calls = _tool_calls_this_tick,
+                                        file_mutations = _file_mutations_this_tick,
                                         "tool execution completed"
                                     );
                                 }
@@ -488,7 +538,24 @@ impl KernelRuntime {
                                     state.uncertainty = (state.uncertainty + 0.15).min(1.0);
                                     state.budget.error_budget_remaining =
                                         state.budget.error_budget_remaining.saturating_sub(1);
-                                    mode = OperatingMode::Recover;
+                                    let new_mode = OperatingMode::Recover;
+                                    if let Some(prev) = previous_mode
+                                        && prev != new_mode
+                                    {
+                                        self.append_event(
+                                            session_id,
+                                            branch_id,
+                                            EventKind::ModeChanged {
+                                                from: prev,
+                                                to: new_mode,
+                                                reason: format!("tool execution error: {error}"),
+                                            },
+                                        )
+                                        .await?;
+                                        emitted += 1;
+                                    }
+                                    mode = new_mode;
+                                    previous_mode = Some(mode);
                                     warn!(
                                         error = %error,
                                         error_streak = state.error_streak,
@@ -510,6 +577,10 @@ impl KernelRuntime {
                         }
                     }
                 }
+
+                emitted += self
+                    .emit_phase(session_id, branch_id, LoopPhase::Commit)
+                    .await?;
 
                 self.append_event(
                     session_id,
@@ -947,6 +1018,30 @@ impl KernelRuntime {
         .await?;
         emitted += 1;
 
+        // Record budget metrics via Vigil GenAI metrics.
+        {
+            let metrics = vigil::metrics::GenAiMetrics::new("arcan");
+            metrics.record_budget(
+                state.budget.tokens_remaining,
+                state.budget.cost_remaining_usd,
+            );
+
+            // Detect and record mode transitions in the Reflect phase.
+            let previous_mode = {
+                let sessions = self.sessions.lock();
+                sessions
+                    .get(session_id.as_str())
+                    .map(|s| s.mode)
+                    .unwrap_or(OperatingMode::Explore)
+            };
+            if previous_mode != *mode {
+                let from_str = operating_mode_str(&previous_mode);
+                let to_str = operating_mode_str(mode);
+                metrics.record_mode_transition(from_str, to_str);
+                debug!(from = from_str, to = to_str, "operating mode transition");
+            }
+        }
+
         self.append_event(
             session_id,
             branch_id,
@@ -1112,9 +1207,14 @@ impl KernelRuntime {
         branch_id: &BranchId,
         phase: LoopPhase,
     ) -> Result<u64> {
-        self.append_event(session_id, branch_id, EventKind::PhaseEntered { phase })
-            .await?;
-        Ok(1)
+        let phase_span = vigil::spans::phase_span(phase);
+        async {
+            self.append_event(session_id, branch_id, EventKind::PhaseEntered { phase })
+                .await?;
+            Ok(1)
+        }
+        .instrument(phase_span)
+        .await
     }
 
     async fn append_event(
@@ -1132,7 +1232,11 @@ impl KernelRuntime {
             event_kind,
             "appending event"
         );
-        let event = EventRecord::new(session_id.clone(), branch_id.clone(), sequence, kind);
+        let mut event = EventRecord::new(session_id.clone(), branch_id.clone(), sequence, kind);
+
+        // Dual-write: embed OTel trace/span IDs into the event for post-hoc correlation.
+        write_trace_context_on_record(&mut event);
+
         let persisted = match self.event_store.append(event).await {
             Ok(persisted) => persisted,
             Err(append_error) => {
@@ -1450,6 +1554,36 @@ impl KernelRuntime {
 fn sha256_json<T: Serialize>(value: &T) -> Result<String> {
     let payload = serde_json::to_vec(value)?;
     Ok(sha256_bytes(&payload))
+}
+
+/// Write the current OTel trace context (trace_id, span_id) into an EventRecord.
+///
+/// Enables dual-write: persisted events carry OTel correlation IDs so they
+/// can be linked back to their distributed traces for post-hoc analysis.
+fn write_trace_context_on_record(event: &mut EventRecord) {
+    use opentelemetry::trace::TraceContextExt;
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+    let current_span = tracing::Span::current();
+    let otel_context = current_span.context();
+    let span_ref = otel_context.span();
+    let span_context = span_ref.span_context();
+
+    if span_context.is_valid() {
+        event.trace_id = Some(span_context.trace_id().to_string());
+        event.span_id = Some(span_context.span_id().to_string());
+    }
+}
+
+fn operating_mode_str(mode: &OperatingMode) -> &'static str {
+    match mode {
+        OperatingMode::Explore => "explore",
+        OperatingMode::Execute => "execute",
+        OperatingMode::Verify => "verify",
+        OperatingMode::AskHuman => "ask_human",
+        OperatingMode::Recover => "recover",
+        OperatingMode::Sleep => "sleep",
+    }
 }
 
 fn model_stop_reason_string(stop_reason: &aios_protocol::ModelStopReason) -> String {

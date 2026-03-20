@@ -161,6 +161,8 @@ impl AiosKernel {
                 TickInput {
                     objective: objective.into(),
                     proposed_tool,
+                    system_prompt: None,
+                    allowed_tools: None,
                 },
             )
             .await
