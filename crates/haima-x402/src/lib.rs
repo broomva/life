@@ -11,12 +11,12 @@
 //! # Protocol Flow (Client)
 //!
 //! ```text
-//! HTTP Request → 402 + PAYMENT-REQUIRED header
-//!   → Parse PaymentRequired terms
-//!   → Evaluate against PaymentPolicy (auto-approve / require approval / deny)
-//!   → Sign with WalletBackend (EIP-3009 transferWithAuthorization)
-//!   → Retry with PAYMENT-SIGNATURE header
-//!   → Receive 200 + PAYMENT-RESPONSE header (settlement confirmation)
+//! HTTP Request -> 402 + PAYMENT-REQUIRED header
+//!   -> Parse PaymentRequired terms
+//!   -> Evaluate against PaymentPolicy (auto-approve / require approval / deny)
+//!   -> Sign with WalletBackend (message signing)
+//!   -> Retry with PAYMENT-SIGNATURE header
+//!   -> Receive 200 + PAYMENT-RESPONSE header (settlement confirmation)
 //! ```
 
 pub mod client;
@@ -24,6 +24,12 @@ pub mod facilitator;
 pub mod header;
 pub mod server;
 
-pub use client::X402Client;
+pub use client::{HandleResult, SettlementResult, X402Client};
 pub use facilitator::{Facilitator, FacilitatorConfig};
+pub use header::{
+    PAYMENT_REQUIRED_HEADER, PAYMENT_RESPONSE_HEADER, PAYMENT_SIGNATURE_HEADER,
+    PaymentRequiredHeader, PaymentResponseHeader, PaymentSignatureHeader, SchemeRequirement,
+    encode_payment_required, encode_payment_response, encode_payment_signature,
+    parse_payment_required, parse_payment_response, parse_payment_signature,
+};
 pub use server::X402ServerMiddleware;
