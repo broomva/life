@@ -12,8 +12,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use autonomic_api::{AppState, build_router};
 use autonomic_controller::{
-    BudgetExhaustionRule, ContextPressureRule, ErrorStreakRule, SpendVelocityRule, SurvivalRule,
-    TokenExhaustionRule,
+    BudgetExhaustionRule, ContextPressureRule, ErrorStreakRule, SpendVelocityRule, StrategyRule,
+    SurvivalRule, TokenExhaustionRule,
 };
 use autonomic_core::rules::RuleSet;
 use clap::Parser;
@@ -49,6 +49,9 @@ fn build_rule_set(config: &AutonomicConfig) -> RuleSet {
         config.operational.error_rate_threshold,
         config.operational.min_events,
     )));
+
+    // Strategy advisory rules
+    rules.add(Box::new(StrategyRule::default()));
 
     rules
 }

@@ -105,6 +105,8 @@ pub fn fold(
         EventKind::Custom { event_type, data } => {
             if let Some(autonomic_event) = AutonomicEvent::from_custom(event_type, data) {
                 apply_autonomic_event(&mut state, &autonomic_event);
+            } else if event_type.starts_with(STRATEGY_EVENT_PREFIX) {
+                apply_strategy_event(&mut state, event_type, ts_ms);
             }
         }
 
@@ -134,6 +136,9 @@ fn apply_token_usage(state: &mut HomeostaticState, usage: &TokenUsage) {
             state.cognitive.total_tokens_used as f32 / total_budget as f32;
     }
 }
+
+/// Prefix for strategy custom events emitted by strategy skills to Lago.
+const STRATEGY_EVENT_PREFIX: &str = "strategy.";
 
 /// Apply an Autonomic-specific event to state.
 fn apply_autonomic_event(state: &mut HomeostaticState, event: &AutonomicEvent) {
@@ -172,6 +177,30 @@ fn apply_autonomic_event(state: &mut HomeostaticState, event: &AutonomicEvent) {
         }
         AutonomicEvent::GatingDecision { .. } => {
             // Informational — no state mutation needed
+        }
+    }
+}
+
+/// Apply a strategy event to state.
+///
+/// Strategy events arrive as `EventKind::Custom` with `"strategy."` prefix.
+/// They are count-based accumulators — pure and deterministic.
+fn apply_strategy_event(state: &mut HomeostaticState, event_type: &str, ts_ms: u64) {
+    state.strategy.last_strategy_event_ms = ts_ms;
+
+    match event_type {
+        "strategy.drift_detected" => {
+            state.strategy.drift_alerts += 1;
+        }
+        "strategy.decision_logged" => {
+            state.strategy.decisions_logged += 1;
+        }
+        "strategy.critique_completed" => {
+            state.strategy.critiques_completed += 1;
+        }
+        _ => {
+            // Unknown strategy event subtype — no state change,
+            // but timestamp is still updated above.
         }
     }
 }
@@ -411,5 +440,139 @@ mod tests {
             autonomic_core::EconomicMode::Sovereign,
             "transition allowed after hold duration elapsed"
         );
+    }
+
+    // ── Strategy event tests ──
+
+    fn strategy_event(event_type: &str) -> EventKind {
+        EventKind::Custom {
+            event_type: event_type.to_owned(),
+            data: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn fold_strategy_drift_detected_increments_counter() {
+        let state = default_state();
+        let kind = strategy_event("strategy.drift_detected");
+        let new_state = fold(state, &kind, 1, 5000);
+        assert_eq!(new_state.strategy.drift_alerts, 1);
+        assert_eq!(new_state.strategy.last_strategy_event_ms, 5000);
+    }
+
+    #[test]
+    fn fold_strategy_decision_logged_increments_counter() {
+        let state = default_state();
+        let kind = strategy_event("strategy.decision_logged");
+        let new_state = fold(state, &kind, 1, 6000);
+        assert_eq!(new_state.strategy.decisions_logged, 1);
+        assert_eq!(new_state.strategy.last_strategy_event_ms, 6000);
+    }
+
+    #[test]
+    fn fold_strategy_critique_completed_increments_counter() {
+        let state = default_state();
+        let kind = strategy_event("strategy.critique_completed");
+        let new_state = fold(state, &kind, 1, 7000);
+        assert_eq!(new_state.strategy.critiques_completed, 1);
+        assert_eq!(new_state.strategy.last_strategy_event_ms, 7000);
+    }
+
+    #[test]
+    fn fold_multiple_strategy_drift_events_accumulate() {
+        let mut state = default_state();
+        for i in 0..5 {
+            let kind = strategy_event("strategy.drift_detected");
+            state = fold(state, &kind, i, (i + 1) * 1000);
+        }
+        assert_eq!(state.strategy.drift_alerts, 5);
+        assert_eq!(state.strategy.last_strategy_event_ms, 5000);
+    }
+
+    #[test]
+    fn fold_unknown_strategy_event_updates_timestamp_only() {
+        let state = default_state();
+        let kind = strategy_event("strategy.unknown_subtype");
+        let new_state = fold(state, &kind, 1, 8000);
+        assert_eq!(new_state.strategy.drift_alerts, 0);
+        assert_eq!(new_state.strategy.decisions_logged, 0);
+        assert_eq!(new_state.strategy.critiques_completed, 0);
+        assert_eq!(new_state.strategy.last_strategy_event_ms, 8000);
+    }
+
+    #[test]
+    fn fold_strategy_events_do_not_affect_other_state() {
+        let state = default_state();
+        let kind = strategy_event("strategy.drift_detected");
+        let new_state = fold(state, &kind, 1, 5000);
+        // Operational, cognitive, economic state should be untouched
+        assert_eq!(new_state.operational.error_streak, 0);
+        assert_eq!(new_state.operational.total_errors, 0);
+        assert_eq!(new_state.cognitive.total_tokens_used, 0);
+        assert_eq!(
+            new_state.economic.mode,
+            autonomic_core::EconomicMode::Sovereign
+        );
+    }
+
+    #[test]
+    fn fold_drift_events_then_strategy_rule_fires() {
+        use crate::strategy_rules::StrategyRule;
+        use autonomic_core::rules::HomeostaticRule;
+
+        // Fold 4 drift events into state (threshold default is 3)
+        let mut state = default_state();
+        for i in 0..4 {
+            let kind = strategy_event("strategy.drift_detected");
+            state = fold(state, &kind, i, (i + 1) * 1000);
+        }
+
+        // Evaluate the strategy rule against the projected state
+        let rule = StrategyRule::default();
+        let decision = rule.evaluate(&state).expect("rule should fire");
+        assert!(decision.rationale.contains("drift alerts"));
+        assert!(decision.rationale.contains("reviewing setpoints"));
+        // Verify it's advisory-only
+        assert!(decision.economic_mode.is_none());
+        assert!(decision.restrict_side_effects.is_none());
+    }
+
+    #[test]
+    fn fold_mixed_strategy_events_then_rule_produces_combined_rationale() {
+        use crate::strategy_rules::StrategyRule;
+        use autonomic_core::rules::HomeostaticRule;
+
+        let mut state = default_state();
+        // 5 drift events, 12 decisions, 2 critiques
+        for i in 0..5 {
+            state = fold(
+                state,
+                &strategy_event("strategy.drift_detected"),
+                i,
+                i * 100,
+            );
+        }
+        for i in 5..17 {
+            state = fold(
+                state,
+                &strategy_event("strategy.decision_logged"),
+                i,
+                i * 100,
+            );
+        }
+        for i in 17..19 {
+            state = fold(
+                state,
+                &strategy_event("strategy.critique_completed"),
+                i,
+                i * 100,
+            );
+        }
+
+        let rule = StrategyRule::default();
+        let decision = rule.evaluate(&state).expect("rule should fire");
+        assert!(decision.rationale.contains("drift alerts"));
+        assert!(decision.rationale.contains("high decision velocity"));
+        assert!(decision.rationale.contains("critiques completed"));
     }
 }
