@@ -29,6 +29,13 @@ pub struct ModelCompletionRequest {
     pub objective: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_tool: Option<ToolCall>,
+    /// Optional system prompt to prepend to the conversation.
+    /// Used for skill catalogs, persona blocks, and context compiler output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    /// Tool whitelist from active skill. When set, only these tools are sent to the LLM.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

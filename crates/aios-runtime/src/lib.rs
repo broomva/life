@@ -40,6 +40,10 @@ impl RuntimeConfig {
 pub struct TickInput {
     pub objective: String,
     pub proposed_tool: Option<ToolCall>,
+    /// Optional per-request system prompt (active skill body, liquid prompt).
+    pub system_prompt: Option<String>,
+    /// Tool whitelist from active skill. When set, only these tools are sent to the LLM.
+    pub allowed_tools: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -350,6 +354,8 @@ impl KernelRuntime {
                     step_index: 0,
                     objective: input.objective.clone(),
                     proposed_tool: None,
+                    system_prompt: input.system_prompt.clone(),
+                    allowed_tools: input.allowed_tools.clone(),
                 })
                 .await
                 .map_err(|error| anyhow::anyhow!(error.to_string()))
