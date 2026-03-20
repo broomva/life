@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "66b848806145",
+  "session_id": "38d2f43d-1bd9-45b7-9b67-6f22da098331",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-19T23:40:12.630609Z",
+  "branch": "BRO-32",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "lago",
+    "vigil",
+    "arcan"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "0142873acf55",
+  "token_usage": {
+    "input_tokens": 15,
+    "cache_creation_tokens": 15591,
+    "cache_read_tokens": 506937,
+    "output_tokens": 3578,
+    "api_call_count": 12
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-19T23:40:12.595824Z",
+    "agent_lines": 0,
+    "human_added": 1458,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1458,
+    "agent_percentage": 0
+  }
+}
