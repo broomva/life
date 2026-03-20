@@ -28,8 +28,8 @@ related:
 
 | Session | Branch | Turns | Duration | Topic |
 |---------|--------|-------|----------|-------|
-| [[session-2026-03-19-a63ee9a3]] | `main` | 2 | 6h 14m | skill |
-| [[session-2026-03-19-c6013dee]] | `main` | 6 | 13m | lets work on upgrading this repo to use /bstack /a |
+| [[session-2026-03-19-a63ee9a3]] | `main` | 2 | 8h 9m | skill |
+| [[session-2026-03-19-c6013dee]] | `main` | 10 | 2h 13m | lets work on upgrading this repo to use /bstack /a |
 
 ## 2026-03-08
 
@@ -109,7 +109,7 @@ related:
 
 ## Statistics
 
-- **Total turns**: 2864
+- **Total turns**: 2868
 - **Branches worked on**: 1
 - **Date range**: 2026-02-20 → 2026-03-19
 
