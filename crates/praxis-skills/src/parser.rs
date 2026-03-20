@@ -6,6 +6,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
+/// MCP server declaration in a SKILL.md file.
+///
+/// Lightweight struct — no dependency on praxis-mcp. The connection lifecycle
+/// is managed by the runtime (arcan) when the skill is activated.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SkillMcpServer {
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
 /// Parsed SKILL.md frontmatter.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SkillMetadata {
@@ -23,6 +35,9 @@ pub struct SkillMetadata {
     pub user_invocable: Option<bool>,
     #[serde(default)]
     pub disable_model_invocation: Option<bool>,
+    /// MCP servers to spawn when this skill is activated.
+    #[serde(default)]
+    pub mcp_servers: Option<Vec<SkillMcpServer>>,
     /// Arbitrary key-value metadata.
     #[serde(default, flatten)]
     pub metadata: BTreeMap<String, serde_yaml::Value>,
@@ -144,6 +159,37 @@ description: No name field
 ---
 Body."#;
         assert!(parse_skill_md(content).is_err());
+    }
+
+    #[test]
+    fn parse_mcp_servers() {
+        let content = r#"---
+name: database-admin
+description: Database administration skill
+mcp_servers:
+  - name: postgres
+    command: mcp-postgres
+    args:
+      - "--connection-string"
+      - "postgresql://localhost/mydb"
+  - name: redis
+    command: mcp-redis
+---
+Manage databases.
+"#;
+        let (meta, _body) = parse_skill_md(content).unwrap();
+        assert_eq!(meta.name, "database-admin");
+        let servers = meta.mcp_servers.unwrap();
+        assert_eq!(servers.len(), 2);
+        assert_eq!(servers[0].name, "postgres");
+        assert_eq!(servers[0].command, "mcp-postgres");
+        assert_eq!(
+            servers[0].args,
+            vec!["--connection-string", "postgresql://localhost/mydb"]
+        );
+        assert_eq!(servers[1].name, "redis");
+        assert_eq!(servers[1].command, "mcp-redis");
+        assert!(servers[1].args.is_empty());
     }
 
     #[test]

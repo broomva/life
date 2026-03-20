@@ -135,6 +135,69 @@ impl SkillRegistry {
     }
 }
 
+/// State for an active skill — carries the skill body and tool whitelist
+/// for injection into the provider request as a liquid prompt.
+#[derive(Debug, Clone)]
+pub struct ActiveSkillState {
+    /// Skill name (e.g. "commit-helper").
+    pub name: String,
+    /// Skill body (markdown instructions from SKILL.md).
+    pub body: String,
+    /// Tool whitelist (None = all tools allowed).
+    pub allowed_tools: Option<Vec<String>>,
+    /// Skill tags for filtering/analytics.
+    pub tags: Vec<String>,
+    /// MCP server declarations (parsed from SKILL.md frontmatter).
+    pub mcp_servers: Option<Vec<crate::parser::SkillMcpServer>>,
+}
+
+/// Attempt to activate a skill from a `/`-prefixed user message.
+///
+/// Returns `Ok(Some((skill_state, remaining_message)))` if the message starts with `/skill-name`,
+/// `Ok(None)` if no skill prefix is detected, or `Err` for unknown skills.
+pub fn try_activate_skill(
+    registry: &SkillRegistry,
+    message: &str,
+) -> Result<Option<(ActiveSkillState, String)>, String> {
+    let trimmed = message.trim();
+    if !trimmed.starts_with('/') {
+        return Ok(None);
+    }
+
+    // Extract skill name: first word after `/`
+    let after_slash = &trimmed[1..];
+    let (skill_name, remaining) = match after_slash.find(char::is_whitespace) {
+        Some(pos) => (&after_slash[..pos], after_slash[pos..].trim().to_string()),
+        None => (after_slash, String::new()),
+    };
+
+    if skill_name.is_empty() {
+        return Ok(None);
+    }
+
+    match registry.activate(skill_name) {
+        Some(skill) => {
+            let state = ActiveSkillState {
+                name: skill.meta.name.clone(),
+                body: skill.body.clone(),
+                allowed_tools: skill.meta.allowed_tools.clone(),
+                tags: skill.meta.tags.clone(),
+                mcp_servers: skill.meta.mcp_servers.clone(),
+            };
+            Ok(Some((state, remaining)))
+        }
+        None => Err(format!("unknown skill: '{skill_name}'")),
+    }
+}
+
+/// Build the per-request liquid prompt for an active skill.
+pub fn active_skill_prompt(skill: &ActiveSkillState) -> String {
+    format!(
+        "<active-skill name=\"{}\">\n{}\n</active-skill>",
+        skill.name, skill.body
+    )
+}
+
 /// Errors from the skill system.
 #[derive(Debug, Error)]
 pub enum SkillError {
@@ -250,6 +313,59 @@ This is the body.
         let registry = SkillRegistry::discover(&[dir.path().to_path_buf()]).unwrap();
         let tools = registry.allowed_tools("restricted").unwrap();
         assert_eq!(tools, &["read_file", "grep"]);
+    }
+
+    #[test]
+    fn try_activate_known_skill() {
+        let dir = TempDir::new().unwrap();
+        let skill_dir = dir.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: my-skill\ndescription: My skill\nuser_invocable: true\nallowed_tools:\n  - read_file\n---\nDo the thing.",
+        )
+        .unwrap();
+
+        let registry = SkillRegistry::discover(&[dir.path().to_path_buf()]).unwrap();
+        let result = try_activate_skill(&registry, "/my-skill please do it").unwrap();
+
+        let (state, remaining) = result.unwrap();
+        assert_eq!(state.name, "my-skill");
+        assert_eq!(state.body, "Do the thing.");
+        assert_eq!(remaining, "please do it");
+        assert_eq!(state.allowed_tools, Some(vec!["read_file".to_string()]));
+    }
+
+    #[test]
+    fn try_activate_unknown_skill_returns_error() {
+        let dir = TempDir::new().unwrap();
+        let registry = SkillRegistry::discover(&[dir.path().to_path_buf()]).unwrap();
+        let result = try_activate_skill(&registry, "/nonexistent");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown skill"));
+    }
+
+    #[test]
+    fn try_activate_no_prefix_returns_none() {
+        let dir = TempDir::new().unwrap();
+        let registry = SkillRegistry::discover(&[dir.path().to_path_buf()]).unwrap();
+        let result = try_activate_skill(&registry, "just a regular message").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn active_skill_prompt_formatting() {
+        let state = ActiveSkillState {
+            name: "test".to_string(),
+            body: "Do this.".to_string(),
+            allowed_tools: None,
+            tags: vec![],
+            mcp_servers: None,
+        };
+        let prompt = active_skill_prompt(&state);
+        assert!(prompt.contains("<active-skill name=\"test\">"));
+        assert!(prompt.contains("Do this."));
+        assert!(prompt.contains("</active-skill>"));
     }
 
     #[test]
