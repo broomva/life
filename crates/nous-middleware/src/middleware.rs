@@ -60,6 +60,11 @@ impl NousMiddleware {
         Ok(Self::new(registry))
     }
 
+    /// Number of registered evaluators.
+    pub fn registry_len(&self) -> usize {
+        self.registry.len()
+    }
+
     /// Get all accumulated scores from evaluations in this middleware instance.
     pub fn scores(&self) -> Vec<EvalScore> {
         self.accumulator
