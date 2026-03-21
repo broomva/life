@@ -9,11 +9,11 @@ if [ -n "${HARNESS_SMOKE_CMD:-}" ]; then
   exit 0
 fi
 
-# Multi-workspace monorepo: aiOS + Arcan + Lago + Spaces
+# Multi-workspace monorepo: all Life crates
 if command -v cargo >/dev/null 2>&1; then
   cd "$root_dir"
   ran=0
-  for ws in aiOS arcan lago spaces; do
+  for ws in aiOS arcan lago spaces anima autonomic haima praxis vigil; do
     if [ -f "$ws/Cargo.toml" ]; then
       (cd "$ws" && cargo check --quiet)
       ran=1
