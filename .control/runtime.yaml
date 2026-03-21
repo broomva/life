@@ -1,0 +1,47 @@
+# Life Agent OS — Runtime Configuration
+# Integration points for the agentic control kernel.
+
+version: 1
+
+runtime:
+  kind: arcan
+  endpoint: http://localhost:3000
+  health_check: /health
+  session_api: /api/sessions
+  description: "Arcan daemon — primary agent runtime implementing aiOS kernel contract"
+
+ledger:
+  kind: lago
+  endpoint: http://localhost:3001
+  health_check: /health
+  journal_api: /api/journal
+  event_prefix: "egri."
+  description: "Lago daemon — append-only event journal with content-addressed blob storage"
+
+homeostasis:
+  kind: autonomic
+  endpoint: http://localhost:3002
+  health_check: /health
+  state_api: /api/state
+  description: "Autonomic daemon — three-pillar homeostatic regulation (advisory)"
+
+networking:
+  kind: spacetimedb
+  module: spaces
+  description: "SpacetimeDB WASM module — distributed agent communication fabric"
+
+finance:
+  kind: haima
+  endpoint: http://localhost:3003
+  health_check: /health
+  description: "Haima daemon — x402 payments, wallet management, per-task revenue billing"
+
+observability:
+  kind: vigil
+  otlp_endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  platforms:
+    - langfuse
+    - langsmith
+    - jaeger
+  description: "Vigil — OpenTelemetry-native tracing with GenAI semantic conventions"
+  fallback: "Structured logging via tracing crate when no OTLP endpoint configured"

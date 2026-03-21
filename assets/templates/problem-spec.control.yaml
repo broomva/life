@@ -1,0 +1,106 @@
+# Life Agent OS — EGRI Problem Spec for Controller Optimization
+# Extends Autoany's problem-spec template with control-specific fields.
+# See: agentic-control-kernel/references/egri-for-controllers.md
+
+name: "life-agent-os-controller-optimization"
+
+objective:
+  metric: "pass_at_1"
+  type: scalar
+  direction: maximize
+  baseline: 1.00  # 1045/1045 tests passing
+
+constraints:
+  - "constraint_violation_count == 0"
+  - "shield_intervention_rate <= 0.05"
+  - "test_count >= 1045"
+  - "clippy_warnings == 0"
+  - "dependency_boundaries_pass == true"
+
+artifacts:
+  mutable:
+    - path: ".control/policy.yaml"
+      type: config
+      description: "Governance policy — gates, profiles, setpoints, shield config"
+    - path: "arcan/arcan-core/src/agent_loop.rs"
+      type: code
+      description: "Agent loop implementation — reconstruct → provider → execute → stream"
+    - path: "autonomic/autonomic-controller/src/rules.rs"
+      type: code
+      description: "Homeostasis rule engine — three-pillar evaluation"
+  immutable:
+    - path: "evals/control-metrics.yaml"
+      reason: "Evaluator metrics — must not change during trials"
+    - path: "schemas/"
+      reason: "Typed schemas — canonical contract, immutable during trials"
+    - path: "scripts/control/"
+      reason: "Gate scripts — evaluator infrastructure, immutable during trials"
+
+evaluator:
+  script: "scripts/control/test.sh"
+  inputs:
+    - "cargo test --workspace output"
+    - "cargo clippy --workspace output"
+    - "scripts/audit_control.sh output"
+  outputs:
+    primary_metric: float  # pass_at_1 ratio
+    constraint_violations: int
+    shield_intervention_rate: float
+    test_count: int
+    clippy_warnings: int
+  trusted: true  # Validated against known outcomes (1045/1045 tests)
+  baseline_score: 1.00
+
+plant:
+  type: cyber
+  config_path: ".control/plant.yaml"
+  shield_enabled: true
+  shield_type: composite
+  fallback_controller: "autonomic-controller (Recover mode)"
+
+execution:
+  backend: local
+  command: "cd arcan && cargo test --workspace && cd ../lago && cargo test --workspace && cd ../autonomic && cargo test --workspace"
+  timeout_s: 600
+  sandbox: true
+
+budget:
+  max_trials: 20
+  time_per_trial_s: 600
+  total_time_s: 7200
+  token_budget: null
+  cost_budget: null
+
+promotion:
+  policy: keep_if_improves
+  threshold: null
+  require_constraint_check: true
+
+autonomy:
+  mode: sandbox
+  escalation_triggers:
+    - "constraint_violation_detected"
+    - "shield_intervention_rate > 0.10"
+    - "budget_75_percent_exhausted_without_improvement"
+    - "evaluator_score_degrades_3_consecutive_trials"
+    - "test_count_regression_detected"
+
+search:
+  proposer: llm
+  strategy_notes: "Focus on agent loop efficiency, memory system completeness, context compiler quality. Mutation surface: rule weights, gating profiles, approval thresholds."
+
+ledger:
+  format: lago
+  path: "http://localhost:3001"
+  schema: "./schemas/trace.schema.json"
+  event_prefix: "egri."
+
+domain:
+  preset: control
+  notes: "Life Agent OS — Rust monorepo (37 crates, ~43K LOC). Primary mutation targets: agent loop, homeostasis rules, economic modes."
+
+meta:
+  created_by: "claude-opus-4-6"
+  created_at: "2026-03-19"
+  version: "0.1.0"
+  parent_spec: null

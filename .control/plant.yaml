@@ -1,0 +1,141 @@
+# Life Agent OS — Plant Interface Definition
+# Defines the Agent OS as a cyber plant for the agentic control kernel.
+# See: agentic-control-kernel/references/plant-interface.md
+
+version: 1
+plant_id: life-agent-os
+plant_type: cyber
+
+state:
+  measured:
+    # CI/Build signals
+    smoke_pass:
+      type: boolean
+      source: scripts/control/smoke.sh
+      unit: pass/fail
+    check_pass:
+      type: boolean
+      source: scripts/control/check.sh
+      unit: pass/fail
+    test_pass:
+      type: boolean
+      source: scripts/control/test.sh
+      unit: pass/fail
+    test_count:
+      type: integer
+      source: cargo test --workspace
+      unit: count
+    clippy_warnings:
+      type: integer
+      source: cargo clippy --workspace
+      unit: count
+    # Runtime signals
+    arcan_healthy:
+      type: boolean
+      source: http://localhost:3000/health
+      unit: up/down
+    lago_healthy:
+      type: boolean
+      source: http://localhost:3001/health
+      unit: up/down
+    autonomic_healthy:
+      type: boolean
+      source: http://localhost:3002/health
+      unit: up/down
+    # Economic signals (from Autonomic)
+    economic_mode:
+      type: string
+      source: http://localhost:3002/api/state
+      unit: enum(Sovereign,Conserving,Hustle,Hibernate)
+    budget_remaining_usd:
+      type: number
+      source: autonomic-controller projection
+      unit: usd
+    # Persistence signals
+    journal_event_count:
+      type: integer
+      source: lago-journal
+      unit: count
+    blob_store_size_bytes:
+      type: integer
+      source: lago-store
+      unit: bytes
+
+  estimated:
+    # Projected from event journal replay
+    session_health:
+      type: number
+      estimator: autonomic-controller
+      description: "Three-pillar homeostatic score (0.0-1.0)"
+    token_burn_rate:
+      type: number
+      estimator: autonomic-controller
+      description: "Tokens consumed per minute (rolling window)"
+      unit: tokens/min
+    time_to_budget_exhaustion:
+      type: number
+      estimator: autonomic-controller
+      description: "Projected minutes until budget depleted"
+      unit: minutes
+
+  context:
+    active_session_id: string
+    current_branch: string
+    operating_mode: enum(Explore,Execute,Verify,Recover,AskHuman,Sleep)
+    workspace_crate_count: integer
+    rust_edition: "2024"
+    msrv: "1.85"
+
+constraints:
+  hard:
+    - "test_count >= 1045"
+    - "clippy_warnings == 0"
+    - "smoke_pass == true"
+    - "no unsafe without justification"
+    - "no secrets in code"
+    - "dependency boundaries enforced (aiOS core independent of Arcan/Lago)"
+  soft:
+    - "budget_remaining_usd > 0"
+    - "token_burn_rate <= setpoint"
+    - "session_health >= 0.7"
+    - "journal_event_count monotonically increasing"
+
+loop_rates:
+  inner:
+    cadence_ms: 0
+    llm: false
+    description: "Not applicable (cyber plant — no real-time servo loop)"
+  mid:
+    cadence_ms: 0
+    llm: false
+    description: "Not applicable (no MPC/CBF-QP solvers)"
+  outer:
+    cadence_s: 5
+    llm: true
+    description: "Agent tick loop: reconstruct → provider → execute → stream"
+    controller: arcan-core
+  meta:
+    cadence: "minutes to days"
+    llm: true
+    description: "EGRI improvement: controller synthesis, model learning, policy evolution"
+    controller: autoany-aios
+
+shield:
+  enabled: true
+  type: composite
+  layers:
+    - name: policy-gate
+      description: "Hard rules from .control/policy.yaml — block merge on failing checks, require plan for long tasks"
+      config: .control/policy.yaml
+    - name: capability-gate
+      description: "aiOS CapabilityPolicy — per-tool approval based on operating mode"
+      config: arcan-core (CapabilityPolicy)
+    - name: budget-gate
+      description: "Autonomic economic gating — block actions when budget exhausted"
+      config: autonomic-controller (EconomicMode)
+    - name: sandbox-boundary
+      description: "Praxis FsPolicy — workspace boundary enforcement, no escape"
+      config: arcan-harness (SandboxPolicy)
+  fallback:
+    description: "On shield infeasibility: switch OperatingMode to Recover, escalate to AskHuman"
+    controller: autonomic-controller
