@@ -13,7 +13,12 @@ jobs:
           token: ${{ secrets.SUBMODULE_PAT || github.token }}
 
       - name: Checkout submodules with remotes
+        env:
+          SUBMODULE_PAT: ${{ secrets.SUBMODULE_PAT }}
         run: |
+          if [ -n "$SUBMODULE_PAT" ]; then
+            git config --global url."https://x-access-token:${SUBMODULE_PAT}@github.com/".insteadOf "https://github.com/"
+          fi
           git submodule sync --recursive
           git submodule update --init --depth 1 aiOS arcan lago autonomic spaces praxis vigil nous anima haima
 
