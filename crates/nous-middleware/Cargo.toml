@@ -1,0 +1,22 @@
+[package]
+name = "nous-middleware"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Arcan Middleware implementation for Nous — wires evaluators into the agent loop"
+
+[dependencies]
+nous-core.workspace = true
+nous-heuristics.workspace = true
+arcan-core.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+nous-heuristics.workspace = true
+
+[lints]
+workspace = true

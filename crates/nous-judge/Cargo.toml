@@ -1,0 +1,19 @@
+[package]
+name = "nous-judge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Async LLM-as-judge evaluators for Nous — plan quality, adherence, task completion"
+
+[dependencies]
+nous-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

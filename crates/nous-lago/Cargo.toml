@@ -1,0 +1,22 @@
+[package]
+name = "nous-lago"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Lago persistence bridge for Nous — publishes and subscribes to eval events"
+
+[dependencies]
+nous-core.workspace = true
+lago-core.workspace = true
+lago-journal.workspace = true
+aios-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

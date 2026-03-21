@@ -1,0 +1,19 @@
+{
+  "name": "simple_chat",
+  "description": "A simple chat completion with no tool use — baseline quality check",
+  "session_id": "golden-simple-chat",
+  "run_id": "run-golden-1",
+  "input_tokens": 500,
+  "output_tokens": 150,
+  "tokens_remaining": 99500,
+  "total_tokens_used": 500,
+  "max_iterations": 24,
+  "iteration": 1,
+  "tool_call_count": 0,
+  "tool_error_count": 0,
+  "expected_scores": {
+    "token_efficiency": { "min": 0.8, "max": 1.0 },
+    "budget_adherence": { "min": 0.99, "max": 1.0 },
+    "step_efficiency": { "min": 0.9, "max": 1.0 }
+  }
+}

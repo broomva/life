@@ -1,0 +1,23 @@
+[package]
+name = "nousd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Nous daemon — metacognitive evaluation service"
+
+[dependencies]
+nous-core.workspace = true
+nous-heuristics.workspace = true
+nous-api.workspace = true
+axum.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow = "1"
+
+[lints]
+workspace = true

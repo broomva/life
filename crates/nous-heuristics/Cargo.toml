@@ -1,0 +1,21 @@
+[package]
+name = "nous-heuristics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Inline heuristic evaluators for Nous — fast (< 2ms), no I/O"
+
+[dependencies]
+nous-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
