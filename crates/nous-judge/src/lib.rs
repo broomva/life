@@ -9,4 +9,7 @@ pub mod plan_adherence;
 pub mod plan_quality;
 pub mod task_completion;
 
-pub use judge_provider::JudgeProvider;
+pub use judge_provider::{JudgeProvider, MockJudgeProvider, parse_judge_scores};
+pub use plan_adherence::PlanAdherence;
+pub use plan_quality::PlanQuality;
+pub use task_completion::TaskCompletion;

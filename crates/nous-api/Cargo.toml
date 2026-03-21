@@ -19,6 +19,7 @@ tracing.workspace = true
 [dev-dependencies]
 tower = "0.5"
 http = "1"
+http-body-util = "0.1"
 
 [lints]
 workspace = true

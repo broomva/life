@@ -3,6 +3,7 @@
 //! This crate defines the vocabulary used across all Nous components.
 //! It has zero I/O and depends only on `aios-protocol`.
 
+pub mod egri;
 pub mod error;
 pub mod evaluator;
 pub mod events;

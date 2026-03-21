@@ -25,10 +25,17 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    let app = nous_api::nous_router();
+    // Build score store and wire it into the API.
+    let store = nous_api::ScoreStore::new();
+
+    // Default heuristic registry has 6 evaluators.
+    let registry = nous_heuristics::default_registry()?;
+    let evaluator_count = registry.len() as u32;
+
+    let app = nous_api::nous_router(store, evaluator_count);
 
     let listener = tokio::net::TcpListener::bind(&cli.bind).await?;
-    info!(bind = %cli.bind, "nousd starting");
+    info!(bind = %cli.bind, evaluator_count, "nousd starting");
 
     axum::serve(listener, app).await?;
 
