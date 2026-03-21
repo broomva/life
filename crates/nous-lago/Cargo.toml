@@ -18,5 +18,9 @@ serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+lago-journal = { workspace = true }
+tempfile = "3"
+
 [lints]
 workspace = true

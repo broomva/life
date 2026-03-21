@@ -7,5 +7,5 @@
 pub mod publisher;
 pub mod subscriber;
 
-pub use publisher::NousPublisher;
-pub use subscriber::NousSubscriber;
+pub use publisher::{LivePublisher, NousPublisher};
+pub use subscriber::{EvalProjection, EvalState, NousSubscriber};
