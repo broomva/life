@@ -3,12 +3,14 @@
 //! Each evaluator completes in < 2ms with no I/O.
 //! They measure different aspects of agent behavior quality.
 
+pub mod argument_validity;
 pub mod budget_adherence;
 pub mod safety_compliance;
 pub mod step_efficiency;
 pub mod token_efficiency;
 pub mod tool_correctness;
 
+pub use argument_validity::ArgumentValidity;
 pub use budget_adherence::BudgetAdherence;
 pub use safety_compliance::SafetyCompliance;
 pub use step_efficiency::StepEfficiency;
@@ -30,6 +32,9 @@ pub fn default_registry() -> NousResult<EvaluatorRegistry> {
     )?;
     registry.register(EvalHook::AfterModelCall, Arc::new(BudgetAdherence))?;
 
+    // pre_tool_call evaluators
+    registry.register(EvalHook::PreToolCall, Arc::new(ArgumentValidity))?;
+
     // post_tool_call evaluators
     registry.register(EvalHook::PostToolCall, Arc::new(SafetyCompliance))?;
 
@@ -45,15 +50,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_registry_has_five_evaluators() {
+    fn default_registry_has_six_evaluators() {
         let registry = default_registry().unwrap();
-        assert_eq!(registry.len(), 5);
+        assert_eq!(registry.len(), 6);
     }
 
     #[test]
     fn default_registry_hooks_wired() {
         let registry = default_registry().unwrap();
         assert_eq!(registry.evaluators_for(EvalHook::AfterModelCall).len(), 2);
+        assert_eq!(registry.evaluators_for(EvalHook::PreToolCall).len(), 1);
         assert_eq!(registry.evaluators_for(EvalHook::PostToolCall).len(), 1);
         assert_eq!(registry.evaluators_for(EvalHook::OnRunFinished).len(), 2);
         assert!(
@@ -61,6 +67,5 @@ mod tests {
                 .evaluators_for(EvalHook::BeforeModelCall)
                 .is_empty()
         );
-        assert!(registry.evaluators_for(EvalHook::PreToolCall).is_empty());
     }
 }
