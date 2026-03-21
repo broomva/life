@@ -30,6 +30,12 @@ pub struct GenAiMetrics {
 
     /// `life.mode.transitions` — counter of operating mode transitions.
     pub mode_transitions: Counter<u64>,
+
+    /// `life.eval.executions` — counter of evaluation executions by evaluator and layer.
+    pub eval_executions: Counter<u64>,
+
+    /// `life.eval.score` — histogram of evaluation scores by evaluator.
+    pub eval_score: Histogram<f64>,
 }
 
 impl GenAiMetrics {
@@ -76,6 +82,17 @@ impl GenAiMetrics {
             .with_description("Number of operating mode transitions")
             .build();
 
+        let eval_executions = meter
+            .u64_counter("life.eval.executions")
+            .with_description("Number of evaluation executions")
+            .build();
+
+        let eval_score = meter
+            .f64_histogram("life.eval.score")
+            .with_description("Evaluation score distribution")
+            .with_boundaries(vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
+            .build();
+
         Self {
             token_usage,
             operation_duration,
@@ -83,6 +100,8 @@ impl GenAiMetrics {
             budget_tokens_remaining,
             budget_cost_remaining,
             mode_transitions,
+            eval_executions,
+            eval_score,
         }
     }
 
@@ -136,6 +155,16 @@ impl GenAiMetrics {
     pub fn record_budget(&self, tokens_remaining: u64, cost_remaining_usd: f64) {
         self.budget_tokens_remaining.record(tokens_remaining, &[]);
         self.budget_cost_remaining.record(cost_remaining_usd, &[]);
+    }
+
+    /// Record an evaluation execution.
+    pub fn record_eval_execution(&self, evaluator: &str, layer: &str, score: f64) {
+        let attrs = [
+            KeyValue::new(semconv::LIFE_EVAL_EVALUATOR, evaluator.to_string()),
+            KeyValue::new(semconv::LIFE_EVAL_LAYER, layer.to_string()),
+        ];
+        self.eval_executions.add(1, &attrs);
+        self.eval_score.record(score, &attrs);
     }
 
     /// Record a mode transition.

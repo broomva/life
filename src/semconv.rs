@@ -128,6 +128,26 @@ pub const AUTONOMIC_COGNITIVE_HEALTH: &str = "autonomic.cognitive_health";
 /// Autonomic economic health (0.0..1.0).
 pub const AUTONOMIC_ECONOMIC_HEALTH: &str = "autonomic.economic_health";
 
+// ─── Nous Evaluation Attributes ──────────────────────────────────────────────
+
+/// Evaluation result event name (follows GenAI semconv v1.39.0).
+pub const GEN_AI_EVAL_RESULT: &str = "gen_ai.evaluation.result";
+
+/// Name of the evaluator that produced the score.
+pub const LIFE_EVAL_EVALUATOR: &str = "life.eval.evaluator";
+
+/// Normalized quality score (0.0..1.0).
+pub const LIFE_EVAL_SCORE: &str = "life.eval.score";
+
+/// Categorical label (good, warning, critical).
+pub const LIFE_EVAL_LABEL: &str = "life.eval.label";
+
+/// Evaluation layer (reasoning, action, execution, safety, cost).
+pub const LIFE_EVAL_LAYER: &str = "life.eval.layer";
+
+/// Evaluation timing (inline, async).
+pub const LIFE_EVAL_TIMING: &str = "life.eval.timing";
+
 // ─── Lago Attributes ─────────────────────────────────────────────────────────
 
 /// Lago journal stream ID.
