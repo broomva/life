@@ -4,11 +4,13 @@
 //! They use a separate model call to assess quality dimensions
 //! that require language understanding.
 
+pub mod anthropic_judge;
 pub mod judge_provider;
 pub mod plan_adherence;
 pub mod plan_quality;
 pub mod task_completion;
 
+pub use anthropic_judge::AnthropicJudgeProvider;
 pub use judge_provider::{JudgeProvider, MockJudgeProvider, parse_judge_scores};
 pub use plan_adherence::PlanAdherence;
 pub use plan_quality::PlanQuality;
