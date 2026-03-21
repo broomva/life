@@ -6,8 +6,8 @@ tags:
   - moc
 type: moc
 status: active
-created: 2026-03-19
-updated: 2026-03-19
+created: 2026-03-20
+updated: 2026-03-20
 related:
   - "[[Documentation Hub]]"
   - "[[CLAUDE]]"
@@ -29,7 +29,7 @@ related:
 | Session | Branch | Turns | Duration | Topic |
 |---------|--------|-------|----------|-------|
 | [[session-2026-03-19-a63ee9a3]] | `main` | 2 | 8h 9m | skill |
-| [[session-2026-03-19-c6013dee]] | `main` | 10 | 3h 41m | lets work on upgrading this repo to use /bstack /a |
+| [[session-2026-03-19-c6013dee]] | `main` | 10 | 8h 12m | lets work on upgrading this repo to use /bstack /a |
 
 ## 2026-03-08
 
