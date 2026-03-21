@@ -43,6 +43,12 @@ pub enum NousEvent {
         inline_count: u32,
         async_count: u32,
     },
+    /// EGRI outcome published after async judge evaluation.
+    EgriOutcome {
+        session_id: String,
+        trial_id: Option<String>,
+        outcome: serde_json::Value,
+    },
 }
 
 /// Summary of a score for event serialization.
@@ -134,6 +140,18 @@ impl NousEvent {
                     "async_count": async_count,
                 }),
             ),
+            Self::EgriOutcome {
+                session_id,
+                trial_id,
+                outcome,
+            } => (
+                "eval.egri_outcome",
+                json!({
+                    "session_id": session_id,
+                    "trial_id": trial_id,
+                    "outcome": outcome,
+                }),
+            ),
         };
         EventKind::Custom {
             event_type: event_type.to_owned(),
@@ -207,6 +225,19 @@ impl NousEvent {
                     trend,
                     inline_count,
                     async_count,
+                })
+            }
+            "eval.egri_outcome" => {
+                let session_id = data.get("session_id")?.as_str()?.to_owned();
+                let trial_id = data
+                    .get("trial_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned);
+                let outcome = data.get("outcome")?.clone();
+                Some(Self::EgriOutcome {
+                    session_id,
+                    trial_id,
+                    outcome,
                 })
             }
             _ => None,
@@ -340,5 +371,57 @@ mod tests {
         assert_eq!(summary.evaluator, "test");
         assert!((summary.value - 0.8).abs() < f64::EPSILON);
         assert_eq!(summary.layer, EvalLayer::Safety);
+    }
+
+    #[test]
+    fn egri_outcome_roundtrip() {
+        let outcome_data = json!({
+            "score": {"aggregate": 0.85, "plan_quality": 0.9},
+            "constraints_passed": true,
+            "constraint_violations": [],
+        });
+        let event = NousEvent::EgriOutcome {
+            session_id: "sess-1".into(),
+            trial_id: Some("trial-001".into()),
+            outcome: outcome_data.clone(),
+        };
+        let kind = event.into_event_kind();
+        if let EventKind::Custom { event_type, data } = kind {
+            assert_eq!(event_type, "eval.egri_outcome");
+            let parsed = NousEvent::from_custom(&event_type, &data).unwrap();
+            match parsed {
+                NousEvent::EgriOutcome {
+                    session_id,
+                    trial_id,
+                    outcome,
+                } => {
+                    assert_eq!(session_id, "sess-1");
+                    assert_eq!(trial_id.as_deref(), Some("trial-001"));
+                    assert_eq!(outcome["score"]["aggregate"], 0.85);
+                }
+                _ => panic!("expected EgriOutcome variant"),
+            }
+        } else {
+            panic!("expected Custom variant");
+        }
+    }
+
+    #[test]
+    fn egri_outcome_without_trial_id() {
+        let event = NousEvent::EgriOutcome {
+            session_id: "sess-2".into(),
+            trial_id: None,
+            outcome: json!({"score": {"aggregate": 0.5}}),
+        };
+        let kind = event.into_event_kind();
+        if let EventKind::Custom { event_type, data } = kind {
+            let parsed = NousEvent::from_custom(&event_type, &data).unwrap();
+            assert!(matches!(
+                parsed,
+                NousEvent::EgriOutcome { trial_id: None, .. }
+            ));
+        } else {
+            panic!("expected Custom variant");
+        }
     }
 }
