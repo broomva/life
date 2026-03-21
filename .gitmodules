@@ -26,3 +26,7 @@
 	path = haima
 	url = https://github.com/broomva/haima.git
 	branch = main
+[submodule "anima"]
+	path = anima
+	url = https://github.com/broomva/anima.git
+	branch = main
