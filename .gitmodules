@@ -30,3 +30,6 @@
 	path = anima
 	url = https://github.com/broomva/anima.git
 	branch = main
+[submodule "nous"]
+	path = nous
+	url = https://github.com/broomva/nous.git

@@ -123,6 +123,78 @@ if [ -f arcan/Cargo.toml ]; then
   echo
 fi
 
+# --- Nous (nousd) ---
+if [ -f nous/Cargo.toml ]; then
+  echo "--- nousd ---"
+
+  if (cd nous && cargo build -p nousd --quiet 2>/dev/null); then
+    ok "nousd builds"
+  else
+    fail "nousd build"
+  fi
+
+  nousd_bin=""
+  for candidate in "nous/.target/debug/nousd" "nous/target/debug/nousd" ".target/debug/nousd" "target/debug/nousd"; do
+    if [ -x "$candidate" ]; then
+      nousd_bin="$candidate"
+      break
+    fi
+  done
+  if [ -n "$nousd_bin" ]; then
+    if "$nousd_bin" --help >/dev/null 2>&1; then
+      ok "nousd --help"
+    else
+      fail "nousd --help"
+    fi
+  fi
+  echo
+fi
+
+# --- Nous regression (golden fixtures) ---
+if [ -f nous/Cargo.toml ]; then
+  echo "--- nous golden fixtures ---"
+
+  if (cd nous && cargo test -p nous-heuristics --test golden_replay --quiet 2>/dev/null); then
+    ok "nous golden fixture tests"
+  else
+    fail "nous golden fixture tests"
+  fi
+
+  if (cd nous && cargo test -p nous-middleware --test e2e_orchestrator --quiet 2>/dev/null); then
+    ok "nous e2e orchestrator tests"
+  else
+    fail "nous e2e orchestrator tests"
+  fi
+  echo
+fi
+
+# --- Autonomicd ---
+if [ -f autonomic/Cargo.toml ]; then
+  echo "--- autonomicd ---"
+
+  if (cd autonomic && cargo build -p autonomicd --quiet 2>/dev/null); then
+    ok "autonomicd builds"
+  else
+    fail "autonomicd build"
+  fi
+
+  autonomicd_bin=""
+  for candidate in "autonomic/.target/debug/autonomicd" "autonomic/target/debug/autonomicd" ".target/debug/autonomicd" "target/debug/autonomicd"; do
+    if [ -x "$candidate" ]; then
+      autonomicd_bin="$candidate"
+      break
+    fi
+  done
+  if [ -n "$autonomicd_bin" ]; then
+    if "$autonomicd_bin" --help >/dev/null 2>&1; then
+      ok "autonomicd --help"
+    else
+      fail "autonomicd --help"
+    fi
+  fi
+  echo
+fi
+
 # --- Summary ---
 total=$((passed + failed))
 echo "CLI E2E: $passed/$total passed"
