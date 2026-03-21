@@ -11,11 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SUBMODULE_PAT || github.token }}
 
       - name: Checkout submodules with remotes
         run: |
           git submodule sync --recursive
-          git submodule update --init --depth 1 aiOS arcan lago autonomic spaces praxis vigil nous
+          git submodule update --init --depth 1 aiOS arcan lago autonomic spaces praxis vigil nous anima haima
 
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler lld
@@ -35,6 +37,8 @@ jobs:
             praxis -> .target
             vigil -> .target
             nous -> .target
+            anima -> .target
+            haima -> .target
 
       - name: Run harness pipeline (smoke → check → test)
         run: make ci
