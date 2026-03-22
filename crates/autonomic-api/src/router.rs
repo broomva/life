@@ -2,6 +2,7 @@
 //!
 //! Endpoints:
 //! - `GET /health` — health check (unprotected)
+//! - `GET /trust-score/{agent_id}` — public trust score (unprotected)
 //! - `GET /gating/{session_id}` — evaluate rules and return gating profile (auth-protected)
 //! - `GET /projection/{session_id}` — return raw homeostatic state (auth-protected)
 
@@ -13,15 +14,16 @@ use serde::Serialize;
 use serde_json::json;
 use tracing::instrument;
 
-use autonomic_controller::evaluate;
+use autonomic_controller::{compute_trust_score, evaluate};
 use autonomic_core::gating::{AutonomicGatingProfile, HomeostaticState};
+use autonomic_core::trust::TrustScore;
 
 use crate::auth::{AuthConfig, auth_middleware};
 use crate::state::AppState;
 
 /// Build the axum router with all endpoints.
 ///
-/// Health endpoint is always unprotected (for load balancer / Railway health checks).
+/// Health and trust-score endpoints are always unprotected (public).
 /// Gating and projection endpoints are protected with JWT auth when a secret is configured.
 pub fn build_router(state: AppState) -> Router {
     build_router_with_auth(state, AuthConfig::from_env())
@@ -36,9 +38,10 @@ pub fn build_router_with_auth(state: AppState, auth_config: AuthConfig) -> Route
         .route_layer(middleware::from_fn_with_state(auth_config, auth_middleware))
         .with_state(state.clone());
 
-    // Public routes: health
+    // Public routes: health + trust-score
     let public = Router::new()
         .route("/health", get(health))
+        .route("/trust-score/{agent_id}", get(get_trust_score))
         .with_state(state);
 
     public.merge(protected)
@@ -110,6 +113,23 @@ async fn get_projection(
         state: homeostatic_state,
         found,
     })
+}
+
+/// Trust score response — public, no auth required.
+#[instrument(skip(state), fields(life.agent_id = %agent_id))]
+async fn get_trust_score(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> Json<TrustScore> {
+    let projections = state.projections.read().await;
+
+    let homeostatic_state = match projections.get(&agent_id) {
+        Some(s) => s.clone(),
+        None => HomeostaticState::for_agent(&agent_id),
+    };
+
+    let trust_score = compute_trust_score(&homeostatic_state);
+    Json(trust_score)
 }
 
 /// Get projection from cache, or bootstrap from Lago journal if available.
@@ -350,5 +370,89 @@ mod tests {
         assert_eq!(json["found"], true);
         assert_eq!(json["state"]["cognitive"]["total_tokens_used"], 5000);
         assert_eq!(json["state"]["last_event_seq"], 42);
+    }
+
+    // --- Trust score endpoint (always unprotected) ---
+
+    #[tokio::test]
+    async fn trust_score_without_token_returns_200() {
+        let app = app_with_auth();
+        let req = Request::builder()
+            .uri("/trust-score/agent-123")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json = body_json(resp).await;
+        assert_eq!(json["agent_id"], "agent-123");
+        assert!(json["score"].as_f64().is_some());
+        assert!(json["tier"].as_str().is_some());
+        assert!(json["trajectory"].as_str().is_some());
+        assert!(json["assessed_at"].as_str().is_some());
+        assert!(json["tier_thresholds"]["certified"].as_f64().is_some());
+        assert!(
+            json["components"]["operational"]["score"]
+                .as_f64()
+                .is_some()
+        );
+        assert!(json["components"]["cognitive"]["score"].as_f64().is_some());
+        assert!(json["components"]["economic"]["score"].as_f64().is_some());
+    }
+
+    #[tokio::test]
+    async fn trust_score_unknown_agent_returns_unverified_default() {
+        let app = app_no_auth();
+        let req = Request::builder()
+            .uri("/trust-score/nonexistent-agent")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json = body_json(resp).await;
+        assert_eq!(json["agent_id"], "nonexistent-agent");
+        // Default state has no completed turns so cognitive starts at 0.5
+        // which pulls the composite score down — but operational and economic are high
+        assert!(json["score"].as_f64().unwrap() > 0.0);
+    }
+
+    #[tokio::test]
+    async fn trust_score_with_projection_data() {
+        let state = test_state();
+        {
+            let mut map = state.projections.write().await;
+            let mut hs = HomeostaticState::for_agent("agent-scored");
+            hs.operational.total_successes = 50;
+            hs.operational.total_errors = 2;
+            hs.cognitive.turns_completed = 30;
+            hs.cognitive.context_pressure = 0.3;
+            map.insert("agent-scored".into(), hs);
+        }
+
+        let app = build_router_with_auth(state, AuthConfig::disabled());
+        let req = Request::builder()
+            .uri("/trust-score/agent-scored")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let json = body_json(resp).await;
+        assert_eq!(json["agent_id"], "agent-scored");
+        let score = json["score"].as_f64().unwrap();
+        assert!(
+            score > 0.7,
+            "expected high score for healthy agent, got {score}"
+        );
+        assert!(
+            json["components"]["operational"]["factors"]["uptime_ratio"]
+                .as_f64()
+                .unwrap()
+                > 0.9
+        );
     }
 }

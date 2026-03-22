@@ -12,6 +12,7 @@ pub mod eval_rules;
 pub mod operational_rules;
 pub mod projection;
 pub mod strategy_rules;
+pub mod trust_scoring;
 
 // Re-exports
 pub use cognitive_rules::{ContextPressureRule, TokenExhaustionRule};
@@ -21,3 +22,4 @@ pub use eval_rules::EvalQualityRule;
 pub use operational_rules::ErrorStreakRule;
 pub use projection::fold;
 pub use strategy_rules::StrategyRule;
+pub use trust_scoring::compute_trust_score;
