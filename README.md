@@ -2,6 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange.svg)](https://www.rust-lang.org/)
+[![docs](https://img.shields.io/badge/docs-broomva.tech-purple.svg)](https://docs.broomva.tech/docs/life/nous)
 
 **Metacognitive evaluation module for the Life Agent OS** -- the "Pepe Grillo" that judges agent behavior in real time, feeding quality signals back into homeostatic control loops.
 
