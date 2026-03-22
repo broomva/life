@@ -1,5 +1,5 @@
 [package]
-name = "praxis-mcp"
+name = "praxis-mcp-bridge"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

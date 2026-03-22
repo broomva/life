@@ -8,7 +8,7 @@
 //!
 //! ```no_run
 //! use aios_protocol::tool::ToolRegistry;
-//! use praxis_mcp::server::PraxisMcpServer;
+//! use praxis_mcp_bridge::server::PraxisMcpServer;
 //! use rmcp::ServiceExt;
 //! use rmcp::transport::io::stdio;
 //!
