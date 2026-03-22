@@ -3,6 +3,7 @@
 [![CI](https://github.com/broomva/lago/actions/workflows/ci.yml/badge.svg)](https://github.com/broomva/lago/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/lago-core.svg)](https://crates.io/crates/lago-core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![docs](https://img.shields.io/badge/docs-broomva.tech-purple.svg)](https://docs.broomva.tech/docs/life/lago)
 
 **Event-sourced persistence layer for long-lived AI agents.**
 
