@@ -23,6 +23,7 @@
 
 pub mod error;
 pub mod event;
+pub mod identity;
 pub mod ids;
 pub mod memory;
 pub mod mode;
@@ -40,6 +41,7 @@ pub use event::{
     ActorType, ApprovalDecision, EventActor, EventEnvelope, EventKind, EventRecord, EventSchema,
     LoopPhase, PolicyDecisionKind, RiskLevel, SnapshotType, SpanStatus, TokenUsage,
 };
+pub use identity::{AgentIdentityProvider, BasicIdentity};
 pub use ids::{
     AgentId, ApprovalId, BlobHash, BranchId, CheckpointId, EventId, HiveTaskId, MemoryId, RunId,
     SeqNo, SessionId, SnapshotId, ToolRunId,
