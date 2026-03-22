@@ -270,7 +270,7 @@ impl KernelRuntime {
 
         // Record initial budget metrics during the Perceive phase.
         {
-            let metrics = vigil::metrics::GenAiMetrics::new("arcan");
+            let metrics = life_vigil::metrics::GenAiMetrics::new("arcan");
             metrics.record_budget(
                 state.budget.tokens_remaining,
                 state.budget.cost_remaining_usd,
@@ -1020,7 +1020,7 @@ impl KernelRuntime {
 
         // Record budget metrics via Vigil GenAI metrics.
         {
-            let metrics = vigil::metrics::GenAiMetrics::new("arcan");
+            let metrics = life_vigil::metrics::GenAiMetrics::new("arcan");
             metrics.record_budget(
                 state.budget.tokens_remaining,
                 state.budget.cost_remaining_usd,
@@ -1207,7 +1207,7 @@ impl KernelRuntime {
         branch_id: &BranchId,
         phase: LoopPhase,
     ) -> Result<u64> {
-        let phase_span = vigil::spans::phase_span(phase);
+        let phase_span = life_vigil::spans::phase_span(phase);
         async {
             self.append_event(session_id, branch_id, EventKind::PhaseEntered { phase })
                 .await?;

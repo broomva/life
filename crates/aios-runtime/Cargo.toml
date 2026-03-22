@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Canonical Agent OS runtime engine"
 
 [dependencies]
-aios-protocol = { path = "../aios-protocol", version = "0.1.0" }
+aios-protocol = { path = "../aios-protocol", version = "0.2.0" }
 anyhow.workspace = true
 chrono.workspace = true
 hex.workspace = true
@@ -21,7 +21,7 @@ tracing.workspace = true
 tracing-opentelemetry = "0.30"
 opentelemetry = "0.29"
 uuid.workspace = true
-vigil.workspace = true
+life-vigil.workspace = true
 
 [lints]
 workspace = true

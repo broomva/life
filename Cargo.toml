@@ -14,10 +14,15 @@ resolver = "2"
 
 [workspace.package]
 edition = "2024"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 authors = ["aiOS contributors"]
 repository = "https://github.com/broomva/aiOS"
+description = "Agent Intelligence OS — kernel contract, runtime, and canonical types for the Life Agent OS"
+keywords = ["agent", "ai", "kernel", "protocol", "runtime"]
+categories = ["development-tools"]
+homepage = "https://docs.broomva.tech/docs/life/overview"
+rust-version = "1.85"
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -42,7 +47,7 @@ futures-util = "0.3"
 async-stream = "0.3"
 
 # Observability
-vigil = { path = "../vigil" }
+life-vigil = { version = "0.1.0", path = "../vigil" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
