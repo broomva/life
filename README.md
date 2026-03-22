@@ -2,6 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange.svg)](https://www.rust-lang.org/)
+[![Tests](https://img.shields.io/badge/tests-passing-green.svg)](#)
+[![docs](https://img.shields.io/badge/docs-broomva.tech-purple.svg)](https://docs.broomva.tech/docs/life/haima)
 
 **Agentic finance engine for the Life Agent OS** -- the circulatory system that distributes economic resources throughout the organism.
 
