@@ -1,5 +1,9 @@
 # Praxis
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange.svg)](https://www.rust-lang.org/)
+[![docs](https://img.shields.io/badge/docs-broomva.tech-purple.svg)](https://docs.broomva.tech/docs/life/praxis)
+
 Canonical tool execution and sandbox engine for the [Agent OS](https://github.com/broomva).
 
 Praxis implements the `Tool` trait from `aios-protocol` and provides a secure, sandboxed environment for executing filesystem operations, shell commands, memory persistence, MCP bridge connections, and skill discovery within agent sessions.
@@ -47,6 +51,10 @@ cargo fmt                       # Format
 
 - Rust 2024 edition (MSRV 1.85)
 - Depends only on `aios-protocol` from the Agent OS stack
+
+## Documentation
+
+Full documentation: [docs.broomva.tech/docs/life/praxis](https://docs.broomva.tech/docs/life/praxis)
 
 ## License
 
