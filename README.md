@@ -1,5 +1,11 @@
 # aiOS
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange.svg)](https://www.rust-lang.org/)
+[![docs](https://img.shields.io/badge/docs-broomva.tech-purple.svg)](https://docs.broomva.tech/docs/life/overview)
+
+**Agent Intelligence OS -- cognitive runtime layer and kernel contract for the Agent OS stack.**
+
 `aiOS` is a Rust-based agent operating system scaffold focused on:
 - session-oriented execution
 - append-only event logs
