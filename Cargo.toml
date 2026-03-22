@@ -1,5 +1,5 @@
 [package]
-name = "spaces"
+name = "life-spaces"
 version = "0.1.0"
 edition = "2024"
 description = "Distributed agent networking engine for the Life Agent OS — SpacetimeDB 2.0, channels, RBAC, real-time pub/sub"
