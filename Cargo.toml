@@ -120,3 +120,4 @@ haima-wallet = { version = "0.1.0", path = "crates/haima-wallet" }
 haima-x402 = { version = "0.1.0", path = "crates/haima-x402" }
 haima-lago = { version = "0.1.0", path = "crates/haima-lago" }
 haima-api = { version = "0.1.0", path = "crates/haima-api" }
+
