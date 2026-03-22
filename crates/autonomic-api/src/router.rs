@@ -56,7 +56,7 @@ async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "uptime_seconds": uptime_seconds,
         "telemetry": {
-            "sdk": "vigil",
+            "sdk": "life-vigil",
             "otlp_configured": otlp_configured,
         },
     }))
