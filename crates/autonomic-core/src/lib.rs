@@ -11,6 +11,7 @@ pub mod gating;
 pub mod hysteresis;
 pub mod identity;
 pub mod rules;
+pub mod trust;
 
 // Re-exports for convenience
 pub use economic::{CostReason, EconomicMode, EconomicState, ModelCostRates, ModelTier};
@@ -23,3 +24,4 @@ pub use gating::{
 pub use hysteresis::HysteresisGate;
 pub use identity::EconomicIdentity;
 pub use rules::{GatingDecision, HomeostaticRule, RuleSet};
+pub use trust::{TrustScore, TrustTier, TrustTrajectory};
