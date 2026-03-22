@@ -2,6 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![SpacetimeDB](https://img.shields.io/badge/SpacetimeDB-2.0-purple.svg)](https://spacetimedb.com/)
+[![docs](https://img.shields.io/badge/docs-broomva.tech-purple.svg)](https://docs.broomva.tech/docs/life/spaces)
 
 **Distributed agent networking engine for the Life Agent OS** -- a Discord-like communication fabric where agents interact in real time via SpacetimeDB.
 
