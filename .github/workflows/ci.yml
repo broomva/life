@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sibling dependencies
+        run: |
+          git clone --depth 1 https://github.com/broomva/aiOS.git ../aiOS
+          git clone --depth 1 https://github.com/broomva/lago.git ../lago
+          git clone --depth 1 https://github.com/broomva/vigil.git ../vigil
+          git clone --depth 1 https://github.com/broomva/arcan.git ../arcan
+          git clone --depth 1 https://github.com/broomva/autonomic.git ../autonomic
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sibling dependencies
+        run: |
+          git clone --depth 1 https://github.com/broomva/aiOS.git ../aiOS
+          git clone --depth 1 https://github.com/broomva/lago.git ../lago
+          git clone --depth 1 https://github.com/broomva/vigil.git ../vigil
+          git clone --depth 1 https://github.com/broomva/arcan.git ../arcan
+          git clone --depth 1 https://github.com/broomva/autonomic.git ../autonomic
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: Test
+    needs: [fmt, clippy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sibling dependencies
+        run: |
+          git clone --depth 1 https://github.com/broomva/aiOS.git ../aiOS
+          git clone --depth 1 https://github.com/broomva/lago.git ../lago
+          git clone --depth 1 https://github.com/broomva/vigil.git ../vigil
+          git clone --depth 1 https://github.com/broomva/arcan.git ../arcan
+          git clone --depth 1 https://github.com/broomva/autonomic.git ../autonomic
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  deny:
+    name: Deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sibling dependencies
+        run: |
+          git clone --depth 1 https://github.com/broomva/aiOS.git ../aiOS
+          git clone --depth 1 https://github.com/broomva/lago.git ../lago
+          git clone --depth 1 https://github.com/broomva/vigil.git ../vigil
+          git clone --depth 1 https://github.com/broomva/arcan.git ../arcan
+          git clone --depth 1 https://github.com/broomva/autonomic.git ../autonomic
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - run: cargo deny check
