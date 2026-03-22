@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone dependencies
+        run: |
+          git clone --depth 1 https://github.com/broomva/aiOS.git ../aiOS
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Publish crates (dependency order)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          # Tier 1: core types
+          cargo publish -p praxis-core || true
+          sleep 30
+
+          # Tier 2: depends on core
+          cargo publish -p praxis-tools || true
+          cargo publish -p praxis-mcp-bridge || true
+          sleep 30
+
+          # Tier 3: depends on tier-2
+          cargo publish -p praxis-skills || true
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
