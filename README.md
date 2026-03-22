@@ -1,5 +1,9 @@
 # Vigil
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange.svg)](https://www.rust-lang.org/)
+[![docs](https://img.shields.io/badge/docs-broomva.tech-purple.svg)](https://docs.broomva.tech/docs/life/vigil)
+
 Observability primitive for the [Agent OS](https://github.com/broomva) -- OpenTelemetry-native tracing, GenAI semantic conventions, and contract-derived instrumentation.
 
 Vigil provides structured logging, distributed tracing, and metrics collection for agent sessions. It follows the OpenTelemetry GenAI semantic conventions for compatibility with Langfuse, LangSmith, Jaeger, Grafana Tempo, and other observability platforms.
@@ -45,6 +49,10 @@ cargo fmt                 # Format
 
 - Rust 2024 edition (MSRV 1.85)
 - Depends only on `aios-protocol` from the Agent OS stack
+
+## Documentation
+
+Full documentation: [docs.broomva.tech/docs/life/vigil](https://docs.broomva.tech/docs/life/vigil)
 
 ## License
 
