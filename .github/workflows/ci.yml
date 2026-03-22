@@ -21,6 +21,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout sibling dependencies
+        run: |
+          git clone --depth 1 https://github.com/broomva/vigil.git ../vigil
+
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
