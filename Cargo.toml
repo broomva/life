@@ -77,10 +77,10 @@ metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 
 # Observability
-vigil = { version = "0.1.0", path = "../vigil" }
+life-vigil = { version = "0.1.0", path = "../vigil" }
 
 # Agent OS protocol (canonical contract)
-aios-protocol = { version = "0.1.0", path = "../aiOS/crates/aios-protocol" }
+aios-protocol = { version = "0.2.0", path = "../aiOS/crates/aios-protocol" }
 
 # Internal crates
 lago-core = { version = "0.2.1", path = "crates/lago-core" }
