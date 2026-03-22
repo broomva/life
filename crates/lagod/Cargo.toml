@@ -31,6 +31,6 @@ toml.workspace = true
 serde.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-vigil.workspace = true
+life-vigil.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use lagod::config::DaemonConfig;
-use vigil::VigConfig;
+use life_vigil::VigConfig;
 
 // --- CLI definition
 
@@ -35,7 +35,7 @@ struct Args {
 #[tokio::main]
 async fn main() {
     // Initialize telemetry via Vigil (structured logging + optional OTel export)
-    let _guard = vigil::init_telemetry(VigConfig::for_service("lago").with_env_overrides())
+    let _guard = life_vigil::init_telemetry(VigConfig::for_service("lago").with_env_overrides())
         .expect("failed to initialize telemetry");
 
     let args = Args::parse();
