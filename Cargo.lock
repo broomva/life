@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "aios-protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -208,12 +208,12 @@ dependencies = [
  "clap",
  "lago-core",
  "lago-journal",
+ "life-vigil",
  "serde",
  "tokio",
  "toml",
  "tracing",
  "tracing-subscriber",
- "vigil",
 ]
 
 [[package]]
@@ -1066,6 +1066,24 @@ name = "libc"
 version = "0.2.182"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6800badb6cb2082ffd7b6a67e6125bb39f18782f793520caee8cb8846be06112"
+
+[[package]]
+name = "life-vigil"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry-semantic-conventions",
+ "opentelemetry_sdk",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tonic",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "linux-raw-sys"
@@ -2241,24 +2259,6 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
-
-[[package]]
-name = "vigil"
-version = "0.1.0"
-dependencies = [
- "aios-protocol",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry-semantic-conventions",
- "opentelemetry_sdk",
- "serde",
- "thiserror",
- "tokio",
- "tonic",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "want"
