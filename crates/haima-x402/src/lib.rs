@@ -25,7 +25,11 @@ pub mod header;
 pub mod server;
 
 pub use client::{HandleResult, SettlementResult, X402Client};
-pub use facilitator::{Facilitator, FacilitatorConfig};
+pub use facilitator::{
+    DEFAULT_FEE_BPS, FacilitateRequest, FacilitateResponse, FacilitationStatus, Facilitator,
+    FacilitatorConfig, FacilitatorStats, FacilitatorStatsCounter, SettlementReceipt, calculate_fee,
+    verify_payment_header,
+};
 pub use header::{
     PAYMENT_REQUIRED_HEADER, PAYMENT_RESPONSE_HEADER, PAYMENT_SIGNATURE_HEADER,
     PaymentRequiredHeader, PaymentResponseHeader, PaymentSignatureHeader, SchemeRequirement,

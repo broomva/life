@@ -2,11 +2,14 @@
 //!
 //! - `GET /health` — public (no auth, used by Railway health checks)
 //! - `GET /state` — protected (requires JWT when auth is enabled)
+//! - `POST /v1/facilitate` — x402 payment facilitation (public)
+//! - `GET /v1/facilitator/stats` — facilitator dashboard stats (public)
 
 use axum::Router;
 use axum::extract::State;
 use axum::response::Json;
-use axum::routing::get;
+use axum::routing::{get, post};
+use haima_x402::{FacilitateRequest, verify_payment_header};
 use serde_json::{Value, json};
 
 use crate::AppState;
@@ -25,6 +28,8 @@ pub fn routes(state: AppState) -> Router {
     // Public routes — no auth
     let public = Router::new()
         .route("/health", get(health))
+        .route("/v1/facilitate", post(facilitate))
+        .route("/v1/facilitator/stats", get(facilitator_stats))
         .with_state(state);
 
     // Merge: public routes are NOT behind the auth layer
@@ -55,12 +60,38 @@ async fn financial_state(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
+/// `POST /v1/facilitate` — Verify an x402 payment header and return a settlement receipt.
+async fn facilitate(
+    State(state): State<AppState>,
+    Json(request): Json<FacilitateRequest>,
+) -> Json<Value> {
+    let response = verify_payment_header(
+        &request,
+        state.facilitator_fee_bps,
+        &state.facilitator_stats,
+    );
+    Json(serde_json::to_value(response).unwrap_or_else(|_| {
+        json!({
+            "status": "rejected",
+            "reason": "internal_error",
+            "details": "Failed to serialize response"
+        })
+    }))
+}
+
+/// `GET /v1/facilitator/stats` — Return facilitator dashboard statistics.
+async fn facilitator_stats(State(state): State<AppState>) -> Json<Value> {
+    let stats = state.facilitator_stats.snapshot();
+    Json(serde_json::to_value(stats).unwrap_or_else(|_| json!({})))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::auth::AuthConfig;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use haima_x402::header::{PaymentSignatureHeader, encode_payment_signature};
     use jsonwebtoken::{EncodingKey, Header, encode};
     use lago_auth::BroomvaClaims;
     use tower::ServiceExt;
@@ -80,6 +111,15 @@ mod tests {
         };
         let key = EncodingKey::from_secret(secret.as_bytes());
         encode(&Header::default(), &claims, &key).unwrap()
+    }
+
+    fn make_valid_payment_header() -> String {
+        let sig = PaymentSignatureHeader {
+            scheme: "exact".into(),
+            network: "eip155:8453".into(),
+            payload: hex::encode([0xabu8; 64]),
+        };
+        encode_payment_signature(&sig).unwrap()
     }
 
     // --- Health endpoint (always public) ---
@@ -158,5 +198,122 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // --- Facilitate endpoint (public) ---
+
+    #[tokio::test]
+    async fn facilitate_valid_payment_returns_settled() {
+        let state = AppState::default();
+        let app = routes(state);
+
+        let body = serde_json::json!({
+            "payment_header": make_valid_payment_header(),
+            "resource_url": "https://api.example.com/data",
+            "amount_micro_usd": 1000
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/facilitate")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "settled");
+        assert!(json["receipt"].is_object());
+        assert_eq!(json["receipt"]["amount_micro_usd"], 1000);
+        assert_eq!(json["receipt"]["chain"], "base");
+        assert_eq!(json["facilitator_fee_bps"], 15);
+    }
+
+    #[tokio::test]
+    async fn facilitate_invalid_header_returns_rejected() {
+        let state = AppState::default();
+        let app = routes(state);
+
+        let body = serde_json::json!({
+            "payment_header": "not-valid-base64!!!",
+            "resource_url": "https://api.example.com/data",
+            "amount_micro_usd": 1000
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/facilitate")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "rejected");
+        assert_eq!(json["reason"], "invalid_header");
+    }
+
+    #[tokio::test]
+    async fn facilitate_updates_stats() {
+        let state = AppState::default();
+        let stats = state.facilitator_stats.clone();
+        let app = routes(state);
+
+        let body = serde_json::json!({
+            "payment_header": make_valid_payment_header(),
+            "resource_url": "https://api.example.com/data",
+            "amount_micro_usd": 5000
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/facilitate")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+
+        let _resp = app.oneshot(req).await.unwrap();
+
+        let snap = stats.snapshot();
+        assert_eq!(snap.total_transactions, 1);
+        assert_eq!(snap.total_volume_micro_usd, 5000);
+    }
+
+    // --- Facilitator stats endpoint (public) ---
+
+    #[tokio::test]
+    async fn facilitator_stats_returns_200() {
+        let state = AppState::default();
+        // Record some stats before querying
+        state.facilitator_stats.record_settled(1_000_000, 1_500);
+        state.facilitator_stats.record_rejected();
+        let app = routes(state);
+
+        let req = Request::builder()
+            .uri("/v1/facilitator/stats")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total_transactions"], 1);
+        assert_eq!(json["total_volume_micro_usd"], 1_000_000);
+        assert_eq!(json["total_fees_micro_usd"], 1_500);
+        assert_eq!(json["total_rejected"], 1);
     }
 }
