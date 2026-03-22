@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "aios-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aios-kernel",
  "aios-protocol",
@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "aios-events"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aios-protocol",
  "anyhow",
@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "aios-kernel"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aios-events",
  "aios-policy",
@@ -67,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "aios-policy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aios-protocol",
  "async-trait",
@@ -80,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "aios-protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -94,12 +94,13 @@ dependencies = [
 
 [[package]]
 name = "aios-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aios-protocol",
  "anyhow",
  "chrono",
  "hex",
+ "life-vigil",
  "opentelemetry",
  "parking_lot",
  "serde",
@@ -109,12 +110,11 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "uuid",
- "vigil",
 ]
 
 [[package]]
 name = "aios-sandbox"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aios-protocol",
  "anyhow",
@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "aios-tools"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aios-policy",
  "aios-protocol",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "aiosd"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aios-kernel",
  "aios-protocol",
@@ -1075,6 +1075,24 @@ name = "libc"
 version = "0.2.182"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6800badb6cb2082ffd7b6a67e6125bb39f18782f793520caee8cb8846be06112"
+
+[[package]]
+name = "life-vigil"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry-semantic-conventions",
+ "opentelemetry_sdk",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tonic",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "litemap"
@@ -2110,24 +2128,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vigil"
-version = "0.1.0"
-dependencies = [
- "aios-protocol",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry-semantic-conventions",
- "opentelemetry_sdk",
- "serde",
- "thiserror",
- "tokio",
- "tonic",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "want"
