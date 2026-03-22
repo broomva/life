@@ -99,3 +99,4 @@ autonomic-core = { version = "0.1.0", path = "crates/autonomic-core" }
 autonomic-controller = { version = "0.1.0", path = "crates/autonomic-controller" }
 autonomic-lago = { version = "0.1.0", path = "crates/autonomic-lago" }
 autonomic-api = { version = "0.1.0", path = "crates/autonomic-api" }
+
