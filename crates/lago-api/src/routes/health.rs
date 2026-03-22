@@ -48,7 +48,7 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
             },
         },
         "telemetry": {
-            "sdk": "vigil",
+            "sdk": "life-vigil",
             "otlp_configured": otlp_configured,
         },
     }))
