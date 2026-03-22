@@ -56,9 +56,10 @@ rust-version = "1.85"
 license = "MIT"
 authors = ["Broomva Tech <contact@broomva.tech>"]
 repository = "https://github.com/broomva/nous"
-homepage = "https://github.com/broomva/nous"
-keywords = ["agent", "evaluation", "metacognition", "quality", "ai"]
-categories = ["command-line-utilities", "development-tools"]
+homepage = "https://docs.broomva.tech/docs/life/nous"
+description = "Metacognitive evaluation module for the Life Agent OS"
+keywords = ["agent", "evaluation", "quality", "ai", "metacognition"]
+categories = ["development-tools"]
 
 [workspace.dependencies]
 # Core
