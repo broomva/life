@@ -41,4 +41,7 @@ pub enum HaimaError {
 
     #[error("crypto error: {0}")]
     Crypto(String),
+
+    #[error("insufficient credit: {reason}")]
+    InsufficientCredit { reason: String },
 }

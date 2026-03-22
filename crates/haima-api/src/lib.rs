@@ -12,9 +12,11 @@
 pub mod auth;
 pub mod routes;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Router;
+use haima_core::credit::CreditScore;
 use haima_lago::FinancialState;
 use haima_x402::FacilitatorStatsCounter;
 use tokio::sync::RwLock;
@@ -30,6 +32,8 @@ pub struct AppState {
     pub facilitator_stats: Arc<FacilitatorStatsCounter>,
     /// Facilitator fee in basis points.
     pub facilitator_fee_bps: u32,
+    /// In-memory credit score cache, keyed by `agent_id`.
+    pub credit_scores: Arc<RwLock<HashMap<String, CreditScore>>>,
 }
 
 impl AppState {
@@ -40,6 +44,7 @@ impl AppState {
             auth_config: Arc::new(auth_config),
             facilitator_stats: Arc::new(FacilitatorStatsCounter::new()),
             facilitator_fee_bps: haima_x402::DEFAULT_FEE_BPS,
+            credit_scores: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -51,6 +56,7 @@ impl Default for AppState {
             auth_config: Arc::new(AuthConfig { jwt_secret: None }),
             facilitator_stats: Arc::new(FacilitatorStatsCounter::new()),
             facilitator_fee_bps: haima_x402::DEFAULT_FEE_BPS,
+            credit_scores: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
