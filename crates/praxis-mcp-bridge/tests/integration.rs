@@ -5,7 +5,7 @@
 use aios_protocol::tool::ToolRegistry;
 use praxis_core::local_fs::LocalFs;
 use praxis_core::workspace::FsPolicy;
-use praxis_mcp::server::PraxisMcpServer;
+use praxis_mcp_bridge::server::PraxisMcpServer;
 use praxis_tools::fs::{GlobTool, GrepTool, ListDirTool, ReadFileTool, WriteFileTool};
 use praxis_tools::memory::{ReadMemoryTool, WriteMemoryTool};
 use serde_json::json;
@@ -54,7 +54,7 @@ fn call_tool(
 
     let registry_tool = server.registry().get(tool_name).unwrap();
     let result = registry_tool.execute(&call, &ctx).unwrap();
-    praxis_mcp::convert::tool_result_to_call_result(&result)
+    praxis_mcp_bridge::convert::tool_result_to_call_result(&result)
 }
 
 #[test]
