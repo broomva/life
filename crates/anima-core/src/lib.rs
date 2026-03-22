@@ -50,6 +50,7 @@ pub mod belief;
 pub mod error;
 pub mod event;
 pub mod identity;
+pub mod identity_document;
 pub mod policy;
 pub mod soul;
 
@@ -59,5 +60,9 @@ pub use belief::AgentBelief;
 pub use error::{AnimaError, AnimaResult};
 pub use event::AnimaEventKind;
 pub use identity::AgentIdentity;
+pub use identity_document::{
+    AgentIdentityDocument, AgentType, Attestation, IdentityDocumentBuilder, TrustTier,
+    VerificationMethod,
+};
 pub use policy::PolicyManifest;
 pub use soul::{AgentSoul, SoulBuilder};

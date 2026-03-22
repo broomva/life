@@ -41,6 +41,7 @@ version = "0.1.0"
 dependencies = [
  "aios-protocol",
  "blake3",
+ "bs58",
  "chrono",
  "haima-core",
  "indexmap",

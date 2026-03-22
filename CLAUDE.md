@@ -8,7 +8,7 @@
 ```
 anima/
 ├── crates/
-│   ├── anima-core/         # Pure types: Soul, Identity, Belief, Self, Policy, Events
+│   ├── anima-core/         # Pure types: Soul, Identity, Belief, Self, Policy, Events, IdentityDocument
 │   ├── anima-identity/     # Cryptographic operations: seed, Ed25519, secp256k1, JWT, DID
 │   └── anima-lago/         # Persistence bridge: genesis events, belief projection
 ```
@@ -18,10 +18,13 @@ anima/
 | Type | Mutability | Purpose |
 |------|-----------|---------|
 | `AgentSoul` | **Immutable** | Origin, lineage, values, cryptographic root. Created once. |
-| `AgentIdentity` | Lifecycle-mutable | Ed25519 (auth) + secp256k1 (economics) dual keypair |
+| `AgentIdentity` | Lifecycle-mutable | Ed25519 (auth) + secp256k1 (economics) dual keypair + DID |
 | `AgentBelief` | **Mutable** | Capabilities, trust scores, reputation, economic state |
 | `AgentSelf` | Composite | Soul + Identity + Belief. The entry point for all crates. |
 | `PolicyManifest` | **Immutable** (in soul) | Safety constraints, capability ceiling, economic limits |
+| `AgentIdentityDocument` | Derived | KYA (Know Your Agent) document: DID, capabilities, trust, attestations |
+| `AgentType` | Value | Autonomous, Delegated, or Hosted |
+| `TrustTier` | Value | Unverified, Provisional, Trusted, or Certified |
 
 ### Key Derivation
 
@@ -43,6 +46,8 @@ All events use `EventKind::Custom` with prefix `"anima."`:
 - `anima.economic_belief_updated` — from Haima/Autonomic
 - `anima.belief_snapshot` — periodic checkpoint
 - `anima.policy_violation_detected` — blocked action
+- `anima.identity_attested` — attestation received (KYA)
+- `anima.identity_verified` — identity verified by external party (KYA)
 
 ### Persistence Model
 
@@ -54,8 +59,8 @@ All events use `EventKind::Custom` with prefix `"anima."`:
 ## Dependencies
 
 ```
-anima-core → aios-protocol, haima-core
-anima-identity → anima-core, haima-wallet, ed25519-dalek, k256, hkdf, chacha20poly1305
+anima-core → aios-protocol, haima-core, bs58
+anima-identity → anima-core, haima-wallet, ed25519-dalek, k256, hkdf, chacha20poly1305, bs58
 anima-lago → anima-core, lago-core, lago-journal
 ```
 
@@ -72,10 +77,35 @@ anima-lago → anima-core, lago-core, lago-journal
 
 ```bash
 cargo check --workspace     # Type check
-cargo test --workspace      # Run all 58 tests
+cargo test --workspace      # Run all 111 tests
 cargo clippy --workspace    # Lint
 cargo fmt --all             # Format
 ```
+
+## KYA (Know Your Agent)
+
+KYA is the agent-era equivalent of KYC. It provides:
+
+### DID Generation (`anima-identity/src/did.rs`)
+- `generate_did_key(public_key)` — Creates `did:key:z6Mk...` from Ed25519 public key
+- `resolve_did_key(did)` — Extracts public key from a `did:key` DID
+- `verify_did_key(did, public_key)` — Verifies DID matches a public key
+- Format: multicodec Ed25519 prefix (0xed01) + public key, base58-btc encoded
+
+### Identity Document (`anima-core/src/identity_document.rs`)
+- `AgentIdentityDocument` — Complete KYA document (DID, capabilities, trust, attestations)
+- `AgentType` — Autonomous, Delegated, or Hosted
+- `TrustTier` — Unverified (<0.4), Provisional (0.4-0.7), Trusted (0.7-0.9), Certified (>=0.9)
+- `Attestation` — Verifiable claims from issuers with expiry
+- `IdentityDocumentBuilder` — Builder pattern for document construction
+
+### AgentSelf Integration
+- `AgentSelf::did()` — Access the agent's DID
+- `AgentSelf::identity_document(agent_type, trust_score)` — Generate a KYA document
+
+### Lago Events
+- `anima.identity_attested` — Attestation received
+- `anima.identity_verified` — Identity verified by external party
 
 ## Integration Points
 

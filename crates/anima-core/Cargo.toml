@@ -22,6 +22,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
 blake3.workspace = true
+bs58.workspace = true
 indexmap.workspace = true
 uuid.workspace = true
 

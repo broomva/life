@@ -15,6 +15,9 @@ use serde::{Deserialize, Serialize};
 use crate::belief::AgentBelief;
 use crate::error::{AnimaError, AnimaResult};
 use crate::identity::AgentIdentity;
+use crate::identity_document::{
+    AgentIdentityDocument, AgentType, IdentityDocumentBuilder, VerificationMethod,
+};
 use crate::soul::AgentSoul;
 
 /// The composite self of an agent — soul, identity, and beliefs.
@@ -126,6 +129,11 @@ impl AgentSelf {
         self.soul.soul_hash()
     }
 
+    /// The agent's DID (Decentralized Identifier), if available.
+    pub fn did(&self) -> Option<&str> {
+        self.identity.did.as_deref()
+    }
+
     /// Whether the agent's identity is currently active.
     pub fn is_active(&self) -> bool {
         self.identity.is_active()
@@ -164,6 +172,60 @@ impl AgentSelf {
             self.beliefs.trust_scores.len(),
             &self.soul.soul_hash()[..16],
         )
+    }
+
+    /// Generate a KYA (Know Your Agent) identity document from this AgentSelf.
+    ///
+    /// The document combines identity, soul, and belief data into a
+    /// single verifiable identity package. Optionally enriched with
+    /// an external trust score (from Autonomic's trust-score API).
+    pub fn identity_document(
+        &self,
+        agent_type: AgentType,
+        trust_score: Option<f64>,
+    ) -> AnimaResult<AgentIdentityDocument> {
+        let did = self.identity.did.as_ref().ok_or_else(|| {
+            AnimaError::Did("agent identity has no DID — generate one first".into())
+        })?;
+
+        let auth_key_multibase = {
+            let mut bytes = vec![0xed, 0x01]; // Ed25519 multicodec prefix
+            bytes.extend_from_slice(&self.identity.auth_public_key);
+            let encoded = bs58::encode(&bytes).into_string();
+            format!("z{encoded}")
+        };
+
+        let vm = VerificationMethod {
+            id: format!("{did}#key-1"),
+            method_type: "Ed25519VerificationKey2020".into(),
+            controller: did.clone(),
+            public_key_multibase: auth_key_multibase,
+        };
+
+        let capabilities: Vec<String> = self
+            .beliefs
+            .capabilities
+            .iter()
+            .filter(|c| c.expires_at.is_none_or(|exp| chrono::Utc::now() < exp))
+            .map(|c| c.capability.clone())
+            .collect();
+
+        let mut builder = IdentityDocumentBuilder::new(
+            did.clone(),
+            self.soul.name().to_string(),
+            self.soul.mission().to_string(),
+            self.soul.soul_hash().to_string(),
+        )
+        .agent_type(agent_type)
+        .verification_method(vm)
+        .capabilities(capabilities)
+        .created_at(self.identity.created_at);
+
+        if let Some(score) = trust_score {
+            builder = builder.trust_score(score);
+        }
+
+        Ok(builder.build())
     }
 }
 

@@ -126,9 +126,11 @@ pub fn fold(belief: &mut AgentBelief, event: &AnimaEventKind, seq: u64, timestam
         | AnimaEventKind::IdentityCreated { .. }
         | AnimaEventKind::IdentityTransitioned { .. }
         | AnimaEventKind::KeyRotated { .. }
-        | AnimaEventKind::LineageVerified { .. } => {
+        | AnimaEventKind::LineageVerified { .. }
+        | AnimaEventKind::IdentityAttested { .. }
+        | AnimaEventKind::IdentityVerified { .. } => {
             // These events are tracked but don't change beliefs.
-            // They affect Soul and Identity, which are managed separately.
+            // They affect Soul, Identity, and KYA documents, which are managed separately.
         }
     }
 }

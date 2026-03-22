@@ -108,6 +108,28 @@ pub enum AnimaEventKind {
         child_soul_hash: String,
         verified: bool,
     },
+
+    /// An attestation was received by this agent (KYA).
+    IdentityAttested {
+        /// DID of the attestation issuer.
+        issuer_did: String,
+        /// What is being attested.
+        claim: String,
+        /// Evidence reference.
+        evidence: String,
+        /// When the attestation expires (if time-bounded).
+        expires_at: Option<DateTime<Utc>>,
+    },
+
+    /// Identity was verified by an external party (KYA).
+    IdentityVerified {
+        /// DID of the verifier.
+        verifier_did: String,
+        /// The verification method used.
+        method: String,
+        /// Whether verification succeeded.
+        verified: bool,
+    },
 }
 
 impl AnimaEventKind {
@@ -130,6 +152,8 @@ impl AnimaEventKind {
             Self::KeyRotated { .. } => "key_rotated",
             Self::PolicyViolationDetected { .. } => "policy_violation_detected",
             Self::LineageVerified { .. } => "lineage_verified",
+            Self::IdentityAttested { .. } => "identity_attested",
+            Self::IdentityVerified { .. } => "identity_verified",
         };
 
         format!("{}.{}", Self::NAMESPACE, variant)

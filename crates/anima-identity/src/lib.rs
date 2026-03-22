@@ -18,9 +18,11 @@
 //! Both keys are cryptographically independent despite sharing a seed.
 //! The seed is encrypted at rest using ChaCha20-Poly1305.
 
+pub mod did;
 pub mod ed25519;
 pub mod keystore;
 pub mod seed;
 
+pub use did::{generate_did_key, resolve_did_key, verify_did_key};
 pub use keystore::AnimaKeystore;
 pub use seed::{EncryptedSeed, MasterSeed};

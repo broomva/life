@@ -57,6 +57,10 @@ pub enum AnimaError {
     /// Lineage verification failed — child does not reference parent correctly.
     #[error("lineage verification failed: {reason}")]
     LineageViolation { reason: String },
+
+    /// DID resolution or validation error.
+    #[error("DID error: {0}")]
+    Did(String),
 }
 
 /// Convenience alias for Anima results.
