@@ -6,6 +6,7 @@
 //! at the HTTP layer, enabling agents to pay for resources and charge for services
 //! without human intervention.
 
+pub mod credit;
 pub mod error;
 pub mod event;
 pub mod payment;
@@ -14,6 +15,9 @@ pub mod receipt;
 pub mod scheme;
 pub mod wallet;
 
+pub use credit::{
+    CreditCheckResult, CreditFactors, CreditScore, CreditTier, check_credit, compute_credit_score,
+};
 pub use error::{HaimaError, HaimaResult};
 pub use event::FinanceEventKind;
 pub use payment::{PaymentDecision, PaymentRequest};

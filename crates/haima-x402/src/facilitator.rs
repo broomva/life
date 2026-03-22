@@ -147,6 +147,9 @@ pub struct FacilitateRequest {
     pub resource_url: String,
     /// Expected payment amount in micro-USD (1 USD = 1,000,000 micro-USD).
     pub amount_micro_usd: u64,
+    /// Optional agent ID for credit-gated facilitation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
 }
 
 /// Response body for `POST /v1/facilitate`.
@@ -470,6 +473,7 @@ mod tests {
             payment_header: "dGVzdA==".into(),
             resource_url: "https://api.example.com/data".into(),
             amount_micro_usd: 1000,
+            agent_id: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: FacilitateRequest = serde_json::from_str(&json).unwrap();
@@ -605,6 +609,7 @@ mod tests {
             payment_header: make_valid_payment_header(),
             resource_url: "https://api.example.com/data".into(),
             amount_micro_usd: 1000,
+            agent_id: None,
         };
         let resp = verify_payment_header(&req, DEFAULT_FEE_BPS, &stats);
         assert_eq!(resp.status, FacilitationStatus::Settled);
@@ -628,6 +633,7 @@ mod tests {
             payment_header: "not-valid-base64!!!".into(),
             resource_url: "https://api.example.com/data".into(),
             amount_micro_usd: 1000,
+            agent_id: None,
         };
         let resp = verify_payment_header(&req, DEFAULT_FEE_BPS, &stats);
         assert_eq!(resp.status, FacilitationStatus::Rejected);
@@ -649,6 +655,7 @@ mod tests {
             payment_header: header,
             resource_url: "https://api.example.com/data".into(),
             amount_micro_usd: 1000,
+            agent_id: None,
         };
         let resp = verify_payment_header(&req, DEFAULT_FEE_BPS, &stats);
         assert_eq!(resp.status, FacilitationStatus::Rejected);
@@ -669,6 +676,7 @@ mod tests {
             payment_header: header,
             resource_url: "https://api.example.com/data".into(),
             amount_micro_usd: 1000,
+            agent_id: None,
         };
         let resp = verify_payment_header(&req, DEFAULT_FEE_BPS, &stats);
         assert_eq!(resp.status, FacilitationStatus::Rejected);
@@ -689,6 +697,7 @@ mod tests {
             payment_header: header,
             resource_url: "https://api.example.com/data".into(),
             amount_micro_usd: 1000,
+            agent_id: None,
         };
         let resp = verify_payment_header(&req, DEFAULT_FEE_BPS, &stats);
         assert_eq!(resp.status, FacilitationStatus::Rejected);
@@ -709,6 +718,7 @@ mod tests {
             payment_header: header,
             resource_url: "https://api.example.com/data".into(),
             amount_micro_usd: 1000,
+            agent_id: None,
         };
         let resp = verify_payment_header(&req, DEFAULT_FEE_BPS, &stats);
         assert_eq!(resp.status, FacilitationStatus::Rejected);
@@ -730,6 +740,7 @@ mod tests {
             payment_header: header,
             resource_url: "https://api.example.com/data".into(),
             amount_micro_usd: 1000,
+            agent_id: None,
         };
         let resp = verify_payment_header(&req, DEFAULT_FEE_BPS, &stats);
         assert_eq!(resp.status, FacilitationStatus::Rejected);
