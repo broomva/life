@@ -1,5 +1,10 @@
 # Autonomic
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange.svg)](https://www.rust-lang.org/)
+[![Tests](https://img.shields.io/badge/tests-passing-green.svg)](#)
+[![docs](https://img.shields.io/badge/docs-broomva.tech-purple.svg)](https://docs.broomva.tech/docs/life/autonomic)
+
 Homeostasis controller for the [Agent OS](https://github.com/broomva) -- self-regulation, resource management, and health checks for agent sessions.
 
 Autonomic implements three-pillar regulation (operational, cognitive, and economic homeostasis) to keep agents running within safe operational bounds. It acts as an advisory service that Arcan consults via HTTP to determine gating profiles, economic modes, and budget enforcement.
@@ -59,6 +64,10 @@ cargo run -p autonomicd -- --bind 127.0.0.1:3002 --lago-data-dir /path/to/data
 
 - Rust 2024 edition (MSRV 1.85)
 - Depends on `aios-protocol`, `lago-core`, and `lago-journal` from the Agent OS stack
+
+## Documentation
+
+Full documentation: [docs.broomva.tech/docs/life/autonomic](https://docs.broomva.tech/docs/life/autonomic)
 
 ## License
 
