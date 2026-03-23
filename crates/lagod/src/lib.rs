@@ -110,6 +110,7 @@ pub async fn run(config: DaemonConfig) -> Result<(), Box<dyn std::error::Error>>
         hook_runner,
         rate_limiter: Some(rate_limiter),
         prometheus_handle,
+        manifest_cache: tokio::sync::RwLock::new(std::collections::HashMap::new()),
     };
     let app = lago_api::build_router(Arc::new(state));
     let listener = tokio::net::TcpListener::bind(http_addr).await?;

@@ -499,6 +499,7 @@ mod tests {
             hook_runner: None,
             rate_limiter: None,
             prometheus_handle,
+            manifest_cache: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         });
         (state, tmp)
     }
