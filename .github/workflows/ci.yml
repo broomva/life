@@ -23,6 +23,8 @@ jobs:
       - name: Checkout sibling dependencies
         run: |
           git clone --depth 1 https://github.com/broomva/aiOS.git ../aiOS
+          # Exclude apps from aiOS workspace (they have deps not needed downstream)
+          cd ../aiOS && sed -i 's|"apps/aios-api",||;s|"apps/aiosd",||' Cargo.toml && cd -
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -36,6 +38,8 @@ jobs:
       - name: Checkout sibling dependencies
         run: |
           git clone --depth 1 https://github.com/broomva/aiOS.git ../aiOS
+          # Exclude apps from aiOS workspace (they have deps not needed downstream)
+          cd ../aiOS && sed -i 's|"apps/aios-api",||;s|"apps/aiosd",||' Cargo.toml && cd -
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -51,6 +55,8 @@ jobs:
       - name: Checkout sibling dependencies
         run: |
           git clone --depth 1 https://github.com/broomva/aiOS.git ../aiOS
+          # Exclude apps from aiOS workspace (they have deps not needed downstream)
+          cd ../aiOS && sed -i 's|"apps/aios-api",||;s|"apps/aiosd",||' Cargo.toml && cd -
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
@@ -63,6 +69,8 @@ jobs:
       - name: Checkout sibling dependencies
         run: |
           git clone --depth 1 https://github.com/broomva/aiOS.git ../aiOS
+          # Exclude apps from aiOS workspace (they have deps not needed downstream)
+          cd ../aiOS && sed -i 's|"apps/aios-api",||;s|"apps/aiosd",||' Cargo.toml && cd -
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
