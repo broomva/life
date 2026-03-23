@@ -383,7 +383,7 @@ mod tests {
         let event = NousEvent::EgriOutcome {
             session_id: "sess-1".into(),
             trial_id: Some("trial-001".into()),
-            outcome: outcome_data.clone(),
+            outcome: outcome_data,
         };
         let kind = event.into_event_kind();
         if let EventKind::Custom { event_type, data } = kind {

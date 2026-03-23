@@ -1,6 +1,6 @@
-//! End-to-end test: NousMiddleware wired into Arcan's Orchestrator.
+//! End-to-end test: `NousMiddleware` wired into Arcan's `Orchestrator`.
 //!
-//! Uses ScriptedProvider to drive a deterministic agent loop
+//! Uses `ScriptedProvider` to drive a deterministic agent loop
 //! and verifies that Nous evaluators fire at the correct hooks
 //! and produce expected scores.
 
