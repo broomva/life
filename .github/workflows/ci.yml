@@ -27,12 +27,13 @@ jobs:
           git clone --depth 1 https://github.com/broomva/vigil.git ../vigil
           git clone --depth 1 https://github.com/broomva/arcan.git ../arcan
           git clone --depth 1 https://github.com/broomva/autonomic.git ../autonomic
-          # Trim sibling workspaces to only crates needed by nous
+          git clone --depth 1 https://github.com/broomva/praxis.git ../praxis
+          # Trim sibling workspaces to only the crates nous directly needs
           python3 -c "
           import re
           for path, members in [
-            ('../aiOS/Cargo.toml', ['crates/aios-protocol', 'crates/aios-events', 'crates/aios-policy', 'crates/aios-runtime', 'crates/aios-sandbox', 'crates/aios-tools']),
-            ('../arcan/Cargo.toml', ['crates/arcan-core', 'crates/arcan-harness', 'crates/arcan-store', 'crates/arcan-provider']),
+            ('../aiOS/Cargo.toml', ['crates/aios-protocol']),
+            ('../arcan/Cargo.toml', ['crates/arcan-core']),
             ('../autonomic/Cargo.toml', ['crates/autonomic-core', 'crates/autonomic-controller']),
           ]:
             with open(path) as f: c = f.read()
@@ -57,12 +58,13 @@ jobs:
           git clone --depth 1 https://github.com/broomva/vigil.git ../vigil
           git clone --depth 1 https://github.com/broomva/arcan.git ../arcan
           git clone --depth 1 https://github.com/broomva/autonomic.git ../autonomic
-          # Trim sibling workspaces to only crates needed by nous
+          git clone --depth 1 https://github.com/broomva/praxis.git ../praxis
+          # Trim sibling workspaces to only the crates nous directly needs
           python3 -c "
           import re
           for path, members in [
-            ('../aiOS/Cargo.toml', ['crates/aios-protocol', 'crates/aios-events', 'crates/aios-policy', 'crates/aios-runtime', 'crates/aios-sandbox', 'crates/aios-tools']),
-            ('../arcan/Cargo.toml', ['crates/arcan-core', 'crates/arcan-harness', 'crates/arcan-store', 'crates/arcan-provider']),
+            ('../aiOS/Cargo.toml', ['crates/aios-protocol']),
+            ('../arcan/Cargo.toml', ['crates/arcan-core']),
             ('../autonomic/Cargo.toml', ['crates/autonomic-core', 'crates/autonomic-controller']),
           ]:
             with open(path) as f: c = f.read()
@@ -89,12 +91,13 @@ jobs:
           git clone --depth 1 https://github.com/broomva/vigil.git ../vigil
           git clone --depth 1 https://github.com/broomva/arcan.git ../arcan
           git clone --depth 1 https://github.com/broomva/autonomic.git ../autonomic
-          # Trim sibling workspaces to only crates needed by nous
+          git clone --depth 1 https://github.com/broomva/praxis.git ../praxis
+          # Trim sibling workspaces to only the crates nous directly needs
           python3 -c "
           import re
           for path, members in [
-            ('../aiOS/Cargo.toml', ['crates/aios-protocol', 'crates/aios-events', 'crates/aios-policy', 'crates/aios-runtime', 'crates/aios-sandbox', 'crates/aios-tools']),
-            ('../arcan/Cargo.toml', ['crates/arcan-core', 'crates/arcan-harness', 'crates/arcan-store', 'crates/arcan-provider']),
+            ('../aiOS/Cargo.toml', ['crates/aios-protocol']),
+            ('../arcan/Cargo.toml', ['crates/arcan-core']),
             ('../autonomic/Cargo.toml', ['crates/autonomic-core', 'crates/autonomic-controller']),
           ]:
             with open(path) as f: c = f.read()
@@ -118,12 +121,13 @@ jobs:
           git clone --depth 1 https://github.com/broomva/vigil.git ../vigil
           git clone --depth 1 https://github.com/broomva/arcan.git ../arcan
           git clone --depth 1 https://github.com/broomva/autonomic.git ../autonomic
-          # Trim sibling workspaces to only crates needed by nous
+          git clone --depth 1 https://github.com/broomva/praxis.git ../praxis
+          # Trim sibling workspaces to only the crates nous directly needs
           python3 -c "
           import re
           for path, members in [
-            ('../aiOS/Cargo.toml', ['crates/aios-protocol', 'crates/aios-events', 'crates/aios-policy', 'crates/aios-runtime', 'crates/aios-sandbox', 'crates/aios-tools']),
-            ('../arcan/Cargo.toml', ['crates/arcan-core', 'crates/arcan-harness', 'crates/arcan-store', 'crates/arcan-provider']),
+            ('../aiOS/Cargo.toml', ['crates/aios-protocol']),
+            ('../arcan/Cargo.toml', ['crates/arcan-core']),
             ('../autonomic/Cargo.toml', ['crates/autonomic-core', 'crates/autonomic-controller']),
           ]:
             with open(path) as f: c = f.read()
