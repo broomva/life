@@ -1,13 +1,23 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use lago_auth::AuthLayer;
-use lago_core::Journal;
+use lago_core::{Journal, ManifestEntry};
 use lago_policy::{HookRunner, PolicyEngine, RbacManager};
 use lago_store::BlobStore;
 use metrics_exporter_prometheus::PrometheusHandle;
 use tokio::sync::RwLock;
+
+/// Cached manifest entry with expiration timestamp.
+pub struct CachedManifest {
+    pub entries: Vec<ManifestEntry>,
+    pub cached_at: Instant,
+}
+
+/// Default manifest cache TTL: 60 seconds.
+pub const MANIFEST_CACHE_TTL_SECS: u64 = 60;
 
 /// Shared application state threaded through all axum handlers.
 ///
@@ -34,4 +44,7 @@ pub struct AppState {
     pub rate_limiter: Option<Arc<crate::rate_limit::RateLimiter>>,
     /// Prometheus metrics handle for rendering the `/metrics` endpoint.
     pub prometheus_handle: PrometheusHandle,
+    /// In-memory manifest cache keyed by (session_id, branch_id).
+    /// Avoids replaying all journal events on every file/manifest request.
+    pub manifest_cache: RwLock<HashMap<(String, String), CachedManifest>>,
 }

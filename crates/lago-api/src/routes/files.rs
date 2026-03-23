@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use lago_core::event::{EventEnvelope, EventPayload};
 use lago_core::hashline::{HashLineEdit, HashLineFile};
@@ -13,7 +15,7 @@ use lago_core::id::{BranchId, EventId, SessionId};
 use lago_core::{EventQuery, ManifestEntry};
 
 use crate::error::ApiError;
-use crate::state::AppState;
+use crate::state::{AppState, CachedManifest, MANIFEST_CACHE_TTL_SECS};
 
 // --- Response types
 
@@ -175,7 +177,7 @@ pub async fn patch_file(
     let event = EventEnvelope {
         event_id: EventId::new(),
         session_id: session_id.clone(),
-        branch_id,
+        branch_id: branch_id.clone(),
         run_id: None,
         seq: 0,
         timestamp: EventEnvelope::now_micros(),
@@ -191,6 +193,7 @@ pub async fn patch_file(
     };
 
     state.journal.append(event).await?;
+    invalidate_manifest_cache(&state, &session_id, &branch_id).await;
 
     Ok((
         StatusCode::OK,
@@ -235,7 +238,7 @@ pub async fn write_file(
     let event = EventEnvelope {
         event_id: EventId::new(),
         session_id: session_id.clone(),
-        branch_id,
+        branch_id: branch_id.clone(),
         run_id: None,
         seq: 0,
         timestamp: EventEnvelope::now_micros(),
@@ -251,6 +254,7 @@ pub async fn write_file(
     };
 
     state.journal.append(event).await?;
+    invalidate_manifest_cache(&state, &session_id, &branch_id).await;
 
     Ok((
         StatusCode::CREATED,
@@ -285,7 +289,7 @@ pub async fn delete_file(
     let event = EventEnvelope {
         event_id: EventId::new(),
         session_id: session_id.clone(),
-        branch_id,
+        branch_id: branch_id.clone(),
         run_id: None,
         seq: 0,
         timestamp: EventEnvelope::now_micros(),
@@ -298,6 +302,7 @@ pub async fn delete_file(
     };
 
     state.journal.append(event).await?;
+    invalidate_manifest_cache(&state, &session_id, &branch_id).await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -332,11 +337,30 @@ pub async fn get_manifest(
 // --- Internal helpers
 
 /// Build a manifest by replaying file events from the journal.
+/// Uses an in-memory cache with TTL to avoid replaying events on every request.
 async fn build_manifest(
     state: &Arc<AppState>,
     session_id: &SessionId,
     branch_id: &BranchId,
 ) -> Result<Vec<ManifestEntry>, ApiError> {
+    let cache_key = (session_id.to_string(), branch_id.to_string());
+
+    // Check cache first (read lock — fast path)
+    {
+        let cache = state.manifest_cache.read().await;
+        if let Some(cached) = cache.get(&cache_key) {
+            if cached.cached_at.elapsed().as_secs() < MANIFEST_CACHE_TTL_SECS {
+                debug!(
+                    session_id = %session_id,
+                    branch_id = %branch_id,
+                    "manifest cache hit"
+                );
+                return Ok(cached.entries.clone());
+            }
+        }
+    }
+
+    // Cache miss or expired — replay events
     let query = EventQuery::new()
         .session(session_id.clone())
         .branch(branch_id.clone());
@@ -373,7 +397,37 @@ async fn build_manifest(
 
     let entries: Vec<ManifestEntry> = manifest.entries().values().cloned().collect();
 
+    // Store in cache (write lock)
+    {
+        let mut cache = state.manifest_cache.write().await;
+        cache.insert(
+            cache_key,
+            CachedManifest {
+                entries: entries.clone(),
+                cached_at: Instant::now(),
+            },
+        );
+    }
+
+    debug!(
+        session_id = %session_id,
+        branch_id = %branch_id,
+        entry_count = entries.len(),
+        "manifest rebuilt and cached"
+    );
+
     Ok(entries)
+}
+
+/// Invalidate the manifest cache for a given session + branch after a mutation.
+async fn invalidate_manifest_cache(
+    state: &Arc<AppState>,
+    session_id: &SessionId,
+    branch_id: &BranchId,
+) {
+    let cache_key = (session_id.to_string(), branch_id.to_string());
+    let mut cache = state.manifest_cache.write().await;
+    cache.remove(&cache_key);
 }
 
 /// Ensure the path starts with '/' for consistency.
