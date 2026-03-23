@@ -12,7 +12,7 @@ use haima_api::auth::AuthConfig;
 use tracing::info;
 
 #[derive(Parser, Debug)]
-#[command(name = "haimad", about = "Haima — agentic finance daemon")]
+#[command(name = "haimad", version, about = "Haima — agentic finance daemon")]
 struct Args {
     /// Bind address for the HTTP server.
     #[arg(long, default_value = "127.0.0.1:3003")]
