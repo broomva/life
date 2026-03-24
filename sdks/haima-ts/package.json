@@ -1,0 +1,48 @@
+{
+  "name": "@haima/sdk",
+  "version": "0.1.0",
+  "description": "Multi-framework x402 payment SDK for AI agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./elizaos": {
+      "types": "./dist/integrations/elizaos.d.ts",
+      "import": "./dist/integrations/elizaos.js"
+    },
+    "./openai": {
+      "types": "./dist/integrations/openai.d.ts",
+      "import": "./dist/integrations/openai.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "keywords": ["x402", "payments", "ai-agents", "haima", "web3", "elizaos"],
+  "author": "Broomva <carlos@broomva.tech>",
+  "license": "MIT",
+  "dependencies": {
+    "viem": "^2.21"
+  },
+  "devDependencies": {
+    "typescript": "^5.7",
+    "vitest": "^3.0"
+  },
+  "peerDependencies": {
+    "@elizaos/core": ">=0.2",
+    "openai": ">=4.70"
+  },
+  "peerDependenciesMeta": {
+    "@elizaos/core": { "optional": true },
+    "openai": { "optional": true }
+  }
+}

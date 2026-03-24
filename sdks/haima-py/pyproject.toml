@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "haima"
+version = "0.1.0"
+description = "Multi-framework x402 payment SDK for AI agents"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Broomva", email = "carlos@broomva.tech" }]
+keywords = ["x402", "payments", "ai-agents", "haima", "web3"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "httpx>=0.27",
+    "eth-account>=0.13",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+langchain = ["langchain-core>=0.3"]
+crewai = ["crewai>=0.80"]
+all = ["haima[langchain,crewai]"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.8"]
+
+[project.urls]
+Homepage = "https://github.com/broomva/haima"
+Documentation = "https://docs.broomva.tech/haima"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/haima"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
