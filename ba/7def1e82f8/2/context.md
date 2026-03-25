@@ -1,0 +1,46 @@
+# Session Context
+
+## User Prompts
+
+### Prompt 1
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485746236832088084" user="broomva" user_id="352126905920782347" ts="2026-03-23T21:05:06.691Z">
+Hey
+</channel>
+
+### Prompt 2
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485746575207563366" user="broomva" user_id="352126905920782347" ts="2026-03-23T21:06:27.366Z">
+Check linear, which workspace do you have access to?
+</channel>
+
+### Prompt 3
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485746786730643549" user="broomva" user_id="352126905920782347" ts="2026-03-23T21:07:17.797Z">
+What’s next on life project?
+</channel>
+
+### Prompt 4
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485747696114598038" user="broomva" user_id="352126905920782347" ts="2026-03-23T21:10:54.611Z">
+How about plans.md and the project status context you have?
+</channel>
+
+### Prompt 5
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485750080379289640" user="broomva" user_id="352126905920782347" ts="2026-03-23T21:20:23.064Z">
+Let’s complete core agent capabilities
+</channel>
+
+### Prompt 6
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485752223014064310" user="broomva" user_id="352126905920782347" ts="2026-03-23T21:28:53.908Z">
+What do we achieve with this?
+</channel>
+
+### Prompt 7
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485752971202400426" user="broomva" user_id="352126905920782347" ts="2026-03-23T21:31:52.290Z">
+Yeah, please create linear tickets detailing it all
+</channel>
+
