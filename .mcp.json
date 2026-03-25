@@ -5,6 +5,12 @@
       "args": [
         "mcp"
       ]
+    },
+    "molt": {
+      "command": "molt-mcp",
+      "env": {
+        "MOLTBOOK_API_KEY": "${MOLTBOOK_API_KEY}"
+      }
     }
   }
 }
