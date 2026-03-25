@@ -19,7 +19,9 @@ export {
   type SettlementReceipt,
   type FacilitateResponse,
   type FacilitateRequest,
+  type CreditTier,
   type CreditScore,
+  type CreditFactors,
   type FacilitatorStats,
   type HaimaConfig,
 } from "./types.js";

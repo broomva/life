@@ -90,12 +90,27 @@ export interface FacilitateResponse {
   details?: string;
 }
 
-/** Agent credit score. */
+/** Credit tier determines spending limits (matches Rust CreditTier). */
+export type CreditTier = "none" | "micro" | "standard" | "premium";
+
+/** Agent credit score (matches Rust CreditScore from haima-core). */
 export interface CreditScore {
   agent_id: string;
+  tier: CreditTier;
   score: number;
-  tier: string;
-  max_credit_line: number;
+  spending_limit_micro_usd: number;
+  current_balance_micro_usd: number;
+  factors?: CreditFactors;
+  assessed_at?: string;
+}
+
+/** Behavioral factors used to compute a credit score (matches Rust CreditFactors). */
+export interface CreditFactors {
+  trust_score: number;
+  payment_history: number;
+  transaction_volume: number;
+  account_age_days: number;
+  economic_stability: number;
 }
 
 /** Facilitator stats. */
