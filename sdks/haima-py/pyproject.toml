@@ -3,20 +3,30 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "haima"
+name = "life-haima"
 version = "0.1.0"
-description = "Multi-framework x402 payment SDK for AI agents"
+description = "Multi-framework x402 payment SDK for AI agents — Python bindings for Life Agent OS Haima subsystem"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-authors = [{ name = "Broomva", email = "carlos@broomva.tech" }]
-keywords = ["x402", "payments", "ai-agents", "haima", "web3"]
+authors = [
+    { name = "Carlos Escobar", email = "carlos@broomva.tech" },
+    { name = "Broomva", email = "carlos@broomva.tech" },
+]
+keywords = ["x402", "payments", "ai-agents", "haima", "web3", "agent-os", "life"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business :: Financial",
+    "Typing :: Typed",
 ]
 dependencies = [
     "httpx>=0.27",
@@ -27,12 +37,14 @@ dependencies = [
 [project.optional-dependencies]
 langchain = ["langchain-core>=0.3"]
 crewai = ["crewai>=0.80"]
-all = ["haima[langchain,crewai]"]
+all = ["life-haima[langchain,crewai]"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.8"]
 
 [project.urls]
-Homepage = "https://github.com/broomva/haima"
+Homepage = "https://github.com/broomva/life"
+Repository = "https://github.com/broomva/life"
 Documentation = "https://docs.broomva.tech/haima"
+Issues = "https://github.com/broomva/life/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/haima"]
