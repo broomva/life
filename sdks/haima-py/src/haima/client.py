@@ -11,9 +11,10 @@ from haima.types import (
     ChainId,
     CreditScore,
     FacilitateResponse,
+    FacilitationStatus,
     FacilitatorStats,
+    PaymentDecision,
     PaymentPolicy,
-    USDC_CONTRACTS,
     WalletInfo,
 )
 from haima.wallet import HaimaWallet
@@ -84,14 +85,13 @@ class HaimaClient:
         """
         # Check policy before submitting
         decision = self.policy.evaluate(amount_micro_usd)
-        if decision.value == "denied":
+        if decision == PaymentDecision.DENIED:
             return FacilitateResponse(
-                status="rejected",
+                status=FacilitationStatus.REJECTED,
                 reason=f"Payment denied by local policy: {amount_micro_usd} μc exceeds hard cap",
             )
 
         # Sign the payment
-        usdc_contract = USDC_CONTRACTS.get(self.chain, USDC_CONTRACTS[ChainId.BASE])
         signature = self.wallet.sign_payment_header(
             scheme="exact",
             network=self.chain.value,

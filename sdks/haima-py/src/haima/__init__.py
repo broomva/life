@@ -3,8 +3,11 @@
 from haima.client import HaimaClient
 from haima.types import (
     ChainId,
+    CreditScore,
+    CreditTier,
     FacilitateResponse,
     FacilitationStatus,
+    FacilitatorStats,
     PaymentDecision,
     PaymentPolicy,
     PaymentScheme,
@@ -21,8 +24,11 @@ __all__ = [
     "HaimaWallet",
     "X402Middleware",
     "ChainId",
+    "CreditScore",
+    "CreditTier",
     "FacilitateResponse",
     "FacilitationStatus",
+    "FacilitatorStats",
     "PaymentDecision",
     "PaymentPolicy",
     "PaymentScheme",

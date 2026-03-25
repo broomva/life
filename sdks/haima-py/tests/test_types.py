@@ -2,6 +2,8 @@
 
 from haima.types import (
     ChainId,
+    CreditScore,
+    CreditTier,
     PaymentDecision,
     PaymentPolicy,
     USDC_CONTRACTS,
@@ -71,3 +73,55 @@ def test_facilitate_response_rejected():
     )
     assert resp.status == FacilitationStatus.REJECTED
     assert resp.reason == "insufficient credit"
+
+
+def test_policy_default_economic_mode_fields():
+    """Verify allow_in_hibernate and allow_in_hustle match Rust defaults."""
+    policy = PaymentPolicy()
+    assert policy.allow_in_hibernate is False
+    assert policy.allow_in_hustle is True
+
+
+def test_credit_tier_values():
+    """Credit tier enum values match Rust CreditTier serde."""
+    assert CreditTier.NONE == "none"
+    assert CreditTier.MICRO == "micro"
+    assert CreditTier.STANDARD == "standard"
+    assert CreditTier.PREMIUM == "premium"
+
+
+def test_credit_tier_spending_limits():
+    """Spending limits match Rust CreditTier::spending_limit()."""
+    assert CreditTier.NONE.spending_limit == 0
+    assert CreditTier.MICRO.spending_limit == 1_000
+    assert CreditTier.STANDARD.spending_limit == 100_000
+    assert CreditTier.PREMIUM.spending_limit == 10_000_000
+
+
+def test_credit_score_construction():
+    """CreditScore matches Rust haima-core CreditScore fields."""
+    score = CreditScore(
+        agent_id="agent-test",
+        score=0.65,
+        tier=CreditTier.STANDARD,
+        spending_limit_micro_usd=100_000,
+        current_balance_micro_usd=0,
+    )
+    assert score.agent_id == "agent-test"
+    assert score.score == 0.65
+    assert score.tier == CreditTier.STANDARD
+    assert score.spending_limit_micro_usd == 100_000
+
+
+def test_credit_score_from_json():
+    """CreditScore can be deserialized from Rust-compatible JSON."""
+    data = {
+        "agent_id": "agent-1",
+        "score": 0.85,
+        "tier": "premium",
+        "spending_limit_micro_usd": 10_000_000,
+        "current_balance_micro_usd": -5000,
+    }
+    score = CreditScore(**data)
+    assert score.tier == CreditTier.PREMIUM
+    assert score.current_balance_micro_usd == -5000
