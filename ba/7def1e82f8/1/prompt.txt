@@ -1,0 +1,1480 @@
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485717497104830617" user="broomva" user_id="352126905920782347" ts="2026-03-23T19:10:54.606Z">
+Hi
+</channel>
+
+---
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485727235058044961" user="broomva" user_id="352126905920782347" ts="2026-03-23T19:49:36.315Z">
+What’s next on life project?
+</channel>
+
+---
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485732799334842429" user="broomva" user_id="352126905920782347" ts="2026-03-23T20:11:42.942Z">
+Let’s review r1 and r2, please review all the chain of dependencies and validate the code implementation, create tickets as needed that specify the needed efforts
+</channel>
+
+---
+
+<task-notification>
+<task-id>afe28eeaaa94ce474</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-core-life/2f64ca4c-f174-5984-8940-d45a0b8b4bf1/tasks/afe28eeaaa94ce474.output</output-file>
+<status>completed</status>
+<summary>Agent "Review dependency chain validation" completed</summary>
+<result>Perfect. Now I have a comprehensive picture. Let me compile my findings report.
+
+## Life Agent OS Dependency Chain Analysis Report
+
+I've completed a thorough audit of the dependency chains across all projects in the Life Agent OS monorepo. Here are my key findings:
+
+### 1. **Workspace Structure (All Submodules)**
+
+All projects are Git submodules, not part of a unified workspace:
+
+- `aiOS` — Canonical kernel contract (separate repo)
+- `arcan` — Agent runtime (separate repo)
+- `lago` — Event persistence (separate repo)
+- `autonomic` — Homeostasis controller (separate repo)
+- `praxis` — Tool execution engine (separate repo)
+- `vigil` — Observability (single crate, not a workspace)
+- `spaces` — Distributed networking (separate repo)
+- `haima` — Agentic finance (separate repo)
+- `anima` — Agent identity & beliefs (separate repo)
+- `nous` — Metacognitive evaluation (separate repo)
+
+**No root-level Cargo.toml exists** — each is an independent workspace/crate.
+
+---
+
+### 2. **Core Dependency Contract (VALID)**
+
+The fundamental architectural invariant is **sound** and **not violated**:
+
+```
+aios-protocol (foundation, zero external Rust deps)
+  └── shared by all projects
+```
+
+**aiOS workspace members**:
+- `aios-protocol` — zero Rust deps beyond std + serde
+- `aios-events` → aios-protocol
+- `aios-kernel` → aios-events, aios-protocol, aios-policy, aios-runtime, aios-sandbox, aios-tools
+- `aios-policy` → aios-protocol
+- `aios-runtime` → aios-protocol, life-vigil
+- `aios-sandbox` → aios-protocol
+- `aios-tools` → aios-protocol, aios-policy, aios-sandbox
+
+**Status**: aios-protocol has no external Rust dependencies. All aiOS crates depend downward from the protocol.
+
+---
+
+### 3. **Lago Dependency Chain (VALID)**
+
+Lago's internal dependency order is correctly layered:
+
+```
+lago-core (foundation, depends on aios-protocol only)
+  │
+  ├── lago-store, lago-journal, lago-fs, lago-policy, lago-ingest
+  │
+  ├── lago-knowledge → lago-core, lago-store
+  ├── lago-auth → lago-core, axum
+  │
+  ├── lago-api → [all above + aios-protocol]
+  ├── lago-aios-eventstore-adapter → aios-protocol
+  │
+  └── lagos-cli, lagod → all above
+```
+
+**Critical pattern**: All internal deps use path deps (`path = "../.."`), no circular dependencies detected.
+
+---
+
+### 4. **Arcan Dependency Chain (VALID)**
+
+Arcan correctly declares external workspace dependencies as path deps:
+
+```
+aios-protocol (external)
+aios-runtime, aios-events, aios-policy, aios-sandbox, aios-tools (external)
+praxis-core, praxis-tools, praxis-skills, praxis-mcp-bridge (external)
+autonomic-core, autonomic-controller (external)
+haima-core, haima-x402, haima-wallet, haima-lago (external)
+lago-api, lago-core, lago-fs, lago-journal, lago-store, lago-policy, lago-aios-eventstore-adapter (external)
+anima-core, anima-lago (external)
+nous-api, nous-core, nous-heuristics, nous-judge, nous-lago, nous-middleware (external)
+```
+
+**Internal structure**:
+```
+arcan-core (types, traits)
+  ├── arcan-harness, arcan-store, arcan-provider
+  ├── arcan-aios-adapters, arcan-anima, arcan-console, arcan-praxis
+  ├── arcan-lago, arcan-spaces
+  │
+  └── arcand (server + loop)
+    └── arcan (binary)
+```
+
+**Critical observation**: Arcan declares **massive external surface** (16 external workspaces). This is appropriate given its role as the orchestration point, but it means **Arcan is the integration hub**.
+
+---
+
+### 5. **Autonomic Dependency Chain (VALID)**
+
+```
+aios-protocol (external) ← foundation
+anima-core (external)
+lago-core, lago-journal, lago-auth (external)
+
+autonomic-core (types, rules, traits)
+  ├── autonomic-controller (pure evaluation)
+  │
+  ├── autonomic-lago (Lago bridge)
+  ├── autonomic-api (axum HTTP)
+  │
+  └── autonomicd (binary)
+```
+
+**Status**: Clean, layered, no violations.
+
+---
+
+### 6. **Praxis Dependency Chain (VALID & ISOLATED)**
+
+```
+aios-protocol (external) ← ONLY external dependency (besides std + serde + tokio)
+
+praxis-core (sandbox policy)
+  ├── praxis-tools (filesystem, shell, editing, memory)
+  ├── praxis-skills (SKILL.md parser)
+  └── praxis-mcp-bridge (MCP server + client, uses rmcp 0.15)
+```
+
+**Critical design**: Praxis depends **only on aios-protocol**, NOT on Arcan, Lago, Autonomic, or Spaces. This makes it reusable across multiple runtimes.
+
+---
+
+### 7. **Haima Dependency Chain (VALID)**
+
+```
+aios-protocol (external)
+autonomic-core (external) ← for economic state integration
+lago-core, lago-journal, lago-auth (external)
+
+haima-core (types, traits, policy, financial events)
+  ├── haima-wallet (secp256k1, key management)
+  │
+  ├── haima-x402 (x402 protocol, Coinbase CDP integration)
+  ├── haima-lago (Lago bridge, event publishing)
+  │
+  ├── haima-api (axum HTTP server)
+  │
+  └── haimad (binary)
+```
+
+**Status**: Clean, no violations. X402 protocol layer is well-isolated.
+
+---
+
+### 8. **Anima Dependency Chain (VALID)**
+
+```
+aios-protocol (external)
+haima-core, haima-wallet (external) ← secp256k1 identity
+lago-core, lago-journal (external)
+
+anima-core (Soul, Identity, Belief, Self — immutable types)
+  ├── anima-identity (Ed25519, secp256k1, DID, JWT)
+  │
+  └── anima-lago (Lago bridge, genesis events, belief projection)
+```
+
+**Status**: Clean, no violations. Soul immutability is enforced at type level.
+
+---
+
+### 9. **Nous Dependency Chain (VALID)**
+
+```
+aios-protocol (external)
+arcan-core (external) ← Middleware trait
+autonomic-core, autonomic-controller (external)
+lago-core, lago-journal (external)
+
+nous-core (types, traits, zero I/O)
+  ├── nous-heuristics (inline evaluators)
+  │
+  ├── nous-middleware (Arcan Middleware impl)
+  │
+  ├── nous-judge (async LLM judge)
+  ├── nous-lago (Lago bridge)
+  │
+  ├── nous-api (axum HTTP)
+  │
+  └── nousd (binary)
+```
+
+**Critical observation**: Nous depends on `arcan-core` (for Middleware trait), which means **Nous requires Arcan to be deployed**. This is appropriate — Nous is a plugin into the agent loop.
+
+---
+
+### 10. **Vigil Dependency Chain (VALID & LIGHTWEIGHT)**
+
+Single crate (not a workspace):
+
+```
+aios-protocol (external) ← EventEnvelope, LoopPhase, TokenUsage
+OpenTelemetry SDK + tracing
+```
+
+**Status**: Zero dependencies on other Agent OS projects. Clean, composable observability layer.
+
+---
+
+### 11. **Spaces Dependency Chain (MINIMAL)**
+
+```
+spacetimedb-sdk = "2.0.*" (external)
+```
+
+Minimal Cargo.toml. WASM module is separate (Rust 2021 Edition per SpacetimeDB constraint).
+
+---
+
+### 12. **CRITICAL ARCHITECTURAL FINDINGS**
+
+#### A. **NO Circular Dependencies Detected**
+
+All dependency edges point downward (acyclic):
+
+```
+aios-protocol
+  ↓
+[all leaf crates]
+  ↓
+[bridge crates: *-lago, *-spaces, etc.]
+  ↓
+[API/daemon crates]
+```
+
+#### B. **Invariant: aiOS Isolation**
+
+✅ **CONFIRMED**: aiOS does NOT depend on Arcan, Lago, Autonomic, Praxis, or Spaces.
+
+aiOS **only depends on**: std, serde, tokio, chrono, thiserror (stable library deps).
+
+#### C. **Invariant: Lago Isolation**
+
+✅ **CONFIRMED**: Lago does NOT depend on Arcan, Autonomic, Praxis, Spaces, or Haima.
+
+Lago **only depends on**: aios-protocol, redb, zstd, axum, tonic, prost (persistence + HTTP + gRPC).
+
+#### D. **Invariant: Praxis Isolation**
+
+✅ **CONFIRMED**: Praxis does NOT depend on Arcan, Lago, Autonomic, Spaces, Haima, or Anima.
+
+Praxis **only depends on**: aios-protocol, rmcp (tool execution is portable).
+
+#### E. **Bridge Crates Are Explicit**
+
+Bridge crates (`*-lago`, `*-spaces`, `*-aios-adapters`) explicitly bridge isolated subsystems:
+
+- `arcan-lago` → connects Arcan to Lago
+- `arcan-spaces` → connects Arcan to Spaces
+- `arcan-aios-adapters` → Arcan implements aiOS protocol ports
+- `arcan-anima` → Arcan reads Anima beliefs
+- `arcan-praxis` → Arcan wraps Praxis as execution backend
+- `autonomic-lago` → Autonomic subscribes to Lago events
+- `haima-lago` → Haima publishes finance events to Lago
+- `anima-lago` → Anima persists soul/belief to Lago
+- `nous-lago` → Nous publishes eval events to Lago
+
+**None of these bridges are circular**.
+
+#### F. **Hub Integration Point: Arcan**
+
+Arcan is the integration hub and has the highest fan-in:
+
+- Depends on: aios, praxis, lago, autonomic, haima, anima, nous, spaces
+- Acts as the orchestrator that invokes all subsystems
+
+This is **architecturally correct** — Arcan is the agent loop.
+
+#### G. **Observability (Vigil) Pervasive**
+
+All workspace root `Cargo.toml` files declare:
+
+```toml
+life-vigil = { version = "0.1.0", path = "../vigil" }
+```
+
+This is appropriate — observability should be wired into all projects.
+
+---
+
+### 13. **Version Consistency**
+
+All projects use Rust 2024 Edition with MSRV 1.85. Version matrix:
+
+| Project | Version | Edition |
+|---------|---------|---------|
+| aiOS | 0.2.0 | 2024 |
+| Arcan | 0.2.1 | 2024 |
+| Lago | 0.2.1 | 2024 |
+| Autonomic | 0.1.0 | 2024 |
+| Praxis | 0.1.0 | 2024 |
+| Vigil | 0.1.0 | 2024 |
+| Spaces | 0.1.0 | 2024 |
+| Haima | 0.1.0 | 2024 |
+| Anima | 0.1.0 | 2024 |
+| Nous | 0.1.0 | 2024 |
+
+---
+
+### 14. **Known Bridge Crates Not Yet Fully Integrated**
+
+Several bridge crates exist but may not be fully wired:
+
+| Bridge | Status | Notes |
+|--------|--------|-------|
+| arcan-lago | ✅ Implemented | Event sourcing |
+| arcan-spaces | ✅ Implemented | Distributed comms |
+| arcan-aios-adapters | ✅ Implemented | Protocol ports |
+| arcan-anima | ✅ Implemented | Soul/belief loading |
+| arcan-praxis | ✅ Implemented | Tool execution |
+| arcan-haima | ❌ Pending | Payment client (R5) |
+| autonomic-lago | ✅ Implemented | Event subscription |
+| haima-lago | ✅ Implemented | Finance events |
+| anima-lago | ✅ Implemented | Genesis + projection |
+| nous-lago | ✅ Implemented | Eval events |
+
+---
+
+### 15. **Submodule Tracking**
+
+All projects are submodules on `main` branch (per .gitmodules):
+
+```
+[submodule "arcan"]     path=arcan      branch=main
+[submodule "lago"]      path=lago       branch=main
+[submodule "aiOS"]      path=aiOS       branch=main
+[submodule "spaces"]    path=spaces     (no branch specified)
+[submodule "autonomic"] path=autonomic  (no branch specified)
+[submodule "vigil"]     path=vigil      (no branch specified)
+[submodule "praxis"]    path=praxis     (no branch specified)
+[submodule "haima"]     path=haima      branch=main
+[submodule "anima"]     path=anima      branch=main
+[submodule "nous"]      path=nous       (no branch specified)
+```
+
+**Observation**: Some submodules track a branch, others don't. Consider standardizing to `branch = main` for all to avoid detached HEAD states.
+
+---
+
+### Summary
+
+**The dependency architecture is sound and follows the documented invariants correctly.** No violations detected across all 37+ crates and 9 submodule projects. The layering is clean:
+
+1. **Foundation**: aios-protocol (zero external deps)
+2. **Isolated subsystems**: Lago (persistence), Praxis (tools), Vigil (observability)
+3. **Advisory layers**: Autonomic (homeostasis), Nous (evaluation)
+4. **Economic layer**: Haima (payments, x402)
+5. **Identity layer**: Anima (soul, beliefs, cryptography)
+6. **Integration hub**: Arcan (orchestrator)
+7. **Bridges**: Explicit *-lago, *-spaces, *-aios-adapters crates
+
+All architectural invariants hold for R1 and R2 planning.</result>
+<usage><total_tokens>95702</total_tokens><tool_uses>18</tool_uses><duration_ms>55649</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-broomva-broomva-core-life/2f64ca4c-f174-5984-8940-d45a0b8b4bf1/tasks/afe28eeaaa94ce474.output
+
+---
+
+<task-notification>
+<task-id>aa18bc10c5ce2ecac</task-id>
+<tool-use-id>toolu_01PsGpyidvH8vbVb18oLAJiV</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-core-life/2f64ca4c-f174-5984-8940-d45a0b8b4bf1/tasks/aa18bc10c5ce2ecac.output</output-file>
+<status>completed</status>
+<summary>Agent "Review R1 conformance state" completed</summary>
+<result>Perfect. Now I have comprehensive information. Let me generate a detailed report.
+
+---
+
+# Phase R1 Conformance Testing Infrastructure Audit
+
+## Executive Summary
+
+The Life Agent OS conformance testing infrastructure has a **solid foundation with strategic gaps** in coverage depth. The baseline harness is operational and validates critical paths, but acceptance criteria for Phase R1 (Conformance Expansion) are only partially met. Key gaps exist in:
+
+1. **Approval workflow determinism** — No dedicated conformance fixtures or cross-project replay tests
+2. **Stream cursor invariants** — Limited replay/cursor boundary testing
+3. **Protocol forward-compat breadth** — Two fixtures exist but lack systematic evolution scenarios
+4. **Memory/learning lifecycle** — No fixtures in conformance suite
+5. **Cross-adapter determinism** — Replay tests exist per project but lack end-to-end interop fixtures
+
+---
+
+## 1. Conformance Harness Infrastructure
+
+### What Exists
+
+**Location**: `/Users/broomva/broomva/core/life/conformance/`
+
+**Entry point**: `run.sh` (943 bytes) — orchestrates 7 test suites across 5 projects
+
+**Fixtures directory**: 6 golden JSON fixtures (~12KB total):
+- `simple-chat.json` (4 events)
+- `tool-round-trip.json` (6 events)
+- `branch-fork.json` (7 events)
+- `branch-merge.json` (8 events)
+- `forward-compat.json` (4 events)
+- `forward-compat-evolution.json` (5 events)
+
+**Test Suite Composition** (run.sh):
+
+| Project | Test Target | Suite Count | Coverage |
+|---------|-------------|------------|----------|
+| aiOS | `aios-protocol` | 1 | Protocol contract (35 tests) |
+| Arcan | `arcand` + `arcan-lago` | 2 | Canonical API (9) + Replay/bridge (3) |
+| Lago | `lago-journal` + `lago-api` + `lago-aios-eventstore-adapter` | 3 | Sequence semantics (1) + Session/SSE (8) + Adapter (11) |
+| **Golden Replay** | `lago-journal` golden_replay | 1 | Fixture round-trip (14 tests) |
+| **Total** | — | **7 suites** | **81 conformance tests** |
+
+### Quality Assessment
+
+**Strengths**:
+- Fixtures are deterministic, minimal, and replay-focused
+- Branch fork/merge logic covered with isolation tests
+- Cross-project payload assertions use JSON round-trip (correct for storage pipeline validation)
+- Head sequence invariants checked
+- Cursor-based replay tested (EventQuery `.after()`)
+- SSE stream format adaptation tested (Vercel AI SDK v6 wrapper)
+
+**Gaps**:
+- **No fixture for canonical run lifecycle** (RunStarted → IterationStarted → TextDelta → RunFinished round-trip; fixtures use generic Message events)
+- **No approval workflow fixture** — Acceptance criteria require "approval flow" coverage; none exists
+- **No long-running session** — All fixtures are 4-8 events; no fixture tests 50+ event streams
+- **No concurrent branch events** — Branch merge fixture is sequential; no concurrent mutations
+- **No memory lifecycle events** — No SessionMemoryCreated/MemoryQueried fixtures
+- **No payment/financial events** (Haima) — No fixture for x402 payment lifecycle
+- **No network isolation test** (Spaces) — Fixtures are single-session, no multi-agent scenario
+- **No determinism cross-check** — Run fixtures multiple times to verify identical outcomes?
+
+### Severity: **HIGH**
+
+Phase R1 acceptance states: *"Golden fixture suite covers at least canonical run lifecycle, branch lifecycle, **approval flow**, and replay parity across adapters."* Approval flow is completely absent.
+
+---
+
+## 2. Cross-Project Event Replay & Determinism
+
+### What Exists
+
+**aiOS → Arcan → Lago Replay Path**:
+
+1. **arcan-lago end_to_end.rs** (150+ lines)
+   - Simulates full session: RunStarted → IterationStarted → TextDelta (2x) → ToolCallRequested → ToolCallCompleted → StatePatched → TextDelta → RunFinished
+   - Writes via `LagoSessionRepository::append()`
+   - Reads via `LagoSessionRepository::load_session()`
+   - Reconstructs `AppStateProjection`
+   - Verifies all 9 events round-trip with correct types/fields (13 assertions)
+   - **PASS**: Round-trip determinism verified
+
+2. **lago-journal golden_replay.rs** (360+ lines, 14 tests)
+   - Loads fixtures from disk → appends to RedbJournal → reads back via EventQuery
+   - Tests:
+     - `golden_simple_chat_replay_deterministic` — 4-event fixture, field-level assertions
+     - `golden_simple_chat_head_seq` — head sequence invariant
+     - `golden_tool_round_trip_replay` — 6-event tool lifecycle
+     - `golden_tool_round_trip_event_by_id` — event retrieval by ID
+     - `golden_branch_fork_isolation` — main branch (5 events) vs feature-x (2 events) isolation
+     - `golden_branch_fork_cursor_replay` — cursor-based `.after(3)` read returns events 4,5
+     - `golden_branch_merge_main_events_intact` — main branch 6 events with BranchCreated/BranchMerged
+     - `golden_branch_merge_experiment_isolated` — experiment branch 2 events isolated
+     - `golden_branch_merge_head_sequences` — head seq per branch (main: 6, experiment: 2)
+     - Forward-compat tests (2): AgentMetrics + CodeReview events with unknown types
+   - **PASS**: Storage pipeline determinism + branch isolation verified
+
+3. **lago-api e2e_sessions.rs** (180+ lines)
+   - HTTP layer tests: session CRUD, event ingestion, SSE streaming, branch ops
+   - Tests cursor invariants, stream format adaptation
+   - **PASS**: API-to-journal determinism verified
+
+4. **arcand canonical_api.rs** (300+ lines, 9 tests)
+   - HTTP routing tests: session creation, run auto-create, streaming with Vercel v6 framing
+   - Branch creation/listing
+   - **PASS**: Canonical API surface determinism verified
+
+**Gaps**:
+- No explicit **cross-adapter protocol mapping test** — Does aiOS EventKind → Lago EventPayload → back to aiOS work? Not tested as a standalone fixture.
+- No **state projection determinism test** — Given same events, do projections always derive same state? Not explicit.
+- No **Autonomic event round-trip** (EventKind::Custom "autonomic.*") — Autonomic publishes custom events; no conformance fixture for replay.
+- No **memory event determinism** — Memory events (MemoryCreated, MemoryQueried) exist in aios-protocol but no conformance replay test.
+- No **multi-adapter validation** — No test that aiOS → Arcan-Lago adapter → Autonomic subscriber produces consistent state.
+
+### Severity: **MEDIUM-HIGH**
+
+The baseline replay works, but systematic coverage of protocol evolution and cross-adapter determinism is incomplete.
+
+---
+
+## 3. Protocol Forward-Compatibility
+
+### What Exists
+
+**Fixtures**:
+- `forward-compat.json` (4 events) — Includes VisionResult event (unknown type in current schema) alongside standard Message events
+- `forward-compat-evolution.json` (5 events) — SessionCreated (v1) → Message (v1) → **AgentMetrics (v2, unknown)** → **CodeReview (v2, unknown)** → Message (v1)
+
+**Test Coverage**:
+- `lago-journal` golden_replay tests load both fixtures and verify unknown types don't break deserialization
+- Assertions check payload fields of unknown types using JSON round-trip
+- Tests verify schema_version field preserved (v1 vs v2)
+
+**Mechanism**:
+- `EventPayload` in `lago-core` uses forward-compatible deserializer (mentioned in event.rs comments)
+- Unknown variant → stored as raw JSON object → survives round-trip
+
+**Gaps**:
+- No test that **unknown events can be queried by ID** after storage (golden_tool_round_trip_event_by_id only tests known events)
+- No test for **unknown event in branch context** — Does an unknown event on a branch cause replay/merge issues?
+- No test for **schema version mismatch in same session** — What if session has mix of v1 and v3 events?
+- No test for **custom event fields with nested unknown objects** — e.g., EventKind::Custom with deeply nested unknown structure
+- No **Autonomic custom event evolution fixture** — "autonomic.economic_mode_transition" events should be testable
+- No **Haima payment custom event fixture** — "finance.payment_authorized" should round-trip
+
+### Severity: **MEDIUM**
+
+Forward-compat mechanism works but lacks systematic coverage of edge cases and cross-project custom events.
+
+---
+
+## 4. Branch Lifecycle & Determinism
+
+### What Exists
+
+**Fixtures & Tests**:
+- `branch-fork.json` (7 events) → 5 on main, 2 on feature-x, tested with `golden_branch_fork_isolation`
+- `branch-merge.json` (8 events) → 6 on main, 2 on experiment, tested with `golden_branch_merge_main_events_intact` + `golden_branch_merge_experiment_isolated` + `golden_branch_merge_head_sequences`
+- `e2e_branch_merge.rs` — HTTP API merge workflow tests (fast-forward, conflict detection, etc.)
+
+**Test Coverage**:
+- Fork isolation (events on each branch stay isolated)
+- Cursor-based replay per branch
+- Head sequence tracking per branch
+- Merge head sequences
+
+**Gaps**:
+- No **three-way merge fixture** — All tests use fast-forward (source ahead of target). What if both branches have divergent histories?
+- No **merge conflict detection fixture** — Can merge detect overlapping event ranges?
+- No **rebase/squash fixture** — Only append-based merges tested; no history rewriting
+- No **long branch history** — All branches are <10 events; no fixture tests 100+ event branch
+- No **concurrent branch creation** — What if two branches fork from same point simultaneously?
+- No **branch orphaning** — What if parent branch is deleted?
+- No **branch rename** — No test for branch identity change
+- No **merge rollback determinism** — Append a merge, then test it can be undone deterministically with compensating events
+
+### Severity: **MEDIUM**
+
+Basic branch ops work; advanced scenarios not covered. Acceptance criteria mention "branch lifecycle" but depth is limited.
+
+---
+
+## 5. Stream Cursor & Replay Invariants
+
+### What Exists
+
+**Cursor Tests**:
+- `golden_branch_fork_cursor_replay` — Query after seq 3, expect events 4-5 (2 events)
+- `canonical_stream_vercel_v6_replays_protocol_events` — Stream with `cursor=0&replay_limit=64&format=vercel_ai_sdk_v6`
+
+**SSE Stream Validation**:
+- Vercel v6 wrapper format (data-aios-event envelope) tested
+- Headers check for `x-vercel-ai-ui-message-stream: v1`
+- Event boundaries preserved in stream
+
+**Gaps**:
+- No **cursor regression test** — Can a cursor ever go backward? No explicit test
+- No **cursor from middle of stream** — Test cursor=5 on 20-event stream
+- No **cursor beyond head** — What happens if cursor > current head_seq?
+- No **Last-Event-ID resumption** — SSE spec allows clients to resume from arbitrary event ID; no test
+- No **stream interleaving** — Multiple concurrent streams with cursor advancement, no atomicity test
+- No **replay limit boundary** — What if replay_limit=1 but events are batched?
+- No **timeout/reconnect cursor preservation** — Simulate SSE disconnect, resume with old cursor, verify no gap/duplication
+
+### Severity: **HIGH**
+
+Cursor behavior is foundational for long-lived streaming; gaps here can cause data loss or duplication in production.
+
+---
+
+## 6. Approval Flow & Policy
+
+### What Exists
+
+**Location**: Scattered across projects, no unified test
+- `aios-policy` crate has policy types (ApprovalQueue, PolicyGatePort)
+- `aios-runtime` has ApprovalPort integration
+- `arcand` canonical API includes approval endpoints (implied by `/sessions/{id}/approvals/{approval_id}`)
+
+**Test Coverage**:
+- 0 conformance fixtures specifically for approval workflow
+- `canonical_api.rs` has no approval workflow test
+- No test for approval request → queue → decision → resolution cycle
+
+**Gaps**:
+- **No fixture for approval request lifecycle** — ToolCallRequested → approval queued → human approves → ToolCallCompleted
+- **No approval timeout fixture** — Approval pending for N seconds, then timeout
+- **No approval rejection path** — Approve request, then test tool call rejection
+- **No multi-approval serialization** — Two tool calls both need approval; queue ordering?
+- **No approval state mutation** — Approval moves from pending → approved; no state projection test
+- **No approval event in conformance** — No ApprovalDecided event in any fixture
+- **No HTTP approval endpoint test** — Canonical API defines `/approvals/{id}` but not tested in conformance
+
+### Severity: **CRITICAL**
+
+Approval flow is explicitly required by R1 acceptance criteria ("approval flow") but is **entirely absent from conformance suite**. This is a blocking gap.
+
+---
+
+## 7. Architecture Dependency Audit
+
+### What Exists
+
+**Script**: `/Users/broomva/broomva/core/life/scripts/architecture/verify_dependencies.sh` (129 lines)
+
+**Mechanism**:
+- Collects `cargo metadata` from aiOS, Arcan, Lago, Autonomic, Praxis
+- Parses dependency graph (edges: src → dst, excluding dev deps)
+- Enforces 14 hard rules (Python):
+  1. aiOS core must not depend on Arcan/Lago
+  2. Lago core crates may consume only aios-protocol (except adapter crate)
+  3. Lago must not depend on Arcan
+  4. Arcan crates: only host/adapters may consume aiOS implementation crates
+  5. arcand, arcan (binaries) may consume aios-protocol, aios-runtime
+  6. arcan-aios-adapters may consume aios-protocol, aios-policy, aios-memory
+  7. arcan-aios-adapters may depend on autonomic-core/controller only
+  8. Other arcan crates must not depend on Autonomic
+  9. Autonomic crates may consume only aios-protocol
+  10. Autonomic must not depend on Arcan
+  11. Praxis crates may consume only aios-protocol
+  12. Praxis must not depend on Arcan/Lago/Autonomic
+  13-14. (variants of above)
+
+**Audit Integration**:
+- Called by `make audit` in root Makefile.control
+- Runs as gate in CI/pre-commit workflow
+- Exit 0 on pass, exit 1 on violation (blocking)
+
+**Validation**:
+- Currently passing (all rules satisfied in current codebase)
+
+**Gaps**:
+- No **backward-compat check** — Rules don't prevent new deps that would break invariants
+- No **circular dependency detection** — Python script is DAG-only
+- No **transitive closure validation** — Checks direct edges only; doesn't verify transitive deps
+- No **semver boundary checks** — Does workspace update bump cause rule violations?
+- No **feature flag audit** — Conditional deps (via `[features]`) not validated
+- No **optional deps audit** — `optional = true` deps not tracked
+- No **version constraint audit** — Are versions pinned/ranged appropriately?
+
+### Severity: **LOW-MEDIUM**
+
+Audit is working; gaps are in proactive regression detection rather than immediate issues. Current implementation is reactive (detects violations) but not predictive.
+
+---
+
+## 8. Test Execution & Metrics
+
+### Test Counts (from STATUS.md)
+
+| Project | Test Suite | Count | Status |
+|---------|-----------|-------|--------|
+| aiOS | aios-protocol + aios-runtime + others | 96 | PASS |
+| Arcan | Workspace (including arcan-spaces) | 481 (+16 SpacetimeDB) | PASS |
+| Lago | Workspace | 332 (incl. 14 golden replay) | PASS |
+| Autonomic | Workspace | 69 | PASS |
+| Praxis | Workspace | 90 | PASS |
+| Vigil | Workspace | 26 (+2 ignored) | PASS |
+| **Conformance** | Cross-project golden suite | **81** | **PASS** |
+| **Total** | — | **1,075+** | **ALL PASS** |
+
+### Execution Model
+
+- **Per-project gates**: Each project runs `cargo test --workspace` independently
+- **Conformance gate**: `./conformance/run.sh` orchestrates 7 test suites as acceptance probes
+- **CI integration**: Implied but not shown in audit (referenced in STATUS.md as "validation gates")
+- **Flakiness**: Not mentioned; assumed deterministic
+
+### Gaps**:
+- No **test performance baseline** — How long do conformance tests take? No SLA?
+- No **flakiness tracking** — No data on test reruns/failures
+- No **coverage metrics** — No statement/branch coverage report
+- No **test isolation** — Fixtures use tempfile; potential filesystem race?
+- No **test parameterization** — Golden tests hardcoded to specific fixtures; no matrix
+- No **performance regression gates** — Can add test that runs 1000x to catch slowdowns
+
+### Severity: **LOW**
+
+Test execution is solid for baseline. Metrics/SLA gaps are post-baseline concerns (R2 observability scope).
+
+---
+
+## Summary Table: Conformance Gaps by Priority
+
+| Gap | Location | Tests Missing | Severity | R1 Blocker? |
+|-----|----------|----------------|----------|------------|
+| **Approval workflow fixture** | conformance/fixtures/ | 1 fixture + 4-6 tests | CRITICAL | YES |
+| **Approval HTTP endpoint** | arcand/canonical_api.rs | 2-3 tests | CRITICAL | YES |
+| **Run lifecycle fixture** | conformance/fixtures/ | 1 fixture | HIGH | YES (partial) |
+| **Stream cursor edge cases** | lago-api/e2e*.rs | 5-7 tests | HIGH | NO |
+| **Cross-adapter protocol mapping** | (none) | 1-2 tests | MEDIUM | NO |
+| **Memory event round-trip** | conformance/fixtures/ | 1 fixture | MEDIUM | NO |
+| **Advanced branch merge** | conformance/fixtures/ | 1 fixture | MEDIUM | NO |
+| **Autonomic custom event** | conformance/fixtures/ | 1 fixture | MEDIUM | NO |
+| **Haima payment custom event** | conformance/fixtures/ | 1 fixture | MEDIUM | NO |
+| **Long-running session** | conformance/fixtures/ | 1 fixture | MEDIUM | NO |
+| **Unknown event by ID** | lago-journal/golden_replay.rs | 1-2 tests | LOW | NO |
+| **Concurrent branch creation** | (integration) | 2-3 tests | LOW | NO |
+
+---
+
+## Detailed Recommendations for Phase R1 Completion
+
+### Critical (Blocking):
+
+1. **Create approval-workflow.json fixture** (8-12 events):
+   - SessionCreated
+   - Message (user: "read sensitive file")
+   - ToolCallRequested (read_file, path=/etc/shadow)
+   - ApprovalRequested (tool=read_file, requires=human-approval)
+   - ApprovalDecided (approved=false, reason="policy: sensitive path")
+   - ToolCallRejected
+   - Message (assistant: "approval denied")
+
+2. **Add approval workflow tests to arcand**:
+   - Test: POST /sessions/{id}/approvals/{approval_id} with decision payload
+   - Test: Verify ApprovalRequested event blocks tool execution
+   - Test: Verify ApprovalDecided transitions run state correctly
+
+3. **Add canonical run lifecycle fixture** (9-12 events):
+   - RunStarted
+   - IterationStarted
+   - TextDelta (multiple)
+   - ToolCallRequested
+   - ToolCallCompleted
+   - StatePatched
+   - RunFinished
+
+### High (R1 Completion):
+
+4. **Add stream cursor boundary tests** to lago-api:
+   - Test: cursor > head_seq (should return empty or error)
+   - Test: cursor = head_seq (should return no new events)
+   - Test: cursor on branch with fewer events than cursor value
+
+5. **Add protocol cross-adapter mapping test**:
+   - Single integration test: aiOS → Arcan-Lago adapter → verify payload round-trip
+   - Load forward-compat fixture, verify EventKind::Custom preservation
+
+### Medium (Can defer to R2):
+
+6. **Memory event fixture** — Requires memory event taxonomy from aios-protocol
+7. **Advanced branch merge fixture** — Three-way merge, conflict detection
+8. **Autonomic economic event fixture** — Custom EventKind examples
+9. **Haima payment event fixture** — Payment lifecycle in events
+
+---
+
+## Conclusion
+
+The **baseline conformance harness is solid** (81 tests, 7 suites, determinism validated), but **R1 acceptance criteria are only ~60% complete**:
+
+- ✅ **Branch lifecycle** — Covered (fork, merge, isolation, head sequences)
+- ✅ **Replay parity** — Covered (Arcan, Lago, round-trip verified)
+- ❌ **Approval flow** — **Not covered** (CRITICAL gap)
+- ✅ **Protocol forward-compat** — Partially covered (mechanism works, edge cases missing)
+- ⚠️ **Stream cursor invariants** — Partially covered (basic cursor works, edges missing)
+
+**To complete R1**: Implement the approval workflow fixture + tests (1-2 days), add cursor edge case tests (0.5-1 day), and create run lifecycle fixture (0.5 day). This would bring R1 to ~90% acceptance compliance.</result>
+<usage><total_tokens>99736</total_tokens><tool_uses>41</tool_uses><duration_ms>158700</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-broomva-broomva-core-life/2f64ca4c-f174-5984-8940-d45a0b8b4bf1/tasks/aa18bc10c5ce2ecac.output
+
+---
+
+<task-notification>
+<task-id>aedc73f6387c86765</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-broomva-broomva-core-life/2f64ca4c-f174-5984-8940-d45a0b8b4bf1/tasks/aedc73f6387c86765.output</output-file>
+<status>completed</status>
+<summary>Agent "Review R2 Vigil observability state" completed</summary>
+<result>Now let me compile the comprehensive audit report:
+
+## Vigil Observability Infrastructure Audit — Phase R2
+
+### Executive Summary
+
+Vigil (observability foundation for Life Agent OS) is **partially implemented and actively integrated into critical paths**, but **lacks comprehensive runtime coverage** across the canonical agent loop and core persistence/homeostasis pipelines. Current status: **26 tests passing (28 total, 2 ignored), 4 modules implemented, Rust 2024 Edition MSRV 1.85**.
+
+The crate is structurally sound and gracefully degrades when OTLP is unavailable, but **critical runtime observability gaps block Phase R2 completion** (Phase R2 = "Observability Maturity" per ROADMAP.md).
+
+---
+
+## 1. Vigil Crate Implementation Status
+
+### What Exists
+
+**Cargo.toml:**
+- Version 0.1.0, Rust 2024/MSRV 1.85
+- Dependencies: OpenTelemetry 0.29, tracing-subscriber 0.3, aios-protocol 0.2.0
+- No external bloat: tonic only for gRPC header injection
+
+**Four modules fully implemented:**
+
+1. **config.rs (8 tests, passing)** — VigConfig builder with env overrides
+   - Supports OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME, VIGIL_* variables
+   - Graceful degradation: no OTLP endpoint → logging-only pipeline
+   - Test coverage: header parsing, sampling ratio clamping, env variable override protocol
+
+2. **semconv.rs (5 tests, passing)** — Semantic convention constants
+   - GenAI conventions (operation_name, system, model, token counts, tool names, agent ID)
+   - Life-specific (session_id, run_id, branch_id, loop_phase, operating_mode, budget, state vector, tool_status)
+   - Autonomic conventions (economic_mode, operational/cognitive/economic health)
+   - Lago conventions (stream_id, blob_hash, fs_branch)
+   - Evaluation conventions (evaluator, score, label, layer, timing)
+   - Test coverage: naming conventions, exact value verification
+
+3. **spans.rs (12 tests, passing)** — Contract-derived span builders
+   - `agent_span(session_id, agent_name)` — root invoke_agent span
+   - `phase_span(LoopPhase)` — child spans for Perceive/Deliberate/Gate/Execute/Commit/Reflect/Sleep
+   - `chat_span(model, provider, max_tokens, temperature)` — GenAI chat span
+   - `tool_span(tool_name, tool_call_id)` — GenAI execute_tool span
+   - `record_token_usage(span, TokenUsage)` — inline recording
+   - `record_finish_reason(span, reason)` — stop reason recording
+   - `eval_event(evaluator, score, label, layer, timing)` — evaluation result event
+   - **Dual-write functions (critical):**
+     - `write_trace_context(envelope)` — injects trace_id/span_id into EventEnvelope
+     - `extract_trace_context(envelope)` — retrieves OTel correlation from persisted events
+   - Test coverage: span creation, field recording, context extraction, event labels
+
+4. **metrics.rs (3 tests, passing)** — GenAiMetrics instrument factory
+   - **Histograms:**
+     - `gen_ai.client.token.usage` (u64) — input/output token counts per request
+     - `gen_ai.client.operation.duration` (f64, seconds) — LLM call latency with boundaries [0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0]
+     - `life.eval.score` (f64) — evaluation score distribution with boundaries [0.1..1.0]
+   - **Counters:**
+     - `life.tool.executions` (u64) — tool execution counts by name and status
+     - `life.mode.transitions` (u64) — operating mode transition counts
+     - `life.eval.executions` (u64) — evaluation execution counts
+   - **Gauges:**
+     - `life.budget.tokens_remaining` (u64) — token budget remaining
+     - `life.budget.cost_remaining_usd` (f64) — USD budget remaining
+   - Helper methods: `record_token_usage()`, `record_operation_duration()`, `record_tool_execution()`, `record_budget()`, `record_eval_execution()`, `record_mode_transition()`
+   - Test coverage: metric creation, recording methods
+
+**lib.rs (5 tests, passing):**
+- `VigGuard` guard struct with Drop impl (flushes telemetry)
+- `init_telemetry(config)` entry point
+- Dual-path initialization: `init_with_otel()` (gRPC/HTTP exporters, tracing-opentelemetry layer) vs. `init_logging_only()` (structured logging fallback)
+- JSON and Pretty log formats
+- OTLP header metadata injection (tonic)
+
+---
+
+### What's Missing
+
+**Critical gaps identified:**
+
+1. **No sampling ratio implementation** (VIGIL_SAMPLING_RATIO parsed but never applied)
+   - Config reads and clamps sampling_ratio (0.0..1.0), but SDK isn't wired to use it
+   - Current behavior: all traces exported regardless of ratio
+   - Severity: **HIGH** — Production will export unnecessary volume to OTLP
+
+2. **No capture_content enforcement** (VIGIL_CAPTURE_CONTENT parsed but never used)
+   - Config reads capture_content flag, but no conditional logic prevents prompt/completion redaction
+   - Current behavior: content always captured if spans are created
+   - Severity: **HIGH** — Privacy control is non-functional
+
+3. **No graceful logging fallback for trace-only failures**
+   - If OTel initialization succeeds but exporter fails mid-session, logs are lost
+   - Current design: single subscriber initialized upfront; no retry/fallback
+   - Severity: **MEDIUM** — Partial observability loss during exporter outages
+
+4. **No metric correlation with spans**
+   - Metrics (GenAiMetrics) created fresh per call (`.new()` reads global provider)
+   - Spans created inline; no explicit linkage in span attributes
+   - Current behavior: traces and metrics may drift in correlation IDs
+   - Severity: **MEDIUM** — Trace ↔ Metric joins require manual attribute matching
+
+---
+
+## 2. Vigil Integration in Arcan
+
+### What's Integrated
+
+**Arcan Cargo.toml:**
+- `life-vigil = { version = "0.1.0", path = "../vigil" }` present in Cargo.toml
+- Actively imported in two adapter crates
+
+**arcan-aios-adapters/src/provider.rs:**
+- `chat_span()` created for LLM calls with model/provider/max_tokens/temperature
+- `record_token_usage()` called post-response with TokenUsage
+- `record_finish_reason()` called with stop_reason string
+- `record_response_id()` called with response ID
+- `GenAiMetrics::new("arcan")` created and used to record:
+  - `record_operation_duration()` with model, operation name ("chat"), duration
+  - `record_token_usage()` with model, operation, input/output counts
+- Spans instrumented with `.instrument(chat_span.clone())`
+- Severity: **INTEGRATED and working**
+
+**arcan-aios-adapters/src/tools.rs:**
+- `tool_span()` created for tool calls with tool_name/call_id
+- `record_tool_status()` called with status string (ok/error/timeout/cancelled)
+- `GenAiMetrics::new("arcan")` created and used to record:
+  - `record_tool_execution()` with tool name and status
+- Spans instrumented with `.instrument(tool_span)` for async execution
+- Severity: **INTEGRATED and working**
+
+**arcan/src/nous_observer.rs:**
+- `GenAiMetrics::new("arcan")` used in evaluation observer
+- Likely: recording eval scores and counts
+- Severity: **PARTIALLY integrated**
+
+### What's NOT Integrated
+
+**Phase-level span coverage:**
+- `phase_span(LoopPhase)` exists but **never called in Arcan codebase**
+- No instrumentation for Perceive/Deliberate/Gate/Execute/Commit/Reflect phases
+- `aios_runtime::LoopPhase` enum exists but Vigil spans never wrap loop phases
+- Severity: **CRITICAL** — Major visibility gap in agent loop lifecycle
+
+**Telemetry initialization in Arcan daemon:**
+- No entry point for `init_telemetry()` in arcan binary or arcand
+- Vigil is linked but never initialized at startup
+- Tracing is enabled via "default" dependency chain but no OTel initialization
+- Severity: **CRITICAL** — OTel exporter never stands up; only structured logs work
+
+**Approval latency and gating metrics:**
+- No metrics for approval request → resolution time
+- No counter/gauge for pending approvals
+- No telemetry in `ArcanApprovalAdapter` gate flow
+- Severity: **HIGH** — Approval workflow is invisible
+
+**Budget state projection:**
+- `record_budget()` method exists but never called from ArcanProviderAdapter
+- BudgetState available from kernel but not recorded
+- Severity: **HIGH** — Cost/token budget exhaustion patterns unseen
+
+**Dual-write trace context:**
+- `write_trace_context(envelope)` and `extract_trace_context(envelope)` functions exist
+- Never called from Arcan event persistence paths
+- EventEnvelope trace_id/span_id fields always remain None
+- Severity: **MEDIUM** — Event ↔ Trace correlation missing
+
+**Mode transition metrics:**
+- `record_mode_transition(from, to)` exists
+- Never called when kernel transitions OperatingMode (Explore → Execute → Verify, etc.)
+- Severity: **MEDIUM** — Mode stability patterns hidden
+
+---
+
+## 3. Vigil Integration in Lago
+
+### What's Integrated
+
+**Lago Cargo.toml:**
+- `life-vigil = { version = "0.1.0", path = "../vigil" }` present
+- Actively used in lagod daemon entry point
+
+**lagod/src/main.rs:**
+- `VigConfig::for_service("lago").with_env_overrides()` called
+- `init_telemetry()` guard created and held for daemon lifetime
+- Result: OTel exporter stands up at startup; structured logs configured
+- Severity: **INTEGRATED and working**
+
+### What's NOT Integrated
+
+**Event persistence instrumentation:**
+- No phase_span or tracing in lago-journal event writes
+- No metrics for journal throughput, event latency, storage I/O
+- No observability of redb transaction performance
+- Severity: **CRITICAL** — Persistence layer is a black box
+
+**API handler telemetry:**
+- No instrumentation in lago-api HTTP handlers
+- No latency distribution for /v1/events, /v1/sessions, SSE streaming endpoints
+- No metrics for API error rates, request queue depth
+- Severity: **HIGH** — API performance patterns unknown
+
+**Knowledge index operations:**
+- No metrics for search latency, wikilink traversal depth, graph operations
+- No tracing in lago-knowledge module
+- Severity: **MEDIUM** — Knowledge query performance uncaptured
+
+**Blob storage operations:**
+- No metrics for blob write/read latency, compression ratio, dedup hits
+- No tracing in lago-store blob persistence path
+- Severity: **MEDIUM** — Storage I/O patterns hidden
+
+**SSE format adapter selection:**
+- No metrics for format conversion (OpenAI/Anthropic/Vercel/Lago) latency
+- No counter for format selection frequency
+- Severity: **LOW** — Format adaptation overhead minimal
+
+---
+
+## 4. Vigil Integration in Autonomic
+
+### What's Integrated
+
+**Autonomic Cargo.toml:**
+- `life-vigil = { version = "0.1.0", path = "../vigil" }` present
+
+**autonomicd/src/main.rs:**
+- `VigConfig::for_service("autonomic").with_env_overrides()` called
+- `init_telemetry()` guard created and held for daemon lifetime
+- Result: OTel exporter stands up; structured logs configured
+- Severity: **INTEGRATED and working**
+
+### What's NOT Integrated
+
+**Economic mode transitions:**
+- No metrics for mode transitions (Sovereign → Conserving → Hustle → Hibernate)
+- No tracing in controller rule evaluation
+- No observability of gating decisions (approved vs. denied)
+- Severity: **CRITICAL** — Economic regulation decisions are unobservable
+
+**Health pillar metrics:**
+- `AUTONOMIC_OPERATIONAL_HEALTH`, `AUTONOMIC_COGNITIVE_HEALTH`, `AUTONOMIC_ECONOMIC_HEALTH` semconv constants defined
+- Never recorded as gauge values
+- No real-time health state export to OTLP
+- Severity: **HIGH** — Three-pillar homeostasis state unobservable
+
+**Hysteresis gate behavior:**
+- No metrics for gate state duration (cool-down timing)
+- No counter for anti-flapping successes
+- No tracing through HysteresisGate evaluation
+- Severity: **MEDIUM** — Stability mechanism metrics missing
+
+**Lago event subscription latency:**
+- No metrics for lag between event write (Lago) and projection update (Autonomic)
+- No observability of event processing queue
+- Severity: **MEDIUM** — Event-driven latency patterns hidden
+
+---
+
+## 5. Vigil Integration in Praxis
+
+### What's Integrated
+
+**Praxis Cargo.toml:**
+- **NO** `life-vigil` dependency declared
+- Vigil is NOT imported or used anywhere in Praxis codebase
+
+### What's NOT Integrated
+
+**Tool execution metrics:**
+- Praxis has no recorded metrics for:
+  - Tool execution latency (per tool type: ReadFile, WriteFile, EditFile, Bash, etc.)
+  - Tool failure rates and error classification
+  - Sandbox policy violations (blocked by FsPolicy, SandboxPolicy)
+  - Memory operation latency
+- Severity: **CRITICAL** — Praxis is tool execution engine but completely unobserved
+
+**Sandbox enforcement telemetry:**
+- No metrics for policy rejections (filesystem boundary, timeout, output truncation)
+- No tracing of command runner execution
+- No observability of async command execution state
+- Severity: **HIGH** — Sandbox behavior patterns unknown
+
+**MCP bridge observability:**
+- No metrics for MCP server startup, HTTP connection handling
+- No latency for MCP tool conversions
+- No observability of stdio subprocess lifecycle
+- Severity: **MEDIUM** — MCP interop overhead unobservable
+
+**Skill discovery and activation:**
+- No metrics for SKILL.md parsing, registry operations
+- No observability of skill activation frequency
+- Severity: **LOW** — Low-frequency operation
+
+---
+
+## 6. GenAI Semantic Conventions Coverage
+
+### What's Implemented
+
+Vigil's `semconv.rs` module follows **OpenTelemetry GenAI v1.39.0 spec** with excellent coverage:
+
+**Request attributes:**
+- `gen_ai.operation.name` ✓ (chat, execute_tool, text_completion)
+- `gen_ai.system` ✓ (anthropic, openai, etc.)
+- `gen_ai.request.model` ✓
+- `gen_ai.request.max_tokens` ✓
+- `gen_ai.request.temperature` ✓
+- `gen_ai.request.top_p` ✓
+
+**Usage attributes:**
+- `gen_ai.usage.input_tokens` ✓
+- `gen_ai.usage.output_tokens` ✓
+
+**Response attributes:**
+- `gen_ai.response.finish_reasons` ✓
+- `gen_ai.response.id` ✓
+- `gen_ai.response.model` ✓
+
+**Tool attributes:**
+- `gen_ai.tool.name` ✓
+- `gen_ai.tool.call.id` ✓
+
+**Agent attributes:**
+- `gen_ai.agent.name` ✓
+- `gen_ai.agent.id` ✓
+
+**Evaluation attributes (v1.39.0):**
+- `gen_ai.evaluation.result` ✓ (event name)
+
+### What's Missing
+
+**Cost tracking:**
+- No `gen_ai.usage.cost` attribute for per-request cost recording
+- Current implementation tracks cost only via Autonomic economic events, not OTel
+- Severity: **MEDIUM** — Cost visibility requires custom event parsing
+
+**Model-specific attributes:**
+- No `gen_ai.request.*` attributes for vision, function_calling specifics
+- No support for multi-modal token differentiation
+- Severity: **LOW** — Feature-specific; not critical for baseline
+
+**Latency breakdown:**
+- No distinction between time-to-first-token vs. total-latency
+- Single `gen_ai.client.operation.duration` histogram without breakdown
+- Severity: **MEDIUM** — Important for streaming optimization visibility
+
+---
+
+## 7. Contract-Derived Spans
+
+### What's Implemented
+
+**Span hierarchy:**
+- Root: `invoke_agent` (session context)
+  - Child: `loop_phase` (Perceive/Deliberate/Gate/Execute/Commit/Reflect/Sleep)
+    - Child: `chat` (model call within phase)
+    - Child: `execute_tool` (tool invocation within phase)
+
+**Attributes:**
+- `life.session_id` on root
+- `life.loop_phase` on phase spans
+- `gen_ai.operation.name`, `gen_ai.system`, `gen_ai.request.model` on chat spans
+- `gen_ai.tool.name`, `gen_ai.tool.call.id` on tool spans
+- `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` recordable
+- `life.tool.status` recordable
+
+### What's Missing
+
+**Phase-to-phase implementation:**
+- Spans defined in `spans.rs` but never instantiated in agent loop
+- No actual phase wrapping in Arcan's aios-runtime integration
+- Loop phases from `aios_runtime::LoopPhase` never create child spans
+- Severity: **CRITICAL** — Span hierarchy is designed but dead code
+
+**Run-level context:**
+- `life.run_id` defined in semconv but never recorded on spans
+- No tracking of run sequence within session
+- Severity: **HIGH** — Run-level aggregation impossible
+
+**Event sequence tracking:**
+- `life.event_seq` semconv defined but never recorded
+- No span-to-event correlation via sequence numbers
+- Severity: **MEDIUM** — Event causality tracing incomplete
+
+**Operating mode context:**
+- `life.operating_mode` semconv defined but never recorded on spans
+- Mode transitions (Explore → Execute → Verify) invisible in traces
+- Severity: **MEDIUM** — Behavioral mode patterns hidden
+
+**Budget context:**
+- `life.budget.*` attributes defined but never recorded during spans
+- Budget exhaustion decisions happen outside traced context
+- Severity: **MEDIUM** — Budget pressure patterns hidden
+
+---
+
+## 8. Metrics Instruments
+
+### What Exists
+
+| Metric | Type | Boundaries | Status |
+|--------|------|-----------|--------|
+| `gen_ai.client.token.usage` | Histogram (u64) | per-token | Wired (partially) |
+| `gen_ai.client.operation.duration` | Histogram (f64, s) | [0.1, 0.25, ..., 120.0] | Wired (partially) |
+| `life.tool.executions` | Counter (u64) | by tool, status | Wired (partially) |
+| `life.budget.tokens_remaining` | Gauge (u64) | — | Not wired |
+| `life.budget.cost_remaining_usd` | Gauge (f64) | — | Not wired |
+| `life.mode.transitions` | Counter (u64) | from, to | Not wired |
+| `life.eval.executions` | Counter (u64) | evaluator, layer | Wired (nous) |
+| `life.eval.score` | Histogram (f64) | [0.1..1.0] | Wired (nous) |
+
+### Critical Gaps
+
+**Approval workflow:**
+- No metric: `life.approval.latency` (histogram) — time from request to resolution
+- No metric: `life.approval.pending_count` (gauge) — open approvals
+- No metric: `life.approval.resolution_rate` (counter) — approved vs. denied
+- Severity: **HIGH** — Critical flow unobserved
+
+**Stream health:**
+- No metric: `life.stream.events_emitted` (counter) — SSE frame count
+- No metric: `life.stream.reconnects` (counter) — client disconnect/reconnect
+- No metric: `life.stream.buffer_depth` (gauge) — queued events
+- Severity: **HIGH** — Streaming reliability patterns hidden
+
+**Persistence layer:**
+- No metric: `life.journal.write_latency` (histogram) — event append duration
+- No metric: `life.journal.transactions` (counter) — commit count
+- No metric: `life.blob_store.operations` (counter) — read/write/deddup
+- Severity: **HIGH** — Storage I/O performance unknown
+
+**Error classes:**
+- No metric: `life.errors_total` (counter) — by error class (ToolNotFound, PolicyDenied, BudgetExhausted, etc.)
+- No breakout of transient vs. permanent failures
+- Severity: **HIGH** — Failure mode classification missing
+
+**Latency percentiles:**
+- Current histograms use fixed boundaries; no P50/P95/P99 automatic calculation
+- OTLP exporters compute percentiles on ingest, but no explicit specification
+- Severity: **MEDIUM** — Query-time percentile computation required
+
+---
+
+## 9. Graceful Degradation
+
+### What Works
+
+1. **No OTLP endpoint configured:**
+   - `init_telemetry()` detects missing `OTEL_EXPORTER_OTLP_ENDPOINT`
+   - Falls back to `init_logging_only()` which configures tracing-subscriber
+   - Structured JSON or pretty logs emitted to stderr
+   - **Behavior: CORRECT**
+
+2. **OTLP exporter unavailable at runtime:**
+   - SDK uses batch exporter with background thread
+   - Failed batches logged to stderr; application continues
+   - **Behavior: CORRECT**
+
+3. **Subscriber initialization race (tests):**
+   - `VigGuard` uses `try_init()` which tolerates multiple init attempts
+   - Tests can run in any order without global state collision
+   - **Behavior: CORRECT**
+
+### What Fails
+
+1. **Partial telemetry loss:**
+   - If metric exporter fails but span exporter succeeds (or vice versa), no fallback
+   - Metrics/traces may arrive partially
+   - **Behavior: SILENT PARTIAL LOSS** — Severity HIGH
+
+2. **No exporter health checks:**
+   - No periodic heartbeat to detect exporter connectivity loss
+   - Silent loss until next batch failure (default 5s interval)
+   - **Behavior: DELAYED DETECTION** — Severity MEDIUM
+
+---
+
+## 10. Platform Support
+
+### Implemented
+
+**Configuration support for:**
+- Langfuse (via custom headers + endpoint)
+- LangSmith (via API key headers)
+- Jaeger (standard OTLP/gRPC)
+- Grafana Tempo (standard OTLP/gRPC)
+
+**Vigil CLAUDE.md provides examples for all four platforms.**
+
+### Missing
+
+**Native SDK integrations:**
+- No vendored Langfuse SDK; relies on OTLP only
+- No LangSmith-specific attributes or session tracking
+- No Datadog, New Relic, Honeycomb native integrations
+- Severity: **LOW** — OTLP is sufficient baseline
+
+**Platform-specific attributes:**
+- No Langfuse prompt versioning attributes
+- No LangSmith metadata tagging
+- Severity: **LOW** — Can be added as custom attributes
+
+---
+
+## 11. Runtime Telemetry Gaps (The Critical List)
+
+### Agent Loop Lifecycle
+
+| Phase | Span | Metrics | Status |
+|-------|------|---------|--------|
+| Perceive (input processing) | Missing | Missing | ✗ CRITICAL |
+| Deliberate (context assembly) | Missing | Missing | ✗ CRITICAL |
+| Gate (approval check) | Missing | approval_latency, approval_pending | ✗ CRITICAL |
+| Execute (tool invocation) | tool_span | tool_executions | ✓ Partial |
+| Commit (event persistence) | Missing | journal_write_latency | ✗ CRITICAL |
+| Reflect (evaluation) | Missing (eval_event exists but unused) | eval_executions, eval_score | ✓ Partial |
+| Sleep (mode transition) | Missing | mode_transitions | ✗ CRITICAL |
+
+### Request-Response Lifecycle
+
+| Component | Latency | Throughput | Error Classification | Status |
+|-----------|---------|------------|-----------------------|--------|
+| Arcan → Provider call | ✓ operation_duration | Missing | Missing | Partial |
+| Provider → Lago event store | Missing | Missing | Missing | ✗ CRITICAL |
+| Approval enqueue → resolve | Missing | ✗ CRITICAL | ✗ CRITICAL | ✗ CRITICAL |
+| SSE streaming | Missing | Missing | Missing | ✗ CRITICAL |
+| Autonomic gating decision | Missing | Missing | Missing | ✗ CRITICAL |
+| Tool execution (end-to-end) | Missing breakdown | ✓ tool_executions | ✓ tool_status | Partial |
+
+### Failure Modes (Visibility)
+
+| Failure Class | Observable | Root Cause Tracing | Status |
+|---------------|------------|-------------------|--------|
+| ToolNotFound | Via span event | Requires log parsing | ✗ CRITICAL |
+| PolicyDenied | Via span event | Requires log parsing | ✗ CRITICAL |
+| BudgetExhausted | Via span event | Requires log parsing | ✗ CRITICAL |
+| ApprovalTimeout | Missing metric | Requires approval table scan | ✗ CRITICAL |
+| StreamDisconnect | Missing metric | Requires HTTP server logs | ✗ CRITICAL |
+| JournalWriteFailure | Missing metric | Requires redb diagnostics | ✗ CRITICAL |
+
+---
+
+## Summary Table: Severity-Ordered Gaps
+
+| Priority | Gap | Component | Impact | Effort |
+|----------|-----|-----------|--------|--------|
+| CRITICAL | Phase-level spans never created | Arcan agent loop | Entire loop lifecycle invisible | Medium |
+| CRITICAL | Telemetry init missing in Arcan daemon | Arcand entry point | OTel exporter never starts | Low |
+| CRITICAL | No approval latency metrics | Arcan approval flow | Approval bottleneck detection impossible | Medium |
+| CRITICAL | No event-to-trace correlation | Arcan-Lago bridge | Post-hoc event ↔ trace joins fail | Medium |
+| CRITICAL | No journal persistence instrumentation | Lago-journal | Storage I/O is black box | High |
+| CRITICAL | No economic mode observability | Autonomic controller | Three-pillar regulation invisible | Medium |
+| CRITICAL | Praxis completely unobserved | Praxis tool engine | Tool execution overhead hidden | High |
+| HIGH | Sampling ratio non-functional | Vigil config | Over-export to OTLP in production | Low |
+| HIGH | Capture content flag unused | Vigil config | Privacy control broken | Low |
+| HIGH | No API handler instrumentation | Lago-api | HTTP performance unknown | Medium |
+| HIGH | No budget state recording | Arcan provider | Cost/token exhaustion patterns invisible | Low |
+| HIGH | No knowledge index metrics | Lago-knowledge | Search/graph latency unknown | Medium |
+| MEDIUM | No metric ↔ span correlation | Vigil metrics | Cross-correlation requires manual join | Low |
+| MEDIUM | No graceful logging fallback | Vigil initialization | Partial exporter failure → silent loss | Low |
+| MEDIUM | Mode transition metrics unused | Arcan kernel | Behavioral mode patterns hidden | Low |
+| MEDIUM | Hysteresis gate unobserved | Autonomic controller | Anti-flapping mechanism invisible | Low |
+| MEDIUM | No stream health metrics | Arcan SSE | Reconnect/buffer patterns unknown | Medium |
+| LOW | No vendor SDK integrations | Vigil platform support | Baseline OTLP sufficient | High |
+
+---
+
+## Recommendations (Ordered by Impact)
+
+1. **Add phase-span instrumentation to aios-runtime** (CRITICAL)
+   - Wrap each LoopPhase loop iteration with `phase_span(phase).enter()`
+   - Record phase entry/exit duration
+   - Attach budget/mode context to phase spans
+   - Effort: ~3 hours | Impact: Entire loop lifecycle becomes observable
+
+2. **Initialize Vigil in Arcan daemon** (CRITICAL)
+   - Add `init_telemetry()` call to arcand/src/lib.rs before router setup
+   - Enable OTLP via env vars
+   - Effort: ~30 min | Impact: OTel pipeline stands up; spans actually exported
+
+3. **Add approval latency metrics** (CRITICAL)
+   - Instrument `ArcanApprovalAdapter` to record enqueue timestamp
+   - Record resolve latency on `approve()` call
+   - Add gauge for pending approval count
+   - Effort: ~2 hours | Impact: Approval bottleneck detection enabled
+
+4. **Add dual-write trace context to event persistence** (CRITICAL)
+   - Call `write_trace_context(envelope)` before storing events in Lago
+   - Call `extract_trace_context(envelope)` on event replay
+   - Effort: ~1 hour | Impact: Event ↔ Trace joins possible
+
+5. **Instrument Lago-journal write paths** (CRITICAL)
+   - Add span around redb transaction
+   - Record histogram for event append latency
+   - Counter for successful/failed writes
+   - Effort: ~3 hours | Impact: Storage I/O becomes observable
+
+6. **Add Praxis tool execution telemetry** (CRITICAL)
+   - Create GenAiMetrics in praxis-core
+   - Record histogram for tool latency per tool type
+   - Counter for tool failures by error class
+   - Effort: ~3 hours | Impact: Tool execution overhead becomes visible
+
+7. **Add Autonomic health state gauges** (CRITICAL)
+   - Call `metrics.record_health(operational, cognitive, economic)` each fold
+   - Export three-pillar state as gauges
+   - Effort: ~1 hour | Impact: Homeostasis regulation becomes observable
+
+8. **Implement sampling ratio and capture_content** (HIGH)
+   - Wire `config.sampling_ratio` to SDK tracer provider
+   - Implement conditional redaction in span record calls based on `config.capture_content`
+   - Effort: ~2 hours | Impact: Production readiness (volume control + privacy)
+
+---
+
+## Conclusion
+
+Vigil is **structurally complete and well-designed**, with **excellent graceful degradation** and **comprehensive GenAI semantic convention coverage**. However, **integration across the runtime is incomplete**, leaving **critical observability gaps** that block Phase R2 completion.
+
+**Current state: 26 tests passing, 4 modules, 2/7 integration points active (Lago init, Arcan partial).**
+
+**To complete Phase R2 ("Observability Maturity")**, the following must be addressed:
+1. Phase-level span instrumentation in aios-runtime
+2. Telemetry initialization in Arcan daemon
+3. Approval workflow metrics
+4. Event-to-trace correlation (dual-write)
+5. Journal persistence instrumentation
+6. Praxis tool execution observability
+7. Autonomic health state export
+
+**Estimated effort to Phase R2 completion: ~20 person-hours.**</result>
+<usage><total_tokens>105770</total_tokens><tool_uses>53</tool_uses><duration_ms>143413</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-broomva-broomva-core-life/2f64ca4c-f174-5984-8940-d45a0b8b4bf1/tasks/aedc73f6387c86765.output
+
+---
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485734997116719265" user="broomva" user_id="352126905920782347" ts="2026-03-23T20:20:26.934Z">
+Wait, which linear workspace are you using?
+</channel>
+
+---
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485735088409808986" user="broomva" user_id="352126905920782347" ts="2026-03-23T20:20:48.700Z">
+Please remove the tickets from stimulus workspace
+</channel>
+
+---
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485735381386399784" user="broomva" user_id="352126905920782347" ts="2026-03-23T20:21:58.551Z">
+What’s current pwd?
+</channel>
+
+---
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485736680156692480" user="broomva" user_id="352126905920782347" ts="2026-03-23T20:27:08.202Z">
+Alright, check maco again
+</channel>
+
+---
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485744845359284458" user="broomva" user_id="352126905920782347" ts="2026-03-23T20:59:34.938Z">
+Please check mcp again
+</channel>
+
+---
+
+<channel source="plugin:discord:discord" chat_id="1485102695441367040" message_id="1485745020018364536" user="broomva" user_id="352126905920782347" ts="2026-03-23T21:00:16.580Z">
+Weird, can you restart the session?
+</channel>
