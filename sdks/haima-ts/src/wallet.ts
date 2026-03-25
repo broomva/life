@@ -7,9 +7,12 @@ import {
   createWalletClient,
   http,
   type WalletClient,
-  type Account,
 } from "viem";
-import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
+import {
+  type PrivateKeyAccount,
+  privateKeyToAccount,
+  generatePrivateKey,
+} from "viem/accounts";
 import { base, baseSepolia, mainnet } from "viem/chains";
 import { ChainId, type WalletInfo } from "./types.js";
 
@@ -20,7 +23,7 @@ const CHAIN_MAP = {
 } as const;
 
 export class HaimaWallet {
-  private account: Account;
+  private account: PrivateKeyAccount;
   private client: WalletClient;
   private _chain: ChainId;
 
