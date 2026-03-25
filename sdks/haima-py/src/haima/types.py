@@ -55,13 +55,19 @@ class PaymentDecision(str, Enum):
 
 
 class PaymentPolicy(BaseModel):
-    """Payment policy thresholds (micro-credits)."""
+    """Payment policy thresholds (micro-credits).
+
+    Mirrors haima-core's PaymentPolicy struct. Amounts are in micro-credits
+    (1 USDC = 1,000,000 micro-credits).
+    """
 
     auto_approve_cap: int = 100
     hard_cap_per_tx: int = 1_000_000
     session_spend_cap: int = 10_000_000
     max_tx_per_minute: int = 10
     enabled: bool = True
+    allow_in_hibernate: bool = False
+    allow_in_hustle: bool = True
 
     def evaluate(self, micro_credits: int) -> PaymentDecision:
         if not self.enabled:
@@ -103,13 +109,40 @@ class FacilitateResponse(BaseModel):
     details: Optional[str] = None
 
 
+class CreditTier(str, Enum):
+    """Credit tier determines spending limits. Mirrors haima-core CreditTier."""
+
+    NONE = "none"
+    MICRO = "micro"
+    STANDARD = "standard"
+    PREMIUM = "premium"
+
+    @property
+    def spending_limit(self) -> int:
+        """Spending limit in micro-USD for this tier."""
+        return {
+            CreditTier.NONE: 0,
+            CreditTier.MICRO: 1_000,
+            CreditTier.STANDARD: 100_000,
+            CreditTier.PREMIUM: 10_000_000,
+        }[self]
+
+
 class CreditScore(BaseModel):
-    """Agent credit score from the bureau."""
+    """Agent credit score. Mirrors haima-core CreditScore.
+
+    The composite score is 0.0-1.0 (not 0-1000). Tier thresholds:
+    - None: < 0.3
+    - Micro: 0.3 - 0.5
+    - Standard: 0.5 - 0.75
+    - Premium: >= 0.75
+    """
 
     agent_id: str
-    score: int = Field(ge=0, le=1000)
-    tier: str
-    max_credit_line: int = 0
+    score: float = Field(ge=0.0, le=1.0)
+    tier: CreditTier
+    spending_limit_micro_usd: int = 0
+    current_balance_micro_usd: int = 0
 
 
 class FacilitatorStats(BaseModel):
