@@ -1,7 +1,7 @@
 {
-  "name": "@haima/sdk",
+  "name": "life-haima",
   "version": "0.1.0",
-  "description": "Multi-framework x402 payment SDK for AI agents",
+  "description": "Multi-framework x402 payment SDK for AI agents — TypeScript bindings for Life Agent OS Haima subsystem",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,9 +27,14 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
-  "keywords": ["x402", "payments", "ai-agents", "haima", "web3", "elizaos"],
+  "keywords": ["x402", "payments", "ai-agent", "haima", "life-agent-os", "web3"],
   "author": "Broomva <carlos@broomva.tech>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/broomva/life"
+  },
+  "homepage": "https://broomva.tech",
   "dependencies": {
     "viem": "^2.21"
   },
