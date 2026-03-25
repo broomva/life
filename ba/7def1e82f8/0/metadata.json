@@ -1,0 +1,36 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "ba7def1e82f8",
+  "session_id": "12293244-8977-4465-aeda-118f13576ab4",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-25T03:55:39.042887Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    ".gitignore",
+    ".mcp.json",
+    "README.md",
+    "docs/conversations/Conversations.md",
+    "scripts/harness/lint.sh",
+    "scripts/harness/smoke.sh",
+    "scripts/harness/test.sh"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "6e994ab56a7e",
+  "token_usage": {
+    "input_tokens": 11,
+    "cache_creation_tokens": 78871,
+    "cache_read_tokens": 178250,
+    "output_tokens": 631,
+    "api_call_count": 5
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-25T03:55:39.026055Z",
+    "agent_lines": 120,
+    "human_added": 69,
+    "human_modified": 30,
+    "human_removed": 0,
+    "total_committed": 216,
+    "agent_percentage": 55.55555555555556
+  }
+}
