@@ -13,7 +13,7 @@ fi
 if command -v cargo >/dev/null 2>&1; then
   cd "$root_dir"
   ran=0
-  for ws in aiOS arcan lago spaces; do
+  for ws in aiOS arcan lago spaces anima autonomic haima nous praxis vigil; do
     if [ -f "$ws/Cargo.toml" ]; then
       (cd "$ws" && cargo clippy --workspace -- -D warnings)
       ran=1
