@@ -2,8 +2,12 @@ name: Control Heartbeat
 
 on:
   schedule:
-    - cron: '15 * * * *'
+    - cron: '15 */6 * * *'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   heartbeat:
@@ -22,6 +26,8 @@ jobs:
         with:
           toolchain: stable
           components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Configure hooks path
         run: git config core.hooksPath .githooks

@@ -5,6 +5,10 @@ on:
     - cron: '0 4 * * *'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   audit:
     runs-on: ubuntu-latest
@@ -23,6 +27,8 @@ jobs:
         with:
           toolchain: stable
           components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Configure hooks path
         run: git config core.hooksPath .githooks
