@@ -54,13 +54,15 @@ echo "== heartbeat: control feedback loop =="
 if ./scripts/audit_control.sh . >/tmp/control-heartbeat-audit.log 2>&1; then
   ok "control audit passed"
 else
-  err "control audit failed (see /tmp/control-heartbeat-audit.log)"
+  err "control audit failed"
+  cat /tmp/control-heartbeat-audit.log
 fi
 
 if ./scripts/audit_harness.sh . >/tmp/control-heartbeat-harness.log 2>&1; then
   ok "harness audit passed"
 else
-  err "harness audit failed (see /tmp/control-heartbeat-harness.log)"
+  err "harness audit failed"
+  cat /tmp/control-heartbeat-harness.log
 fi
 
 if [ "$failures" -eq 0 ]; then
