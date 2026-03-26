@@ -1,0 +1,55 @@
+# Support Agent Template — Customer-facing stack with homeostasis
+#
+# Deploys: arcan (runtime) + lago (persistence) + autonomic (homeostasis)
+#
+# Use case: Customer support, ticket triage, FAQ responses.
+# Autonomic ensures stable response times under load.
+# No finance engine — cost tracked at platform level.
+
+[meta]
+name = "support-agent"
+description = "Customer support agent with persistence and homeostatic regulation"
+use_case = "Customer support — ticket triage, FAQ, conversational assistance"
+version = "0.1.0"
+
+[shared_env]
+AIOS_STATE_ROOT = "/data/.aios"
+RUST_LOG = "info"
+
+[scaling]
+min_replicas = 2
+max_replicas = 8
+scale_down_mode = "conserving"
+scale_up_mode = "sovereign"
+
+[services.arcan]
+image = "ghcr.io/broomva/arcan:latest"
+port = 3000
+public = true
+health_path = "/health"
+volume = "/data"
+command = "arcan serve --provider ${ARCAN_PROVIDER:-anthropic} --port 3000 --autonomic-url http://autonomicd.railway.internal:3002 --data-dir /data/.aios/tenants/default/projects/life/sessions/prod"
+
+[services.arcan.env]
+ARCAN_PROVIDER = "anthropic"
+ARCAN_AUTONOMIC_URL = "http://autonomicd.railway.internal:3002"
+
+[services.lago]
+image = "ghcr.io/broomva/lago:latest"
+port = 8080
+public = false
+health_path = "/health"
+volume = "/data"
+command = "lagod --data-dir /data/.aios/tenants/default/projects/life/sessions/prod"
+
+[services.lago.env]
+
+[services.autonomic]
+image = "ghcr.io/broomva/autonomic:latest"
+port = 3002
+public = false
+health_path = "/health"
+volume = "/data"
+command = "autonomicd --bind 0.0.0.0:3002 --lago-data-dir /data/.aios/control/state"
+
+[services.autonomic.env]

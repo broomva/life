@@ -1,0 +1,194 @@
+// A2A Protocol gRPC Service Definition for Life Spaces.
+//
+// Provides gRPC transport alongside the JSON-RPC HTTP transport.
+// Based on the A2A protocol specification (a2a-protocol.org).
+
+syntax = "proto3";
+
+package a2a.v1;
+
+// The A2A service exposes agent-to-agent communication primitives.
+service A2AService {
+  // Send a message to an agent and receive the task result.
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+
+  // Stream a message to an agent and receive incremental updates.
+  rpc StreamMessage(SendMessageRequest) returns (stream TaskEvent);
+
+  // Get the current state of a task.
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+
+  // Cancel a running task.
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+
+  // List tasks matching criteria.
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+
+  // Get an agent's card (discovery).
+  rpc GetAgentCard(GetAgentCardRequest) returns (AgentCardResponse);
+
+  // List all available agents.
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+}
+
+// --- Request/Response Messages ---
+
+message SendMessageRequest {
+  // Target agent ID
+  string agent_id = 1;
+  // The message to send
+  TaskMessage message = 2;
+  // Existing task ID for follow-up messages (optional)
+  optional string task_id = 3;
+  // Context ID for grouping related tasks (optional)
+  optional string context_id = 4;
+}
+
+message SendMessageResponse {
+  Task task = 1;
+}
+
+message GetTaskRequest {
+  string task_id = 1;
+  bool include_history = 2;
+}
+
+message GetTaskResponse {
+  Task task = 1;
+}
+
+message CancelTaskRequest {
+  string task_id = 1;
+}
+
+message CancelTaskResponse {
+  Task task = 1;
+}
+
+message ListTasksRequest {
+  // Filter by context ID
+  optional string context_id = 1;
+  // Filter by agent ID
+  optional string agent_id = 2;
+  // Filter by state
+  optional string state = 3;
+  // Maximum results
+  int32 limit = 4;
+}
+
+message ListTasksResponse {
+  repeated Task tasks = 1;
+}
+
+message GetAgentCardRequest {
+  string agent_id = 1;
+}
+
+message AgentCardResponse {
+  // JSON serialized AgentCard
+  string card_json = 1;
+}
+
+message ListAgentsRequest {
+  // Filter by tag
+  optional string tag = 1;
+  int32 limit = 2;
+}
+
+message ListAgentsResponse {
+  repeated AgentSummary agents = 1;
+}
+
+// --- Core Data Types ---
+
+message Task {
+  string id = 1;
+  string context_id = 2;
+  TaskStatus status = 3;
+  repeated Artifact artifacts = 4;
+  repeated TaskMessage history = 5;
+}
+
+message TaskStatus {
+  // One of: submitted, working, input_required, auth_required,
+  // completed, failed, canceled, rejected
+  string state = 1;
+  optional string message = 2;
+  optional TaskError error = 3;
+  string timestamp = 4;
+}
+
+message TaskError {
+  string code = 1;
+  string message = 2;
+}
+
+message TaskMessage {
+  // "requester" or "handler"
+  string role = 1;
+  repeated MessagePart parts = 2;
+  optional string timestamp = 3;
+}
+
+message MessagePart {
+  oneof content {
+    TextPart text = 1;
+    DataPart data = 2;
+  }
+}
+
+message TextPart {
+  string text = 1;
+}
+
+message DataPart {
+  bytes data = 1;
+  string mime_type = 2;
+}
+
+message Artifact {
+  uint32 index = 1;
+  optional string name = 2;
+  repeated ArtifactPart parts = 3;
+}
+
+message ArtifactPart {
+  oneof content {
+    TextArtifact text = 1;
+    DataArtifact data = 2;
+    FileArtifact file = 3;
+  }
+}
+
+message TextArtifact {
+  string text = 1;
+  optional string mime_type = 2;
+}
+
+message DataArtifact {
+  bytes data = 1;
+  string mime_type = 2;
+}
+
+message FileArtifact {
+  string uri = 1;
+  optional string mime_type = 2;
+}
+
+// Streaming event for StreamMessage
+message TaskEvent {
+  oneof event {
+    TaskStatus status_update = 1;
+    Artifact artifact_update = 2;
+    TaskMessage message_update = 3;
+  }
+}
+
+message AgentSummary {
+  string agent_id = 1;
+  string name = 2;
+  string description = 3;
+  string url = 4;
+  string version = 5;
+  string card_url = 6;
+}

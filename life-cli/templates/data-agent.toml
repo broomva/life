@@ -1,0 +1,53 @@
+# Data Agent Template — Lean processing stack
+#
+# Deploys: arcan (runtime) + lago (persistence) + haima (cost tracking)
+#
+# Use case: Data processing, ETL pipelines, analysis tasks.
+# Lighter stack — no autonomic homeostasis or quality scoring.
+# Cost tracking via Haima for per-task billing.
+
+[meta]
+name = "data-agent"
+description = "Lean data processing agent with persistence and cost tracking"
+use_case = "Data processing — ETL, analysis, report generation, data pipelines"
+version = "0.1.0"
+
+[shared_env]
+AIOS_STATE_ROOT = "/data/.aios"
+RUST_LOG = "info"
+
+[scaling]
+min_replicas = 1
+max_replicas = 10
+scale_down_mode = "hustle"
+scale_up_mode = "sovereign"
+
+[services.arcan]
+image = "ghcr.io/broomva/arcan:latest"
+port = 3000
+public = true
+health_path = "/health"
+volume = "/data"
+command = "arcan serve --provider ${ARCAN_PROVIDER:-anthropic} --port 3000 --data-dir /data/.aios/tenants/default/projects/life/sessions/prod"
+
+[services.arcan.env]
+ARCAN_PROVIDER = "anthropic"
+
+[services.lago]
+image = "ghcr.io/broomva/lago:latest"
+port = 8080
+public = false
+health_path = "/health"
+volume = "/data"
+command = "lagod --data-dir /data/.aios/tenants/default/projects/life/sessions/prod"
+
+[services.lago.env]
+
+[services.haima]
+image = "ghcr.io/broomva/haima:latest"
+port = 6000
+public = false
+health_path = "/health"
+volume = "/data"
+
+[services.haima.env]
