@@ -283,6 +283,25 @@ pub async fn get_session(
     Ok(Json(SessionResponse::from(&session)))
 }
 
+/// PUT /v1/sessions/:id
+///
+/// Upsert a session by its ID. Used by remote clients (e.g. arcan) that
+/// manage their own session IDs and need to register or update a session in
+/// the journal without the journal auto-assigning an ID.
+///
+/// The `session_id` in the request body must match the path parameter; if
+/// absent it is set automatically.
+pub async fn upsert_session(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(mut session): Json<Session>,
+) -> Result<axum::http::StatusCode, ApiError> {
+    // Authoritative ID comes from the path, not the body.
+    session.session_id = SessionId::from_string(id);
+    state.journal.put_session(session).await?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

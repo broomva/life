@@ -37,11 +37,22 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/sessions",
             post(routes::sessions::create_session).get(routes::sessions::list_sessions),
         )
-        .route("/sessions/{id}", get(routes::sessions::get_session))
-        // --- Events (SSE)
+        .route(
+            "/sessions/{id}",
+            get(routes::sessions::get_session).put(routes::sessions::upsert_session),
+        )
+        // --- Events: SSE stream + write/read/head
         .route(
             "/sessions/{id}/events",
-            get(routes::events::stream_events),
+            get(routes::events::stream_events).post(routes::events::append_event),
+        )
+        .route(
+            "/sessions/{id}/events/read",
+            get(routes::events::read_events),
+        )
+        .route(
+            "/sessions/{id}/events/head",
+            get(routes::events::head_seq),
         )
         // --- Branches: POST and GET on the same path
         .route(

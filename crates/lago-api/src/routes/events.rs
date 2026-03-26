@@ -2,16 +2,19 @@ use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::http::{HeaderName, HeaderValue};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use futures::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument};
 
+use lago_core::event::EventEnvelope;
 use lago_core::id::{BranchId, SeqNo, SessionId};
+use lago_core::EventQuery;
 
 use crate::error::ApiError;
 use crate::sse::format::{SseFormat, SseFrame};
@@ -72,6 +75,102 @@ fn frame_to_sse_event(frame: SseFrame) -> SseEvent {
     }
     event
 }
+
+// ─── Request / response types for write endpoints ─────────────────────────
+
+#[derive(Deserialize)]
+pub struct AppendEventRequest {
+    pub event: EventEnvelope,
+}
+
+#[derive(Serialize)]
+pub struct AppendEventResponse {
+    pub seq: SeqNo,
+}
+
+#[derive(Deserialize, Default)]
+pub struct ReadEventsQuery {
+    #[serde(default = "default_branch")]
+    pub branch: String,
+    #[serde(default)]
+    pub after_seq: SeqNo,
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize, Default)]
+pub struct HeadQuery {
+    #[serde(default = "default_branch")]
+    pub branch: String,
+}
+
+#[derive(Serialize)]
+pub struct HeadSeqResponse {
+    pub seq: SeqNo,
+}
+
+// ─── POST /v1/sessions/:id/events ─────────────────────────────────────────
+
+/// POST /v1/sessions/:id/events
+///
+/// Append a single event to the journal. The `seq` field in the request body
+/// is ignored — the journal assigns a monotonically increasing sequence number.
+/// Returns `{ seq }` with the assigned sequence.
+pub async fn append_event(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+    Json(body): Json<AppendEventRequest>,
+) -> Result<Json<AppendEventResponse>, ApiError> {
+    let mut event = body.event;
+    // Ensure session_id on the envelope matches the path parameter.
+    event.session_id = SessionId::from_string(session_id);
+    let seq = state.journal.append(event).await?;
+    Ok(Json(AppendEventResponse { seq }))
+}
+
+// ─── GET /v1/sessions/:id/events/read ─────────────────────────────────────
+
+/// GET /v1/sessions/:id/events/read?branch=main&after_seq=0&limit=100
+///
+/// Batch-read events from the journal. Unlike the SSE stream endpoint this
+/// returns immediately with the current events — it does not tail.
+pub async fn read_events(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+    Query(query): Query<ReadEventsQuery>,
+) -> Result<Json<Vec<EventEnvelope>>, ApiError> {
+    let session_id = SessionId::from_string(session_id);
+    let branch_id = BranchId::from_string(query.branch);
+
+    let mut q = EventQuery::new()
+        .session(session_id)
+        .branch(branch_id)
+        .after(query.after_seq.saturating_sub(1));
+    if let Some(limit) = query.limit {
+        q = q.limit(limit);
+    }
+
+    let events = state.journal.read(q).await?;
+    Ok(Json(events))
+}
+
+// ─── GET /v1/sessions/:id/events/head ─────────────────────────────────────
+
+/// GET /v1/sessions/:id/events/head?branch=main
+///
+/// Returns the current head sequence number for a session+branch.
+/// Returns `{ seq: 0 }` if the session has no events yet.
+pub async fn head_seq(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+    Query(query): Query<HeadQuery>,
+) -> Result<Json<HeadSeqResponse>, ApiError> {
+    let session_id = SessionId::from_string(session_id);
+    let branch_id = BranchId::from_string(query.branch);
+    let seq = state.journal.head_seq(&session_id, &branch_id).await?;
+    Ok(Json(HeadSeqResponse { seq }))
+}
+
+// ─── SSE stream ───────────────────────────────────────────────────────────
 
 /// GET /v1/sessions/:id/events
 ///
