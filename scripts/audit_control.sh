@@ -99,7 +99,7 @@ baseline=(
   "scripts/control/test.sh"
   "docs/control/ARCHITECTURE.md"
   "docs/control/OBSERVABILITY.md"
-  ".github/workflows/control-harness.yml"
+  ".github/workflows/harness.yml"
 )
 
 for rel in "${baseline[@]}"; do
@@ -110,7 +110,7 @@ echo
 check_contains "AGENTS.md" "Harness Commands|Control Commands" "AGENTS.md command section"
 check_contains "METALAYER.md" "Setpoints" "METALAYER setpoint section"
 check_contains "Makefile.control" "^control-audit:" "Makefile.control control-audit target"
-check_contains ".github/workflows/control-harness.yml" "make ci" "control harness workflow invokes make ci"
+check_contains ".github/workflows/harness.yml" "make ci" "control harness workflow invokes make ci"
 
 if [ "$strict" -eq 1 ]; then
   echo
