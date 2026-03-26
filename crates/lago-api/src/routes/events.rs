@@ -12,9 +12,9 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument};
 
+use lago_core::EventQuery;
 use lago_core::event::EventEnvelope;
 use lago_core::id::{BranchId, SeqNo, SessionId};
-use lago_core::EventQuery;
 
 use crate::error::ApiError;
 use crate::sse::format::{SseFormat, SseFrame};
