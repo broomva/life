@@ -1,0 +1,72 @@
+# Coding Agent Template — Full Life Agent OS Stack
+#
+# Deploys: arcan (runtime) + lago (persistence) + autonomic (homeostasis)
+#          + haima (finance) + nous (quality) + vigil (observability)
+#
+# Use case: Software engineering tasks — code generation, review, debugging,
+#           refactoring. Full autonomy with cost tracking and quality scoring.
+
+[meta]
+name = "coding-agent"
+description = "Full-stack coding agent with persistence, cost tracking, and quality scoring"
+use_case = "Software engineering — code generation, review, debugging, refactoring"
+version = "0.1.0"
+
+[shared_env]
+AIOS_STATE_ROOT = "/data/.aios"
+RUST_LOG = "info"
+
+[scaling]
+min_replicas = 1
+max_replicas = 5
+scale_down_mode = "conserving"
+scale_up_mode = "sovereign"
+
+[services.arcan]
+image = "ghcr.io/broomva/arcan:latest"
+port = 3000
+public = true
+health_path = "/health"
+volume = "/data"
+command = "arcan serve --provider ${ARCAN_PROVIDER:-anthropic} --port 3000 --autonomic-url http://autonomicd.railway.internal:3002 --data-dir /data/.aios/tenants/default/projects/life/sessions/prod"
+
+[services.arcan.env]
+ARCAN_PROVIDER = "anthropic"
+ARCAN_AUTONOMIC_URL = "http://autonomicd.railway.internal:3002"
+
+[services.lago]
+image = "ghcr.io/broomva/lago:latest"
+port = 8080
+public = false
+health_path = "/health"
+volume = "/data"
+command = "lagod --data-dir /data/.aios/tenants/default/projects/life/sessions/prod"
+
+[services.lago.env]
+
+[services.autonomic]
+image = "ghcr.io/broomva/autonomic:latest"
+port = 3002
+public = false
+health_path = "/health"
+volume = "/data"
+command = "autonomicd --bind 0.0.0.0:3002 --lago-data-dir /data/.aios/control/state"
+
+[services.autonomic.env]
+
+[services.haima]
+image = "ghcr.io/broomva/haima:latest"
+port = 6000
+public = false
+health_path = "/health"
+volume = "/data"
+
+[services.haima.env]
+
+[services.nous]
+image = "ghcr.io/broomva/nous:latest"
+port = 7000
+public = false
+health_path = "/health"
+
+[services.nous.env]
