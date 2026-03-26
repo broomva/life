@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "711df40400ff",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "deploy/railway/Dockerfile.haimad",
+    "deploy/railway/Dockerfile.life-cli",
+    "life-cli/src/cost.rs",
+    "life-cli/src/deploy/railway.rs",
+    "life-cli/src/deploy/state.rs",
+    "life-cli/src/status.rs",
+    "spaces-a2a/src/main.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/71/1df40400ff/0/metadata.json",
+      "transcript": "/71/1df40400ff/0/full.jsonl",
+      "context": "/71/1df40400ff/0/context.md",
+      "content_hash": "/71/1df40400ff/0/content_hash.txt",
+      "prompt": "/71/1df40400ff/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 96,
+    "cache_creation_tokens": 94677,
+    "cache_read_tokens": 1863525,
+    "output_tokens": 6838,
+    "api_call_count": 25
+  }
+}
