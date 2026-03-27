@@ -33,6 +33,7 @@ pub use metrics::GenAiMetrics;
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::WithExportConfig as _;
+use opentelemetry_otlp::WithHttpConfig as _;
 use opentelemetry_otlp::WithTonicConfig as _;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
@@ -201,11 +202,23 @@ fn build_tracer_provider(
                 .build()
                 .map_err(|e| VigError::SpanExporter(e.to_string()))?
         }
-        OtlpProtocol::Http => opentelemetry_otlp::SpanExporter::builder()
-            .with_http()
-            .with_endpoint(endpoint)
-            .build()
-            .map_err(|e| VigError::SpanExporter(e.to_string()))?,
+        OtlpProtocol::Http => {
+            let mut builder = opentelemetry_otlp::SpanExporter::builder()
+                .with_http()
+                .with_endpoint(endpoint);
+
+            if !config.otlp_headers.is_empty() {
+                let mut headers = std::collections::HashMap::new();
+                for (key, value) in &config.otlp_headers {
+                    headers.insert(key.clone(), value.clone());
+                }
+                builder = builder.with_headers(headers);
+            }
+
+            builder
+                .build()
+                .map_err(|e| VigError::SpanExporter(e.to_string()))?
+        }
     };
 
     let provider = SdkTracerProvider::builder()
@@ -245,11 +258,23 @@ fn build_meter_provider(
                 .build()
                 .map_err(|e| VigError::MetricExporter(e.to_string()))?
         }
-        OtlpProtocol::Http => opentelemetry_otlp::MetricExporter::builder()
-            .with_http()
-            .with_endpoint(endpoint)
-            .build()
-            .map_err(|e| VigError::MetricExporter(e.to_string()))?,
+        OtlpProtocol::Http => {
+            let mut builder = opentelemetry_otlp::MetricExporter::builder()
+                .with_http()
+                .with_endpoint(endpoint);
+
+            if !config.otlp_headers.is_empty() {
+                let mut headers = std::collections::HashMap::new();
+                for (key, value) in &config.otlp_headers {
+                    headers.insert(key.clone(), value.clone());
+                }
+                builder = builder.with_headers(headers);
+            }
+
+            builder
+                .build()
+                .map_err(|e| VigError::MetricExporter(e.to_string()))?
+        }
     };
 
     let provider = SdkMeterProvider::builder()
