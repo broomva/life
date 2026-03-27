@@ -1,0 +1,31 @@
+[package]
+name = "life-relayd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Life Relay daemon — bridges local agent sessions to broomva.tech"
+
+[dependencies]
+life-relay-core.workspace = true
+life-relay-api.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+chrono.workspace = true
+clap.workspace = true
+dirs.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+hostname.workspace = true
+async-trait.workspace = true
+
+[lints]
+workspace = true
