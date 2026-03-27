@@ -1,0 +1,44 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "dfbb63f7e42f",
+  "session_id": "79f58ef5-0588-44ee-b07f-c000b6a6bc5e",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-27T20:33:43.849416Z",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "relay/Cargo.lock",
+    "relay/Cargo.toml",
+    "relay/crates/life-relay-api/Cargo.toml",
+    "relay/crates/life-relay-api/src/lib.rs",
+    "relay/crates/life-relay-core/src/lib.rs",
+    "relay/crates/life-relay-core/src/protocol.rs",
+    "relay/crates/life-relayd/Cargo.toml",
+    "relay/crates/life-relayd/src/adapters/claude.rs",
+    "relay/crates/life-relayd/src/adapters/mod.rs",
+    "relay/crates/life-relayd/src/adapters/parser.rs",
+    "relay/crates/life-relayd/src/adapters/pty.rs",
+    "relay/crates/life-relayd/src/config.rs",
+    "relay/crates/life-relayd/src/connection.rs",
+    "relay/crates/life-relayd/src/daemon.rs",
+    "relay/crates/life-relayd/src/main.rs"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "d4b8c3bd4bb4",
+  "token_usage": {
+    "input_tokens": 191,
+    "cache_creation_tokens": 453595,
+    "cache_read_tokens": 14285942,
+    "output_tokens": 106239,
+    "api_call_count": 118
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-27T20:33:43.572208Z",
+    "agent_lines": 1080,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 9,
+    "total_committed": 1080,
+    "agent_percentage": 100
+  }
+}
