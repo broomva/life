@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "92ae47f43571",
+  "session_id": "e00f1f66-3838-48ad-a9a2-d6a355a0d2c4",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-27T20:47:25.453845Z",
+  "branch": "main",
+  "checkpoints_count": 14,
+  "files_touched": [
+    "docs/conversations/Conversations.md",
+    "praxis",
+    "vigil"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "404ccc79b9c1",
+  "token_usage": {
+    "input_tokens": 192,
+    "cache_creation_tokens": 731342,
+    "cache_read_tokens": 17722362,
+    "output_tokens": 54473,
+    "api_call_count": 152
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-27T20:47:25.29544Z",
+    "agent_lines": 0,
+    "human_added": 5104,
+    "human_modified": 7,
+    "human_removed": 0,
+    "total_committed": 5109,
+    "agent_percentage": 0
+  }
+}
