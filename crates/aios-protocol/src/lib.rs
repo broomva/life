@@ -52,7 +52,7 @@ pub use payment::{
     PaymentAuthorizationDecision, PaymentAuthorizationRequest, PaymentPort,
     PaymentSettlementReceipt, WalletBalanceInfo,
 };
-pub use policy::{Capability, PolicyEvaluation, PolicySet};
+pub use policy::{Capability, PolicyEvaluation, PolicySet, SubscriptionTier};
 pub use ports::{
     ApprovalPort, ApprovalRequest, ApprovalResolution, ApprovalTicket, EventRecordStream,
     EventStorePort, ModelCompletion, ModelCompletionRequest, ModelDirective, ModelProviderPort,

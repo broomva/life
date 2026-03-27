@@ -143,6 +143,24 @@ impl Default for PolicySet {
     }
 }
 
+/// Subscription tier for a user or tenant.
+///
+/// Controls session TTLs, rate limits, and capability grants across the
+/// Agent OS (Arcan session store, Lago metering, Praxis tool limits).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SubscriptionTier {
+    /// Unauthenticated public access — zero persistence, minimal capabilities.
+    #[default]
+    Anonymous,
+    /// Authenticated free tier — 7-day session TTL.
+    Free,
+    /// Authenticated Pro subscriber — 90-day session TTL, full tool access.
+    Pro,
+    /// Enterprise tenant — no session expiry, custom capability overrides.
+    Enterprise,
+}
+
 /// Result of evaluating capabilities against a policy set.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyEvaluation {
