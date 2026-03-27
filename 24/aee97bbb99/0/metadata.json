@@ -1,0 +1,34 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "24aee97bbb99",
+  "session_id": "79f58ef5-0588-44ee-b07f-c000b6a6bc5e",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-27T23:56:33.715656Z",
+  "branch": "main",
+  "checkpoints_count": 10,
+  "files_touched": [
+    "relay/crates/life-relayd/src/auth.rs",
+    "relay/crates/life-relayd/src/config.rs",
+    "relay/crates/life-relayd/src/main.rs"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "43b14c071c3e",
+  "checkpoint_transcript_start": 687,
+  "transcript_lines_at_start": 687,
+  "token_usage": {
+    "input_tokens": 329,
+    "cache_creation_tokens": 525117,
+    "cache_read_tokens": 34953526,
+    "output_tokens": 97160,
+    "api_call_count": 283
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-27T23:56:32.894879Z",
+    "agent_lines": 146,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 12,
+    "total_committed": 146,
+    "agent_percentage": 100
+  }
+}
