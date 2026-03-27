@@ -31,6 +31,40 @@ impl RelayConfig {
     }
 }
 
+/// Read stored auth token from broomva CLI config or relay credentials.
+pub fn read_token(cfg: &RelayConfig) -> Result<String> {
+    // First try relay-specific credentials
+    let relay_creds = cfg.credentials_path();
+    if relay_creds.exists() {
+        let content = std::fs::read_to_string(&relay_creds)?;
+        let parsed: serde_json::Value = serde_json::from_str(&content)?;
+        if let Some(token) = parsed.get("token").and_then(|t| t.as_str()) {
+            return Ok(token.to_string());
+        }
+    }
+
+    // Fall back to broomva CLI config (~/.config/broomva/config.json)
+    let broomva_config = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("broomva")
+        .join("config.json");
+
+    if broomva_config.exists() {
+        let content = std::fs::read_to_string(&broomva_config)?;
+        let parsed: serde_json::Value = serde_json::from_str(&content)?;
+        if let Some(token) = parsed.get("token").and_then(|t| t.as_str()) {
+            return Ok(token.to_string());
+        }
+    }
+
+    // Check env var
+    if let Ok(token) = std::env::var("BROOMVA_TOKEN") {
+        return Ok(token);
+    }
+
+    anyhow::bail!("No auth token found. Run `broomva relay auth` first.")
+}
+
 /// Load configuration from disk, creating defaults if needed.
 pub fn load_config() -> Result<RelayConfig> {
     let config_dir = dirs::config_dir()
