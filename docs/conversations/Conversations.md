@@ -6,8 +6,8 @@ tags:
   - moc
 type: moc
 status: active
-created: 2026-03-25
-updated: 2026-03-25
+created: 2026-03-27
+updated: 2026-03-27
 related:
   - "[[Documentation Hub]]"
   - "[[CLAUDE]]"
@@ -22,13 +22,22 @@ related:
 > tool usage, files modified, and commits — linking agent work to the
 > knowledge graph.
 
-**Total sessions indexed**: 48
+**Total sessions indexed**: 52
+
+## 2026-03-27
+
+| Session | Branch | Turns | Duration | Topic |
+|---------|--------|-------|----------|-------|
+| [[session-2026-03-27-79f58ef5]] | `main` | 8 | 57m | <channel source="plugin:discord:discord" chat_id=" |
+| [[session-2026-03-27-cd1317fe]] | `` | 2 | 17m | Session cd1317fe |
+| [[session-2026-03-27-4be0b59e]] | `` | 2 | 0m | Session 4be0b59e |
+| [[session-2026-03-27-454c2839]] | `` | 2 | 1m | Session 454c2839 |
 
 ## 2026-03-24
 
 | Session | Branch | Turns | Duration | Topic |
 |---------|--------|-------|----------|-------|
-| [[session-2026-03-24-e00f1f66]] | `main` | 4 | 38h 36m | <channel source="plugin:discord:discord" chat_id=" |
+| [[session-2026-03-24-e00f1f66]] | `main` | 32 | 52h 27m | <channel source="plugin:discord:discord" chat_id=" |
 
 ## 2026-03-23
 
@@ -36,7 +45,7 @@ related:
 |---------|--------|-------|----------|-------|
 | [[session-2026-03-23-2f64ca4c]] | `main` | 24 | 33h 48m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-23-5271645a]] | `main` | 14 | 30h 52m | <channel source="plugin:discord:discord" chat_id=" |
-| [[session-2026-03-23-ab6d67d3]] | `main` | 6 | 53h 19m | <channel source="plugin:discord:discord" chat_id=" |
+| [[session-2026-03-23-ab6d67d3]] | `main` | 6 | 92h 6m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-23-12293244]] | `main` | 4 | 27h 30m | <channel source="plugin:discord:discord" chat_id=" |
 
 ## 2026-03-19
@@ -124,9 +133,9 @@ related:
 
 ## Statistics
 
-- **Total turns**: 2920
+- **Total turns**: 2962
 - **Branches worked on**: 1
-- **Date range**: 2026-02-20 → 2026-03-24
+- **Date range**: 2026-02-20 → 2026-03-27
 
 ---
 

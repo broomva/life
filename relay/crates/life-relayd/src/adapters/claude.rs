@@ -13,6 +13,7 @@ use chrono::Utc;
 use life_relay_core::{
     DaemonMessage, RelayError, RelayResult, SessionInfo, SessionStatus, SessionType, SpawnConfig,
 };
+use tokio::process::Command;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -81,6 +82,17 @@ impl SessionAdapter for ClaudeAdapter {
             model: config.model.clone(),
             created_at: Utc::now(),
         };
+
+        // Background task: emit git workspace status every 30 s.
+        let ws_workdir = config.workdir.clone();
+        let ws_tx = event_tx.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                let status = git_workspace_status(id, &ws_workdir).await;
+                let _ = ws_tx.send(status).await;
+            }
+        });
 
         // Background task: forward output and parsed events to daemon.
         let session_id = id;
@@ -225,6 +237,86 @@ async fn handle_parsed_event(
                 .await;
         }
         ClaudeEvent::ToolResult { .. } | ClaudeEvent::Raw(_) => {}
+    }
+}
+
+/// Run git commands in `workdir` and assemble a [`DaemonMessage::WorkspaceStatus`].
+///
+/// All git invocations are best-effort — failures produce `None` / 0 values so
+/// the caller always gets a usable (if sparse) status message.
+async fn git_workspace_status(session_id: Uuid, workdir: &str) -> DaemonMessage {
+    // Current branch
+    let branch = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(workdir)
+        .output()
+        .await
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty() && s != "HEAD")
+            } else {
+                None
+            }
+        });
+
+    // Modified (unstaged) + staged counts from `git status --porcelain`
+    let (modified, staged) = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(workdir)
+        .output()
+        .await
+        .map(|o| {
+            if !o.status.success() {
+                return (0u32, 0u32);
+            }
+            let text = String::from_utf8_lossy(&o.stdout);
+            let mut m = 0u32;
+            let mut s = 0u32;
+            for line in text.lines() {
+                if line.len() < 2 {
+                    continue;
+                }
+                let staged_char = line.chars().next().unwrap_or(' ');
+                let unstaged_char = line.chars().nth(1).unwrap_or(' ');
+                if staged_char != ' ' && staged_char != '?' {
+                    s += 1;
+                }
+                if unstaged_char != ' ' && unstaged_char != '?' {
+                    m += 1;
+                }
+            }
+            (m, s)
+        })
+        .unwrap_or((0, 0));
+
+    // Last commit: short hash + subject
+    let last_commit = Command::new("git")
+        .args(["log", "-1", "--format=%h %s"])
+        .current_dir(workdir)
+        .output()
+        .await
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            } else {
+                None
+            }
+        });
+
+    DaemonMessage::WorkspaceStatus {
+        session_id,
+        branch,
+        modified,
+        staged,
+        last_commit,
     }
 }
 
