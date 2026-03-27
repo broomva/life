@@ -95,6 +95,19 @@ pub enum DaemonMessage {
         hostname: String,
         capabilities: Vec<String>,
     },
+    /// Workspace git status emitted periodically by relayd.
+    #[serde(rename_all = "camelCase")]
+    WorkspaceStatus {
+        session_id: Uuid,
+        /// Current branch name, or `None` if not a git repo.
+        branch: Option<String>,
+        /// Number of modified (unstaged) files.
+        modified: u32,
+        /// Number of staged files.
+        staged: u32,
+        /// Short hash + subject of the last commit, or `None` if no commits.
+        last_commit: Option<String>,
+    },
     /// Keepalive pong.
     Pong,
     /// Error message.
@@ -186,6 +199,27 @@ mod tests {
         assert!(json.contains("Bash"));
         let parsed: DaemonMessage = serde_json::from_str(&json).unwrap();
         assert!(matches!(parsed, DaemonMessage::ToolEvent { .. }));
+    }
+
+    #[test]
+    fn workspace_status_roundtrip() {
+        let id = Uuid::new_v4();
+        let msg = DaemonMessage::WorkspaceStatus {
+            session_id: id,
+            branch: Some("main".to_string()),
+            modified: 3,
+            staged: 1,
+            last_commit: Some("a1b2c3d Add relay session replay buffer".to_string()),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("workspace_status"), "variant tag: {json}");
+        assert!(json.contains("sessionId"), "camelCase field: {json}");
+        assert!(json.contains("lastCommit"), "camelCase field: {json}");
+        let parsed: DaemonMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            parsed,
+            DaemonMessage::WorkspaceStatus { modified: 3, .. }
+        ));
     }
 
     #[test]
