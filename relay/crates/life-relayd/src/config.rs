@@ -11,7 +11,7 @@ pub struct RelayConfig {
     /// Configuration directory (~/.config/life/relay/).
     #[serde(skip)]
     pub config_dir: PathBuf,
-    /// Server URL for WebSocket connection.
+    /// Base server URL (e.g. <https://broomva.tech>).
     pub server_url: String,
     /// Local API bind address.
     pub bind_address: String,
@@ -81,7 +81,7 @@ pub fn load_config() -> Result<RelayConfig> {
 
     Ok(RelayConfig {
         config_dir,
-        server_url: "wss://broomva.tech/api/relay/connect".to_string(),
+        server_url: "https://broomva.tech".to_string(),
         bind_address: "127.0.0.1:3004".to_string(),
         node_name: hostname,
     })
