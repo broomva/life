@@ -9,4 +9,4 @@ pub mod session;
 
 pub use error::{RelayError, RelayResult};
 pub use protocol::{DaemonMessage, ServerMessage};
-pub use session::{SessionInfo, SessionType, SessionStatus, SpawnConfig};
+pub use session::{SessionInfo, SessionStatus, SessionType, SpawnConfig};
