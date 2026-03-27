@@ -25,6 +25,7 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 hostname.workspace = true
 async-trait.workspace = true
+portable-pty.workspace = true
 
 [lints]
 workspace = true

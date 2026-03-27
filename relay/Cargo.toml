@@ -60,7 +60,7 @@ reqwest = { version = "0.12", features = ["json"] }
 reqwest-eventsource = "0.6"
 
 # PTY
-portable-pty = "0.8"
+portable-pty = "0.9"
 
 # CLI
 clap = { version = "4", features = ["derive"] }

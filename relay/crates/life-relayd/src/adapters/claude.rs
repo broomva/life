@@ -1,34 +1,47 @@
 //! Claude Code adapter — spawns and manages Claude Code sessions via PTY.
 //!
-//! Launches `claude` CLI in a pseudo-terminal, captures output continuously,
-//! and injects keystrokes for input and permission approvals.
+//! Launches `claude --output-format stream-json` in a pseudo-terminal,
+//! streams structured JSONL output to the daemon event channel, and
+//! injects keystrokes for input. Approval requests are surfaced as
+//! [`DaemonMessage::ApprovalRequest`] so the web UI can render buttons.
 
-use life_relay_core::{SessionInfo, SessionStatus, SessionType, SpawnConfig};
-use tracing::info;
+use std::collections::HashMap;
+use std::sync::Arc;
 
-/// Claude Code session adapter (placeholder for PTY implementation).
-pub struct ClaudeAdapter;
+use async_trait::async_trait;
+use chrono::Utc;
+use life_relay_core::{
+    DaemonMessage, RelayError, RelayResult, SessionInfo, SessionStatus, SessionType, SpawnConfig,
+};
+use tokio::sync::{RwLock, mpsc};
+use tracing::{debug, info, warn};
+use uuid::Uuid;
+
+use super::SessionAdapter;
+use super::parser::{self, ClaudeEvent};
+use super::pty::PtyHandle;
+
+/// Manages Claude Code sessions via PTY.
+///
+/// Session handles are stored in `sessions`. Output is forwarded to the
+/// daemon's outbound channel as [`DaemonMessage`] events.
+#[derive(Debug, Default)]
+pub struct ClaudeAdapter {
+    sessions: Arc<RwLock<HashMap<Uuid, PtyHandle>>>,
+}
 
 impl ClaudeAdapter {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 
     /// Build the claude CLI command for a session.
     pub fn build_command(config: &SpawnConfig) -> Vec<String> {
         let mut args = vec![
             "claude".to_string(),
-            "--dangerously-skip-permissions".to_string(),
-            "--channels".to_string(),
-            "plugin:discord@claude-plugins-official".to_string(),
-            "--name".to_string(),
-            config.name.clone(),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
         ];
-
-        if let Some(ref sid) = config.session_id {
-            args.push("--session-id".to_string());
-            args.push(sid.to_string());
-        }
 
         if let Some(ref model) = config.model {
             args.push("--model".to_string());
@@ -39,35 +52,209 @@ impl ClaudeAdapter {
     }
 }
 
-impl Default for ClaudeAdapter {
-    fn default() -> Self {
-        Self::new()
+#[async_trait]
+impl SessionAdapter for ClaudeAdapter {
+    async fn spawn(
+        &self,
+        config: &SpawnConfig,
+        event_tx: mpsc::Sender<DaemonMessage>,
+    ) -> RelayResult<SessionInfo> {
+        let id = config.session_id.unwrap_or_else(Uuid::new_v4);
+        let cmd = Self::build_command(config);
+
+        info!(
+            session_id = %id,
+            cmd = ?cmd,
+            workdir = %config.workdir,
+            "spawning claude code session"
+        );
+
+        let mut handle = PtyHandle::spawn(id, &cmd, &config.workdir)?;
+        let mut output_rx = handle.take_output_rx();
+
+        let info = SessionInfo {
+            id,
+            session_type: SessionType::ClaudeCode,
+            status: SessionStatus::Active,
+            name: config.name.clone(),
+            workdir: config.workdir.clone(),
+            model: config.model.clone(),
+            created_at: Utc::now(),
+        };
+
+        // Background task: forward output and parsed events to daemon.
+        let session_id = id;
+        let forward_tx = event_tx.clone();
+        tokio::spawn(async move {
+            let mut seq: u64 = 0;
+            let mut line_buf = String::new();
+
+            while let Some(chunk) = output_rx.recv().await {
+                // Forward raw chunk for terminal display.
+                seq += 1;
+                let _ = forward_tx
+                    .send(DaemonMessage::Output {
+                        session_id,
+                        data: chunk.clone(),
+                        seq,
+                    })
+                    .await;
+
+                // Parse complete lines for structured events.
+                line_buf.push_str(&chunk);
+                while let Some(pos) = line_buf.find('\n') {
+                    let line = line_buf[..pos].to_string();
+                    line_buf = line_buf[pos + 1..].to_string();
+                    handle_parsed_event(session_id, &line, &forward_tx).await;
+                }
+            }
+
+            // PTY closed — session ended.
+            warn!(session_id = %session_id, "PTY output stream closed");
+            let _ = forward_tx
+                .send(DaemonMessage::SessionEnded {
+                    session_id,
+                    reason: "pty closed".to_string(),
+                })
+                .await;
+        });
+
+        self.sessions.write().await.insert(id, handle);
+        Ok(info)
+    }
+
+    async fn send_input(&self, session_id: &Uuid, data: &str) -> RelayResult<()> {
+        let sessions = self.sessions.read().await;
+        let handle = sessions
+            .get(session_id)
+            .ok_or_else(|| RelayError::SessionNotFound(session_id.to_string()))?;
+        handle.send_input(data).await
+    }
+
+    async fn kill(&self, session_id: &Uuid) -> RelayResult<()> {
+        let mut sessions = self.sessions.write().await;
+        let handle = sessions
+            .get(session_id)
+            .ok_or_else(|| RelayError::SessionNotFound(session_id.to_string()))?;
+        handle.kill()?;
+        sessions.remove(session_id);
+        Ok(())
+    }
+
+    async fn resize(&self, session_id: &Uuid, cols: u16, rows: u16) -> RelayResult<()> {
+        let sessions = self.sessions.read().await;
+        let handle = sessions
+            .get(session_id)
+            .ok_or_else(|| RelayError::SessionNotFound(session_id.to_string()))?;
+        handle.resize(cols, rows)
     }
 }
 
-// Note: Full SessionAdapter trait implementation requires `portable-pty`
-// and `async-trait` crates. The PTY spawn/read/write loop will be added
-// in a follow-up commit once the workspace compiles cleanly.
-//
-// The pattern follows Mission Control's agent service:
-// 1. portable_pty::native_pty_system().openpty(size)
-// 2. child = pair.slave.spawn_command(cmd)
-// 3. reader = pair.master.try_clone_reader()
-// 4. writer = pair.master.take_writer()
-// 5. tokio::spawn read loop → tx.send(output)
-// 6. writer.write_all(input) for keystroke injection
+/// Dispatch a parsed [`ClaudeEvent`] to the daemon channel.
+async fn handle_parsed_event(
+    session_id: Uuid,
+    line: &str,
+    forward_tx: &mpsc::Sender<DaemonMessage>,
+) {
+    match parser::parse_line(line) {
+        ClaudeEvent::ApprovalRequest {
+            approval_id,
+            capability,
+            context,
+        } => {
+            debug!(
+                session_id = %session_id,
+                capability = %capability,
+                "approval request detected"
+            );
+            let _ = forward_tx
+                .send(DaemonMessage::ApprovalRequest {
+                    session_id,
+                    approval_id,
+                    capability,
+                    context,
+                })
+                .await;
+        }
+        ClaudeEvent::Result {
+            cost_usd,
+            duration_ms,
+        } => {
+            info!(
+                session_id = %session_id,
+                cost_usd = ?cost_usd,
+                duration_ms = ?duration_ms,
+                "claude session completed"
+            );
+            let _ = forward_tx
+                .send(DaemonMessage::SessionEnded {
+                    session_id,
+                    reason: "completed".to_string(),
+                })
+                .await;
+        }
+        ClaudeEvent::SystemInit {
+            model,
+            session_id: sid,
+            cwd,
+        } => {
+            debug!(
+                session_id = %session_id,
+                model = ?model,
+                remote_sid = ?sid,
+                cwd = ?cwd,
+                "claude session initialized"
+            );
+        }
+        ClaudeEvent::AssistantText { text } => {
+            if !text.is_empty() {
+                let _ = forward_tx
+                    .send(DaemonMessage::AssistantMessage { session_id, text })
+                    .await;
+            }
+        }
+        ClaudeEvent::ToolUse { id, name, input } => {
+            debug!(session_id = %session_id, tool = %name, "tool use");
+            let _ = forward_tx
+                .send(DaemonMessage::ToolEvent {
+                    session_id,
+                    tool_name: name,
+                    tool_id: id,
+                    input,
+                })
+                .await;
+        }
+        ClaudeEvent::ToolResult { .. } | ClaudeEvent::Raw(_) => {}
+    }
+}
 
-/// Placeholder: create session info for a spawned Claude Code session.
-pub fn mock_session_info(config: &SpawnConfig) -> SessionInfo {
-    let id = config.session_id.unwrap_or_else(uuid::Uuid::new_v4);
-    info!(session_id = %id, name = %config.name, "spawning claude code session");
-    SessionInfo {
-        id,
-        session_type: SessionType::ClaudeCode,
-        status: SessionStatus::Active,
-        name: config.name.clone(),
-        workdir: config.workdir.clone(),
-        model: config.model.clone(),
-        created_at: chrono::Utc::now(),
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_command_includes_stream_json() {
+        let config = SpawnConfig {
+            name: "test".to_string(),
+            workdir: "/tmp".to_string(),
+            model: None,
+            session_id: None,
+        };
+        let cmd = ClaudeAdapter::build_command(&config);
+        assert!(cmd.contains(&"stream-json".to_string()));
+        assert!(cmd.contains(&"--output-format".to_string()));
+    }
+
+    #[test]
+    fn build_command_includes_model_when_set() {
+        let config = SpawnConfig {
+            name: "test".to_string(),
+            workdir: "/tmp".to_string(),
+            model: Some("claude-opus-4-5".to_string()),
+            session_id: None,
+        };
+        let cmd = ClaudeAdapter::build_command(&config);
+        assert!(cmd.contains(&"--model".to_string()));
+        assert!(cmd.contains(&"claude-opus-4-5".to_string()));
     }
 }

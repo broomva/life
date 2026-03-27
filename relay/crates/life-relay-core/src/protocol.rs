@@ -1,10 +1,13 @@
-//! Wire protocol types for WebSocket communication between relayd and server.
+//! Wire protocol types for HTTP polling communication between relayd and server.
 //!
-//! All messages serialize as JSON. The WebSocket carries these bidirectionally:
-//! - `ServerMessage`: commands from the web UI → daemon
-//! - `DaemonMessage`: events from local sessions → server → browser
+//! All messages serialize as JSON with camelCase field names (matching TypeScript).
+//! Variant tags use `snake_case` (e.g. `"session_created"`, `"tool_event"`).
+//!
+//! - `ServerMessage`: commands from the web UI → daemon (via `/api/relay/poll`)
+//! - `DaemonMessage`: events from local sessions → server (via `/api/relay/events`)
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::session::{SessionInfo, SessionType, SpawnConfig};
@@ -16,31 +19,31 @@ use crate::session::{SessionInfo, SessionType, SpawnConfig};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
     /// Spawn a new agent session.
+    #[serde(rename_all = "camelCase")]
     Spawn {
         session_type: SessionType,
         config: SpawnConfig,
     },
     /// Send input (text or keystrokes) to a session.
-    Input {
-        session_id: Uuid,
-        data: String,
-    },
+    #[serde(rename_all = "camelCase")]
+    Input { session_id: Uuid, data: String },
     /// Resize the PTY for a session.
+    #[serde(rename_all = "camelCase")]
     Resize {
         session_id: Uuid,
         cols: u16,
         rows: u16,
     },
     /// Resolve a capability approval request.
+    #[serde(rename_all = "camelCase")]
     Approve {
         session_id: Uuid,
         approval_id: String,
         approved: bool,
     },
     /// Kill a session.
-    Kill {
-        session_id: Uuid,
-    },
+    #[serde(rename_all = "camelCase")]
+    Kill { session_id: Uuid },
     /// Request the current session list.
     ListSessions,
     /// Keepalive ping.
@@ -53,22 +56,31 @@ pub enum ServerMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DaemonMessage {
-    /// Output data from a session (terminal bytes or structured events).
+    /// Raw output data from a session (terminal bytes).
+    #[serde(rename_all = "camelCase")]
     Output {
         session_id: Uuid,
         data: String,
         seq: u64,
     },
-    /// A new session was created.
-    SessionCreated {
-        session: SessionInfo,
-    },
-    /// A session has ended.
-    SessionEnded {
+    /// An assistant text message extracted from stream-json output.
+    #[serde(rename_all = "camelCase")]
+    AssistantMessage { session_id: Uuid, text: String },
+    /// A tool was invoked by the agent (e.g. Edit, Bash, Write, Read).
+    #[serde(rename_all = "camelCase")]
+    ToolEvent {
         session_id: Uuid,
-        reason: String,
+        tool_name: String,
+        tool_id: String,
+        input: Value,
     },
+    /// A new session was created.
+    SessionCreated { session: SessionInfo },
+    /// A session has ended.
+    #[serde(rename_all = "camelCase")]
+    SessionEnded { session_id: Uuid, reason: String },
     /// A session needs capability approval from the user.
+    #[serde(rename_all = "camelCase")]
     ApprovalRequest {
         session_id: Uuid,
         approval_id: String,
@@ -76,9 +88,7 @@ pub enum DaemonMessage {
         context: String,
     },
     /// Response to `ListSessions`.
-    SessionList {
-        sessions: Vec<SessionInfo>,
-    },
+    SessionList { sessions: Vec<SessionInfo> },
     /// Node identification sent on connect.
     NodeInfo {
         name: String,
@@ -88,10 +98,7 @@ pub enum DaemonMessage {
     /// Keepalive pong.
     Pong,
     /// Error message.
-    Error {
-        code: String,
-        message: String,
-    },
+    Error { code: String, message: String },
 }
 
 #[cfg(test)]
@@ -110,6 +117,23 @@ mod tests {
     }
 
     #[test]
+    fn server_message_fields_are_camel_case() {
+        let msg = ServerMessage::Input {
+            session_id: Uuid::new_v4(),
+            data: "hi".to_string(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(
+            json.contains("sessionId"),
+            "expected camelCase sessionId: {json}"
+        );
+        assert!(
+            !json.contains("session_id"),
+            "unexpected snake_case: {json}"
+        );
+    }
+
+    #[test]
     fn daemon_message_roundtrip() {
         let msg = DaemonMessage::Output {
             session_id: Uuid::new_v4(),
@@ -119,6 +143,49 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: DaemonMessage = serde_json::from_str(&json).unwrap();
         assert!(matches!(parsed, DaemonMessage::Output { seq: 42, .. }));
+    }
+
+    #[test]
+    fn daemon_message_fields_are_camel_case() {
+        let msg = DaemonMessage::Output {
+            session_id: Uuid::new_v4(),
+            data: "x".to_string(),
+            seq: 1,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("sessionId"), "expected camelCase: {json}");
+    }
+
+    #[test]
+    fn assistant_message_roundtrip() {
+        let id = Uuid::new_v4();
+        let msg = DaemonMessage::AssistantMessage {
+            session_id: id,
+            text: "Hello from Claude".to_string(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("assistant_message"));
+        assert!(json.contains("sessionId"));
+        assert!(json.contains("Hello from Claude"));
+        let parsed: DaemonMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(parsed, DaemonMessage::AssistantMessage { .. }));
+    }
+
+    #[test]
+    fn tool_event_roundtrip() {
+        let id = Uuid::new_v4();
+        let msg = DaemonMessage::ToolEvent {
+            session_id: id,
+            tool_name: "Bash".to_string(),
+            tool_id: "tu_abc".to_string(),
+            input: serde_json::json!({ "command": "ls -la" }),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("tool_event"));
+        assert!(json.contains("toolName"));
+        assert!(json.contains("Bash"));
+        let parsed: DaemonMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(parsed, DaemonMessage::ToolEvent { .. }));
     }
 
     #[test]

@@ -1,19 +1,23 @@
 //! life-relayd — relay daemon for remote agent sessions.
 //!
-//! Connects to broomva.tech via outbound WebSocket, bridges local
+//! Connects to broomva.tech via outbound HTTP polling, bridges local
 //! agent sessions (Claude Code, Codex, Arcan) to the web UI.
 
+mod adapters;
 mod config;
 mod connection;
 mod daemon;
-mod adapters;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Parser)]
-#[command(name = "relayd", version, about = "Life Relay daemon — remote agent sessions")]
+#[command(
+    name = "relayd",
+    version,
+    about = "Life Relay daemon — remote agent sessions"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -23,7 +27,7 @@ struct Cli {
 enum Command {
     /// Authenticate with broomva.tech via device authorization.
     Auth {
-        /// Server URL (default: https://broomva.tech).
+        /// Server URL (default: <https://broomva.tech>).
         #[arg(long, default_value = "https://broomva.tech")]
         url: String,
     },
@@ -56,21 +60,19 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Auth { url } => {
             info!(url = %url, "starting device authorization");
-            eprintln!("Device authorization not yet implemented.");
-            eprintln!("Will open browser to {url}/device?code=XXXX");
+            warn!("device authorization not yet implemented");
+            info!("will open browser to {url}/device?code=XXXX");
         }
         Command::Start { bind, server } => {
             info!(bind = %bind, server = %server, "starting life-relayd");
             daemon::run(&bind, &server).await?;
         }
         Command::Stop => {
-            eprintln!("Sending stop signal to running daemon...");
-            // TODO: signal via PID file or local API
+            warn!("stop signal not yet implemented");
         }
         Command::Status => {
             let cfg = config::load_config()?;
-            eprintln!("Config dir: {}", cfg.config_dir.display());
-            eprintln!("Authenticated: {}", cfg.credentials_path().exists());
+            info!(config_dir = %cfg.config_dir.display(), authenticated = cfg.credentials_path().exists(), "relay status");
         }
     }
 

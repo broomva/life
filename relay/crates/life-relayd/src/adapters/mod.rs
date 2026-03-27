@@ -1,26 +1,34 @@
 //! Session adapters — bridge between the relay daemon and local agent runtimes.
 
 pub mod claude;
+pub mod parser;
+pub mod pty;
 
-use life_relay_core::{RelayResult, SessionInfo, SpawnConfig};
-use tokio::sync::mpsc;
+use life_relay_core::{DaemonMessage, RelayResult, SessionInfo, SpawnConfig};
+use uuid::Uuid;
 
 /// Trait for session adapters (Claude Code, Codex, Arcan).
+///
+/// Implementations manage a collection of live sessions internally.
+/// Output is streamed to the provided `event_tx` channel during `spawn`.
 #[async_trait::async_trait]
 pub trait SessionAdapter: Send + Sync {
     /// Spawn a new session. Returns session info.
-    async fn spawn(&self, config: &SpawnConfig) -> RelayResult<SessionInfo>;
+    ///
+    /// Starts a background task that sends [`DaemonMessage`] events
+    /// (output, approvals, ended) to `event_tx` for the lifetime of the session.
+    async fn spawn(
+        &self,
+        config: &SpawnConfig,
+        event_tx: tokio::sync::mpsc::Sender<DaemonMessage>,
+    ) -> RelayResult<SessionInfo>;
 
     /// Send input (text or keystrokes) to the session.
-    async fn send_input(&self, session_id: &uuid::Uuid, data: &str) -> RelayResult<()>;
+    async fn send_input(&self, session_id: &Uuid, data: &str) -> RelayResult<()>;
 
     /// Kill the session.
-    async fn kill(&self, session_id: &uuid::Uuid) -> RelayResult<()>;
+    async fn kill(&self, session_id: &Uuid) -> RelayResult<()>;
 
-    /// Start streaming output. Sends output strings to the channel.
-    async fn stream_output(
-        &self,
-        session_id: &uuid::Uuid,
-        tx: mpsc::Sender<String>,
-    ) -> RelayResult<()>;
+    /// Resize the session terminal.
+    async fn resize(&self, session_id: &Uuid, cols: u16, rows: u16) -> RelayResult<()>;
 }

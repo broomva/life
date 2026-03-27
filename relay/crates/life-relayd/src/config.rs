@@ -26,6 +26,7 @@ impl RelayConfig {
     }
 
     /// Path to the local session registry.
+    #[allow(dead_code)]
     pub fn registry_path(&self) -> PathBuf {
         self.config_dir.join("sessions.json")
     }

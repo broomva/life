@@ -1,7 +1,7 @@
 //! HTTP polling connection to broomva.tech relay edge.
 //!
 //! Replaces WebSocket with Vercel-compatible HTTP polling:
-//! - POST /api/relay/connect — register node, get node_id
+//! - POST /api/relay/connect — register node, get `node_id`
 //! - GET  /api/relay/poll?nodeId=xxx — poll for commands (1-2s interval)
 //! - POST /api/relay/events — push session output events
 
@@ -63,15 +63,13 @@ async fn poll_commands(
 ) -> Option<ServerMessage> {
     let url = format!("{server_url}/api/relay/poll?nodeId={node_id}");
     match client.get(&url).bearer_auth(token).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<PollResponse>().await {
-                Ok(data) => data.command,
-                Err(e) => {
-                    warn!(error = %e, "failed to parse poll response");
-                    None
-                }
+        Ok(resp) if resp.status().is_success() => match resp.json::<PollResponse>().await {
+            Ok(data) => data.command,
+            Err(e) => {
+                warn!(error = %e, "failed to parse poll response");
+                None
             }
-        }
+        },
         Ok(resp) => {
             warn!(status = %resp.status(), "poll returned error");
             None
@@ -142,11 +140,11 @@ pub async fn run_polling_loop(
             event_buffer.push(msg);
         }
 
-        if !event_buffer.is_empty() {
-            if push_events(client, server_url, token, node_id, &event_buffer).await {
-                event_buffer.clear();
-            }
-            // On failure, keep events in buffer for next cycle
+        // On failure, keep events in buffer for next cycle.
+        if !event_buffer.is_empty()
+            && push_events(client, server_url, token, node_id, &event_buffer).await
+        {
+            event_buffer.clear();
         }
 
         // 3. Wait before next poll
