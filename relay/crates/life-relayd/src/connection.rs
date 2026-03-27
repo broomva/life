@@ -1,103 +1,155 @@
-//! WebSocket client to broomva.tech relay edge.
+//! HTTP polling connection to broomva.tech relay edge.
+//!
+//! Replaces WebSocket with Vercel-compatible HTTP polling:
+//! - POST /api/relay/connect — register node, get node_id
+//! - GET  /api/relay/poll?nodeId=xxx — poll for commands (1-2s interval)
+//! - POST /api/relay/events — push session output events
 
 use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
 use life_relay_core::{DaemonMessage, ServerMessage};
+use serde::Deserialize;
 use tokio::sync::mpsc;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{error, info, warn};
 
-/// Maximum reconnect backoff.
-const MAX_BACKOFF: Duration = Duration::from_secs(60);
+#[derive(Deserialize)]
+struct ConnectResponse {
+    #[serde(rename = "nodeId")]
+    node_id: String,
+    status: String,
+}
 
-/// Run the WebSocket connection loop with auto-reconnect.
-pub async fn run_connection(
+#[derive(Deserialize)]
+struct PollResponse {
+    command: Option<ServerMessage>,
+}
+
+/// Register this node with the relay server.
+pub async fn register_node(
+    client: &reqwest::Client,
     server_url: &str,
+    token: &str,
+    name: &str,
+    hostname: &str,
+) -> anyhow::Result<String> {
+    let url = format!("{server_url}/api/relay/connect");
+    let resp = client
+        .post(&url)
+        .bearer_auth(token)
+        .json(&serde_json::json!({
+            "name": name,
+            "hostname": hostname,
+            "capabilities": ["claude-code", "codex", "arcan"],
+        }))
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("register failed: {body}");
+    }
+
+    let data: ConnectResponse = resp.json().await?;
+    info!(node_id = %data.node_id, status = %data.status, "node registered");
+    Ok(data.node_id)
+}
+
+/// Poll for commands from the server (non-blocking).
+async fn poll_commands(
+    client: &reqwest::Client,
+    server_url: &str,
+    token: &str,
+    node_id: &str,
+) -> Option<ServerMessage> {
+    let url = format!("{server_url}/api/relay/poll?nodeId={node_id}");
+    match client.get(&url).bearer_auth(token).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<PollResponse>().await {
+                Ok(data) => data.command,
+                Err(e) => {
+                    warn!(error = %e, "failed to parse poll response");
+                    None
+                }
+            }
+        }
+        Ok(resp) => {
+            warn!(status = %resp.status(), "poll returned error");
+            None
+        }
+        Err(e) => {
+            warn!(error = %e, "poll request failed");
+            None
+        }
+    }
+}
+
+/// Push events to the server.
+pub async fn push_events(
+    client: &reqwest::Client,
+    server_url: &str,
+    token: &str,
+    node_id: &str,
+    events: &[DaemonMessage],
+) -> bool {
+    let url = format!("{server_url}/api/relay/events");
+    match client
+        .post(&url)
+        .bearer_auth(token)
+        .json(&serde_json::json!({
+            "nodeId": node_id,
+            "events": events,
+        }))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => true,
+        Ok(resp) => {
+            warn!(status = %resp.status(), "push events failed");
+            false
+        }
+        Err(e) => {
+            warn!(error = %e, "push events request failed");
+            false
+        }
+    }
+}
+
+/// Run the polling connection loop.
+pub async fn run_polling_loop(
+    client: &reqwest::Client,
+    server_url: &str,
+    token: &str,
+    node_id: &str,
     outbound_rx: &mut mpsc::Receiver<DaemonMessage>,
     inbound_tx: &mpsc::Sender<ServerMessage>,
 ) {
-    let mut backoff = Duration::from_secs(1);
+    let poll_interval = Duration::from_secs(2);
+    let mut event_buffer: Vec<DaemonMessage> = Vec::new();
+
+    info!("starting polling loop (interval: {poll_interval:?})");
 
     loop {
-        info!(url = %server_url, "connecting to relay server");
-
-        match connect_async(server_url).await {
-            Ok((ws_stream, _)) => {
-                info!("connected to relay server");
-                backoff = Duration::from_secs(1); // reset on success
-
-                let (mut write, mut read) = ws_stream.split();
-
-                // Send node info on connect
-                let hostname = hostname::get()
-                    .map(|h| h.to_string_lossy().into_owned())
-                    .unwrap_or_else(|_| "unknown".to_string());
-
-                let node_info = DaemonMessage::NodeInfo {
-                    name: hostname.clone(),
-                    hostname,
-                    capabilities: vec![
-                        "claude-code".to_string(),
-                        "codex".to_string(),
-                        "arcan".to_string(),
-                    ],
-                };
-
-                if let Ok(json) = serde_json::to_string(&node_info) {
-                    let _ = write.send(Message::Text(json.into())).await;
-                }
-
-                // Message loop
-                loop {
-                    tokio::select! {
-                        // Receive from server
-                        msg = read.next() => {
-                            match msg {
-                                Some(Ok(Message::Text(text))) => {
-                                    match serde_json::from_str::<ServerMessage>(&text) {
-                                        Ok(server_msg) => {
-                                            if inbound_tx.send(server_msg).await.is_err() {
-                                                error!("daemon receiver dropped");
-                                                return;
-                                            }
-                                        }
-                                        Err(e) => warn!(error = %e, "invalid server message"),
-                                    }
-                                }
-                                Some(Ok(Message::Ping(data))) => {
-                                    let _ = write.send(Message::Pong(data)).await;
-                                }
-                                Some(Ok(Message::Close(_))) | None => {
-                                    info!("server closed connection");
-                                    break;
-                                }
-                                Some(Err(e)) => {
-                                    warn!(error = %e, "websocket error");
-                                    break;
-                                }
-                                _ => {}
-                            }
-                        }
-                        // Send to server
-                        Some(daemon_msg) = outbound_rx.recv() => {
-                            if let Ok(json) = serde_json::to_string(&daemon_msg) {
-                                if write.send(Message::Text(json.into())).await.is_err() {
-                                    warn!("failed to send to server");
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, backoff = ?backoff, "connection failed, retrying");
+        // 1. Poll for commands
+        if let Some(cmd) = poll_commands(client, server_url, token, node_id).await {
+            if inbound_tx.send(cmd).await.is_err() {
+                error!("daemon receiver dropped");
+                return;
             }
         }
 
-        // Reconnect with exponential backoff
-        tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(MAX_BACKOFF);
+        // 2. Drain outbound events and push them
+        while let Ok(msg) = outbound_rx.try_recv() {
+            event_buffer.push(msg);
+        }
+
+        if !event_buffer.is_empty() {
+            if push_events(client, server_url, token, node_id, &event_buffer).await {
+                event_buffer.clear();
+            }
+            // On failure, keep events in buffer for next cycle
+        }
+
+        // 3. Wait before next poll
+        tokio::time::sleep(poll_interval).await;
     }
 }
