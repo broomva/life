@@ -4,6 +4,7 @@
 //! agent sessions (Claude Code, Codex, Arcan) to the web UI.
 
 mod adapters;
+mod auth;
 mod config;
 mod connection;
 mod daemon;
@@ -37,7 +38,7 @@ enum Command {
         #[arg(long, default_value = "127.0.0.1:3004")]
         bind: String,
         /// Server URL to connect to.
-        #[arg(long, default_value = "wss://broomva.tech/api/relay/connect")]
+        #[arg(long, default_value = "https://broomva.tech")]
         server: String,
     },
     /// Stop the relay daemon.
@@ -60,8 +61,8 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Auth { url } => {
             info!(url = %url, "starting device authorization");
-            warn!("device authorization not yet implemented");
-            info!("will open browser to {url}/device?code=XXXX");
+            let cfg = config::load_config()?;
+            auth::run(&url, &cfg.credentials_path()).await?;
         }
         Command::Start { bind, server } => {
             info!(bind = %bind, server = %server, "starting life-relayd");
