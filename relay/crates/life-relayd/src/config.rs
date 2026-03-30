@@ -44,17 +44,24 @@ pub fn read_token(cfg: &RelayConfig) -> Result<String> {
         }
     }
 
-    // Fall back to broomva CLI config (~/.config/broomva/config.json)
-    let broomva_config = dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("broomva")
-        .join("config.json");
+    // Fall back to broomva CLI config
+    // Check both ~/.broomva/config.json (primary) and ~/.config/broomva/config.json (legacy)
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let broomva_paths = [
+        home.join(".broomva").join("config.json"),
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("broomva")
+            .join("config.json"),
+    ];
 
-    if broomva_config.exists() {
-        let content = std::fs::read_to_string(&broomva_config)?;
-        let parsed: serde_json::Value = serde_json::from_str(&content)?;
-        if let Some(token) = parsed.get("token").and_then(|t| t.as_str()) {
-            return Ok(token.to_string());
+    for broomva_config in &broomva_paths {
+        if broomva_config.exists() {
+            let content = std::fs::read_to_string(broomva_config)?;
+            let parsed: serde_json::Value = serde_json::from_str(&content)?;
+            if let Some(token) = parsed.get("token").and_then(|t| t.as_str()) {
+                return Ok(token.to_string());
+            }
         }
     }
 

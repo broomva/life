@@ -2,6 +2,8 @@
 
 use clap::{Parser, Subcommand};
 
+use crate::relay::RelayCommand;
+
 #[derive(Parser)]
 #[command(
     name = "life",
@@ -39,6 +41,12 @@ pub enum Command {
 
     /// Scale agent services based on Autonomic economic modes.
     Scale(ScaleArgs),
+
+    /// Manage the relay daemon for remote agent sessions.
+    Relay {
+        #[command(subcommand)]
+        command: RelayCommand,
+    },
 }
 
 #[derive(clap::Args)]
