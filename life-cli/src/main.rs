@@ -13,6 +13,7 @@ mod cli;
 mod cost;
 mod deploy;
 mod logs;
+mod relay;
 mod scale;
 mod status;
 mod template;
@@ -40,5 +41,6 @@ async fn main() -> Result<()> {
         Command::Cost(args) => cost::run(args).await,
         Command::Logs(args) => logs::run(args).await,
         Command::Scale(args) => scale::run(args).await,
+        Command::Relay { command } => relay::run(command).await,
     }
 }

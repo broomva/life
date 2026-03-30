@@ -3,11 +3,7 @@
 //! Connects to broomva.tech via outbound HTTP polling, bridges local
 //! agent sessions (Claude Code, Codex, Arcan) to the web UI.
 
-mod adapters;
-mod auth;
-mod config;
-mod connection;
-mod daemon;
+use life_relayd::{auth, config, daemon};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
