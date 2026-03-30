@@ -90,19 +90,23 @@ pub async fn push_events(
     events: &[DaemonMessage],
 ) -> bool {
     let url = format!("{server_url}/api/relay/events");
+    let payload = serde_json::json!({
+        "nodeId": node_id,
+        "events": events,
+    });
+    tracing::debug!(payload = %serde_json::to_string(&payload).unwrap_or_default(), "pushing events");
     match client
         .post(&url)
         .bearer_auth(token)
-        .json(&serde_json::json!({
-            "nodeId": node_id,
-            "events": events,
-        }))
+        .json(&payload)
         .send()
         .await
     {
         Ok(resp) if resp.status().is_success() => true,
         Ok(resp) => {
-            warn!(status = %resp.status(), "push events failed");
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            warn!(status = %status, body = %body, "push events failed");
             false
         }
         Err(e) => {

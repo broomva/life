@@ -46,6 +46,12 @@ pub enum ServerMessage {
     Kill { session_id: Uuid },
     /// Request the current session list.
     ListSessions,
+    /// List directory contents on the daemon machine.
+    #[serde(rename_all = "camelCase")]
+    ListDir {
+        path: String,
+        request_id: String,
+    },
     /// Keepalive ping.
     Ping,
 }
@@ -108,10 +114,27 @@ pub enum DaemonMessage {
         /// Short hash + subject of the last commit, or `None` if no commits.
         last_commit: Option<String>,
     },
+    /// Response to `ListDir` — directory listing from the daemon machine.
+    #[serde(rename_all = "camelCase")]
+    DirListing {
+        request_id: String,
+        path: String,
+        entries: Vec<DirEntry>,
+    },
     /// Keepalive pong.
     Pong,
     /// Error message.
     Error { code: String, message: String },
+}
+
+/// A single entry in a directory listing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirEntry {
+    /// File or directory name (not full path).
+    pub name: String,
+    /// Whether this entry is a directory.
+    pub is_dir: bool,
 }
 
 #[cfg(test)]

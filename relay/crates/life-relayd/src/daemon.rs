@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use life_relay_core::{DaemonMessage, ServerMessage, SessionInfo};
+use life_relay_core::{DaemonMessage, DirEntry, ServerMessage, SessionInfo};
 use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
 
@@ -192,5 +192,75 @@ async fn dispatch_command(
                 );
             }
         }
+
+        ServerMessage::ListDir { path, request_id } => {
+            let outbound = outbound.clone();
+            // Spawn a blocking task so the file I/O doesn't stall the command loop.
+            tokio::spawn(async move {
+                let result = list_directory(&path).await;
+                match result {
+                    Ok((resolved_path, entries)) => {
+                        let _ = outbound
+                            .send(DaemonMessage::DirListing {
+                                request_id,
+                                path: resolved_path,
+                                entries,
+                            })
+                            .await;
+                    }
+                    Err(e) => {
+                        warn!(path = %path, error = %e, "list_dir failed");
+                        let _ = outbound
+                            .send(DaemonMessage::Error {
+                                code: "list_dir_failed".to_string(),
+                                message: e.to_string(),
+                            })
+                            .await;
+                    }
+                }
+            });
+        }
     }
+}
+
+/// List directory contents on the local filesystem.
+///
+/// Resolves `~` to the user's home directory. Returns the canonical
+/// path and a vector of entries (name + is_dir).
+async fn list_directory(path: &str) -> Result<(String, Vec<DirEntry>)> {
+    use std::path::PathBuf;
+
+    let resolved: PathBuf = if path == "~" || path.starts_with("~/") {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        if path == "~" {
+            home
+        } else {
+            home.join(&path[2..])
+        }
+    } else {
+        PathBuf::from(path)
+    };
+
+    let canonical = tokio::fs::canonicalize(&resolved).await?;
+    let canonical_str = canonical.to_string_lossy().to_string();
+
+    let mut read_dir = tokio::fs::read_dir(&canonical).await?;
+    let mut entries = Vec::new();
+
+    while let Some(entry) = read_dir.next_entry().await? {
+        let name = entry.file_name().to_string_lossy().to_string();
+        // Skip hidden files/dirs for cleaner browsing (user can type path directly)
+        if name.starts_with('.') {
+            continue;
+        }
+        let is_dir = entry.file_type().await.map(|ft| ft.is_dir()).unwrap_or(false);
+        entries.push(DirEntry { name, is_dir });
+    }
+
+    // Sort: directories first, then alphabetical
+    entries.sort_by(|a, b| {
+        b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name))
+    });
+
+    Ok((canonical_str, entries))
 }
