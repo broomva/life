@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "echo 'umbrella: no tests (re-exports only)'",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
