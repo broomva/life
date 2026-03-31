@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "65c281123f86",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "relay/crates/life-relayd/src/adapters/claude.rs",
+    "relay/crates/life-relayd/src/adapters/parser.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/65/c281123f86/0/metadata.json",
+      "transcript": "/65/c281123f86/0/full.jsonl",
+      "context": "/65/c281123f86/0/context.md",
+      "content_hash": "/65/c281123f86/0/content_hash.txt",
+      "prompt": "/65/c281123f86/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 686,
+    "cache_creation_tokens": 1218735,
+    "cache_read_tokens": 65919939,
+    "output_tokens": 254657,
+    "api_call_count": 545
+  }
+}
