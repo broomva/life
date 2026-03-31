@@ -1,0 +1,23 @@
+{
+  "name": "@life/ikr-layout",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@life/ikr-ir": "workspace:*",
+    "@chenglou/pretext": "^0.0.3",
+    "yoga-layout": "^3.0.0"
+  }
+}
