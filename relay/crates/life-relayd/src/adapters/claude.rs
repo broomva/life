@@ -35,6 +35,8 @@ struct SessionState {
     message_count: u64,
     /// Channel to send user messages for processing
     input_tx: mpsc::Sender<String>,
+    /// Claude Code's internal session ID (captured from SystemInit event).
+    claude_session_id: Option<String>,
 }
 
 /// Manages Claude Code sessions.
@@ -55,6 +57,20 @@ impl std::fmt::Debug for SessionState {
 impl ClaudeAdapter {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Store the Claude Code session ID for a relay session.
+    pub async fn set_claude_session_id(&self, session_id: &Uuid, claude_sid: String) {
+        if let Some(state) = self.sessions.write().await.get_mut(session_id) {
+            state.claude_session_id = Some(claude_sid);
+        }
+    }
+
+    /// Get the workdir and Claude session ID for a relay session.
+    pub async fn get_session_info(&self, session_id: &Uuid) -> Option<(String, Option<String>)> {
+        self.sessions.read().await.get(session_id).map(|s| {
+            (s.workdir.clone(), s.claude_session_id.clone())
+        })
     }
 
     /// Build the claude CLI command for a session.
@@ -219,7 +235,17 @@ async fn run_claude_turn(
                     })
                     .await;
             }
-            ClaudeEvent::SystemInit { .. } | ClaudeEvent::Raw(_) => {}
+            ClaudeEvent::SystemInit { session_id: sid, .. } => {
+                if let Some(ref claude_sid) = sid {
+                    let _ = event_tx
+                        .send(DaemonMessage::SessionMapping {
+                            session_id,
+                            claude_session_id: claude_sid.clone(),
+                        })
+                        .await;
+                }
+            }
+            ClaudeEvent::Raw(_) => {}
         }
     }
 
@@ -308,6 +334,7 @@ impl SessionAdapter for ClaudeAdapter {
             model: config.model.clone(),
             message_count: 0,
             input_tx,
+            claude_session_id: None,
         };
         self.sessions.write().await.insert(id, state);
         Ok(info)
