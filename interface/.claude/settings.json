@@ -1,0 +1,15 @@
+{
+	"hooks": {
+		"Stop": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "/Users/broomva/broomva/core/life/interface/scripts/conversation-bridge-hook.sh",
+						"timeout": 5
+					}
+				]
+			}
+		]
+	}
+}
