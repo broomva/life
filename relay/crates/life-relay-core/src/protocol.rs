@@ -101,6 +101,42 @@ pub enum DaemonMessage {
         hostname: String,
         capabilities: Vec<String>,
     },
+    /// Streaming: incremental text delta within a content block.
+    #[serde(rename_all = "camelCase")]
+    ContentDelta {
+        session_id: Uuid,
+        index: u32,
+        text: String,
+    },
+    /// Streaming: a content block has started.
+    #[serde(rename_all = "camelCase")]
+    ContentBlockStart {
+        session_id: Uuid,
+        index: u32,
+        block_type: String,
+    },
+    /// Streaming: a content block has finished.
+    #[serde(rename_all = "camelCase")]
+    ContentBlockStop {
+        session_id: Uuid,
+        index: u32,
+    },
+    /// Tool execution result forwarded from Claude Code.
+    #[serde(rename_all = "camelCase")]
+    ToolResult {
+        session_id: Uuid,
+        tool_use_id: String,
+        content: String,
+        is_error: bool,
+    },
+    /// Summary emitted at the end of a Claude Code turn.
+    #[serde(rename_all = "camelCase")]
+    TurnResult {
+        session_id: Uuid,
+        cost_usd: Option<f64>,
+        duration_ms: Option<u64>,
+        num_turns: Option<u64>,
+    },
     /// Workspace git status emitted periodically by relayd.
     #[serde(rename_all = "camelCase")]
     WorkspaceStatus {

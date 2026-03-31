@@ -92,6 +92,7 @@ async fn run_claude_turn(
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
+        "--include-partial-messages".to_string(),
     ];
 
     if is_continuation {
@@ -167,10 +168,58 @@ async fn run_claude_turn(
                     })
                     .await;
             }
+            ClaudeEvent::ToolResult { tool_use_id, content, is_error } => {
+                debug!(session_id = %session_id, tool_use_id = ?tool_use_id, "tool result");
+                let _ = event_tx
+                    .send(DaemonMessage::ToolResult {
+                        session_id,
+                        tool_use_id: tool_use_id.unwrap_or_default(),
+                        content,
+                        is_error,
+                    })
+                    .await;
+            }
+            ClaudeEvent::StreamContentDelta { index, text } => {
+                let _ = event_tx
+                    .send(DaemonMessage::ContentDelta {
+                        session_id,
+                        index,
+                        text,
+                    })
+                    .await;
+            }
+            ClaudeEvent::StreamContentStart { index, block_type } => {
+                let _ = event_tx
+                    .send(DaemonMessage::ContentBlockStart {
+                        session_id,
+                        index,
+                        block_type,
+                    })
+                    .await;
+            }
+            ClaudeEvent::StreamContentStop { index } => {
+                let _ = event_tx
+                    .send(DaemonMessage::ContentBlockStop {
+                        session_id,
+                        index,
+                    })
+                    .await;
+            }
+            ClaudeEvent::StreamToolInputDelta { .. } => {
+                // Skip — we handle tool_use events at the aggregate level already
+            }
             ClaudeEvent::Result { cost_usd, duration_ms } => {
                 info!(session_id = %session_id, cost = ?cost_usd, duration = ?duration_ms, "turn completed");
+                let _ = event_tx
+                    .send(DaemonMessage::TurnResult {
+                        session_id,
+                        cost_usd,
+                        duration_ms,
+                        num_turns: None,
+                    })
+                    .await;
             }
-            ClaudeEvent::SystemInit { .. } | ClaudeEvent::ToolResult { .. } | ClaudeEvent::Raw(_) => {}
+            ClaudeEvent::SystemInit { .. } | ClaudeEvent::Raw(_) => {}
         }
     }
 
