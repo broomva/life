@@ -41,6 +41,14 @@ pub enum ClaudeEvent {
         cost_usd: Option<f64>,
         duration_ms: Option<u64>,
     },
+    /// Streaming: a content block has started (text or tool_use).
+    StreamContentStart { index: u32, block_type: String },
+    /// Streaming: incremental text delta within a content block.
+    StreamContentDelta { index: u32, text: String },
+    /// Streaming: a content block has finished.
+    StreamContentStop { index: u32 },
+    /// Streaming: incremental tool input JSON delta.
+    StreamToolInputDelta { index: u32, json_delta: String },
     /// Raw terminal output (ANSI sequences, plain text, or unrecognised JSON).
     Raw(String),
 }
@@ -261,6 +269,85 @@ fn parse_raw_event(raw: RawEvent, original_line: &str) -> ClaudeEvent {
                 .get("duration_ms")
                 .and_then(serde_json::Value::as_u64),
         },
+
+        "stream_event" => {
+            // Extract the nested event sub-type from rest["event"]["type"]
+            let sub_type = raw
+                .rest
+                .get("event")
+                .and_then(|e| e.get("type"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("");
+
+            match sub_type {
+                "content_block_start" => {
+                    let index = raw
+                        .rest
+                        .get("event")
+                        .and_then(|e| e.get("content_block"))
+                        .and_then(|cb| cb.get("index"))
+                        .and_then(|i| i.as_u64())
+                        .unwrap_or(0) as u32;
+                    let block_type = raw
+                        .rest
+                        .get("event")
+                        .and_then(|e| e.get("content_block"))
+                        .and_then(|cb| cb.get("type"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("text")
+                        .to_string();
+                    ClaudeEvent::StreamContentStart { index, block_type }
+                }
+                "content_block_delta" => {
+                    let event = raw.rest.get("event");
+                    let index = event
+                        .and_then(|e| e.get("index"))
+                        .and_then(|i| i.as_u64())
+                        .unwrap_or(0) as u32;
+                    let delta_type = event
+                        .and_then(|e| e.get("delta"))
+                        .and_then(|d| d.get("type"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("");
+
+                    match delta_type {
+                        "text_delta" => {
+                            let text = event
+                                .and_then(|e| e.get("delta"))
+                                .and_then(|d| d.get("text"))
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            ClaudeEvent::StreamContentDelta { index, text }
+                        }
+                        "input_json_delta" => {
+                            let json_delta = event
+                                .and_then(|e| e.get("delta"))
+                                .and_then(|d| d.get("partial_json"))
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            ClaudeEvent::StreamToolInputDelta { index, json_delta }
+                        }
+                        _ => ClaudeEvent::Raw(original_line.to_string()),
+                    }
+                }
+                "content_block_stop" => {
+                    let index = raw
+                        .rest
+                        .get("event")
+                        .and_then(|e| e.get("index"))
+                        .and_then(|i| i.as_u64())
+                        .unwrap_or(0) as u32;
+                    ClaudeEvent::StreamContentStop { index }
+                }
+                // message_start, message_delta, message_stop — not needed
+                "message_start" | "message_delta" | "message_stop" => {
+                    ClaudeEvent::Raw(original_line.to_string())
+                }
+                _ => ClaudeEvent::Raw(original_line.to_string()),
+            }
+        }
 
         _ => ClaudeEvent::Raw(original_line.to_string()),
     }
