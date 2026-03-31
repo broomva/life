@@ -1,9 +1,12 @@
 //! Claude Code adapter — spawns and manages Claude Code sessions.
 //!
-//! Launches `claude --print --output-format stream-json --input-format stream-json`
-//! as a subprocess with piped stdin/stdout. This is Claude Code's non-interactive
-//! mode designed for programmatic use — clean JSONL on stdout, structured input
-//! on stdin, no TUI rendering.
+//! Uses `claude --print --output-format stream-json --verbose` in non-interactive
+//! mode. Each user message spawns a new Claude Code process; conversation context
+//! is preserved via `--continue` which resumes the most recent session in the
+//! working directory.
+//!
+//! This gives clean JSONL output without ANSI contamination, and multi-turn
+//! conversation support through Claude Code's built-in session resumption.
 
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -14,7 +17,7 @@ use chrono::Utc;
 use life_relay_core::{
     DaemonMessage, RelayError, RelayResult, SessionInfo, SessionStatus, SessionType, SpawnConfig,
 };
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info, warn};
@@ -23,20 +26,29 @@ use uuid::Uuid;
 use super::SessionAdapter;
 use super::parser::{self, ClaudeEvent};
 
-/// Handle for a running Claude Code session.
-struct SessionHandle {
+/// State for a relay session.
+/// Each user message spawns a new Claude Code process with `--continue`.
+struct SessionState {
+    workdir: String,
+    model: Option<String>,
+    /// Number of messages processed (0 = first message, uses no --continue)
+    message_count: u64,
+    /// Channel to send user messages for processing
     input_tx: mpsc::Sender<String>,
 }
 
-/// Manages Claude Code sessions via piped subprocess.
+/// Manages Claude Code sessions.
 #[derive(Debug, Default)]
 pub struct ClaudeAdapter {
-    sessions: Arc<RwLock<HashMap<Uuid, SessionHandle>>>,
+    sessions: Arc<RwLock<HashMap<Uuid, SessionState>>>,
 }
 
-impl std::fmt::Debug for SessionHandle {
+impl std::fmt::Debug for SessionState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SessionHandle").finish()
+        f.debug_struct("SessionState")
+            .field("workdir", &self.workdir)
+            .field("message_count", &self.message_count)
+            .finish()
     }
 }
 
@@ -45,14 +57,12 @@ impl ClaudeAdapter {
         Self::default()
     }
 
-    /// Build the claude CLI command args for a session.
+    /// Build the claude CLI command for a session.
     pub fn build_command(config: &SpawnConfig) -> Vec<String> {
         let mut args = vec![
             "claude".to_string(),
             "--print".to_string(),
             "--output-format".to_string(),
-            "stream-json".to_string(),
-            "--input-format".to_string(),
             "stream-json".to_string(),
             "--verbose".to_string(),
         ];
@@ -66,6 +76,107 @@ impl ClaudeAdapter {
     }
 }
 
+/// Run a single Claude Code invocation for one user message.
+/// Returns when Claude Code finishes processing.
+async fn run_claude_turn(
+    session_id: Uuid,
+    workdir: &str,
+    model: &Option<String>,
+    message: &str,
+    is_continuation: bool,
+    event_tx: &mpsc::Sender<DaemonMessage>,
+) {
+    let mut args = vec![
+        "claude".to_string(),
+        "--print".to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+    ];
+
+    if is_continuation {
+        args.push("--continue".to_string());
+    }
+
+    if let Some(m) = model {
+        args.push("--model".to_string());
+        args.push(m.clone());
+    }
+
+    // The message is the positional argument
+    args.push(message.to_string());
+
+    debug!(session_id = %session_id, args = ?args, "running claude code turn");
+
+    let child = Command::new(&args[0])
+        .args(&args[1..])
+        .current_dir(workdir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(session_id = %session_id, error = %e, "failed to spawn claude");
+            return;
+        }
+    };
+
+    let stdout = child.stdout.take().expect("stdout piped");
+    let reader = BufReader::new(stdout);
+    let mut lines = reader.lines();
+
+    while let Ok(Some(line)) = lines.next_line().await {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        debug!(session_id = %session_id, line = %trimmed.get(..120).unwrap_or(trimmed), "claude stdout");
+
+        match parser::parse_line(trimmed) {
+            ClaudeEvent::AssistantText { text } => {
+                if !text.is_empty() {
+                    info!(session_id = %session_id, text_len = text.len(), "assistant message");
+                    let _ = event_tx
+                        .send(DaemonMessage::AssistantMessage { session_id, text })
+                        .await;
+                }
+            }
+            ClaudeEvent::ToolUse { id: tool_id, name, input } => {
+                debug!(session_id = %session_id, tool = %name, "tool use");
+                let _ = event_tx
+                    .send(DaemonMessage::ToolEvent {
+                        session_id,
+                        tool_name: name,
+                        tool_id,
+                        input,
+                    })
+                    .await;
+            }
+            ClaudeEvent::ApprovalRequest { approval_id, capability, context } => {
+                debug!(session_id = %session_id, capability = %capability, "approval request");
+                let _ = event_tx
+                    .send(DaemonMessage::ApprovalRequest {
+                        session_id,
+                        approval_id,
+                        capability,
+                        context,
+                    })
+                    .await;
+            }
+            ClaudeEvent::Result { cost_usd, duration_ms } => {
+                info!(session_id = %session_id, cost = ?cost_usd, duration = ?duration_ms, "turn completed");
+            }
+            ClaudeEvent::SystemInit { .. } | ClaudeEvent::ToolResult { .. } | ClaudeEvent::Raw(_) => {}
+        }
+    }
+
+    let _ = child.wait().await;
+}
+
 #[async_trait]
 impl SessionAdapter for ClaudeAdapter {
     async fn spawn(
@@ -74,26 +185,12 @@ impl SessionAdapter for ClaudeAdapter {
         event_tx: mpsc::Sender<DaemonMessage>,
     ) -> RelayResult<SessionInfo> {
         let id = config.session_id.unwrap_or_else(Uuid::new_v4);
-        let cmd_args = Self::build_command(config);
 
         info!(
             session_id = %id,
-            cmd = ?cmd_args,
             workdir = %config.workdir,
-            "spawning claude code session"
+            "creating claude code session"
         );
-
-        let mut child = Command::new(&cmd_args[0])
-            .args(&cmd_args[1..])
-            .current_dir(&config.workdir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| RelayError::SpawnFailed(e.to_string()))?;
-
-        let stdin = child.stdin.take().expect("stdin piped");
-        let stdout = child.stdout.take().expect("stdout piped");
 
         let info = SessionInfo {
             id,
@@ -105,103 +202,50 @@ impl SessionAdapter for ClaudeAdapter {
             created_at: Utc::now(),
         };
 
-        // Input channel → child stdin (stream-json format)
-        let (input_tx, mut input_rx) = mpsc::channel::<String>(64);
-        let mut stdin_writer = stdin;
-        let input_session_id = id;
-        tokio::spawn(async move {
-            while let Some(text) = input_rx.recv().await {
-                // stream-json input format: send as JSON user message
-                let msg = serde_json::json!({
-                    "type": "user",
-                    "message": {
-                        "role": "user",
-                        "content": [{"type": "text", "text": text.trim()}]
-                    }
-                });
-                let line = format!("{}\n", serde_json::to_string(&msg).unwrap_or_default());
-                debug!(session_id = %input_session_id, "sending input to claude stdin");
-                if stdin_writer.write_all(line.as_bytes()).await.is_err() {
-                    break;
-                }
-                let _ = stdin_writer.flush().await;
-            }
-        });
-
-        // Background: parse stdout JSONL → structured events
+        // Message processing loop — each message spawns a Claude Code invocation
+        let (input_tx, mut input_rx) = mpsc::channel::<String>(32);
+        let workdir = config.workdir.clone();
+        let model = config.model.clone();
         let session_id = id;
         let forward_tx = event_tx.clone();
         tokio::spawn(async move {
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
+            let mut turn_count: u64 = 0;
 
-            while let Ok(Some(line)) = lines.next_line().await {
-                let trimmed = line.trim();
+            while let Some(message) = input_rx.recv().await {
+                let trimmed = message.trim();
                 if trimmed.is_empty() {
                     continue;
                 }
 
-                debug!(session_id = %session_id, line = %trimmed.get(..100).unwrap_or(trimmed), "claude stdout line");
+                let is_continuation = turn_count > 0;
+                turn_count += 1;
 
-                match parser::parse_line(trimmed) {
-                    ClaudeEvent::AssistantText { text } => {
-                        if !text.is_empty() {
-                            info!(session_id = %session_id, text_len = text.len(), "assistant message");
-                            let _ = forward_tx
-                                .send(DaemonMessage::AssistantMessage { session_id, text })
-                                .await;
-                        }
-                    }
-                    ClaudeEvent::ToolUse { id: tool_id, name, input } => {
-                        debug!(session_id = %session_id, tool = %name, "tool use");
-                        let _ = forward_tx
-                            .send(DaemonMessage::ToolEvent {
-                                session_id,
-                                tool_name: name,
-                                tool_id,
-                                input,
-                            })
-                            .await;
-                    }
-                    ClaudeEvent::ApprovalRequest { approval_id, capability, context } => {
-                        debug!(session_id = %session_id, capability = %capability, "approval request");
-                        let _ = forward_tx
-                            .send(DaemonMessage::ApprovalRequest {
-                                session_id,
-                                approval_id,
-                                capability,
-                                context,
-                            })
-                            .await;
-                    }
-                    ClaudeEvent::Result { cost_usd, duration_ms } => {
-                        info!(session_id = %session_id, cost = ?cost_usd, duration = ?duration_ms, "session completed");
-                        let _ = forward_tx
-                            .send(DaemonMessage::SessionEnded {
-                                session_id,
-                                reason: "completed".to_string(),
-                            })
-                            .await;
-                    }
-                    ClaudeEvent::SystemInit { model, session_id: sid, cwd } => {
-                        debug!(session_id = %session_id, model = ?model, remote_sid = ?sid, cwd = ?cwd, "session init");
-                    }
-                    ClaudeEvent::ToolResult { .. } | ClaudeEvent::Raw(_) => {}
-                }
+                info!(session_id = %session_id, turn = turn_count, continuation = is_continuation, "processing user message");
+
+                run_claude_turn(
+                    session_id,
+                    &workdir,
+                    &model,
+                    trimmed,
+                    is_continuation,
+                    &forward_tx,
+                )
+                .await;
             }
 
-            warn!(session_id = %session_id, "Claude Code stdout closed");
+            // Input channel closed — session ended
+            warn!(session_id = %session_id, "session input channel closed");
             let _ = forward_tx
                 .send(DaemonMessage::SessionEnded {
                     session_id,
-                    reason: "process exited".to_string(),
+                    reason: "session closed".to_string(),
                 })
                 .await;
         });
 
         // Background: git workspace status every 30s
         let ws_workdir = config.workdir.clone();
-        let ws_tx = event_tx.clone();
+        let ws_tx = event_tx;
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
@@ -210,23 +254,23 @@ impl SessionAdapter for ClaudeAdapter {
             }
         });
 
-        // Background: wait for child exit
-        tokio::spawn(async move {
-            let status = child.wait().await;
-            info!(session_id = %session_id, status = ?status, "Claude Code process exited");
-        });
-
-        let handle = SessionHandle { input_tx };
-        self.sessions.write().await.insert(id, handle);
+        let state = SessionState {
+            workdir: config.workdir.clone(),
+            model: config.model.clone(),
+            message_count: 0,
+            input_tx,
+        };
+        self.sessions.write().await.insert(id, state);
         Ok(info)
     }
 
     async fn send_input(&self, session_id: &Uuid, data: &str) -> RelayResult<()> {
-        let sessions = self.sessions.read().await;
-        let handle = sessions
-            .get(session_id)
+        let mut sessions = self.sessions.write().await;
+        let state = sessions
+            .get_mut(session_id)
             .ok_or_else(|| RelayError::SessionNotFound(session_id.to_string()))?;
-        handle
+        state.message_count += 1;
+        state
             .input_tx
             .send(data.to_string())
             .await
@@ -258,9 +302,7 @@ async fn git_workspace_status(session_id: Uuid, workdir: &str) -> DaemonMessage 
         .and_then(|o| {
             if o.status.success() {
                 String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s != "HEAD")
-            } else {
-                None
-            }
+            } else { None }
         });
 
     let (modified, staged) = Command::new("git")
@@ -292,9 +334,7 @@ async fn git_workspace_status(session_id: Uuid, workdir: &str) -> DaemonMessage 
         .and_then(|o| {
             if o.status.success() {
                 String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-            } else {
-                None
-            }
+            } else { None }
         });
 
     DaemonMessage::WorkspaceStatus { session_id, branch, modified, staged, last_commit }
@@ -315,7 +355,6 @@ mod tests {
         let cmd = ClaudeAdapter::build_command(&config);
         assert!(cmd.contains(&"--print".to_string()));
         assert!(cmd.contains(&"stream-json".to_string()));
-        assert!(cmd.contains(&"--input-format".to_string()));
         assert!(cmd.contains(&"--verbose".to_string()));
     }
 }
