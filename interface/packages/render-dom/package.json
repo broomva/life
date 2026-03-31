@@ -18,5 +18,8 @@
   "dependencies": {
     "@life/ikr-ir": "workspace:*",
     "@life/ikr-signals": "workspace:*"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.0"
   }
 }
