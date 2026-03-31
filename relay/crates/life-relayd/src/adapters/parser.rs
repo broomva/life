@@ -54,19 +54,95 @@ struct RawEvent {
     rest: serde_json::Map<String, serde_json::Value>,
 }
 
+/// Strip ANSI escape sequences from a string.
+///
+/// PTY output mixes ANSI rendering with JSON lines. This removes all
+/// escape sequences so the JSON parser can find valid JSON.
+fn strip_ansi(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // ESC sequence — consume until end marker
+            if let Some(&next) = chars.peek() {
+                if next == '[' {
+                    chars.next(); // consume '['
+                    // CSI sequence: consume until letter (0x40-0x7E)
+                    for c2 in chars.by_ref() {
+                        if c2.is_ascii_alphabetic() || c2 == '~' || c2 == '@' {
+                            break;
+                        }
+                    }
+                } else if next == ']' {
+                    chars.next(); // consume ']'
+                    // OSC sequence: consume until BEL (0x07) or ST (ESC \)
+                    for c2 in chars.by_ref() {
+                        if c2 == '\x07' {
+                            break;
+                        }
+                        if c2 == '\x1b' {
+                            chars.next(); // consume '\'
+                            break;
+                        }
+                    }
+                } else if next == '(' || next == ')' || next == '>' || next == '<' {
+                    chars.next();
+                    chars.next(); // consume the character after
+                } else {
+                    chars.next(); // consume single-char escape
+                }
+            }
+        } else if c == '\r' || c == '\x07' || c == '\x08' {
+            // Skip carriage return, bell, backspace
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 /// Parse one line of Claude Code output into a [`ClaudeEvent`].
 ///
-/// Non-JSON lines and unknown event types map to [`ClaudeEvent::Raw`].
+/// First tries the raw line as JSON. If that fails, strips ANSI escape
+/// sequences and retries. Non-JSON lines map to [`ClaudeEvent::Raw`].
 pub fn parse_line(line: &str) -> ClaudeEvent {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return ClaudeEvent::Raw(String::new());
     }
 
-    let Ok(raw): Result<RawEvent, _> = serde_json::from_str(trimmed) else {
-        return ClaudeEvent::Raw(line.to_string());
-    };
+    // Try raw first (fast path for clean JSON lines)
+    if let Ok(raw) = serde_json::from_str::<RawEvent>(trimmed) {
+        return parse_raw_event(raw, line);
+    }
 
+    // Strip ANSI and retry — PTY output often wraps JSON in escape sequences
+    let stripped = strip_ansi(trimmed);
+    let stripped = stripped.trim();
+    if stripped.is_empty() {
+        return ClaudeEvent::Raw(String::new());
+    }
+
+    // Try to find JSON within the stripped line (may have leading/trailing noise)
+    let json_start = stripped.find('{');
+    let json_end = stripped.rfind('}');
+
+    if let (Some(start), Some(end)) = (json_start, json_end) {
+        if end > start {
+            let candidate = &stripped[start..=end];
+            if let Ok(raw) = serde_json::from_str::<RawEvent>(candidate) {
+                return parse_raw_event(raw, line);
+            }
+        }
+    }
+
+    ClaudeEvent::Raw(line.to_string())
+}
+
+fn parse_raw_event(raw: RawEvent, original_line: &str) -> ClaudeEvent {
+
+    let _ = original_line; // suppress unused warning
     match raw.event_type.as_str() {
         "system" => ClaudeEvent::SystemInit {
             session_id: raw
@@ -186,7 +262,7 @@ pub fn parse_line(line: &str) -> ClaudeEvent {
                 .and_then(serde_json::Value::as_u64),
         },
 
-        _ => ClaudeEvent::Raw(line.to_string()),
+        _ => ClaudeEvent::Raw(original_line.to_string()),
     }
 }
 
