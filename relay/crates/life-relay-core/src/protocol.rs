@@ -12,6 +12,33 @@ use uuid::Uuid;
 
 use crate::session::{SessionInfo, SessionType, SpawnConfig};
 
+// ── History Types ──────────────────────────────────────────────────────
+
+/// A single tool invocation within a history message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryToolUse {
+    /// Tool name (e.g. "Bash", "Edit", "Read").
+    pub name: String,
+    /// First 100 characters of the serialised input.
+    pub input_preview: String,
+}
+
+/// A single message extracted from a Claude Code session JSONL file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryMessage {
+    /// "user" or "assistant".
+    pub role: String,
+    /// Extracted text content.
+    pub text: String,
+    /// Tool calls within this message (assistant only).
+    pub tools: Vec<HistoryToolUse>,
+    /// ISO-8601 timestamp if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
+}
+
 // ── Server → Daemon ─────────────────────────────────────────────────────
 
 /// Commands sent from broomva.tech to the relay daemon.
@@ -50,6 +77,12 @@ pub enum ServerMessage {
     #[serde(rename_all = "camelCase")]
     ListDir {
         path: String,
+        request_id: String,
+    },
+    /// Load conversation history from Claude Code session files.
+    #[serde(rename_all = "camelCase")]
+    LoadHistory {
+        session_id: Uuid,
         request_id: String,
     },
     /// Keepalive ping.
@@ -101,6 +134,42 @@ pub enum DaemonMessage {
         hostname: String,
         capabilities: Vec<String>,
     },
+    /// Streaming: incremental text delta within a content block.
+    #[serde(rename_all = "camelCase")]
+    ContentDelta {
+        session_id: Uuid,
+        index: u32,
+        text: String,
+    },
+    /// Streaming: a content block has started.
+    #[serde(rename_all = "camelCase")]
+    ContentBlockStart {
+        session_id: Uuid,
+        index: u32,
+        block_type: String,
+    },
+    /// Streaming: a content block has finished.
+    #[serde(rename_all = "camelCase")]
+    ContentBlockStop {
+        session_id: Uuid,
+        index: u32,
+    },
+    /// Tool execution result forwarded from Claude Code.
+    #[serde(rename_all = "camelCase")]
+    ToolResult {
+        session_id: Uuid,
+        tool_use_id: String,
+        content: String,
+        is_error: bool,
+    },
+    /// Summary emitted at the end of a Claude Code turn.
+    #[serde(rename_all = "camelCase")]
+    TurnResult {
+        session_id: Uuid,
+        cost_usd: Option<f64>,
+        duration_ms: Option<u64>,
+        num_turns: Option<u64>,
+    },
     /// Workspace git status emitted periodically by relayd.
     #[serde(rename_all = "camelCase")]
     WorkspaceStatus {
@@ -120,6 +189,19 @@ pub enum DaemonMessage {
         request_id: String,
         path: String,
         entries: Vec<DirEntry>,
+    },
+    /// Maps a relay session to a Claude Code session ID.
+    #[serde(rename_all = "camelCase")]
+    SessionMapping {
+        session_id: Uuid,
+        claude_session_id: String,
+    },
+    /// Response to `LoadHistory` — conversation history from JSONL files.
+    #[serde(rename_all = "camelCase")]
+    HistoryMessages {
+        session_id: Uuid,
+        request_id: String,
+        messages: Vec<HistoryMessage>,
     },
     /// Keepalive pong.
     Pong,

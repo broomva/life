@@ -117,6 +117,9 @@ pub async fn push_events(
 }
 
 /// Run the polling connection loop.
+///
+/// Uses adaptive polling: 200ms when streaming events are flowing,
+/// 2s otherwise. Reverts to slow polling after 5s of no streaming events.
 pub async fn run_polling_loop(
     client: &reqwest::Client,
     server_url: &str,
@@ -125,10 +128,14 @@ pub async fn run_polling_loop(
     outbound_rx: &mut mpsc::Receiver<DaemonMessage>,
     inbound_tx: &mpsc::Sender<ServerMessage>,
 ) {
-    let poll_interval = Duration::from_secs(2);
-    let mut event_buffer: Vec<DaemonMessage> = Vec::new();
+    let slow_interval = Duration::from_secs(2);
+    let fast_interval = Duration::from_millis(200);
+    let fast_timeout = Duration::from_secs(5);
 
-    info!("starting polling loop (interval: {poll_interval:?})");
+    let mut event_buffer: Vec<DaemonMessage> = Vec::new();
+    let mut last_streaming_event = tokio::time::Instant::now() - fast_timeout;
+
+    info!("starting polling loop (adaptive: {}ms / {}ms)", fast_interval.as_millis(), slow_interval.as_millis());
 
     loop {
         // 1. Poll for commands
@@ -140,7 +147,15 @@ pub async fn run_polling_loop(
         }
 
         // 2. Drain outbound events and push them
+        let had_events = !event_buffer.is_empty();
         while let Ok(msg) = outbound_rx.try_recv() {
+            // Track whether any streaming events arrived this cycle
+            if matches!(msg, DaemonMessage::ContentDelta { .. }
+                | DaemonMessage::ContentBlockStart { .. }
+                | DaemonMessage::ContentBlockStop { .. })
+            {
+                last_streaming_event = tokio::time::Instant::now();
+            }
             event_buffer.push(msg);
         }
 
@@ -148,10 +163,19 @@ pub async fn run_polling_loop(
         if !event_buffer.is_empty()
             && push_events(client, server_url, token, node_id, &event_buffer).await
         {
+            // Events arrived this cycle — mark as streaming if buffer was freshly populated
+            if !had_events {
+                last_streaming_event = tokio::time::Instant::now();
+            }
             event_buffer.clear();
         }
 
-        // 3. Wait before next poll
+        // 3. Adaptive wait: fast polling while streaming, slow otherwise
+        let poll_interval = if last_streaming_event.elapsed() < fast_timeout {
+            fast_interval
+        } else {
+            slow_interval
+        };
         tokio::time::sleep(poll_interval).await;
     }
 }

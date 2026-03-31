@@ -1,0 +1,17 @@
+{
+	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"baseUrl": ".",
+		"paths": {
+			"@life/ikr-ir": ["../ir/src/index.ts"],
+			"@life/ikr-signals": ["../signals/src/index.ts"],
+			"@life/ikr-layout": ["../layout/src/index.ts"],
+			"@life/ikr-policy": ["../policy/src/index.ts"],
+			"@life/ikr-repair": ["../repair/src/index.ts"],
+			"@life/ikr-render-dom": ["../render-dom/src/index.ts"],
+			"@life/ikr-render-terminal": ["../render-terminal/src/index.ts"]
+		}
+	},
+	"include": ["src"]
+}
