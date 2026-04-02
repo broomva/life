@@ -119,6 +119,44 @@ if [ -f arcan/Cargo.toml ]; then
     else
       fail "arcan --help"
     fi
+
+    # --- Arcan Shell E2E (Levels 1-3, mock provider, no API key) ---
+    data_dir=$(mktemp -d)
+
+    # Level 1: Shell boot + slash commands
+    shell_out=$(printf '/help\n/status\n/context\n/memory\n/consolidate\n' \
+      | "$arcan_bin" shell --provider mock --data-dir "$data_dir" --budget 10.0 -y 2>&1 || true)
+
+    if echo "$shell_out" | grep -q "Tools: 17"; then ok "arcan shell boots (17 tools)"; else fail "arcan shell boots"; fi
+    if echo "$shell_out" | grep -q "evaluators active"; then ok "arcan shell nous evaluators"; else fail "arcan shell nous evaluators"; fi
+    if echo "$shell_out" | grep -q "Available commands:"; then ok "arcan shell /help"; else fail "arcan shell /help"; fi
+    if echo "$shell_out" | grep -q "CACHEABLE"; then ok "arcan shell /context"; else fail "arcan shell /context"; fi
+    if echo "$shell_out" | grep -q "consolidation"; then ok "arcan shell /consolidate"; else fail "arcan shell /consolidate"; fi
+    if [ -f "$data_dir/shell-journals/"*.redb ] 2>/dev/null; then ok "arcan shell redb journal"; else fail "arcan shell redb journal"; fi
+    if [ -d "$data_dir/workspace.lance" ]; then ok "arcan shell lance workspace"; else fail "arcan shell lance workspace"; fi
+    if [ -f "$data_dir/memory/MEMORY.md" ]; then ok "arcan shell MEMORY.md"; else fail "arcan shell MEMORY.md"; fi
+
+    # Level 2: Tool execution + Nous safety
+    data_dir2=$(mktemp -d)
+    tool_out=$(printf 'file\n/status\n' \
+      | "$arcan_bin" shell --provider mock --data-dir "$data_dir2" -y 2>&1 || true)
+
+    if echo "$tool_out" | grep -q "\[tool: write_file\]"; then ok "arcan shell tool execution"; else fail "arcan shell tool execution"; fi
+    if echo "$tool_out" | grep -q "safety_compliance"; then ok "arcan shell nous safety score"; else fail "arcan shell nous safety score"; fi
+
+    # Level 3: Session resume
+    data_dir3=$(mktemp -d)
+    printf 'ping\n' | "$arcan_bin" shell --provider mock --data-dir "$data_dir3" -y >/dev/null 2>&1 || true
+    sess_id=$(ls "$data_dir3/shell-journals/" 2>/dev/null | head -1 | sed 's/\.redb$//')
+    if [ -n "$sess_id" ]; then
+      resume_out=$(printf '/history\n' \
+        | "$arcan_bin" shell --provider mock --data-dir "$data_dir3" --session "$sess_id" --resume -y 2>&1 || true)
+      if echo "$resume_out" | grep -q "Restored.*messages"; then ok "arcan shell session resume"; else fail "arcan shell session resume"; fi
+    else
+      fail "arcan shell session resume (no journal)"
+    fi
+
+    rm -rf "$data_dir" "$data_dir2" "$data_dir3"
   fi
   echo
 fi
