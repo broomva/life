@@ -3,14 +3,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use aios_protocol::{
-    AgentStateVector, ApprovalDecision, ApprovalId, ApprovalPort, ApprovalRequest, BranchId,
-    BranchInfo, BranchMergeResult, BudgetState, CheckpointId, CheckpointManifest, EventKind,
-    EventRecord, EventStorePort, FileProvenance, LoopPhase, ModelCompletionRequest, ModelDirective,
-    ModelProviderPort, ModelRouting, OperatingMode, PolicyGatePort, PolicySet, RiskLevel, RunId,
-    SessionId, SessionManifest, SpanStatus, ToolCall, ToolExecutionReport, ToolExecutionRequest,
-    ToolHarnessPort, ToolOutcome,
+    AgentStateVector, ApprovalDecision, ApprovalId, ApprovalPort, ApprovalRequest, ApprovalTicket,
+    BranchId, BranchInfo, BranchMergeResult, BudgetState, CheckpointId, CheckpointManifest,
+    EventKind, EventRecord, EventStorePort, FileProvenance, LoopPhase, ModelCompletionRequest,
+    ModelDirective, ModelProviderPort, ModelRouting, OperatingMode, PolicyGatePort, PolicySet,
+    RiskLevel, RunId, SessionId, SessionManifest, SpanStatus, ToolCall, ToolExecutionReport,
+    ToolExecutionRequest, ToolHarnessPort, ToolOutcome,
 };
 use anyhow::{Context, Result, bail};
+use async_trait::async_trait;
 use chrono::Utc;
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -56,6 +57,57 @@ pub struct TickOutput {
 }
 
 #[derive(Debug, Clone)]
+pub struct TurnContext {
+    pub session_id: SessionId,
+    pub branch_id: BranchId,
+    pub manifest: SessionManifest,
+    pub input: TickInput,
+    pub state: AgentStateVector,
+    pub pending_approvals: Vec<ApprovalTicket>,
+    pub mode: OperatingMode,
+}
+
+#[async_trait]
+pub trait TurnMiddleware: Send + Sync {
+    async fn process(&self, ctx: &mut TurnContext, next: TurnNext<'_>) -> Result<TickOutput>;
+}
+
+pub struct TurnNext<'a> {
+    runtime: &'a KernelRuntime,
+    middlewares: &'a [Arc<dyn TurnMiddleware>],
+}
+
+impl<'a> TurnNext<'a> {
+    fn new(runtime: &'a KernelRuntime, middlewares: &'a [Arc<dyn TurnMiddleware>]) -> Self {
+        Self {
+            runtime,
+            middlewares,
+        }
+    }
+
+    pub async fn run(self, ctx: &mut TurnContext) -> Result<TickOutput> {
+        match self.middlewares.split_first() {
+            Some((middleware, remaining)) => {
+                middleware
+                    .process(ctx, TurnNext::new(self.runtime, remaining))
+                    .await
+            }
+            None => self.runtime.execute_turn(ctx).await,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct PassthroughTurnMiddleware;
+
+#[async_trait]
+impl TurnMiddleware for PassthroughTurnMiddleware {
+    async fn process(&self, ctx: &mut TurnContext, next: TurnNext<'_>) -> Result<TickOutput> {
+        next.run(ctx).await
+    }
+}
+
+#[derive(Debug, Clone)]
 struct SessionRuntimeState {
     manifest: SessionManifest,
     next_sequence_by_branch: HashMap<BranchId, u64>,
@@ -81,6 +133,7 @@ pub struct KernelRuntime {
     tool_harness: Arc<dyn ToolHarnessPort>,
     approvals: Arc<dyn ApprovalPort>,
     policy_gate: Arc<dyn PolicyGatePort>,
+    turn_middlewares: Vec<Arc<dyn TurnMiddleware>>,
     stream: broadcast::Sender<EventRecord>,
     sessions: Arc<Mutex<HashMap<String, SessionRuntimeState>>>,
 }
@@ -94,6 +147,26 @@ impl KernelRuntime {
         approvals: Arc<dyn ApprovalPort>,
         policy_gate: Arc<dyn PolicyGatePort>,
     ) -> Self {
+        Self::with_turn_middlewares(
+            config,
+            event_store,
+            provider,
+            tool_harness,
+            approvals,
+            policy_gate,
+            Vec::new(),
+        )
+    }
+
+    pub fn with_turn_middlewares(
+        config: RuntimeConfig,
+        event_store: Arc<dyn EventStorePort>,
+        provider: Arc<dyn ModelProviderPort>,
+        tool_harness: Arc<dyn ToolHarnessPort>,
+        approvals: Arc<dyn ApprovalPort>,
+        policy_gate: Arc<dyn PolicyGatePort>,
+        turn_middlewares: Vec<Arc<dyn TurnMiddleware>>,
+    ) -> Self {
         let (stream, _) = broadcast::channel(2048);
         Self {
             config,
@@ -102,6 +175,7 @@ impl KernelRuntime {
             tool_harness,
             approvals,
             policy_gate,
+            turn_middlewares,
             stream,
             sessions: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -250,7 +324,7 @@ impl KernelRuntime {
         branch_id: &BranchId,
         input: TickInput,
     ) -> Result<TickOutput> {
-        let (manifest, mut state) = {
+        let (manifest, state) = {
             let sessions = self.sessions.lock();
             let session = sessions
                 .get(session_id.as_str())
@@ -258,11 +332,40 @@ impl KernelRuntime {
             (session.manifest.clone(), session.state_vector.clone())
         };
 
+        let pending_approvals = self
+            .approvals
+            .list_pending(session_id.clone())
+            .await
+            .unwrap_or_default();
+        let mode = self.estimate_mode(&state, pending_approvals.len());
+
+        let mut ctx = TurnContext {
+            session_id: session_id.clone(),
+            branch_id: branch_id.clone(),
+            manifest,
+            input,
+            state,
+            pending_approvals,
+            mode,
+        };
+
+        TurnNext::new(self, &self.turn_middlewares)
+            .run(&mut ctx)
+            .await
+    }
+
+    async fn execute_turn(&self, ctx: &mut TurnContext) -> Result<TickOutput> {
+        let session_id = &ctx.session_id;
+        let branch_id = &ctx.branch_id;
+        let manifest = &ctx.manifest;
+        let input = &ctx.input;
+        let state = &mut ctx.state;
+
         let mut emitted = 0_u64;
-        #[allow(unused_assignments)]
-        let mut previous_mode: Option<OperatingMode> = None;
+        let mut previous_mode = Some(ctx.mode);
         let mut _tool_calls_this_tick = 0_u32;
         let mut _file_mutations_this_tick = 0_u32;
+        let mut mode = ctx.mode;
 
         emitted += self
             .emit_phase(session_id, branch_id, LoopPhase::Perceive)
@@ -292,19 +395,11 @@ impl KernelRuntime {
         .await?;
         emitted += 1;
 
-        let pending_approvals = self
-            .approvals
-            .list_pending(session_id.clone())
-            .await
-            .unwrap_or_default();
-        let mut mode = self.estimate_mode(&state, pending_approvals.len());
-        previous_mode = Some(mode);
-
         self.append_event(
             session_id,
             branch_id,
             EventKind::StateEstimated {
-                state: state.clone(),
+                state: (*state).clone(),
                 mode,
             },
         )
@@ -314,10 +409,11 @@ impl KernelRuntime {
 
         if matches!(mode, OperatingMode::AskHuman | OperatingMode::Sleep) {
             emitted += self
-                .finalize_tick(session_id, branch_id, &manifest, &mut state, &mode)
+                .finalize_tick(session_id, branch_id, manifest, state, &mode)
                 .await?;
+            ctx.mode = mode;
             return self
-                .current_tick_output(session_id, branch_id, mode, state, emitted)
+                .current_tick_output(session_id, branch_id, mode, (*state).clone(), emitted)
                 .await;
         }
 
@@ -493,7 +589,7 @@ impl KernelRuntime {
                                 Ok(report) => {
                                     emitted += self
                                         .record_tool_report(
-                                            session_id, branch_id, &manifest, &report,
+                                            session_id, branch_id, manifest, &report,
                                         )
                                         .await?;
                                     if let ToolOutcome::Success { output } = &report.outcome
@@ -501,8 +597,8 @@ impl KernelRuntime {
                                     {
                                         _file_mutations_this_tick += 1;
                                     }
-                                    self.apply_homeostasis_controllers(&mut state, &report);
-                                    let new_mode = self.estimate_mode(&state, 0);
+                                    self.apply_homeostasis_controllers(state, &report);
+                                    let new_mode = self.estimate_mode(state, 0);
                                     if let Some(prev) = previous_mode
                                         && prev != new_mode
                                     {
@@ -645,10 +741,11 @@ impl KernelRuntime {
         }
 
         emitted += self
-            .finalize_tick(session_id, branch_id, &manifest, &mut state, &mode)
+            .finalize_tick(session_id, branch_id, manifest, state, &mode)
             .await?;
+        ctx.mode = mode;
         info!(mode = ?mode, emitted, "tick finalized");
-        self.current_tick_output(session_id, branch_id, mode, state, emitted)
+        self.current_tick_output(session_id, branch_id, mode, (*state).clone(), emitted)
             .await
     }
 

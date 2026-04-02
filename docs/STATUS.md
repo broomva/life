@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-02-15
+Last updated: 2026-04-02
 
 ## Build and Quality
 
@@ -26,6 +26,7 @@ Last updated: 2026-02-15
 14. Branch-aware event model (`branch_id`) with branch-scoped sequences, reads, and SSE stream filtering/querying.
 15. Branch lifecycle hardening: fork-sequence bounds validation, merge-safety rules, and merged-branch read-only enforcement.
 16. Structured `tracing` spans across kernel/runtime/tool/sandbox/event-store boundaries for operator-grade execution visibility.
+17. Ordered turn middleware chain in `aios-runtime`, with mutable `TurnContext` and kernel-level coverage proving middleware can rewrite a turn before terminal execution.
 
 ## In Progress / Partial
 
