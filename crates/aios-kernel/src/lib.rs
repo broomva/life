@@ -9,7 +9,7 @@ use aios_protocol::{
     ModelStopReason, PolicyGatePort, PolicySet, SessionId, SessionManifest, TokenUsage, ToolCall,
     ToolHarnessPort,
 };
-use aios_runtime::{KernelRuntime, RuntimeConfig, TickInput, TickOutput};
+use aios_runtime::{KernelRuntime, RuntimeConfig, TickInput, TickOutput, TurnMiddleware};
 use aios_sandbox::LocalSandboxRunner;
 use aios_tools::{ToolDispatcher, ToolRegistry};
 use anyhow::Result;
@@ -56,11 +56,12 @@ impl ModelProviderPort for BaselineModelProvider {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct KernelBuilder {
     root: PathBuf,
     allowed_commands: Vec<String>,
     default_policy: PolicySet,
+    turn_middlewares: Vec<Arc<dyn TurnMiddleware>>,
 }
 
 impl KernelBuilder {
@@ -69,6 +70,7 @@ impl KernelBuilder {
             root: root.into(),
             allowed_commands: vec!["echo".to_owned(), "git".to_owned(), "cargo".to_owned()],
             default_policy: PolicySet::default(),
+            turn_middlewares: Vec::new(),
         }
     }
 
@@ -79,6 +81,11 @@ impl KernelBuilder {
 
     pub fn default_policy(mut self, policy: PolicySet) -> Self {
         self.default_policy = policy;
+        self
+    }
+
+    pub fn turn_middlewares(mut self, turn_middlewares: Vec<Arc<dyn TurnMiddleware>>) -> Self {
+        self.turn_middlewares = turn_middlewares;
         self
     }
 
@@ -101,13 +108,14 @@ impl KernelBuilder {
         let tool_harness: Arc<dyn ToolHarnessPort> = dispatcher;
 
         let provider: Arc<dyn ModelProviderPort> = Arc::new(BaselineModelProvider);
-        let runtime = KernelRuntime::new(
+        let runtime = KernelRuntime::with_turn_middlewares(
             RuntimeConfig::new(self.root),
             event_store,
             provider,
             tool_harness,
             approvals,
             policy_gate,
+            self.turn_middlewares,
         );
 
         AiosKernel { runtime }
@@ -274,14 +282,30 @@ impl AiosKernel {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use aios_protocol::{BranchId, Capability, OperatingMode, PolicySet, ToolCall};
+    use aios_protocol::{BranchId, Capability, EventKind, OperatingMode, PolicySet, ToolCall};
+    use aios_runtime::{TickOutput, TurnContext, TurnMiddleware, TurnNext};
     use anyhow::Result;
+    use async_trait::async_trait;
     use serde_json::json;
     use tokio::fs;
 
     use crate::KernelBuilder;
+
+    #[derive(Debug)]
+    struct ObjectivePrefixMiddleware {
+        prefix: String,
+    }
+
+    #[async_trait]
+    impl TurnMiddleware for ObjectivePrefixMiddleware {
+        async fn process(&self, ctx: &mut TurnContext, next: TurnNext<'_>) -> Result<TickOutput> {
+            ctx.input.objective = format!("{}{}", self.prefix, ctx.input.objective);
+            next.run(ctx).await
+        }
+    }
 
     fn unique_test_root(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -332,6 +356,51 @@ mod tests {
             PathBuf::from(&session.workspace_root).join("artifacts/reports/test.txt");
         let content = fs::read_to_string(artifact_path).await?;
         assert_eq!(content, "ok");
+
+        let _ = fs::remove_dir_all(root).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn turn_middleware_can_rewrite_turn_objective() -> Result<()> {
+        let root = unique_test_root("aios-kernel-turn-middleware");
+        let kernel = KernelBuilder::new(&root)
+            .turn_middlewares(vec![Arc::new(ObjectivePrefixMiddleware {
+                prefix: "middleware: ".to_owned(),
+            })])
+            .build();
+
+        let session = kernel
+            .create_session("tester", PolicySet::default(), None)
+            .await?;
+
+        let _tick = kernel
+            .tick(&session.session_id, "original objective", None)
+            .await?;
+
+        let events = kernel
+            .read_events_on_branch(&session.session_id, &BranchId::main(), 1, 256)
+            .await?;
+
+        let deliberation = events.iter().find_map(|event| match &event.kind {
+            EventKind::DeliberationProposed { summary, .. } => Some(summary.clone()),
+            _ => None,
+        });
+        let assistant_message = events.iter().find_map(|event| match &event.kind {
+            EventKind::Message { role, content, .. } if role == "assistant" => {
+                Some(content.clone())
+            }
+            _ => None,
+        });
+
+        assert_eq!(
+            deliberation.as_deref(),
+            Some("middleware: original objective")
+        );
+        assert_eq!(
+            assistant_message.as_deref(),
+            Some("working on: middleware: original objective"),
+        );
 
         let _ = fs::remove_dir_all(root).await;
         Ok(())
