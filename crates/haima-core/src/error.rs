@@ -44,4 +44,36 @@ pub enum HaimaError {
 
     #[error("insufficient credit: {reason}")]
     InsufficientCredit { reason: String },
+
+    // -- Insurance errors --
+
+    #[error("policy not found: {0}")]
+    PolicyNotFound(String),
+
+    #[error("policy not active: {policy_id} is {status}")]
+    PolicyNotActive { policy_id: String, status: String },
+
+    #[error("claim exceeds coverage: claimed {claimed} > remaining {remaining} micro-USD")]
+    ClaimExceedsCoverage { claimed: i64, remaining: i64 },
+
+    #[error("agent not insurable: {reason}")]
+    NotInsurable { reason: String },
+
+    #[error("quote expired: {quote_id}")]
+    QuoteExpired { quote_id: String },
+
+    #[error("quote not found: {0}")]
+    QuoteNotFound(String),
+
+    #[error("product not found: {0}")]
+    ProductNotFound(String),
+
+    #[error("pool reserves insufficient: need {needed}, have {available} micro-USD")]
+    PoolReservesInsufficient { needed: i64, available: i64 },
+
+    #[error("provider not found: {0}")]
+    ProviderNotFound(String),
+
+    #[error("claim not found: {0}")]
+    ClaimNotFound(String),
 }

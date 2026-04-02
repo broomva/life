@@ -11,6 +11,8 @@
 //! If neither is set, auth is disabled (local dev mode).
 
 pub mod auth;
+pub mod insurance;
+pub mod outcome;
 pub mod routes;
 
 use std::collections::HashMap;
@@ -20,7 +22,8 @@ use axum::Router;
 use haima_core::bureau::{PaymentHistory, TrustContext};
 use haima_core::credit::CreditScore;
 use haima_core::lending::CreditLine;
-use haima_lago::FinancialState;
+use haima_lago::{FinancialState, InsuranceState, OutcomePricingState};
+use haima_outcome::OutcomeEngine;
 use haima_x402::FacilitatorStatsCounter;
 use tokio::sync::RwLock;
 
@@ -43,13 +46,26 @@ pub struct AppState {
     pub trust_contexts: Arc<RwLock<HashMap<String, TrustContext>>>,
     /// In-memory payment history cache, keyed by `agent_id`.
     pub payment_histories: Arc<RwLock<HashMap<String, PaymentHistory>>>,
+    /// Outcome-based pricing state (contracts, task stats, pending tasks).
+    pub outcome_state: Arc<RwLock<OutcomePricingState>>,
+    /// Outcome pricing engine (contract → verify → bill → refund orchestrator).
+    pub outcome_engine: Arc<RwLock<OutcomeEngine>>,
+    /// Insurance marketplace state (products, policies, claims, pool).
+    pub insurance_state: Arc<RwLock<InsuranceState>>,
 }
 
 impl AppState {
     /// Create a new `AppState` with the given auth config and default financial state.
     pub fn new(auth_config: AuthConfig) -> Self {
+        let outcome_state = Arc::new(RwLock::new(OutcomePricingState::default()));
+        let financial_state = Arc::new(RwLock::new(FinancialState::default()));
+        let engine = OutcomeEngine::new(
+            Arc::clone(&outcome_state),
+            Arc::clone(&financial_state),
+        );
+
         Self {
-            financial_state: Arc::new(RwLock::new(FinancialState::default())),
+            financial_state,
             auth_config: Arc::new(auth_config),
             facilitator_stats: Arc::new(FacilitatorStatsCounter::new()),
             facilitator_fee_bps: haima_x402::DEFAULT_FEE_BPS,
@@ -57,14 +73,67 @@ impl AppState {
             credit_lines: Arc::new(RwLock::new(HashMap::new())),
             trust_contexts: Arc::new(RwLock::new(HashMap::new())),
             payment_histories: Arc::new(RwLock::new(HashMap::new())),
+            outcome_state,
+            outcome_engine: Arc::new(RwLock::new(engine)),
+            insurance_state: Arc::new(RwLock::new(InsuranceState::default())),
+        }
+    }
+
+    /// Create a new `AppState` with the insurance marketplace bootstrapped
+    /// (default pool, products, and provider).
+    pub fn with_insurance(auth_config: AuthConfig) -> Self {
+        let pool_id = "life-network-pool";
+        let pool = haima_core::marketplace::create_pool(
+            pool_id,
+            "Life Network Self-Insurance Pool",
+            250, // 2.5% management fee
+        );
+        let products = haima_core::marketplace::default_products(pool_id);
+        let provider = haima_core::marketplace::default_pool_provider(pool_id);
+
+        let mut insurance = InsuranceState::default();
+        insurance.pool = Some(pool);
+        for p in products {
+            insurance.products.insert(p.product_id.clone(), p);
+        }
+        insurance
+            .providers
+            .insert(provider.provider_id.clone(), provider);
+
+        let outcome_state = Arc::new(RwLock::new(OutcomePricingState::default()));
+        let financial_state = Arc::new(RwLock::new(FinancialState::default()));
+        let engine = OutcomeEngine::new(
+            Arc::clone(&outcome_state),
+            Arc::clone(&financial_state),
+        );
+
+        Self {
+            financial_state,
+            auth_config: Arc::new(auth_config),
+            facilitator_stats: Arc::new(FacilitatorStatsCounter::new()),
+            facilitator_fee_bps: haima_x402::DEFAULT_FEE_BPS,
+            credit_scores: Arc::new(RwLock::new(HashMap::new())),
+            credit_lines: Arc::new(RwLock::new(HashMap::new())),
+            trust_contexts: Arc::new(RwLock::new(HashMap::new())),
+            payment_histories: Arc::new(RwLock::new(HashMap::new())),
+            outcome_state,
+            outcome_engine: Arc::new(RwLock::new(engine)),
+            insurance_state: Arc::new(RwLock::new(insurance)),
         }
     }
 }
 
 impl Default for AppState {
     fn default() -> Self {
+        let outcome_state = Arc::new(RwLock::new(OutcomePricingState::default()));
+        let financial_state = Arc::new(RwLock::new(FinancialState::default()));
+        let engine = OutcomeEngine::new(
+            Arc::clone(&outcome_state),
+            Arc::clone(&financial_state),
+        );
+
         Self {
-            financial_state: Arc::new(RwLock::new(FinancialState::default())),
+            financial_state,
             auth_config: Arc::new(AuthConfig { jwt_secret: None }),
             facilitator_stats: Arc::new(FacilitatorStatsCounter::new()),
             facilitator_fee_bps: haima_x402::DEFAULT_FEE_BPS,
@@ -72,11 +141,16 @@ impl Default for AppState {
             credit_lines: Arc::new(RwLock::new(HashMap::new())),
             trust_contexts: Arc::new(RwLock::new(HashMap::new())),
             payment_histories: Arc::new(RwLock::new(HashMap::new())),
+            outcome_state,
+            outcome_engine: Arc::new(RwLock::new(engine)),
+            insurance_state: Arc::new(RwLock::new(InsuranceState::default())),
         }
     }
 }
 
 /// Build the Haima API router.
 pub fn router(state: AppState) -> Router {
-    routes::routes(state)
+    let outcome = outcome::outcome_routes(state.clone());
+    let insurance = insurance::insurance_routes(state.clone());
+    routes::routes(state).merge(outcome).merge(insurance)
 }
