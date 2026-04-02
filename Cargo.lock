@@ -179,6 +179,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-util",
  "tower 0.5.3",
  "tracing",
 ]
@@ -241,6 +242,7 @@ dependencies = [
  "life-vigil",
  "serde",
  "tokio",
+ "tokio-util",
  "toml",
  "tracing",
  "tracing-subscriber",
@@ -2047,6 +2049,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

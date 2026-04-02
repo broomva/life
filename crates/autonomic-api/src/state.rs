@@ -8,6 +8,7 @@ use autonomic_core::gating::HomeostaticState;
 use autonomic_core::rules::RuleSet;
 use lago_core::journal::Journal;
 use tokio::sync::RwLock;
+use tokio_util::task::TaskTracker;
 
 /// Shared state for the axum HTTP server.
 #[derive(Clone)]
@@ -20,6 +21,8 @@ pub struct AppState {
     pub journal: Option<Arc<dyn Journal>>,
     /// Daemon startup time for uptime reporting.
     pub started_at: Instant,
+    /// Tracks spawned background tasks for graceful shutdown.
+    pub task_tracker: TaskTracker,
 }
 
 impl AppState {
@@ -30,6 +33,7 @@ impl AppState {
             rules: Arc::new(rules),
             journal: None,
             started_at: Instant::now(),
+            task_tracker: TaskTracker::new(),
         }
     }
 
@@ -43,6 +47,7 @@ impl AppState {
             rules: Arc::new(rules),
             journal: None,
             started_at: Instant::now(),
+            task_tracker: TaskTracker::new(),
         }
     }
 
@@ -57,6 +62,7 @@ impl AppState {
             rules: Arc::new(rules),
             journal: Some(journal),
             started_at: Instant::now(),
+            task_tracker: TaskTracker::new(),
         }
     }
 }
