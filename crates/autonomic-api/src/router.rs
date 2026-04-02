@@ -150,11 +150,11 @@ async fn get_or_bootstrap(state: &AppState, session_id: &str) -> HomeostaticStat
                 let mut projections = state.projections.write().await;
                 projections.insert(session_id.to_owned(), loaded.clone());
 
-                // Spawn live subscriber for ongoing updates
+                // Spawn live subscriber for ongoing updates (tracked for graceful shutdown)
                 let j = journal.clone();
                 let sid = session_id.to_owned();
                 let p = state.projections.clone();
-                tokio::spawn(async move {
+                state.task_tracker.spawn(async move {
                     autonomic_lago::subscribe_session(j, sid, "main".into(), p).await;
                 });
 

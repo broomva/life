@@ -21,7 +21,7 @@ use config::{AutonomicConfig, CliArgs};
 use lago_core::journal::Journal;
 use lago_journal::RedbJournal;
 use life_vigil::VigConfig;
-use tracing::info;
+use tracing::{info, warn};
 
 fn build_rule_set(config: &AutonomicConfig) -> RuleSet {
     let mut rules = RuleSet::new();
@@ -103,6 +103,7 @@ async fn main() -> Result<()> {
         AppState::with_projections(projections, rules)
     };
 
+    let task_tracker = state.task_tracker.clone();
     let auth_config = AuthConfig::from_env();
     let app = build_router_with_auth(state, auth_config);
 
@@ -113,13 +114,47 @@ async fn main() -> Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
+    // Drain all tracked background tasks (e.g. Lago subscribers)
+    task_tracker.close();
+    tokio::select! {
+        _ = task_tracker.wait() => {
+            info!("all background tasks completed");
+        }
+        _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+            warn!(remaining = task_tracker.len(), "shutdown timeout: tasks still running");
+        }
+    }
+
     info!("autonomicd stopped");
     Ok(())
 }
 
 async fn shutdown_signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to install CTRL+C handler");
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    {
+        let terminate = async {
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("failed to install SIGTERM handler")
+                .recv()
+                .await;
+        };
+
+        tokio::select! {
+            _ = ctrl_c => {},
+            _ = terminate => {},
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        ctrl_c.await;
+    }
+
     info!("shutdown signal received");
 }
