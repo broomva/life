@@ -236,6 +236,65 @@ Life/AOS differentiates on: event-sourced persistence, formal kernel contract, h
 
 **Implementation target**: `arcan-core` + `autonomic-controller`.
 
+### 17. Three-Tier Loop Detection (from DeerFlow)
+
+**What**: DeerFlow's `LoopDetectionMiddleware` uses MD5 hashing of normalized, sorted tool calls with a sliding window (20 turns). Three graduated responses:
+- **Warning** (threshold=3): Injects a message telling the agent to stop repeating
+- **Hard stop** (limit=5): Strips all `tool_calls` from the response, forcing text-only output
+- Per-thread tracking with LRU eviction across 100 concurrent threads
+
+**Why it matters**: Runaway tool-calling loops waste tokens and time. Life has no loop detection. Autonomic's homeostasis should detect this but doesn't have the granularity.
+
+**Recommendation for Life**: Add loop detection to the turn middleware chain:
+- Hash tool call signatures per turn
+- Warn at 3 repetitions, force-stop at 5
+- Log loop events to Lago for post-mortem analysis
+
+**Implementation target**: `arcan-core` middleware — `LoopDetectionMiddleware`.
+
+### 18. Harness/App Boundary Enforcement (from DeerFlow)
+
+**What**: DeerFlow enforces a strict two-layer split: the publishable harness (`deerflow.*`) and the application layer (`app.*`). A CI test (`test_harness_boundary.py`) ensures the harness never imports app code. This enables extracting the agent engine as a standalone library.
+
+**Why it matters**: Life already has this conceptually (aios-protocol is the contract, Arcan is the runtime) but doesn't enforce import boundaries. As the codebase grows, accidental coupling between layers will emerge.
+
+**Recommendation for Life**: Add boundary tests:
+- `arcan-core` must not depend on `arcand` or `arcan-lago`
+- `praxis-core` must not depend on `praxis-mcp`
+- `lago-core` must not depend on `lago-api`
+- Enforce via `cargo test` that checks `Cargo.toml` dependency graphs
+
+**Implementation target**: Test crate or CI script.
+
+### 19. Deferred Tool Registry (from DeerFlow)
+
+**What**: Instead of exposing all MCP tools (which overwhelms context), DeerFlow registers them in a "deferred registry." The agent discovers tools on demand via a `tool_search` built-in. This solves the "too many tools" problem elegantly.
+
+**Why it matters**: As Praxis connects to more MCP servers, the tool count will grow beyond what fits in context. A deferred registry keeps the active tool set lean.
+
+**Recommendation for Life**: Add to Praxis MCP client:
+- MCP tools register in a deferred index (name + description only)
+- `tool_search` tool lets the agent query the index
+- Selected tools are dynamically added to the active set for the current turn
+- Mirrors the progressive skill loading pattern (item 2)
+
+**Implementation target**: `praxis-mcp` — add `DeferredToolRegistry`.
+
+### 20. Structured Memory with Confidence Scores (from DeerFlow)
+
+**What**: DeerFlow's memory system extracts structured facts with categories (preference/knowledge/context/behavior/goal) and confidence scores (0-1). Facts are deduplicated by whitespace-normalized comparison. "Correction" flags enable emphasized learning. Top 15 facts injected per turn via `<memory>` tags.
+
+**Why it matters**: Life's MemoryProjection stores events but doesn't score or categorize them. Structured memory with confidence enables better retrieval and decay.
+
+**Recommendation for Life**: Extend `MemoryProjection` in Arcan:
+- Add `MemoryFact` with category enum and confidence score
+- LLM-assisted extraction after each session (async, via review agent)
+- Confidence-weighted retrieval (high-confidence facts preferred)
+- Natural decay (confidence decreases over time without reinforcement)
+- Maps to Autonomic's cognitive pillar
+
+**Implementation target**: `arcan-core` memory system + `autonomic-controller` cognitive regulation.
+
 ---
 
 ## Patterns NOT to Adopt
@@ -252,47 +311,55 @@ Life/AOS differentiates on: event-sourced persistence, formal kernel contract, h
 
 ## Priority Matrix
 
-| # | Feature | Impact | Effort | Priority |
-|---|---|---|---|---|
-| 1 | Turn middleware chain | High | Medium | **P0** — architectural enabler |
-| 4 | Context compression | High | Medium | **P0** — directly improves agent quality |
-| 11 | Frozen snapshot for cache preservation | High | Low | **P0** — immediate cost savings |
-| 2 | Progressive skill loading | Medium | Low | **P1** — quick win |
-| 3 | Self-improving skills | High | Medium | **P1** — addresses self-learning gap |
-| 5 | Sub-agent delegation | High | High | **P1** — leverages existing Lago branching |
-| 8 | Cross-session memory search | High | Medium | **P1** — lago-knowledge is ready |
-| 14 | Background self-improvement daemon | High | Medium | **P1** — working model for self-learning |
-| 16 | Iteration budget with refund | Medium | Low | **P1** — wire Autonomic to agent loop |
-| 10 | Guardrails middleware | Medium | Low | **P2** — compose with existing ApprovalGate |
-| 13 | Lifecycle hooks for plugins | Medium | Medium | **P2** — extensibility for external crates |
-| 15 | Composable toolsets | Medium | Medium | **P2** — scales tool management |
-| 7 | Sandbox isolation (Docker) | Medium | High | **P2** — aligns with Aegis roadmap |
-| 9 | RL trajectory export | High | Medium | **P2** — Phase 2 dependency |
-| 12 | UDS RPC batch execution | Medium | High | **P2** — advanced sandbox pattern |
-| 6 | Multi-platform gateway | Medium | High | **P3** — future phase |
+| # | Feature | Impact | Effort | Priority | Source |
+|---|---|---|---|---|---|
+| 1 | Turn middleware chain | High | Medium | **P0** | DeerFlow |
+| 4 | Context compression | High | Medium | **P0** | Both |
+| 11 | Frozen snapshot for cache preservation | High | Low | **P0** | Hermes |
+| 17 | Three-tier loop detection | High | Low | **P0** | DeerFlow |
+| 2 | Progressive skill loading | Medium | Low | **P1** | DeerFlow |
+| 3 | Self-improving skills | High | Medium | **P1** | Hermes |
+| 5 | Sub-agent delegation | High | High | **P1** | Both |
+| 8 | Cross-session memory search | High | Medium | **P1** | Both |
+| 14 | Background self-improvement daemon | High | Medium | **P1** | Hermes |
+| 16 | Iteration budget with refund | Medium | Low | **P1** | Hermes |
+| 19 | Deferred tool registry | Medium | Low | **P1** | DeerFlow |
+| 20 | Structured memory with confidence | High | Medium | **P1** | DeerFlow |
+| 10 | Guardrails middleware | Medium | Low | **P2** | DeerFlow |
+| 13 | Lifecycle hooks for plugins | Medium | Medium | **P2** | Hermes |
+| 15 | Composable toolsets | Medium | Medium | **P2** | Hermes |
+| 18 | Boundary enforcement tests | Medium | Low | **P2** | DeerFlow |
+| 7 | Sandbox isolation (Docker) | Medium | High | **P2** | DeerFlow |
+| 9 | RL trajectory export | High | Medium | **P2** | Hermes |
+| 12 | UDS RPC batch execution | Medium | High | **P2** | Hermes |
+| 6 | Multi-platform gateway | Medium | High | **P3** | Hermes |
 
 ---
 
 ## Recommended Implementation Order
 
-### Phase A: Architectural Foundation (P0)
+### Phase A: Architectural Foundation (P0) — "Make the loop extensible"
 1. **Turn middleware chain** in `arcan-core` — enables guardrails, compression, hooks
-2. **Frozen snapshot prefix** in context compiler — immediate cost savings, minimal change
-3. **Context compression middleware** — quality improvement for long sessions
+2. **Three-tier loop detection** — prevent runaway tool loops (low effort, high safety)
+3. **Frozen snapshot prefix** in context compiler — immediate cost savings, minimal change
+4. **Context compression middleware** — quality improvement for long sessions
 
-### Phase B: Self-Learning Unlock (P1)
-4. **Iteration budget with refund** — wire Autonomic economic modes to agent loop
-5. **Progressive skill loading** in `praxis-skills` — low-effort context efficiency
-6. **Self-improving skills** via Lago events — biggest self-learning unlock
-7. **Background self-improvement daemon** — autonomous skill/memory refinement
-8. **Cross-session FTS** in `lago-knowledge` — wire existing infra to agent loop
+### Phase B: Self-Learning & Memory (P1) — "Make the agent smarter over time"
+5. **Iteration budget with refund** — wire Autonomic economic modes to agent loop
+6. **Progressive skill loading** in `praxis-skills` — low-effort context efficiency
+7. **Deferred tool registry** in `praxis-mcp` — solve "too many tools" problem
+8. **Self-improving skills** via Lago events — biggest self-learning unlock
+9. **Background self-improvement daemon** — autonomous skill/memory refinement
+10. **Structured memory with confidence scores** — categorized, scored, decaying facts
+11. **Cross-session FTS** in `lago-knowledge` — wire existing infra to agent loop
 
-### Phase C: Extensibility & Isolation (P2)
-9. **Sub-agent delegation** via Lago branches — complex but high leverage
-10. **Lifecycle hooks** for external crate integration
-11. **Composable toolsets** for growing tool ecosystem
-12. **Guardrails middleware** — compose with ApprovalGate
-13. **RL trajectory export** — Phase 2 self-learning dependency
+### Phase C: Extensibility & Isolation (P2) — "Make the system production-ready"
+12. **Sub-agent delegation** via Lago branches — complex but high leverage
+13. **Lifecycle hooks** for external crate integration
+14. **Composable toolsets** for growing tool ecosystem
+15. **Guardrails middleware** — compose with ApprovalGate
+16. **Boundary enforcement tests** — prevent layer coupling as codebase grows
+17. **RL trajectory export** — Phase 2 self-learning dependency
 
 ---
 
