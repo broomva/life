@@ -162,6 +162,82 @@ Life/AOS differentiates on: event-sourced persistence, formal kernel contract, h
 
 ---
 
+## Deep-Dive: Additional Architectural Patterns
+
+### 11. Frozen Snapshot Memory for Cache Preservation (from Hermes)
+
+**What**: Memory files (`MEMORY.md`, `USER.md`) are updated on disk immediately during a session, but the system prompt retains the **session-start snapshot** throughout. This preserves the LLM prompt cache prefix for the entire session, dramatically reducing API costs (Anthropic prompt caching has 5-min TTL).
+
+**Why it matters**: Life's context compiler rebuilds context each turn. If memory or skill content changes mid-session, the entire prompt prefix is invalidated.
+
+**Recommendation for Life**: Freeze the system prompt prefix at session start. Mid-session changes to memory/skills update Lago events but don't alter the compiled context until the next session. This requires minimal code change but can cut provider costs significantly.
+
+**Implementation target**: `arcan-core` context compiler — add `FrozenPrefix` mode.
+
+### 12. Unix Socket RPC for Sandboxed Code Execution (from Hermes)
+
+**What**: Rather than simple subprocess execution, Hermes creates a Unix domain socket RPC bridge. The LLM writes Python that calls `hermes_tools.*` functions, which travel back over the socket to the parent for dispatch. The child process receives a minimal environment with API keys intentionally excluded. Output limits: 50KB stdout (40% head / 60% tail), 10KB stderr, 50 max tool calls, 5-min timeout.
+
+**Why it matters**: This collapses multi-step tool chains into single inference turns (saving tokens and latency) while maintaining security isolation. The iteration budget even supports **refunds** — `execute_code` returns iterations since it handled multiple tool calls internally.
+
+**Recommendation for Life**: Consider a similar RPC bridge in Praxis for batch tool execution. An agent could write a script that chains multiple filesystem/shell operations, executed in a single sandboxed turn.
+
+**Implementation target**: `praxis-tools` — add `BatchExecutor` with UDS RPC bridge.
+
+### 13. Plugin System with Lifecycle Hooks (from Hermes)
+
+**What**: Six lifecycle hooks: `pre_tool_call`, `post_tool_call`, `pre_llm_call`, `post_llm_call`, `on_session_start`, `on_session_end`. Three plugin discovery paths: user directory, project directory, pip entry points. Plugins can register tools and inject messages.
+
+**Why it matters**: This is complementary to the middleware chain (item 1). Middleware transforms the request/response flow; hooks allow external code to observe and react. Together they form a complete extensibility model.
+
+**Recommendation for Life**: Define lifecycle hooks in the Arcan agent loop. External crates (Autonomic, Haima, Vigil) subscribe to hooks rather than being hardwired into the loop.
+
+**Implementation target**: `arcan-core` — define `AgentHook` trait, register hooks in `arcand`.
+
+### 14. Background Self-Improvement Daemon (from Hermes)
+
+**What**: After conversations, a daemon thread spawns a **forked `AIAgent`** with reduced budget (8 iterations) that reviews the conversation and writes to shared MemoryStore/SkillStore. A companion repo (`hermes-agent-self-evolution`) implements GEPA (ICLR 2026 Oral paper) for evolutionary self-improvement using execution traces.
+
+**Why it matters**: This is a working implementation of autonomous self-improvement — the biggest gap in Life (self-learning score: 2/10). The low-budget forked agent is a clever resource-efficient approach.
+
+**Recommendation for Life**: After each session, spawn a lightweight "review" agent that:
+- Extracts key decisions and outcomes
+- Creates/updates skill documents
+- Updates memory with learned patterns
+- Writes review events to Lago for auditability
+- Uses Autonomic's Conserving economic mode (minimal token budget)
+
+**Implementation target**: `arcand` — post-session hook + review agent with Lago event persistence.
+
+### 15. Composable Toolsets with Hierarchy (from Hermes)
+
+**What**: Three-tier toolset hierarchy — atomic (web, terminal, vision), scenario (debugging, safe), platform (hermes-cli, hermes-telegram). Recursive resolution with cycle detection. Runtime custom toolset creation.
+
+**Why it matters**: Life's Praxis has a flat `ToolRegistry`. As tool count grows, flat registries become unwieldy. Hierarchical composition with cycle detection is a mature pattern.
+
+**Recommendation for Life**: Add toolset grouping to Praxis:
+- Define `ToolSet` as a named collection of tool names + included toolsets
+- Resolve recursively with cycle detection
+- Allow runtime composition (e.g., "safe" = read-only tools only)
+- OperatingMode (Explore/Execute/Verify) maps naturally to toolset selection
+
+**Implementation target**: `praxis-core` — add `ToolSet` type to `ToolRegistry`.
+
+### 16. Iteration Budget with Refund Semantics (from Hermes)
+
+**What**: Thread-safe `IterationBudget` class with consume/refund. Default 90 for parent, 50 for subagents. `execute_code` refunds iterations since it collapses multiple tool calls into one inference turn.
+
+**Why it matters**: Autonomic already has economic modes but no turn-level budget. A refundable iteration budget provides fine-grained loop control and maps naturally to Autonomic's EconomicMode.
+
+**Recommendation for Life**: Wire Autonomic's budget into the agent loop:
+- Map EconomicMode to iteration caps (Sovereign=unlimited, Conserving=30, Hustle=90, Hibernate=5)
+- Add refund semantics for batch operations
+- HysteresisGate prevents budget mode flapping
+
+**Implementation target**: `arcan-core` + `autonomic-controller`.
+
+---
+
 ## Patterns NOT to Adopt
 
 | Pattern | Why Not |
@@ -176,35 +252,56 @@ Life/AOS differentiates on: event-sourced persistence, formal kernel contract, h
 
 ## Priority Matrix
 
-| Feature | Impact | Effort | Priority |
-|---|---|---|---|
-| Turn middleware chain | High | Medium | **P0** — architectural enabler |
-| Context compression | High | Medium | **P0** — directly improves agent quality |
-| Progressive skill loading | Medium | Low | **P1** — quick win |
-| Self-improving skills | High | Medium | **P1** — addresses self-learning gap |
-| Sub-agent delegation | High | High | **P1** — leverages existing Lago branching |
-| Cross-session memory search | High | Medium | **P1** — lago-knowledge is ready |
-| Guardrails middleware | Medium | Low | **P2** — compose with existing ApprovalGate |
-| Sandbox isolation (Docker) | Medium | High | **P2** — aligns with Aegis roadmap |
-| RL trajectory export | High | Medium | **P2** — Phase 2 dependency |
-| Multi-platform gateway | Medium | High | **P3** — future phase |
+| # | Feature | Impact | Effort | Priority |
+|---|---|---|---|---|
+| 1 | Turn middleware chain | High | Medium | **P0** — architectural enabler |
+| 4 | Context compression | High | Medium | **P0** — directly improves agent quality |
+| 11 | Frozen snapshot for cache preservation | High | Low | **P0** — immediate cost savings |
+| 2 | Progressive skill loading | Medium | Low | **P1** — quick win |
+| 3 | Self-improving skills | High | Medium | **P1** — addresses self-learning gap |
+| 5 | Sub-agent delegation | High | High | **P1** — leverages existing Lago branching |
+| 8 | Cross-session memory search | High | Medium | **P1** — lago-knowledge is ready |
+| 14 | Background self-improvement daemon | High | Medium | **P1** — working model for self-learning |
+| 16 | Iteration budget with refund | Medium | Low | **P1** — wire Autonomic to agent loop |
+| 10 | Guardrails middleware | Medium | Low | **P2** — compose with existing ApprovalGate |
+| 13 | Lifecycle hooks for plugins | Medium | Medium | **P2** — extensibility for external crates |
+| 15 | Composable toolsets | Medium | Medium | **P2** — scales tool management |
+| 7 | Sandbox isolation (Docker) | Medium | High | **P2** — aligns with Aegis roadmap |
+| 9 | RL trajectory export | High | Medium | **P2** — Phase 2 dependency |
+| 12 | UDS RPC batch execution | Medium | High | **P2** — advanced sandbox pattern |
+| 6 | Multi-platform gateway | Medium | High | **P3** — future phase |
 
 ---
 
 ## Recommended Implementation Order
 
-1. **Turn middleware chain** in `arcan-core` (P0) — enables items 4, 5, 10
-2. **Context compression middleware** (P0) — immediate quality improvement
-3. **Progressive skill loading** in `praxis-skills` (P1) — low-effort, high-context-efficiency
-4. **Self-improving skills** via Lago events (P1) — biggest self-learning unlock
-5. **Cross-session FTS** in `lago-knowledge` (P1) — wire existing infra to agent loop
-6. **Sub-agent delegation** via Lago branches (P1) — complex but high leverage
+### Phase A: Architectural Foundation (P0)
+1. **Turn middleware chain** in `arcan-core` — enables guardrails, compression, hooks
+2. **Frozen snapshot prefix** in context compiler — immediate cost savings, minimal change
+3. **Context compression middleware** — quality improvement for long sessions
+
+### Phase B: Self-Learning Unlock (P1)
+4. **Iteration budget with refund** — wire Autonomic economic modes to agent loop
+5. **Progressive skill loading** in `praxis-skills` — low-effort context efficiency
+6. **Self-improving skills** via Lago events — biggest self-learning unlock
+7. **Background self-improvement daemon** — autonomous skill/memory refinement
+8. **Cross-session FTS** in `lago-knowledge` — wire existing infra to agent loop
+
+### Phase C: Extensibility & Isolation (P2)
+9. **Sub-agent delegation** via Lago branches — complex but high leverage
+10. **Lifecycle hooks** for external crate integration
+11. **Composable toolsets** for growing tool ecosystem
+12. **Guardrails middleware** — compose with ApprovalGate
+13. **RL trajectory export** — Phase 2 self-learning dependency
 
 ---
 
 ## References
 
-- Hermes Agent: https://github.com/nousresearch/hermes-agent (v0.6.0, MIT)
-- DeerFlow: https://github.com/bytedance/deer-flow (v2.0, MIT)
+- Hermes Agent: https://github.com/nousresearch/hermes-agent (v0.6.0, MIT, 21.8K stars)
+- Hermes Agent Self-Evolution: https://github.com/NousResearch/hermes-agent-self-evolution (GEPA — ICLR 2026 Oral)
+- DeerFlow: https://github.com/bytedance/deer-flow (v2.0, MIT, 56.2K stars)
 - agentskills.io: Open standard for agent skills (Hermes-compatible)
 - Agent Communication Protocol (ACP): Used by DeerFlow for external agent invocation
+- Atropos: Nous Research RL training framework (integrated with Hermes)
+- Honcho: AI-native cross-session memory (https://github.com/plastic-labs/honcho)
