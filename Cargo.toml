@@ -5,7 +5,9 @@ members = [
     "crates/haima-wallet",
     "crates/haima-x402",
     "crates/haima-lago",
+    "crates/haima-insurance",
     "crates/haima-api",
+    "crates/haima-outcome",
     "crates/haimad",
 ]
 
@@ -79,8 +81,9 @@ chacha20poly1305 = "0.10"
 
 # Async
 async-trait = "0.1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 
 # HTTP
 axum = { version = "0.8", features = ["macros"] }
@@ -91,6 +94,9 @@ reqwest = { version = "0.12", features = ["json"] }
 clap = { version = "4", features = ["derive"] }
 toml = "0.9"
 anyhow = "1"
+
+# IDs
+ulid = "1"
 
 # Testing
 tower = { version = "0.5", features = ["util"] }
@@ -119,5 +125,7 @@ haima-core = { version = "0.1.0", path = "crates/haima-core" }
 haima-wallet = { version = "0.1.0", path = "crates/haima-wallet" }
 haima-x402 = { version = "0.1.0", path = "crates/haima-x402" }
 haima-lago = { version = "0.1.0", path = "crates/haima-lago" }
+haima-insurance = { version = "0.1.0", path = "crates/haima-insurance" }
+haima-outcome = { version = "0.1.0", path = "crates/haima-outcome" }
 haima-api = { version = "0.1.0", path = "crates/haima-api" }
 

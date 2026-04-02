@@ -13,6 +13,8 @@ haima-core.workspace = true
 haima-wallet.workspace = true
 haima-x402.workspace = true
 haima-lago.workspace = true
+haima-outcome.workspace = true
+haima-insurance.workspace = true
 lago-auth.workspace = true
 aios-protocol.workspace = true
 serde.workspace = true
@@ -22,6 +24,8 @@ tracing.workspace = true
 tokio.workspace = true
 axum.workspace = true
 tower-http.workspace = true
+chrono.workspace = true
+ulid.workspace = true
 
 [dev-dependencies]
 tower.workspace = true

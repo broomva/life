@@ -7,8 +7,12 @@
 //! - **Subscriber**: Subscribes to finance events for real-time projections
 //! - **Projection**: Deterministic fold over finance events → `FinancialState`
 
+pub mod insurance;
+pub mod outcome;
 pub mod projection;
 pub mod publisher;
 
+pub use insurance::InsuranceState;
+pub use outcome::{DashboardSummary, OutcomePricingState, PendingTask, TaskTypeStats};
 pub use projection::FinancialState;
 pub use publisher::FinancePublisher;

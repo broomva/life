@@ -10,7 +10,10 @@ pub mod bureau;
 pub mod credit;
 pub mod error;
 pub mod event;
+pub mod insurance;
 pub mod lending;
+pub mod marketplace;
+pub mod outcome;
 pub mod payment;
 pub mod policy;
 pub mod receipt;
@@ -27,6 +30,23 @@ pub use credit::{
 };
 pub use error::{HaimaError, HaimaResult};
 pub use event::FinanceEventKind;
+pub use insurance::{
+    BindRequest, ClaimRequest, ClaimStatus, ClaimVerification, InsuranceClaim, InsurancePool,
+    InsurancePolicy, InsuranceProduct, InsuranceProductType, InsuranceProvider, InsuranceQuote,
+    InsuranceTrustTier, PolicyStatus, PoolContributionRequest, PoolStatus, ProviderType,
+    QuoteRequest, RiskAssessment, RiskComponents,
+};
+pub use marketplace::{
+    ClaimsHistory, InsuranceDashboard, assess_risk, bind_policy, calculate_premium,
+    contribute_to_pool, create_claim, create_pool, default_pool_provider, default_products,
+    generate_quote, pool_payout, pool_register_policy, verify_claim,
+};
+pub use outcome::{
+    CriterionResult, OutcomeRecord, OutcomeVerification, RefundPolicy, SuccessCriterion,
+    TaskComplexity, TaskContract, TaskOutcome, TaskType, default_code_review_contract,
+    default_data_pipeline_contract, default_document_generation_contract,
+    default_support_ticket_contract,
+};
 pub use lending::{
     CreditLine, CreditLineStatus, DrawRequest, DrawResult, RepaymentRecord, accrue_interest,
     close_credit_line, default_credit_line, draw, freeze_credit_line, open_credit_line, repay,
