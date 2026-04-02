@@ -311,20 +311,25 @@ The agent learns which tools work best for which task types. That learning itsel
 | EventEnvelope | ✅ Complete | 50+ | lago-core/event.rs |
 | Journal trait | ✅ Complete | 6 | lago-core/journal.rs |
 | RedbJournal | ✅ Complete | 20+ | lago-journal |
-| LanceJournal | ✅ Complete | 24 | lago-lance |
+| LanceJournal | ✅ Complete | 24 | lago-lance (events + sessions + workspace) |
 | Context Compiler | ✅ Complete | 27 | lago-compiler (scorer, formatter, retriever) |
 | FilesystemRetriever | ✅ Complete | In compiler tests | Level 0 retrieval |
-| Liquid Prompt | ✅ Complete | 13 | arcan-core/prompt.rs |
+| Liquid Prompt | ✅ Complete | 13 | arcan-core/prompt.rs (cacheable/dynamic split) |
 | Shared workspace journal | ✅ Complete | — | arcan shell → workspace.lance |
-| Memory extraction | ✅ Partial | — | Heuristic, not compaction-triggered |
-| MEMORY.md index | ❌ Not implemented | — | Needs: always-loaded, capped, deduped |
-| Prompt cache boundary | ❌ Not implemented | — | Needs: split cacheable/dynamic |
-| Consolidation engine | ❌ Not implemented | — | Background: episodic→semantic→procedural |
-| EGRI self-improvement | ❌ Not implemented | — | Track retrieval strategy outcomes |
-| Proactive memory tools | ❌ Not implemented | — | memory_offload, memory_forget, memory_browse |
-| Tree navigation | ❌ Not implemented | — | PageIndex-style hierarchical retrieval |
-| Vector search integration | ❌ Not implemented | — | Lance ANN in retrieval |
-| DuckDB analytics | ❌ Not implemented | — | Cross-session SQL queries |
+| Memory extraction | ✅ Complete | — | Heuristic extraction + compaction-triggered |
+| MEMORY.md index | ✅ Complete | — | Always-loaded, capped 200 lines, auto-generated |
+| Prompt cache boundary | ✅ Complete | — | SystemPrompt { cacheable, dynamic } split |
+| Proactive memory tools | ✅ Complete | 6 tools | memory_search, memory_browse, memory_recent, memory_offload, memory_forget |
+| /search command | ✅ Complete | 6 | Keyword search across memory files (2026-04-02) |
+| Session resume | ✅ Complete | — | Replay from redb journal, tokio fallback fixed |
+| Consolidation engine | ✅ Partial | 6 | Decay + prune implemented; pattern extraction basic |
+| E2E test suite | ✅ Complete | 45 | 6-level smoke test, path-filtered CI |
+| Vector search integration | 🔄 In Progress | — | BRO-382: Lance embedding column + ANN search |
+| Embedding provider | 📋 Planned | — | BRO-388: HttpEmbeddingProvider, embed-on-write |
+| memory_similar tool | 📋 Planned | — | BRO-390: Agent-driven vector retrieval |
+| Tree navigation | 📋 Planned | — | PageIndex-style hierarchical retrieval |
+| EGRI self-improvement | 📋 Planned | — | Track retrieval strategy outcomes |
+| DuckDB analytics | 📋 Planned | — | Cross-session SQL queries |
 
 ## Graceful Degradation
 
