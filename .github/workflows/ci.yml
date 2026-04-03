@@ -35,6 +35,7 @@ jobs:
           git clone --depth 1 https://github.com/broomva/lago.git
           git clone --depth 1 https://github.com/broomva/autonomic.git
           git clone --depth 1 https://github.com/broomva/vigil.git
+          git clone --depth 1 https://github.com/broomva/anima.git
 
       - uses: dtolnay/rust-toolchain@stable
         with:
