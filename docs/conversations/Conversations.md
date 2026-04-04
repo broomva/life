@@ -6,8 +6,8 @@ tags:
   - moc
 type: moc
 status: active
-created: 2026-03-27
-updated: 2026-03-27
+created: 2026-04-03
+updated: 2026-04-03
 related:
   - "[[Documentation Hub]]"
   - "[[CLAUDE]]"
@@ -22,22 +22,30 @@ related:
 > tool usage, files modified, and commits — linking agent work to the
 > knowledge graph.
 
-**Total sessions indexed**: 52
+**Total sessions indexed**: 55
+
+## 2026-04-02
+
+| Session | Branch | Turns | Duration | Topic |
+|---------|--------|-------|----------|-------|
+| [[session-2026-04-02-f948108a]] | `main` | 12 | 12h 48m | whats next on this project? |
 
 ## 2026-03-27
 
 | Session | Branch | Turns | Duration | Topic |
 |---------|--------|-------|----------|-------|
-| [[session-2026-03-27-79f58ef5]] | `main` | 8 | 57m | <channel source="plugin:discord:discord" chat_id=" |
+| [[session-2026-03-27-79f58ef5]] | `main` | 43 | 77h 22m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-27-cd1317fe]] | `` | 2 | 17m | Session cd1317fe |
-| [[session-2026-03-27-4be0b59e]] | `` | 2 | 0m | Session 4be0b59e |
+| [[session-2026-03-27-4be0b59e]] | `` | 2 | 142h 27m | Session 4be0b59e |
 | [[session-2026-03-27-454c2839]] | `` | 2 | 1m | Session 454c2839 |
+| [[session-2026-03-27-2fe5caa1]] | `` | 2 | 0m | Session 2fe5caa1 |
+| [[session-2026-03-27-75d90196]] | `` | 2 | 42m | Session 75d90196 |
 
 ## 2026-03-24
 
 | Session | Branch | Turns | Duration | Topic |
 |---------|--------|-------|----------|-------|
-| [[session-2026-03-24-e00f1f66]] | `main` | 32 | 52h 27m | <channel source="plugin:discord:discord" chat_id=" |
+| [[session-2026-03-24-e00f1f66]] | `main` | 32 | 219h 23m | <channel source="plugin:discord:discord" chat_id=" |
 
 ## 2026-03-23
 
@@ -45,7 +53,7 @@ related:
 |---------|--------|-------|----------|-------|
 | [[session-2026-03-23-2f64ca4c]] | `main` | 24 | 33h 48m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-23-5271645a]] | `main` | 14 | 30h 52m | <channel source="plugin:discord:discord" chat_id=" |
-| [[session-2026-03-23-ab6d67d3]] | `main` | 6 | 92h 6m | <channel source="plugin:discord:discord" chat_id=" |
+| [[session-2026-03-23-ab6d67d3]] | `main` | 6 | 245h 59m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-23-12293244]] | `main` | 4 | 27h 30m | <channel source="plugin:discord:discord" chat_id=" |
 
 ## 2026-03-19
@@ -133,9 +141,9 @@ related:
 
 ## Statistics
 
-- **Total turns**: 2962
+- **Total turns**: 3013
 - **Branches worked on**: 1
-- **Date range**: 2026-02-20 → 2026-03-27
+- **Date range**: 2026-02-20 → 2026-04-02
 
 ---
 
