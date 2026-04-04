@@ -4,6 +4,7 @@
 //! cognitive, economic), gating profiles, hysteresis primitives, rule traits,
 //! and event constructors. It has zero I/O dependencies.
 
+pub mod context;
 pub mod economic;
 pub mod error;
 pub mod events;
@@ -14,6 +15,7 @@ pub mod rules;
 pub mod trust;
 
 // Re-exports for convenience
+pub use context::{ContextCompressionAdvice, ContextRuling};
 pub use economic::{CostReason, EconomicMode, EconomicState, ModelCostRates, ModelTier};
 pub use error::{AutonomicError, AutonomicResult};
 pub use events::AutonomicEvent;
