@@ -1,8 +1,16 @@
 # Lago Lakehouse Architecture — Delta Lake + DuckDB + Lance
 
+> **Historical design note**
+> This document captures the earlier Delta-first lakehouse direction.
+> It is no longer the canonical cognitive-substrate roadmap.
+> For the current implementation direction, use:
+> - `core/life/docs/LAGO_ARCHITECTURE.md`
+> - `core/life/docs/COGNITIVE_STORAGE.md`
+> - `core/life/docs/COGNITIVE_STORAGE_v2.md`
+
 > **Date**: 2026-04-01
-> **Status**: Proposed
-> **Vision**: Lago is the AI-native lakehouse — Delta Lake for agent data, DuckDB for analytics, Lance for vectors.
+> **Status**: Historical proposal
+> **Vision at the time**: Lago as an AI-native lakehouse — Delta Lake for agent data, DuckDB for analytics, Lance for vectors.
 
 ## Strategic Position
 
