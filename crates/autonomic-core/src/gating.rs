@@ -8,6 +8,7 @@ use aios_protocol::mode::{GatingProfile, OperatingMode};
 use serde::{Deserialize, Serialize};
 
 use crate::economic::{EconomicMode, EconomicState, ModelTier};
+use crate::hysteresis::HysteresisGate;
 
 /// Economic gates — extensions to the canonical `GatingProfile`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +93,9 @@ pub struct CognitiveState {
     pub tool_density: f64,
     /// Turns elapsed since last compaction. High = stale old context.
     pub turns_since_compact: u32,
+    /// Hysteresis gate for context dilation — prevents flapping between
+    /// Dilate and Compress decisions in the soft zone.
+    pub dilation_gate: HysteresisGate,
 }
 
 impl Default for CognitiveState {
@@ -103,6 +107,9 @@ impl Default for CognitiveState {
             turns_completed: 0,
             tool_density: 0.0,
             turns_since_compact: 0,
+            // Dilation gate: enters dilation at 60% pressure, exits at 45%.
+            // min_hold_ms=0 because the shell tracks turns, not wall-clock time.
+            dilation_gate: HysteresisGate::new(0.60, 0.45, 0),
         }
     }
 }
@@ -376,6 +383,14 @@ mod tests {
         assert_eq!(state.belief.capability_count, 0);
         assert_eq!(state.belief.violations, 0);
         assert!((state.belief.reputation_score - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cognitive_state_has_dilation_gate() {
+        let cog = CognitiveState::default();
+        assert!(!cog.dilation_gate.active);
+        assert!((cog.dilation_gate.threshold_enter - 0.60).abs() < f64::EPSILON);
+        assert!((cog.dilation_gate.threshold_exit - 0.45).abs() < f64::EPSILON);
     }
 
     #[test]
