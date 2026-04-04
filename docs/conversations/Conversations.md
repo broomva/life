@@ -6,8 +6,8 @@ tags:
   - moc
 type: moc
 status: active
-created: 2026-04-03
-updated: 2026-04-03
+created: 2026-04-04
+updated: 2026-04-04
 related:
   - "[[Documentation Hub]]"
   - "[[CLAUDE]]"
@@ -28,14 +28,14 @@ related:
 
 | Session | Branch | Turns | Duration | Topic |
 |---------|--------|-------|----------|-------|
-| [[session-2026-04-02-f948108a]] | `main` | 12 | 34h 10m | whats next on this project? |
+| [[session-2026-04-02-f948108a]] | `main` | 12 | 34h 41m | whats next on this project? |
 
 ## 2026-03-27
 
 | Session | Branch | Turns | Duration | Topic |
 |---------|--------|-------|----------|-------|
 | [[session-2026-03-27-79f58ef5]] | `main` | 43 | 174h 32m | <channel source="plugin:discord:discord" chat_id=" |
-| [[session-2026-03-27-cd1317fe]] | `` | 2 | 17m | Session cd1317fe |
+| [[session-2026-03-27-cd1317fe]] | `` | 2 | 175h 0m | Session cd1317fe |
 | [[session-2026-03-27-4be0b59e]] | `` | 2 | 142h 27m | Session 4be0b59e |
 | [[session-2026-03-27-454c2839]] | `` | 2 | 1m | Session 454c2839 |
 | [[session-2026-03-27-2fe5caa1]] | `` | 2 | 0m | Session 2fe5caa1 |
@@ -53,7 +53,7 @@ related:
 |---------|--------|-------|----------|-------|
 | [[session-2026-03-23-2f64ca4c]] | `main` | 24 | 33h 48m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-23-5271645a]] | `main` | 14 | 30h 52m | <channel source="plugin:discord:discord" chat_id=" |
-| [[session-2026-03-23-ab6d67d3]] | `main` | 6 | 268h 22m | <channel source="plugin:discord:discord" chat_id=" |
+| [[session-2026-03-23-ab6d67d3]] | `main` | 6 | 268h 27m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-23-12293244]] | `main` | 4 | 27h 30m | <channel source="plugin:discord:discord" chat_id=" |
 
 ## 2026-03-19
