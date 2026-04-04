@@ -53,7 +53,7 @@ related:
 |---------|--------|-------|----------|-------|
 | [[session-2026-03-23-2f64ca4c]] | `main` | 24 | 33h 48m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-23-5271645a]] | `main` | 14 | 30h 52m | <channel source="plugin:discord:discord" chat_id=" |
-| [[session-2026-03-23-ab6d67d3]] | `main` | 6 | 245h 59m | <channel source="plugin:discord:discord" chat_id=" |
+| [[session-2026-03-23-ab6d67d3]] | `main` | 6 | 267h 54m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-23-12293244]] | `main` | 4 | 27h 30m | <channel source="plugin:discord:discord" chat_id=" |
 
 ## 2026-03-19
