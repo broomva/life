@@ -88,6 +88,10 @@ pub struct CognitiveState {
     pub context_pressure: f32,
     /// Number of model turns completed.
     pub turns_completed: u32,
+    /// Average tool calls per turn (rolling window). High = active implementation.
+    pub tool_density: f64,
+    /// Turns elapsed since last compaction. High = stale old context.
+    pub turns_since_compact: u32,
 }
 
 impl Default for CognitiveState {
@@ -97,6 +101,8 @@ impl Default for CognitiveState {
             tokens_remaining: 120_000,
             context_pressure: 0.0,
             turns_completed: 0,
+            tool_density: 0.0,
+            turns_since_compact: 0,
         }
     }
 }
@@ -370,5 +376,29 @@ mod tests {
         assert_eq!(state.belief.capability_count, 0);
         assert_eq!(state.belief.violations, 0);
         assert!((state.belief.reputation_score - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cognitive_state_has_compression_signals() {
+        let mut cog = CognitiveState::default();
+        assert_eq!(cog.tool_density, 0.0);
+        assert_eq!(cog.turns_since_compact, 0);
+        cog.tool_density = 3.5;
+        cog.turns_since_compact = 12;
+        assert!((cog.tool_density - 3.5).abs() < f64::EPSILON);
+        assert_eq!(cog.turns_since_compact, 12);
+    }
+
+    #[test]
+    fn cognitive_state_compression_signals_serde() {
+        let cog = CognitiveState {
+            tool_density: 2.5,
+            turns_since_compact: 8,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&cog).unwrap();
+        let back: CognitiveState = serde_json::from_str(&json).unwrap();
+        assert!((back.tool_density - 2.5).abs() < f64::EPSILON);
+        assert_eq!(back.turns_since_compact, 8);
     }
 }
