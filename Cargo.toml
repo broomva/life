@@ -90,7 +90,7 @@ life-vigil = { version = "0.1.0", path = "../vigil" }
 aios-protocol = { version = "0.2.0", path = "../aiOS/crates/aios-protocol" }
 
 # Arcan core (Middleware trait, runtime types)
-arcan-core = { version = "0.2.1", path = "../arcan/crates/arcan-core" }
+arcan-core = { version = "0.3.0", path = "../arcan/crates/arcan-core" }
 
 # Autonomic (homeostatic state, rules)
 autonomic-core = { version = "0.1.0", path = "../autonomic/crates/autonomic-core" }
