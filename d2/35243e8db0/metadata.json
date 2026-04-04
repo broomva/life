@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "d235243e8db0",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "docs/conversations/Conversations.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d2/35243e8db0/0/metadata.json",
+      "transcript": "/d2/35243e8db0/0/full.jsonl",
+      "context": "/d2/35243e8db0/0/context.md",
+      "content_hash": "/d2/35243e8db0/0/content_hash.txt",
+      "prompt": "/d2/35243e8db0/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  }
+}
