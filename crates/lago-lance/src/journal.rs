@@ -67,28 +67,97 @@ impl LanceJournal {
 
     /// Write a `RecordBatch` of events — creates the dataset on first call,
     /// appends on subsequent calls.
+    ///
+    /// If appending fails due to a schema mismatch (e.g., the on-disk dataset
+    /// was created before the `embedding` column was added), automatically
+    /// migrates by reading existing events, recreating the dataset with the
+    /// current schema, and re-appending all data.
     async fn write_events_batch(&self, batch: RecordBatch) -> LagoResult<()> {
         let schema = Arc::new(event_schema());
-        let batches: Vec<Result<RecordBatch, arrow::error::ArrowError>> = vec![Ok(batch)];
-        let reader = RecordBatchIterator::new(batches, schema);
 
         if self.events_exist() {
+            // Try the fast path: append to existing dataset.
+            let batches: Vec<Result<RecordBatch, arrow::error::ArrowError>> =
+                vec![Ok(batch.clone())];
+            let reader = RecordBatchIterator::new(batches, schema.clone());
+
             let mut ds = Dataset::open(&self.events_uri)
                 .await
                 .map_err(|e| LagoError::Journal(format!("open events dataset: {e}")))?;
-            ds.append(reader, None)
-                .await
-                .map_err(|e| LagoError::Journal(format!("append events: {e}")))?;
-        } else {
-            let params = WriteParams {
-                mode: WriteMode::Create,
-                ..Default::default()
-            };
-            Dataset::write(reader, &self.events_uri, Some(params))
-                .await
-                .map_err(|e| LagoError::Journal(format!("create events dataset: {e}")))?;
+
+            match ds.append(reader, None).await {
+                Ok(_) => return Ok(()),
+                Err(e) => {
+                    let msg = e.to_string();
+                    if msg.contains("schema") || msg.contains("fields did not match") {
+                        // Schema mismatch — migrate the dataset.
+                        tracing::warn!(
+                            "Lance events schema mismatch — migrating dataset: {msg}"
+                        );
+                        self.migrate_events_dataset(batch).await?;
+                        return Ok(());
+                    }
+                    return Err(LagoError::Journal(format!("append events: {e}")));
+                }
+            }
         }
 
+        // Dataset doesn't exist yet — create it.
+        let batches: Vec<Result<RecordBatch, arrow::error::ArrowError>> = vec![Ok(batch)];
+        let reader = RecordBatchIterator::new(batches, schema);
+        let params = WriteParams {
+            mode: WriteMode::Create,
+            ..Default::default()
+        };
+        Dataset::write(reader, &self.events_uri, Some(params))
+            .await
+            .map_err(|e| LagoError::Journal(format!("create events dataset: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Migrate the events dataset to the current schema.
+    ///
+    /// Reads all existing events, deletes the old dataset, and recreates it
+    /// with the current schema (including any new columns like `embedding`).
+    async fn migrate_events_dataset(&self, new_batch: RecordBatch) -> LagoResult<()> {
+        // Read existing events from the old-schema dataset.
+        // Use a raw scan that doesn't require the embedding column.
+        let existing_events = self.scan_events(None).await.unwrap_or_default();
+
+        tracing::info!(
+            existing = existing_events.len(),
+            "migrating Lance events dataset to new schema"
+        );
+
+        // Delete the old dataset directory.
+        let path = PathBuf::from(&self.events_uri);
+        if path.exists() {
+            std::fs::remove_dir_all(&path)
+                .map_err(|e| LagoError::Journal(format!("remove old events dataset: {e}")))?;
+        }
+
+        // Recreate with current schema: existing events + new batch.
+        let schema = Arc::new(event_schema());
+        let mut all_batches: Vec<Result<RecordBatch, arrow::error::ArrowError>> = Vec::new();
+
+        if !existing_events.is_empty() {
+            let existing_batch = events_to_batch(&existing_events)
+                .map_err(|e| LagoError::Journal(format!("re-batch existing events: {e}")))?;
+            all_batches.push(Ok(existing_batch));
+        }
+        all_batches.push(Ok(new_batch));
+
+        let reader = RecordBatchIterator::new(all_batches, schema);
+        let params = WriteParams {
+            mode: WriteMode::Create,
+            ..Default::default()
+        };
+        Dataset::write(reader, &self.events_uri, Some(params))
+            .await
+            .map_err(|e| LagoError::Journal(format!("recreate events dataset: {e}")))?;
+
+        tracing::info!("Lance events dataset migrated successfully");
         Ok(())
     }
 
