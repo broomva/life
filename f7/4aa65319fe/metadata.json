@@ -3,10 +3,12 @@
   "checkpoint_id": "f74aa65319fe",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 2,
+  "checkpoints_count": 13,
   "files_touched": [
     "docs/conversations/Conversations.md",
+    "docs/conversations/session-2026-03-27-2fe5caa1.md",
     "docs/conversations/session-2026-03-27-75d90196.md",
+    "docs/conversations/session-2026-04-02-f948108a.md",
     "docs/superpowers/plans/2026-03-27-tiered-sandbox-default.md",
     "haima",
     "nous",
@@ -27,13 +29,20 @@
       "context": "/f7/4aa65319fe/1/context.md",
       "content_hash": "/f7/4aa65319fe/1/content_hash.txt",
       "prompt": "/f7/4aa65319fe/1/prompt.txt"
+    },
+    {
+      "metadata": "/f7/4aa65319fe/2/metadata.json",
+      "transcript": "/f7/4aa65319fe/2/full.jsonl",
+      "context": "/f7/4aa65319fe/2/context.md",
+      "content_hash": "/f7/4aa65319fe/2/content_hash.txt",
+      "prompt": "/f7/4aa65319fe/2/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 782,
-    "cache_creation_tokens": 1313412,
-    "cache_read_tokens": 67783464,
-    "output_tokens": 261495,
-    "api_call_count": 570
+    "input_tokens": 7780,
+    "cache_creation_tokens": 4580337,
+    "cache_read_tokens": 104349629,
+    "output_tokens": 324704,
+    "api_call_count": 788
   }
 }
