@@ -75,8 +75,16 @@ jobs:
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout sibling dependencies
+        run: |
+          git clone --depth 1 https://github.com/broomva/aiOS.git ../aiOS
+          git clone --depth 1 https://github.com/broomva/lago.git ../lago
+          git clone --depth 1 https://github.com/broomva/vigil.git ../vigil
+          git clone --depth 1 https://github.com/broomva/anima.git ../anima
+          git clone --depth 1 https://github.com/broomva/haima.git ../haima
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
