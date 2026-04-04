@@ -28,7 +28,7 @@ related:
 
 | Session | Branch | Turns | Duration | Topic |
 |---------|--------|-------|----------|-------|
-| [[session-2026-04-02-f948108a]] | `main` | 12 | 34h 41m | whats next on this project? |
+| [[session-2026-04-02-f948108a]] | `main` | 12 | 37h 28m | whats next on this project? |
 
 ## 2026-03-27
 
@@ -53,7 +53,7 @@ related:
 |---------|--------|-------|----------|-------|
 | [[session-2026-03-23-2f64ca4c]] | `main` | 24 | 33h 48m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-23-5271645a]] | `main` | 14 | 30h 52m | <channel source="plugin:discord:discord" chat_id=" |
-| [[session-2026-03-23-ab6d67d3]] | `main` | 6 | 268h 27m | <channel source="plugin:discord:discord" chat_id=" |
+| [[session-2026-03-23-ab6d67d3]] | `main` | 6 | 271h 13m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-23-12293244]] | `main` | 4 | 27h 30m | <channel source="plugin:discord:discord" chat_id=" |
 
 ## 2026-03-19
