@@ -91,9 +91,7 @@ impl LanceJournal {
                     let msg = e.to_string();
                     if msg.contains("schema") || msg.contains("fields did not match") {
                         // Schema mismatch — migrate the dataset.
-                        tracing::warn!(
-                            "Lance events schema mismatch — migrating dataset: {msg}"
-                        );
+                        tracing::warn!("Lance events schema mismatch — migrating dataset: {msg}");
                         self.migrate_events_dataset(batch).await?;
                         return Ok(());
                     }
