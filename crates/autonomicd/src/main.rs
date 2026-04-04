@@ -38,6 +38,8 @@ fn build_rule_set(config: &AutonomicConfig) -> RuleSet {
     // Cognitive rules
     rules.add(Box::new(ContextPressureRule::new(
         config.cognitive.context_pressure_threshold,
+        0.85,
+        0.95,
     )));
     rules.add(Box::new(TokenExhaustionRule::new(
         config.cognitive.token_exhaustion_threshold,
