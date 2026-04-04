@@ -84,13 +84,13 @@ toml = "0.9"
 # Observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-life-vigil = { version = "0.1.0", path = "../vigil" }
+life-vigil = { version = "0.1.0", path = "/Users/broomva/broomva/core/life/vigil" }
 
 # Agent OS protocol (canonical contract)
 aios-protocol = { version = "0.2.0", path = "../aiOS/crates/aios-protocol" }
 
 # Arcan core (Middleware trait, runtime types)
-arcan-core = { version = "0.2.1", path = "../arcan/crates/arcan-core" }
+arcan-core = { version = "0.2.1", path = "/Users/broomva/broomva/core/life/arcan/crates/arcan-core" }
 
 # Autonomic (homeostatic state, rules)
 autonomic-core = { version = "0.1.0", path = "../autonomic/crates/autonomic-core" }

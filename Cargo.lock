@@ -95,11 +95,13 @@ name = "arcan-core"
 version = "0.2.1"
 dependencies = [
  "aios-protocol",
+ "chrono",
  "json-patch",
  "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -2069,6 +2071,15 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "wait-timeout"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "want"
