@@ -1,0 +1,45 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "55dbd55ead5c",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/aios/aios-protocol/src/lib.rs",
+    "crates/aios/aios-runtime/src/lib.rs",
+    "crates/arcan/arcand/src/canonical.rs",
+    "crates/cli/life-cli/src/cost.rs",
+    "crates/cli/life-cli/src/deploy/backend.rs",
+    "crates/cli/life-cli/src/deploy/mod.rs",
+    "crates/cli/life-cli/src/deploy/railway.rs",
+    "crates/cli/life-cli/src/logs.rs",
+    "crates/cli/life-cli/src/relay.rs",
+    "crates/cli/life-cli/src/scale.rs",
+    "crates/cli/life-cli/src/status.rs",
+    "crates/cli/life-cli/src/template.rs",
+    "crates/lago/lago-api/src/router.rs",
+    "crates/relay/life-relay-core/src/protocol.rs",
+    "crates/relay/life-relayd/src/adapters/claude.rs",
+    "crates/relay/life-relayd/src/adapters/parser.rs",
+    "crates/relay/life-relayd/src/auth.rs",
+    "crates/relay/life-relayd/src/connection.rs",
+    "crates/relay/life-relayd/src/daemon.rs",
+    "docs/conversations/Conversations.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/55/dbd55ead5c/0/metadata.json",
+      "transcript": "/55/dbd55ead5c/0/full.jsonl",
+      "context": "/55/dbd55ead5c/0/context.md",
+      "content_hash": "/55/dbd55ead5c/0/content_hash.txt",
+      "prompt": "/55/dbd55ead5c/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  }
+}
