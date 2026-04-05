@@ -1,0 +1,43 @@
+[package]
+name = "life-vigil"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Observability foundation for the Life Agent OS — OpenTelemetry tracing, GenAI semantic conventions, and contract-derived instrumentation"
+license = "MIT"
+repository = "https://github.com/broomva/vigil"
+
+[dependencies]
+# OpenTelemetry core
+opentelemetry = "0.29"
+opentelemetry_sdk = { version = "0.29", features = ["trace", "metrics"] }
+opentelemetry-otlp = { version = "0.29", features = ["trace", "metrics", "grpc-tonic", "http-proto"] }
+opentelemetry-semantic-conventions = "0.29"
+
+# Tracing bridge
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "registry", "fmt"] }
+tracing-opentelemetry = "0.30"
+
+# Shared contract
+aios-protocol = { version = "0.2.0", path = "../aiOS/crates/aios-protocol" }
+
+# Error handling
+thiserror = "2.0"
+
+# gRPC transport (required for OTLP header injection)
+tonic = "0.12"
+
+# Utilities
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt"] }
+
+[dev-dependencies]
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[lints.rust]
+unused_must_use = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"
