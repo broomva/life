@@ -71,38 +71,68 @@ life/
 | [**Spaces A2A**](crates/spaces-a2a/) | 1 | A2A protocol bridge for Spaces | `spaces-a2a` | -- |
 | | **76** | | | |
 
+## Prerequisites
+
+- [**Rust**](https://rustup.rs/) 2024 Edition (MSRV 1.93)
+- **Protobuf compiler** -- required for gRPC codegen (lago, haima)
+  ```bash
+  # macOS
+  brew install protobuf
+
+  # Ubuntu/Debian
+  sudo apt-get install -y protobuf-compiler
+  ```
+
 ## Quick Start
 
+### Zero-config (no API key needed)
+
 ```bash
-# Clone and build
-git clone https://github.com/broomva/life.git
-cd life
-cargo check --workspace
-
-# Run all 2,625 tests
-cargo test --workspace
-
-# Install the agent CLI
 cargo install arcan
 
-# Start arcan shell (interactive agent REPL)
+# Interactive agent shell with mock provider -- works immediately
+arcan shell --provider mock
+
+# Or start the daemon + TUI client
+arcan serve --provider mock   # terminal 1
+arcan chat                    # terminal 2
+```
+
+### With a real LLM provider
+
+```bash
+# Anthropic Claude
+ANTHROPIC_API_KEY=sk-ant-... arcan shell
+
+# Local Ollama
 arcan shell --provider ollama --model gemma4
+
+# Any OpenAI-compatible API
+OPENAI_API_KEY=... OPENAI_BASE_URL=https://api.together.xyz arcan shell --provider openai --model meta-llama/Llama-3.3-70B-Instruct-Turbo
+```
+
+See [`.env.example`](.env.example) for all configuration options.
+
+### Build from source
+
+```bash
+git clone https://github.com/broomva/life.git
+cd life
+cargo check --workspace       # Verify compilation (76 crates)
+cargo test --workspace        # Run 2,625+ tests
+
+# Set up conventional commit hooks
+git config core.hooksPath .githooks
+git config commit.template .gitmessage
 ```
 
 ### Daemons
 
 ```bash
-# Agent runtime (port 3000)
-cargo run -p arcan -- serve
-
-# Persistence daemon
-cargo run -p lagod
-
-# Homeostasis controller (port 3002)
-cargo run -p autonomicd
-
-# Finance engine (port 3003)
-cargo run -p haimad
+cargo run -p arcan -- serve   # Agent runtime (port 3000)
+cargo run -p lagod            # Persistence (port 8080/50051)
+cargo run -p autonomicd       # Homeostasis controller (port 3002)
+cargo run -p haimad           # Finance engine (port 3003)
 ```
 
 ## Architecture
