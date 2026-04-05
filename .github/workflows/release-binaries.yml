@@ -47,7 +47,7 @@ jobs:
           mkdir -p dist
           cp target/${{ matrix.target }}/release/arcan dist/ 2>/dev/null || true
           cd dist && for f in *; do tar czf "${f}-${{ matrix.target }}.tar.gz" "$f"; rm "$f"; done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binaries-${{ matrix.target }}
           path: dist/*.tar.gz
