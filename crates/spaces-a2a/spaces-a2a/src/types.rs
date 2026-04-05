@@ -209,10 +209,7 @@ pub enum ArtifactPart {
         mime_type: Option<String>,
     },
     #[serde(rename = "data")]
-    Data {
-        data: String,
-        mime_type: String,
-    },
+    Data { data: String, mime_type: String },
     #[serde(rename = "file")]
     File {
         uri: String,
@@ -363,10 +360,7 @@ pub enum TaskStreamEvent {
     StatusUpdate { task_id: String, status: TaskStatus },
     /// New artifact produced
     #[serde(rename = "artifact")]
-    ArtifactUpdate {
-        task_id: String,
-        artifact: Artifact,
-    },
+    ArtifactUpdate { task_id: String, artifact: Artifact },
     /// New message in task conversation
     #[serde(rename = "message")]
     MessageUpdate {

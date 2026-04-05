@@ -1,0 +1,9 @@
+{
+  "checkpoint_id": "c29374e5-bbdb-4fc7-8f49-ebd8e1a29b04",
+  "session_id": "policy-test",
+  "branch_id": "main",
+  "created_at": "2026-04-05T12:15:04.782007Z",
+  "event_sequence": 392,
+  "state_hash": "cc722c04c08edca2f54ef4f45b7c4f47357e6ff0aa6bfd64589d2cbf38c74fdc",
+  "note": "automatic heartbeat checkpoint"
+}

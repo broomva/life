@@ -108,8 +108,8 @@ pub fn verify_agent_card(card: &AgentCard) -> Result<bool, String> {
     let pk_array: [u8; 32] = pk_bytes
         .try_into()
         .map_err(|_| "Public key must be 32 bytes".to_string())?;
-    let verifying_key = VerifyingKey::from_bytes(&pk_array)
-        .map_err(|e| format!("Invalid verifying key: {}", e))?;
+    let verifying_key =
+        VerifyingKey::from_bytes(&pk_array).map_err(|e| format!("Invalid verifying key: {}", e))?;
 
     let sig_bytes = b64
         .decode(&security.signature)
@@ -487,10 +487,7 @@ mod tests {
                     authorization_url.as_deref(),
                     Some("https://auth.example.com/authorize")
                 );
-                assert_eq!(
-                    token_url.as_deref(),
-                    Some("https://auth.example.com/token")
-                );
+                assert_eq!(token_url.as_deref(), Some("https://auth.example.com/token"));
             }
             _ => panic!("Expected OAuth2 scheme"),
         }

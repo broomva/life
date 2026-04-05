@@ -57,13 +57,14 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(50051);
 
-    let base_url = std::env::var("A2A_BASE_URL")
-        .unwrap_or_else(|_| format!("http://localhost:{}", http_port));
+    let base_url =
+        std::env::var("A2A_BASE_URL").unwrap_or_else(|_| format!("http://localhost:{}", http_port));
 
     // Create bridge with config
     let config = AgentCardConfig {
         base_url: base_url.clone(),
         a2a_version: "1.0".to_string(),
+        signing_key: None,
     };
     let bridge = Arc::new(SpacesBridge::new(config));
 
@@ -73,10 +74,7 @@ async fn main() -> anyhow::Result<()> {
     // Build HTTP router
     let app = Router::new()
         // A2A well-known discovery
-        .route(
-            "/.well-known/agent-card.json",
-            get(well_known_directory),
-        )
+        .route("/.well-known/agent-card.json", get(well_known_directory))
         .route(
             "/agents/{agent_id}/.well-known/agent-card.json",
             get(well_known_agent_card),
@@ -111,7 +109,10 @@ async fn main() -> anyhow::Result<()> {
     // Start HTTP server
     let addr = format!("0.0.0.0:{}", http_port);
     tracing::info!("A2A bridge HTTP server listening on {}", addr);
-    tracing::info!("Agent Card directory: {}/.well-known/agent-card.json", base_url);
+    tracing::info!(
+        "Agent Card directory: {}/.well-known/agent-card.json",
+        base_url
+    );
     tracing::info!("JSON-RPC endpoint: {}/", base_url);
     tracing::info!("gRPC endpoint: 0.0.0.0:{}", grpc_port);
 
@@ -274,7 +275,8 @@ async fn register_sample_agents(bridge: &SpacesBridge) {
         .register_listing(ListingData {
             agent_id: "life-lago".to_string(),
             name: "Lago Persistence Engine".to_string(),
-            description: "Event-sourced persistence — journal, blob store, knowledge index".to_string(),
+            description: "Event-sourced persistence — journal, blob store, knowledge index"
+                .to_string(),
             version: "0.1.0".to_string(),
             url: "http://localhost:8081".to_string(),
             provider_name: "BroomVA".to_string(),
