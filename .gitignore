@@ -21,3 +21,5 @@ node_modules/
 *.tsbuildinfo
 interface/packages/*/dist/
 interface/apps/*/.next/
+.claude/worktrees/
+test.txt
