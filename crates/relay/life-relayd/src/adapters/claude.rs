@@ -30,6 +30,7 @@ use super::parser::{self, ClaudeEvent};
 /// Each user message spawns a new Claude Code process with `--continue`.
 struct SessionState {
     workdir: String,
+    #[allow(dead_code)]
     model: Option<String>,
     /// Number of messages processed (0 = first message, uses no --continue)
     message_count: u64,
