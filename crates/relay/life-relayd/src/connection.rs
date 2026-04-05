@@ -135,7 +135,11 @@ pub async fn run_polling_loop(
     let mut event_buffer: Vec<DaemonMessage> = Vec::new();
     let mut last_streaming_event = tokio::time::Instant::now() - fast_timeout;
 
-    info!("starting polling loop (adaptive: {}ms / {}ms)", fast_interval.as_millis(), slow_interval.as_millis());
+    info!(
+        "starting polling loop (adaptive: {}ms / {}ms)",
+        fast_interval.as_millis(),
+        slow_interval.as_millis()
+    );
 
     loop {
         // 1. Poll for commands
@@ -150,10 +154,12 @@ pub async fn run_polling_loop(
         let had_events = !event_buffer.is_empty();
         while let Ok(msg) = outbound_rx.try_recv() {
             // Track whether any streaming events arrived this cycle
-            if matches!(msg, DaemonMessage::ContentDelta { .. }
-                | DaemonMessage::ContentBlockStart { .. }
-                | DaemonMessage::ContentBlockStop { .. })
-            {
+            if matches!(
+                msg,
+                DaemonMessage::ContentDelta { .. }
+                    | DaemonMessage::ContentBlockStart { .. }
+                    | DaemonMessage::ContentBlockStop { .. }
+            ) {
                 last_streaming_event = tokio::time::Instant::now();
             }
             event_buffer.push(msg);

@@ -185,7 +185,10 @@ pub async fn run(args: ScaleArgs) -> Result<()> {
             eprintln!("Backend scaling failed: {e}");
             eprintln!();
             eprintln!("Manual steps:");
-            eprintln!("  1. Open the Railway dashboard for project '{}'", state.project_name);
+            eprintln!(
+                "  1. Open the Railway dashboard for project '{}'",
+                state.project_name
+            );
             eprintln!(
                 "  2. Navigate to service '{}' → Settings → Scaling",
                 args.service

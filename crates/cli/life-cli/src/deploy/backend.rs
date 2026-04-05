@@ -45,10 +45,7 @@ pub trait DeployBackend: Send + Sync {
     ) -> Result<DeploymentResult>;
 
     /// Get the deployment status for all services in a project.
-    async fn status(
-        &self,
-        project_id: &str,
-    ) -> Result<HashMap<String, DeployedService>>;
+    async fn status(&self, project_id: &str) -> Result<HashMap<String, DeployedService>>;
 
     /// Destroy a project and all its services.
     async fn destroy(&self, project_id: &str) -> Result<()>;
@@ -59,10 +56,5 @@ pub trait DeployBackend: Send + Sync {
 
     /// Scale a specific service to the given number of replicas.
     #[allow(dead_code)]
-    async fn scale(
-        &self,
-        project_id: &str,
-        service_name: &str,
-        replicas: u32,
-    ) -> Result<()>;
+    async fn scale(&self, project_id: &str, service_name: &str, replicas: u32) -> Result<()>;
 }

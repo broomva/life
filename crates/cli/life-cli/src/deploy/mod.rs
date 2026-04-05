@@ -49,9 +49,25 @@ pub async fn run(args: DeployArgs) -> Result<()> {
 
     let backend = create_backend(&args.target)?;
 
-    println!("Deploying {agent} to {target}...", agent = args.agent, target = args.target);
-    println!("  Template: {name} — {desc}", name = template.meta.name, desc = template.meta.description);
-    println!("  Services: {svcs}", svcs = template.services.keys().cloned().collect::<Vec<_>>().join(", "));
+    println!(
+        "Deploying {agent} to {target}...",
+        agent = args.agent,
+        target = args.target
+    );
+    println!(
+        "  Template: {name} — {desc}",
+        name = template.meta.name,
+        desc = template.meta.description
+    );
+    println!(
+        "  Services: {svcs}",
+        svcs = template
+            .services
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     println!();
 
     // ── Provision ────────────────────────────────────────────────────────────
@@ -87,7 +103,10 @@ pub async fn run(args: DeployArgs) -> Result<()> {
         loop {
             if start.elapsed() > timeout {
                 eprintln!("Timeout: not all services became healthy within 5 minutes.");
-                eprintln!("Run `life status --agent {agent}` to check progress.", agent = args.agent);
+                eprintln!(
+                    "Run `life status --agent {agent}` to check progress.",
+                    agent = args.agent
+                );
                 break;
             }
 
@@ -95,7 +114,10 @@ pub async fn run(args: DeployArgs) -> Result<()> {
             match status {
                 Ok(statuses) => {
                     let all_healthy = statuses.iter().all(|(_, s)| {
-                        matches!(s.status.as_str(), "SUCCESS" | "HEALTHY" | "RUNNING" | "ACTIVE")
+                        matches!(
+                            s.status.as_str(),
+                            "SUCCESS" | "HEALTHY" | "RUNNING" | "ACTIVE"
+                        )
                     });
 
                     if all_healthy && !statuses.is_empty() {
@@ -139,7 +161,15 @@ pub async fn destroy(args: DestroyArgs) -> Result<()> {
             project = state.project_name,
         );
         println!("  Target: {}", state.target);
-        println!("  Services: {}", state.services.keys().cloned().collect::<Vec<_>>().join(", "));
+        println!(
+            "  Services: {}",
+            state
+                .services
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         println!();
         println!("Type 'yes' to confirm:");
 
@@ -218,15 +248,20 @@ pub async fn list(args: ListArgs) -> Result<()> {
 pub fn create_backend(target: &str) -> Result<Box<dyn DeployBackend>> {
     match target {
         "railway" => {
-            let token = std::env::var("RAILWAY_API_TOKEN")
-                .context("RAILWAY_API_TOKEN environment variable is required for Railway deploys")?;
+            let token = std::env::var("RAILWAY_API_TOKEN").context(
+                "RAILWAY_API_TOKEN environment variable is required for Railway deploys",
+            )?;
             Ok(Box::new(railway::RailwayBackend::new(token)))
         }
         "flyio" | "fly" => {
-            anyhow::bail!("Fly.io backend is planned but not yet implemented. Use --target railway.");
+            anyhow::bail!(
+                "Fly.io backend is planned but not yet implemented. Use --target railway."
+            );
         }
         "ecs" | "aws" => {
-            anyhow::bail!("AWS ECS backend is planned but not yet implemented. Use --target railway.");
+            anyhow::bail!(
+                "AWS ECS backend is planned but not yet implemented. Use --target railway."
+            );
         }
         other => {
             anyhow::bail!(

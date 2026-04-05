@@ -64,10 +64,7 @@ pub async fn run(args: CostArgs) -> Result<()> {
         .with_context(|| format!("no deployment found for agent '{}'", args.agent))?;
 
     // Try to reach Haima API for live cost data
-    let haima_url = state
-        .services
-        .get("haima")
-        .and_then(|s| s.url.as_deref());
+    let haima_url = state.services.get("haima").and_then(|s| s.url.as_deref());
 
     let report = if let Some(url) = haima_url {
         match fetch_cost_report(url, &args.window).await {
@@ -115,7 +112,10 @@ pub async fn run(args: CostArgs) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         _ => {
-            println!("Cost Report: {} (window: {})", state.agent_name, args.window);
+            println!(
+                "Cost Report: {} (window: {})",
+                state.agent_name, args.window
+            );
             println!("═══════════════════════════════════════════");
 
             if let Some(mode) = &economic_mode {
@@ -174,7 +174,9 @@ async fn fetch_cost_report(base_url: &str, window: &str) -> Result<HaimaCostRepo
         anyhow::bail!("Haima returned HTTP {}", resp.status());
     }
 
-    resp.json().await.context("failed to parse Haima cost report")
+    resp.json()
+        .await
+        .context("failed to parse Haima cost report")
 }
 
 /// Fetch current economic mode from Autonomic.
@@ -185,7 +187,9 @@ async fn fetch_economic_mode(base_url: &str) -> Result<String> {
     }
 
     let url = format!("{base_url}/gating/default");
-    let resp = reqwest::get(&url).await.context("failed to reach Autonomic")?;
+    let resp = reqwest::get(&url)
+        .await
+        .context("failed to reach Autonomic")?;
 
     if !resp.status().is_success() {
         anyhow::bail!("Autonomic returned HTTP {}", resp.status());

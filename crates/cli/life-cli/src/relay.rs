@@ -80,10 +80,7 @@ pub async fn run(command: RelayCommand) -> Result<()> {
 
             println!("  Relay Configuration");
             println!("  ───────────────────");
-            println!(
-                "  Config dir:     {}",
-                cfg.config_dir.display()
-            );
+            println!("  Config dir:     {}", cfg.config_dir.display());
             println!("  Authenticated:  {}", if has_token { "yes" } else { "no" });
 
             // Check if daemon is running

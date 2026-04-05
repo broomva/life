@@ -36,7 +36,7 @@ related:
 |---------|--------|-------|----------|-------|
 | [[session-2026-03-27-79f58ef5]] | `main` | 43 | 174h 32m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-27-cd1317fe]] | `` | 2 | 175h 0m | Session cd1317fe |
-| [[session-2026-03-27-4be0b59e]] | `` | 2 | 142h 27m | Session 4be0b59e |
+| [[session-2026-03-27-4be0b59e]] | `` | 2 | 200h 37m | Session 4be0b59e |
 | [[session-2026-03-27-454c2839]] | `` | 2 | 1m | Session 454c2839 |
 | [[session-2026-03-27-2fe5caa1]] | `` | 2 | 0m | Session 2fe5caa1 |
 | [[session-2026-03-27-75d90196]] | `` | 2 | 42m | Session 75d90196 |
@@ -45,7 +45,7 @@ related:
 
 | Session | Branch | Turns | Duration | Topic |
 |---------|--------|-------|----------|-------|
-| [[session-2026-03-24-e00f1f66]] | `main` | 32 | 280h 10m | <channel source="plugin:discord:discord" chat_id=" |
+| [[session-2026-03-24-e00f1f66]] | `main` | 32 | 280h 15m | <channel source="plugin:discord:discord" chat_id=" |
 
 ## 2026-03-23
 
@@ -53,7 +53,7 @@ related:
 |---------|--------|-------|----------|-------|
 | [[session-2026-03-23-2f64ca4c]] | `main` | 24 | 33h 48m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-23-5271645a]] | `main` | 14 | 30h 52m | <channel source="plugin:discord:discord" chat_id=" |
-| [[session-2026-03-23-ab6d67d3]] | `main` | 6 | 294h 51m | <channel source="plugin:discord:discord" chat_id=" |
+| [[session-2026-03-23-ab6d67d3]] | `main` | 6 | 294h 55m | <channel source="plugin:discord:discord" chat_id=" |
 | [[session-2026-03-23-12293244]] | `main` | 4 | 27h 30m | <channel source="plugin:discord:discord" chat_id=" |
 
 ## 2026-03-19

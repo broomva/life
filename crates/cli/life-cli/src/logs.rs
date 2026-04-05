@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::cli::LogsArgs;
 use crate::deploy::DeploymentState;
@@ -13,11 +13,7 @@ use crate::deploy::DeploymentState;
 const RAILWAY_API_URL: &str = "https://backboard.railway.app/graphql/v2";
 
 /// Fetch deployment logs from Railway via GraphQL.
-async fn fetch_railway_logs(
-    token: &str,
-    deployment_id: &str,
-    limit: u32,
-) -> Result<Vec<LogEntry>> {
+async fn fetch_railway_logs(token: &str, deployment_id: &str, limit: u32) -> Result<Vec<LogEntry>> {
     let client = reqwest::Client::new();
 
     let query = r#"query ($deploymentId: String!, $limit: Int) {
@@ -51,7 +47,10 @@ async fn fetch_railway_logs(
         anyhow::bail!("Railway API returned HTTP {status}: {text}");
     }
 
-    let json: Value = resp.json().await.context("failed to parse Railway response")?;
+    let json: Value = resp
+        .json()
+        .await
+        .context("failed to parse Railway response")?;
 
     if let Some(errors) = json.get("errors") {
         if let Some(arr) = errors.as_array() {
@@ -149,8 +148,7 @@ async fn fetch_latest_deployment_id(
         .context("failed to reach Railway API")?;
 
     let json: Value = resp.json().await?;
-    let data: ProjectData =
-        serde_json::from_value(json.get("data").cloned().unwrap_or_default())?;
+    let data: ProjectData = serde_json::from_value(json.get("data").cloned().unwrap_or_default())?;
 
     for edge in data.project.services.edges {
         if edge.node.name == service_name {
@@ -208,8 +206,7 @@ pub async fn run(args: LogsArgs) -> Result<()> {
 
     for svc_name in &service_names {
         // Get the latest deployment ID for this service
-        let deployment_id =
-            fetch_latest_deployment_id(&token, &state.project_id, svc_name).await?;
+        let deployment_id = fetch_latest_deployment_id(&token, &state.project_id, svc_name).await?;
 
         let Some(deployment_id) = deployment_id else {
             println!("\n[{svc_name}] No active deployment found.");
@@ -227,10 +224,7 @@ pub async fn run(args: LogsArgs) -> Result<()> {
                 println!("\n── {svc_name} ({} entries) ──", entries.len());
 
                 for entry in &entries {
-                    let ts = entry
-                        .timestamp
-                        .as_deref()
-                        .unwrap_or("                   ");
+                    let ts = entry.timestamp.as_deref().unwrap_or("                   ");
                     let severity = entry.severity.as_deref().unwrap_or("INFO");
                     let msg = &entry.message;
 
@@ -249,7 +243,10 @@ pub async fn run(args: LogsArgs) -> Result<()> {
     if !found_any && args.service.is_none() {
         println!();
         println!("No logs found for any service.");
-        println!("Services may still be deploying. Run `life status --agent {}` to check.", args.agent);
+        println!(
+            "Services may still be deploying. Run `life status --agent {}` to check.",
+            args.agent
+        );
     }
 
     Ok(())

@@ -137,7 +137,10 @@ pub fn load_template(name: &str, custom_path: Option<&str>) -> Result<AgentTempl
         _ => {
             // Try loading from ~/.life/templates/{name}.toml
             let home = dirs::home_dir().context("cannot determine home directory")?;
-            let path = home.join(".life").join("templates").join(format!("{name}.toml"));
+            let path = home
+                .join(".life")
+                .join("templates")
+                .join(format!("{name}.toml"));
             if path.exists() {
                 let content = std::fs::read_to_string(&path)
                     .with_context(|| format!("failed to read {}", path.display()))?;

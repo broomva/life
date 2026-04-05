@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use life_relay_core::{DaemonMessage, DirEntry, HistoryMessage, HistoryToolUse, ServerMessage, SessionInfo};
+use life_relay_core::{
+    DaemonMessage, DirEntry, HistoryMessage, HistoryToolUse, ServerMessage, SessionInfo,
+};
 use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
 
@@ -196,7 +198,10 @@ async fn dispatch_command(
             }
         }
 
-        ServerMessage::LoadHistory { session_id, request_id } => {
+        ServerMessage::LoadHistory {
+            session_id,
+            request_id,
+        } => {
             let outbound = outbound.clone();
             let claude = claude_adapter.clone();
             let registry = registry.clone();
@@ -217,7 +222,8 @@ async fn dispatch_command(
                                 let _ = outbound
                                     .send(DaemonMessage::Error {
                                         code: "session_not_found".to_string(),
-                                        message: "Session not found for history loading".to_string(),
+                                        message: "Session not found for history loading"
+                                            .to_string(),
                                     })
                                     .await;
                                 return;
@@ -297,14 +303,16 @@ async fn list_directory(path: &str) -> Result<(String, Vec<DirEntry>)> {
         if name.starts_with('.') {
             continue;
         }
-        let is_dir = entry.file_type().await.map(|ft| ft.is_dir()).unwrap_or(false);
+        let is_dir = entry
+            .file_type()
+            .await
+            .map(|ft| ft.is_dir())
+            .unwrap_or(false);
         entries.push(DirEntry { name, is_dir });
     }
 
     // Sort: directories first, then alphabetical
-    entries.sort_by(|a, b| {
-        b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name))
-    });
+    entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name)));
 
     Ok((canonical_str, entries))
 }
@@ -513,13 +521,17 @@ mod history_tests {
 
     #[test]
     fn encode_workdir_replaces_slashes() {
-        assert_eq!(encode_workdir("/Users/broomva/broomva"), "-Users-broomva-broomva");
+        assert_eq!(
+            encode_workdir("/Users/broomva/broomva"),
+            "-Users-broomva-broomva"
+        );
         assert_eq!(encode_workdir("/tmp"), "-tmp");
     }
 
     #[test]
     fn parse_user_message() {
-        let jsonl = r#"{"type":"user","message":{"content":[{"type":"text","text":"hello world"}]}}"#;
+        let jsonl =
+            r#"{"type":"user","message":{"content":[{"type":"text","text":"hello world"}]}}"#;
         let messages = parse_jsonl_history(jsonl);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].role, "user");

@@ -75,10 +75,7 @@ pub enum ServerMessage {
     ListSessions,
     /// List directory contents on the daemon machine.
     #[serde(rename_all = "camelCase")]
-    ListDir {
-        path: String,
-        request_id: String,
-    },
+    ListDir { path: String, request_id: String },
     /// Load conversation history from Claude Code session files.
     #[serde(rename_all = "camelCase")]
     LoadHistory {
@@ -150,10 +147,7 @@ pub enum DaemonMessage {
     },
     /// Streaming: a content block has finished.
     #[serde(rename_all = "camelCase")]
-    ContentBlockStop {
-        session_id: Uuid,
-        index: u32,
-    },
+    ContentBlockStop { session_id: Uuid, index: u32 },
     /// Tool execution result forwarded from Claude Code.
     #[serde(rename_all = "camelCase")]
     ToolResult {
