@@ -1,0 +1,51 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "55dbd55ead5c",
+  "session_id": "ab6d67d3-6181-4bd8-950b-1d7b49172cf1",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-05T05:18:32.596248Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/aios/aios-runtime/src/lib.rs",
+    "crates/arcan/arcand/src/canonical.rs",
+    "crates/cli/life-cli/src/deploy/mod.rs",
+    "crates/cli/life-cli/src/logs.rs",
+    "crates/cli/life-cli/src/relay.rs",
+    "crates/cli/life-cli/src/scale.rs",
+    "crates/lago/lago-api/src/router.rs",
+    "crates/relay/life-relay-core/src/protocol.rs",
+    "crates/cli/life-cli/src/cost.rs",
+    "crates/relay/life-relayd/src/adapters/claude.rs",
+    "crates/relay/life-relayd/src/adapters/parser.rs",
+    "crates/relay/life-relayd/src/connection.rs",
+    "crates/relay/life-relayd/src/daemon.rs",
+    "crates/cli/life-cli/src/deploy/backend.rs",
+    "crates/cli/life-cli/src/deploy/railway.rs",
+    "crates/cli/life-cli/src/status.rs",
+    "crates/cli/life-cli/src/template.rs",
+    "crates/aios/aios-protocol/src/lib.rs",
+    "crates/relay/life-relayd/src/auth.rs",
+    "docs/conversations/Conversations.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "8f3d54e07d50",
+  "checkpoint_transcript_start": 284,
+  "transcript_lines_at_start": 284,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-05T05:18:32.458091Z",
+    "agent_lines": 209,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 209,
+    "agent_percentage": 100
+  }
+}
