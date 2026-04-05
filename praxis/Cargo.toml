@@ -1,0 +1,50 @@
+[workspace]
+members = [
+    "crates/praxis-core",
+    "crates/praxis-mcp-bridge",
+    "crates/praxis-skills",
+    "crates/praxis-tools",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT"
+authors = ["Life contributors"]
+repository = "https://github.com/broomva/life"
+rust-version = "1.85"
+
+[workspace.dependencies]
+aios-protocol = { path = "../aiOS/crates/aios-protocol", version = "0.2.0" }
+praxis-core = { path = "crates/praxis-core", version = "0.1.0" }
+praxis-tools = { path = "crates/praxis-tools", version = "0.1.0" }
+praxis-mcp-bridge = { path = "crates/praxis-mcp-bridge", version = "0.1.0" }
+praxis-skills = { path = "crates/praxis-skills", version = "0.1.0" }
+
+blake3 = "1.8"
+glob = "0.3"
+regex = "1.11"
+rmcp = { version = "0.15", features = ["client", "server", "macros", "transport-child-process", "transport-io", "transport-streamable-http-server"] }
+schemars = "1.2"
+axum = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+thiserror = "2.0"
+tokio = { version = "1.46", features = ["full"] }
+tokio-util = "0.7"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+wait-timeout = "0.2"
+walkdir = "2.5"
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+undocumented_unsafe_blocks = "deny"
