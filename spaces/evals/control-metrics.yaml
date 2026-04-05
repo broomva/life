@@ -1,0 +1,17 @@
+version: 1
+metrics:
+  pass_at_1:
+    target: 0.70
+    alert_below: 0.55
+  retry_rate:
+    target: 0.20
+    alert_above: 0.40
+  merge_cycle_time_hours:
+    target: 24
+    alert_above: 48
+  revert_rate:
+    target: 0.03
+    alert_above: 0.08
+  human_intervention_rate:
+    target: 0.20
+    alert_above: 0.40
