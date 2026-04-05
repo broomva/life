@@ -231,7 +231,6 @@ zeroize = { version = "1", features = ["derive"] }
 zstd = "0.13"
 
 [workspace.lints.clippy]
-all = "warn"
 too_many_arguments = "allow"
 
 [profile.release]
