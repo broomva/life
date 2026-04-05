@@ -1,6 +1,6 @@
 [package]
 name = "spaces-a2a"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "A2A protocol bridge for Life Spaces — exposes Life agents as A2A-compatible services"
 license = "MIT OR Apache-2.0"

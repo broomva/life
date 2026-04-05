@@ -1,0 +1,239 @@
+# Life Agent OS — Unified Workspace
+[workspace]
+resolver = "2"
+members = [
+    # aiOS — kernel contract
+    "crates/aios/aios-events",
+    "crates/aios/aios-kernel",
+    "crates/aios/aios-policy",
+    "crates/aios/aios-protocol",
+    "crates/aios/aios-runtime",
+    "crates/aios/aios-sandbox",
+    "crates/aios/aios-tools",
+    # Arcan — agent runtime
+    "crates/arcan/arcan",
+    "crates/arcan/arcan-aios-adapters",
+    "crates/arcan/arcan-anima",
+    "crates/arcan/arcan-commands",
+    "crates/arcan/arcan-console",
+    "crates/arcan/arcan-core",
+    "crates/arcan/arcan-fleet",
+    "crates/arcan/arcan-harness",
+    "crates/arcan/arcan-lago",
+    "crates/arcan/arcan-praxis",
+    "crates/arcan/arcan-provider",
+    "crates/arcan/arcan-provider-bubblewrap",
+    "crates/arcan/arcan-provider-local",
+    "crates/arcan/arcan-provider-vercel",
+    "crates/arcan/arcan-sandbox",
+    "crates/arcan/arcan-spaces",
+    "crates/arcan/arcan-store",
+    "crates/arcan/arcan-tui",
+    "crates/arcan/arcand",
+    # Lago — persistence
+    "crates/lago/lago-aios-eventstore-adapter",
+    "crates/lago/lago-api",
+    "crates/lago/lago-auth",
+    # "crates/lago/lago-billing", # excluded: pre-existing compile errors
+    "crates/lago/lago-cli",
+    "crates/lago/lago-compiler",
+    "crates/lago/lago-core",
+    "crates/lago/lago-fs",
+    "crates/lago/lago-ingest",
+    "crates/lago/lago-journal",
+    "crates/lago/lago-knowledge",
+    "crates/lago/lago-lance",
+    "crates/lago/lago-policy",
+    "crates/lago/lago-store",
+    "crates/lago/lagod",
+    # Autonomic — homeostasis
+    "crates/autonomic/autonomic-api",
+    "crates/autonomic/autonomic-controller",
+    "crates/autonomic/autonomic-core",
+    "crates/autonomic/autonomic-lago",
+    "crates/autonomic/autonomicd",
+    # Praxis — tool execution
+    "crates/praxis/praxis-core",
+    "crates/praxis/praxis-mcp-bridge",
+    "crates/praxis/praxis-skills",
+    "crates/praxis/praxis-tools",
+    # Haima — finance
+    "crates/haima/haima-api",
+    "crates/haima/haima-core",
+    "crates/haima/haima-insurance",
+    "crates/haima/haima-lago",
+    "crates/haima/haima-outcome",
+    "crates/haima/haima-wallet",
+    "crates/haima/haima-x402",
+    "crates/haima/haimad",
+    # Nous — evaluation
+    "crates/nous/nous-api",
+    "crates/nous/nous-core",
+    "crates/nous/nous-heuristics",
+    "crates/nous/nous-judge",
+    "crates/nous/nous-lago",
+    "crates/nous/nous-middleware",
+    "crates/nous/nousd",
+    # Anima — identity
+    "crates/anima/anima-core",
+    "crates/anima/anima-identity",
+    "crates/anima/anima-lago",
+    # Vigil — observability
+    "crates/vigil/life-vigil",
+    # Spaces — networking (excluded: needs spacetimedb-sdk, own workspace)
+    # "crates/spaces/life-spaces",
+    # Relay — remote sessions
+    "crates/relay/life-relay-api",
+    "crates/relay/life-relay-core",
+    "crates/relay/life-relayd",
+    # CLI
+    "crates/cli/life-cli",
+    # Spaces A2A (excluded: compile errors pending fix)
+    # "crates/spaces-a2a/spaces-a2a",
+]
+exclude = ["crates/spaces/life-spaces/spacetimedb"]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["Life Agent OS Contributors"]
+repository = "https://github.com/broomva/life"
+homepage = "https://docs.broomva.tech/docs/life"
+keywords = ["agent", "ai", "llm", "rust"]
+categories = ["command-line-utilities"]
+
+[workspace.dependencies]
+# ── Internal crates ──
+aios-events = { path = "crates/aios/aios-events", version = "0.3.0" }
+aios-policy = { path = "crates/aios/aios-policy", version = "0.3.0" }
+aios-protocol = { path = "crates/aios/aios-protocol", version = "0.3.0" }
+aios-runtime = { path = "crates/aios/aios-runtime", version = "0.3.0" }
+aios-sandbox = { path = "crates/aios/aios-sandbox", version = "0.3.0" }
+aios-tools = { path = "crates/aios/aios-tools", version = "0.3.0" }
+anima-core = { path = "crates/anima/anima-core", version = "0.3.0" }
+anima-lago = { path = "crates/anima/anima-lago", version = "0.3.0" }
+arcan-core = { path = "crates/arcan/arcan-core", version = "0.3.0" }
+arcan-provider-bubblewrap = { path = "crates/arcan/arcan-provider-bubblewrap", version = "0.3.0" }
+arcan-provider-local = { path = "crates/arcan/arcan-provider-local", version = "0.3.0" }
+arcan-provider-vercel = { path = "crates/arcan/arcan-provider-vercel", version = "0.3.0" }
+arcan-sandbox = { path = "crates/arcan/arcan-sandbox", version = "0.3.0" }
+autonomic-api = { path = "crates/autonomic/autonomic-api", version = "0.3.0" }
+autonomic-controller = { path = "crates/autonomic/autonomic-controller", version = "0.3.0" }
+autonomic-core = { path = "crates/autonomic/autonomic-core", version = "0.3.0" }
+autonomic-lago = { path = "crates/autonomic/autonomic-lago", version = "0.3.0" }
+haima-api = { path = "crates/haima/haima-api", version = "0.3.0" }
+haima-core = { path = "crates/haima/haima-core", version = "0.3.0" }
+haima-insurance = { path = "crates/haima/haima-insurance", version = "0.3.0" }
+haima-outcome = { path = "crates/haima/haima-outcome", version = "0.3.0" }
+haima-lago = { path = "crates/haima/haima-lago", version = "0.3.0" }
+haima-wallet = { path = "crates/haima/haima-wallet", version = "0.3.0" }
+haima-x402 = { path = "crates/haima/haima-x402", version = "0.3.0" }
+lago-aios-eventstore-adapter = { path = "crates/lago/lago-aios-eventstore-adapter", version = "0.3.0" }
+lago-ingest = { path = "crates/lago/lago-ingest", version = "0.3.0" }
+lago-knowledge = { path = "crates/lago/lago-knowledge", version = "0.3.0" }
+lago-api = { path = "crates/lago/lago-api", version = "0.3.0" }
+lago-auth = { path = "crates/lago/lago-auth", version = "0.3.0" }
+lago-core = { path = "crates/lago/lago-core", version = "0.3.0" }
+lago-fs = { path = "crates/lago/lago-fs", version = "0.3.0" }
+lago-journal = { path = "crates/lago/lago-journal", version = "0.3.0" }
+lago-lance = { path = "crates/lago/lago-lance", version = "0.3.0" }
+lago-policy = { path = "crates/lago/lago-policy", version = "0.3.0" }
+lago-store = { path = "crates/lago/lago-store", version = "0.3.0" }
+life-vigil = { path = "crates/vigil/life-vigil", version = "0.3.0" }
+nous-api = { path = "crates/nous/nous-api", version = "0.3.0" }
+nous-core = { path = "crates/nous/nous-core", version = "0.3.0" }
+nous-heuristics = { path = "crates/nous/nous-heuristics", version = "0.3.0" }
+nous-judge = { path = "crates/nous/nous-judge", version = "0.3.0" }
+nous-lago = { path = "crates/nous/nous-lago", version = "0.3.0" }
+nous-middleware = { path = "crates/nous/nous-middleware", version = "0.3.0" }
+# Relay
+life-relay-api = { path = "crates/relay/life-relay-api", version = "0.3.0" }
+life-relay-core = { path = "crates/relay/life-relay-core", version = "0.3.0" }
+praxis-core = { path = "crates/praxis/praxis-core", version = "0.3.0" }
+praxis-mcp-bridge = { path = "crates/praxis/praxis-mcp-bridge", version = "0.3.0" }
+praxis-skills = { path = "crates/praxis/praxis-skills", version = "0.3.0" }
+praxis-tools = { path = "crates/praxis/praxis-tools", version = "0.3.0" }
+
+# ── External dependencies ──
+anyhow = "1"
+async-stream = "0.3"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["macros"] }
+base64 = "0.22"
+bitflags = { version = "2", features = ["serde"] }
+blake3 = "1"
+bs58 = "0.5"
+chacha20poly1305 = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+dashmap = "6"
+dirs = "6"
+ed25519-dalek = { version = "2", features = ["rand_core", "serde"] }
+futures = "0.3"
+futures-util = "0.3"
+glob = "0.3"
+hex = "0.4"
+hostname = "0.4"
+hkdf = "0.12"
+indexmap = { version = "2", features = ["serde"] }
+infer = "0.16"
+json-patch = "4"
+jsonwebtoken = "9"
+k256 = { version = "0.13", features = ["ecdsa", "sha256"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+opentelemetry = "0.29"
+opentelemetry-otlp = { version = "0.29", features = ["trace", "metrics", "grpc-tonic"] }
+opentelemetry_sdk = { version = "0.29", features = ["trace", "metrics"] }
+parking_lot = "0.12"
+portable-pty = "0.8"
+prost = "0.14"
+prost-types = "0.14"
+rand = "0.8"
+redb = "2"
+regex = "1"
+reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
+reqwest-eventsource = "0.6"
+rig-core = "0.30"
+rmcp = { version = "0.15", features = ["client", "server", "macros", "transport-child-process", "transport-io", "transport-streamable-http-server"] }
+schemars = { version = "0.8", features = ["chrono"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+sha3 = "0.10"
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "uuid", "chrono"] }
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+toml = "0.9"
+tonic = "0.14"
+tonic-build = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+tracing = "0.1"
+tracing-opentelemetry = "0.30"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+ulid = { version = "1", features = ["serde"] }
+url = { version = "2", features = ["serde"] }
+utoipa = { version = "5", features = ["axum_extras", "chrono"] }
+utoipa-scalar = { version = "0.3", features = ["axum"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+wait-timeout = "0.2"
+walkdir = "2"
+zeroize = { version = "1", features = ["derive"] }
+zstd = "0.13"
+
+[workspace.lints.clippy]
+all = "warn"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"
+panic = "abort"
