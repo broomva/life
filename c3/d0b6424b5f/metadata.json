@@ -1,0 +1,36 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "c3d0b6424b5f",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".gitignore",
+    "crates/anima/anima-data",
+    "crates/arcan/.claude/worktrees/aiOS",
+    "crates/arcan/.claude/worktrees/anima",
+    "crates/arcan/.claude/worktrees/autonomic",
+    "crates/arcan/.claude/worktrees/haima",
+    "crates/arcan/.claude/worktrees/lago",
+    "crates/arcan/.claude/worktrees/nous",
+    "crates/arcan/.claude/worktrees/praxis",
+    "crates/arcan/.claude/worktrees/spaces",
+    "crates/arcan/.claude/worktrees/vigil"
+  ],
+  "sessions": [
+    {
+      "metadata": "/c3/d0b6424b5f/0/metadata.json",
+      "transcript": "/c3/d0b6424b5f/0/full.jsonl",
+      "context": "/c3/d0b6424b5f/0/context.md",
+      "content_hash": "/c3/d0b6424b5f/0/content_hash.txt",
+      "prompt": "/c3/d0b6424b5f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  }
+}
