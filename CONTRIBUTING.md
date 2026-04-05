@@ -7,13 +7,17 @@ Thanks for your interest in contributing to Life! This document provides guideli
 ```bash
 git clone https://github.com/broomva/life.git
 cd life
-cargo test --workspace    # Run all 1,077 tests
+cargo test --workspace    # Run all 2,625+ tests
 cargo clippy --workspace -- -D warnings  # Zero warnings policy
+
+# Set up commit hooks (conventional commits enforced)
+git config core.hooksPath .githooks
+git config commit.template .gitmessage
 ```
 
 ### Prerequisites
 
-- **Rust** 2024 Edition (MSRV 1.85) via [rustup](https://rustup.rs/)
+- **Rust** 2024 Edition (MSRV 1.93) via [rustup](https://rustup.rs/)
 - **Protobuf compiler** (`protoc`) for gRPC codegen
 - **SpacetimeDB CLI** (optional, only for Spaces development)
 

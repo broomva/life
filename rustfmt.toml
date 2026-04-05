@@ -1,0 +1,3 @@
+# Rust formatting — applied via `cargo fmt`
+# Uses default rustfmt settings (Rust 2024 edition style)
+edition = "2024"

@@ -1,33 +1,57 @@
-/target
-/.target
-sdks/*/dist/
-/.aios
-/.aios-*/
+# ═══════════════════════════════════════════════════════════════════
+# Life Agent OS — .gitignore
+# ═══════════════════════════════════════════════════════════════════
+
+# Rust build artifacts
+/target/
+/.target/
+**/target/
+
+# Environment files (secrets)
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Agent runtime data
+.arcan/
+.lago/
+.aios/
+.aios-*/
+
+# Claude Code worktrees
+.claude/worktrees/
+
+# Python
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
-.DS_Store
-/.arcan
-.lake/
-.env
-.env.*
-!.env.example
-.vercel
-.lago/
 
-# TypeScript / Node.js (interface kernel)
+# TypeScript / Node.js
 node_modules/
 *.tsbuildinfo
-interface/packages/*/dist/
-interface/apps/*/.next/
-.claude/worktrees/
+**/dist/
+**/.next/
+
+# Vercel
+.vercel/
+
+# Lake / Lean
+.lake/
+
+# Test artifacts
 test.txt
 
 # Local symlinks (absolute paths, not portable)
-crates/anima/anima-data
-crates/arcan/.claude/worktrees/
-
-# Local worktree symlinks (absolute paths, machine-specific)
-crates/arcan/.claude/worktrees/
 crates/anima/anima-data
