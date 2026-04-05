@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Gate 1: Formatting ────────────────────────────────────────────
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  # ── Gate 2: Linting ───────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # ── Gate 3: Tests (Linux) ─────────────────────────────────────────
+  test-linux:
+    name: Test (Linux)
+    needs: [format, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  # ── Gate 4: Tests (macOS) ─────────────────────────────────────────
+  test-macos:
+    name: Test (macOS)
+    needs: [format, lint]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: brew install protobuf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  # ── Gate 5: Minimum Supported Rust Version ────────────────────────
+  msrv:
+    name: MSRV Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85.0"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace
+
+  # ── Gate 6: Security Audit ────────────────────────────────────────
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Gate 7: Dependency Policy ─────────────────────────────────────
+  deny:
+    name: Dependency Check
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-deny --locked
+      - run: cargo deny check
+
+  # ── Gate 8: Secret Scanning ───────────────────────────────────────
+  secrets:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+
+  # ── Gate 9: Conventional Commits ──────────────────────────────────
+  commit-lint:
+    name: Commit Lint
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check PR title follows conventional commits
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          echo "Checking: $PR_TITLE"
+          echo "$PR_TITLE" | grep -qE '^(feat|fix|chore|docs|refactor|test|ci|perf|build|style|revert)(\(.+\))?(!)?: .+' \
+            || { echo "::error::PR title must follow conventional commits: <type>(<scope>): <subject>"; exit 1; }
+
+  # ── Gate 10: Console Frontend ─────────────────────────────────────
+  console:
+    name: Console Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/arcan/arcan-console/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: TypeScript check
+        run: bun run lint
+      - name: Unit tests
+        run: bun run test
+      - name: Production build
+        run: bun run build
+
+  # ── Gate 11: Release Build ────────────────────────────────────────
+  build:
+    name: Build Release
+    needs: [test-linux, test-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: Swatinem/rust-cache@v2
+      - name: Install console deps
+        run: cd crates/arcan/arcan-console/frontend && bun install --frozen-lockfile
+      - run: cargo build --workspace --release
