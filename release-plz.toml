@@ -1,0 +1,12 @@
+[workspace]
+changelog_config = "cliff.toml"
+publish_timeout = "30m"
+semver_check = true
+
+[[package]]
+name = "arcan"
+git_release_enable = true
+
+[[package]]
+name = "lagod"
+git_release_enable = true
