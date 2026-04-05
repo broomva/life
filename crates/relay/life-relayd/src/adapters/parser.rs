@@ -149,7 +149,6 @@ pub fn parse_line(line: &str) -> ClaudeEvent {
 }
 
 fn parse_raw_event(raw: RawEvent, original_line: &str) -> ClaudeEvent {
-
     let _ = original_line; // suppress unused warning
     match raw.event_type.as_str() {
         "system" => ClaudeEvent::SystemInit {

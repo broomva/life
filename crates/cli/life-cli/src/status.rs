@@ -62,7 +62,10 @@ pub async fn run(args: StatusArgs) -> Result<()> {
             println!("Project: {} ({})", state.project_name, state.project_id);
             println!("Target: {}", state.target);
             println!("Template: {}", state.template_name);
-            println!("Deployed: {}", state.deployed_at.format("%Y-%m-%d %H:%M:%S UTC"));
+            println!(
+                "Deployed: {}",
+                state.deployed_at.format("%Y-%m-%d %H:%M:%S UTC")
+            );
             println!();
 
             match live_status {

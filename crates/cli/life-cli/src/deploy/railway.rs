@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{debug, info, warn};
 
 use super::backend::{DeployBackend, DeployedService, DeploymentResult};
@@ -56,7 +56,10 @@ impl RailwayBackend {
             anyhow::bail!("Railway API returned HTTP {status}: {text}");
         }
 
-        let json: Value = resp.json().await.context("failed to parse Railway response")?;
+        let json: Value = resp
+            .json()
+            .await
+            .context("failed to parse Railway response")?;
 
         if let Some(errors) = json.get("errors") {
             if let Some(arr) = errors.as_array() {
@@ -275,9 +278,7 @@ impl DeployBackend for RailwayBackend {
                     }
                     Err(e) => {
                         warn!(service = svc_name, error = %e, "failed to create domain");
-                        url = Some(format!(
-                            "https://{svc_name}-{project_name}.up.railway.app"
-                        ));
+                        url = Some(format!("https://{svc_name}-{project_name}.up.railway.app"));
                     }
                 }
             }
@@ -299,10 +300,7 @@ impl DeployBackend for RailwayBackend {
         })
     }
 
-    async fn status(
-        &self,
-        project_id: &str,
-    ) -> Result<HashMap<String, DeployedService>> {
+    async fn status(&self, project_id: &str) -> Result<HashMap<String, DeployedService>> {
         #[derive(Deserialize)]
         struct ProjectStatus {
             project: ProjectServices,
@@ -494,14 +492,11 @@ impl DeployBackend for RailwayBackend {
         Ok(())
     }
 
-    async fn scale(
-        &self,
-        _project_id: &str,
-        _service_name: &str,
-        _replicas: u32,
-    ) -> Result<()> {
+    async fn scale(&self, _project_id: &str, _service_name: &str, _replicas: u32) -> Result<()> {
         // Railway handles scaling via their replica configuration.
         // This would need the serviceInstanceUpdate mutation with numReplicas.
-        anyhow::bail!("Railway scaling via API requires Enterprise plan. Use Railway dashboard to configure replicas.")
+        anyhow::bail!(
+            "Railway scaling via API requires Enterprise plan. Use Railway dashboard to configure replicas."
+        )
     }
 }

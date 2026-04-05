@@ -68,9 +68,11 @@ impl ClaudeAdapter {
 
     /// Get the workdir and Claude session ID for a relay session.
     pub async fn get_session_info(&self, session_id: &Uuid) -> Option<(String, Option<String>)> {
-        self.sessions.read().await.get(session_id).map(|s| {
-            (s.workdir.clone(), s.claude_session_id.clone())
-        })
+        self.sessions
+            .read()
+            .await
+            .get(session_id)
+            .map(|s| (s.workdir.clone(), s.claude_session_id.clone()))
     }
 
     /// Build the claude CLI command for a session.
@@ -162,7 +164,11 @@ async fn run_claude_turn(
                         .await;
                 }
             }
-            ClaudeEvent::ToolUse { id: tool_id, name, input } => {
+            ClaudeEvent::ToolUse {
+                id: tool_id,
+                name,
+                input,
+            } => {
                 debug!(session_id = %session_id, tool = %name, "tool use");
                 let _ = event_tx
                     .send(DaemonMessage::ToolEvent {
@@ -173,7 +179,11 @@ async fn run_claude_turn(
                     })
                     .await;
             }
-            ClaudeEvent::ApprovalRequest { approval_id, capability, context } => {
+            ClaudeEvent::ApprovalRequest {
+                approval_id,
+                capability,
+                context,
+            } => {
                 debug!(session_id = %session_id, capability = %capability, "approval request");
                 let _ = event_tx
                     .send(DaemonMessage::ApprovalRequest {
@@ -184,7 +194,11 @@ async fn run_claude_turn(
                     })
                     .await;
             }
-            ClaudeEvent::ToolResult { tool_use_id, content, is_error } => {
+            ClaudeEvent::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => {
                 debug!(session_id = %session_id, tool_use_id = ?tool_use_id, "tool result");
                 let _ = event_tx
                     .send(DaemonMessage::ToolResult {
@@ -215,16 +229,16 @@ async fn run_claude_turn(
             }
             ClaudeEvent::StreamContentStop { index } => {
                 let _ = event_tx
-                    .send(DaemonMessage::ContentBlockStop {
-                        session_id,
-                        index,
-                    })
+                    .send(DaemonMessage::ContentBlockStop { session_id, index })
                     .await;
             }
             ClaudeEvent::StreamToolInputDelta { .. } => {
                 // Skip — we handle tool_use events at the aggregate level already
             }
-            ClaudeEvent::Result { cost_usd, duration_ms } => {
+            ClaudeEvent::Result {
+                cost_usd,
+                duration_ms,
+            } => {
                 info!(session_id = %session_id, cost = ?cost_usd, duration = ?duration_ms, "turn completed");
                 let _ = event_tx
                     .send(DaemonMessage::TurnResult {
@@ -235,7 +249,9 @@ async fn run_claude_turn(
                     })
                     .await;
             }
-            ClaudeEvent::SystemInit { session_id: sid, .. } => {
+            ClaudeEvent::SystemInit {
+                session_id: sid, ..
+            } => {
                 if let Some(ref claude_sid) = sid {
                     let _ = event_tx
                         .send(DaemonMessage::SessionMapping {
@@ -377,8 +393,13 @@ async fn git_workspace_status(session_id: Uuid, workdir: &str) -> DaemonMessage 
         .ok()
         .and_then(|o| {
             if o.status.success() {
-                String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s != "HEAD")
-            } else { None }
+                String::from_utf8(o.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty() && s != "HEAD")
+            } else {
+                None
+            }
         });
 
     let (modified, staged) = Command::new("git")
@@ -387,15 +408,23 @@ async fn git_workspace_status(session_id: Uuid, workdir: &str) -> DaemonMessage 
         .output()
         .await
         .map(|o| {
-            if !o.status.success() { return (0u32, 0u32); }
+            if !o.status.success() {
+                return (0u32, 0u32);
+            }
             let text = String::from_utf8_lossy(&o.stdout);
             let (mut m, mut s) = (0u32, 0u32);
             for line in text.lines() {
-                if line.len() < 2 { continue; }
+                if line.len() < 2 {
+                    continue;
+                }
                 let sc = line.chars().next().unwrap_or(' ');
                 let uc = line.chars().nth(1).unwrap_or(' ');
-                if sc != ' ' && sc != '?' { s += 1; }
-                if uc != ' ' && uc != '?' { m += 1; }
+                if sc != ' ' && sc != '?' {
+                    s += 1;
+                }
+                if uc != ' ' && uc != '?' {
+                    m += 1;
+                }
             }
             (m, s)
         })
@@ -409,11 +438,22 @@ async fn git_workspace_status(session_id: Uuid, workdir: &str) -> DaemonMessage 
         .ok()
         .and_then(|o| {
             if o.status.success() {
-                String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-            } else { None }
+                String::from_utf8(o.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            } else {
+                None
+            }
         });
 
-    DaemonMessage::WorkspaceStatus { session_id, branch, modified, staged, last_commit }
+    DaemonMessage::WorkspaceStatus {
+        session_id,
+        branch,
+        modified,
+        staged,
+        last_commit,
+    }
 }
 
 #[cfg(test)]

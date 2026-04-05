@@ -82,7 +82,10 @@ pub async fn run(server_url: &str, credentials_path: &Path) -> Result<()> {
     let poll_interval = Duration::from_secs(code_resp.interval.max(5));
     let deadline = Instant::now() + Duration::from_secs(code_resp.expires_in);
 
-    info!("polling for authorization (timeout: {}s)", code_resp.expires_in);
+    info!(
+        "polling for authorization (timeout: {}s)",
+        code_resp.expires_in
+    );
 
     loop {
         if Instant::now() >= deadline {
@@ -119,10 +122,7 @@ pub async fn run(server_url: &str, credentials_path: &Path) -> Result<()> {
                 if let Some(parent) = credentials_path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
-                std::fs::write(
-                    credentials_path,
-                    serde_json::to_string_pretty(&creds)?,
-                )?;
+                std::fs::write(credentials_path, serde_json::to_string_pretty(&creds)?)?;
 
                 println!("  Authenticated successfully!");
                 println!("  Credentials saved to: {}", credentials_path.display());
