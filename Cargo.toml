@@ -232,8 +232,6 @@ zstd = "0.13"
 
 [workspace.lints.clippy]
 all = "warn"
-
-[workspace.lints.clippy]
 too_many_arguments = "allow"
 
 [profile.release]
