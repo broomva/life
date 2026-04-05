@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "16bb05b29e68",
+  "session_id": "ab6d67d3-6181-4bd8-950b-1d7b49172cf1",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-05T04:27:52.595142Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "docs/conversations/Conversations.md",
+    "lago",
+    "aiOS",
+    "arcan"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "8f3d54e07d50",
+  "checkpoint_transcript_start": 284,
+  "transcript_lines_at_start": 284,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-05T04:27:52.45766Z",
+    "agent_lines": 2,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 2,
+    "agent_percentage": 100
+  }
+}
