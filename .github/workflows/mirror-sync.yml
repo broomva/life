@@ -1,0 +1,65 @@
+name: Mirror Sync
+
+# Sync monorepo module directories to individual read-only mirror repos.
+# Uses splitsh-lite (industry standard: Symfony, Laravel, Drupal).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    if: github.repository == 'broomva/life'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - module: aios
+            repo: broomva/aiOS
+          - module: arcan
+            repo: broomva/arcan
+          - module: lago
+            repo: broomva/lago
+          - module: autonomic
+            repo: broomva/autonomic
+          - module: praxis
+            repo: broomva/praxis
+          - module: spaces
+            repo: broomva/spaces
+          - module: haima
+            repo: broomva/haima
+          - module: anima
+            repo: broomva/anima
+          - module: nous
+            repo: broomva/nous
+          - module: vigil
+            repo: broomva/vigil
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Split subtree
+        id: split
+        run: |
+          # Install splitsh-lite
+          curl -L https://github.com/splitsh/lite/releases/download/v1.0.1/lite_linux_amd64.tar.gz | tar xz
+          chmod +x splitsh-lite
+
+          # Split the module directory into a standalone branch
+          SHA=$(./splitsh-lite --prefix=crates/${{ matrix.module }}/)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Push to mirror
+        if: steps.split.outputs.sha != ''
+        run: |
+          git push --force \
+            https://x-access-token:${{ secrets.MIRROR_PAT }}@github.com/${{ matrix.repo }}.git \
+            ${{ steps.split.outputs.sha }}:refs/heads/main
