@@ -2,6 +2,17 @@ name: Mirror Sync
 
 # Sync monorepo module directories to individual read-only mirror repos.
 # Uses splitsh-lite (industry standard: Symfony, Laravel, Drupal).
+#
+# REQUIRED SECRET: MIRROR_PAT
+# A GitHub Personal Access Token (classic) with `repo` scope, created by
+# a user who has push access to ALL mirror repos listed in the matrix.
+# Set it at: https://github.com/broomva/life/settings/secrets/actions
+# The default GITHUB_TOKEN only has access to the current repo (broomva/life)
+# and will get 403 Forbidden when pushing to mirror repos.
+#
+# To create: GitHub → Settings → Developer settings → Personal access tokens
+#            → Tokens (classic) → Generate new token → scope: repo
+#            Then add as repository secret named MIRROR_PAT.
 
 on:
   push:
