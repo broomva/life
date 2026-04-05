@@ -15,10 +15,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+
       - uses: dtolnay/rust-toolchain@stable
+
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Clean tracked-but-gitignored files
+        run: |
+          # release-plz fails if any file is both git-tracked and in .gitignore.
+          # Remove such files from the index (they should never have been committed).
+          IGNORED=$(git ls-files -ci --exclude-standard 2>/dev/null || true)
+          if [ -n "$IGNORED" ]; then
+            echo "Removing tracked-but-gitignored files from index:"
+            echo "$IGNORED"
+            echo "$IGNORED" | xargs git rm --cached --quiet
+          fi
+
       - uses: Swatinem/rust-cache@v2
+
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@v0.5
         with:
