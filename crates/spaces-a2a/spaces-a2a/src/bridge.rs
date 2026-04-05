@@ -5,7 +5,7 @@
 //! SpacetimeDB SDK's real-time pub/sub. For now, it uses a simple
 //! in-memory store that can be populated via HTTP API or file import.
 
-use crate::agent_card::{AgentCardConfig, ListingData};
+use crate::agent_card::{AgentCardConfig, AuthSchemeData, ListingData, SkillData};
 use crate::types::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -162,7 +162,10 @@ impl SpacesBridge {
             task_data.state,
             TaskState::Completed | TaskState::Failed | TaskState::Canceled | TaskState::Rejected
         ) {
-            anyhow::bail!("Cannot cancel task in terminal state: {:?}", task_data.state);
+            anyhow::bail!(
+                "Cannot cancel task in terminal state: {:?}",
+                task_data.state
+            );
         }
 
         task_data.state = TaskState::Canceled;
@@ -206,8 +209,7 @@ impl SpacesBridge {
         task_data.updated_at = chrono::Utc::now();
 
         // If task was waiting for input, transition back to working
-        if task_data.state == TaskState::InputRequired
-            || task_data.state == TaskState::AuthRequired
+        if task_data.state == TaskState::InputRequired || task_data.state == TaskState::AuthRequired
         {
             task_data.state = TaskState::Working;
         }

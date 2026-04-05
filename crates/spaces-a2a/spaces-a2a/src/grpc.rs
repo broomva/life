@@ -86,9 +86,7 @@ impl pb::a2a_service_server::A2aService for A2AGrpcService {
             {
                 Ok(t) => t,
                 Err(e) => {
-                    let _ = tx
-                        .send(Err(Status::internal(e.to_string())))
-                        .await;
+                    let _ = tx.send(Err(Status::internal(e.to_string()))).await;
                     return;
                 }
             };

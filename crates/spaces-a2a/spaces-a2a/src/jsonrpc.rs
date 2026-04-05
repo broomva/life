@@ -8,10 +8,7 @@ use crate::types::*;
 use std::sync::Arc;
 
 /// Process a JSON-RPC request and return a response.
-pub async fn handle_jsonrpc(
-    bridge: Arc<SpacesBridge>,
-    request: JsonRpcRequest,
-) -> JsonRpcResponse {
+pub async fn handle_jsonrpc(bridge: Arc<SpacesBridge>, request: JsonRpcRequest) -> JsonRpcResponse {
     if request.jsonrpc != "2.0" {
         return JsonRpcResponse::error(
             request.id,
@@ -87,18 +84,14 @@ async fn handle_message_send(
         .create_task(&agent_id, &context_id, &params.message)
         .await
     {
-        Ok(task) => JsonRpcResponse::success(
-            request.id,
-            serde_json::to_value(&task).unwrap_or_default(),
-        ),
+        Ok(task) => {
+            JsonRpcResponse::success(request.id, serde_json::to_value(&task).unwrap_or_default())
+        }
         Err(e) => JsonRpcResponse::error(request.id, error_codes::INTERNAL_ERROR, e.to_string()),
     }
 }
 
-async fn handle_task_get(
-    bridge: Arc<SpacesBridge>,
-    request: JsonRpcRequest,
-) -> JsonRpcResponse {
+async fn handle_task_get(bridge: Arc<SpacesBridge>, request: JsonRpcRequest) -> JsonRpcResponse {
     let params: TaskGetParams = match serde_json::from_value(request.params.clone()) {
         Ok(p) => p,
         Err(e) => {
@@ -111,10 +104,9 @@ async fn handle_task_get(
     };
 
     match bridge.get_task(&params.id, params.include_history).await {
-        Ok(Some(task)) => JsonRpcResponse::success(
-            request.id,
-            serde_json::to_value(&task).unwrap_or_default(),
-        ),
+        Ok(Some(task)) => {
+            JsonRpcResponse::success(request.id, serde_json::to_value(&task).unwrap_or_default())
+        }
         Ok(None) => JsonRpcResponse::error(
             request.id,
             error_codes::TASK_NOT_FOUND,
@@ -124,10 +116,7 @@ async fn handle_task_get(
     }
 }
 
-async fn handle_task_cancel(
-    bridge: Arc<SpacesBridge>,
-    request: JsonRpcRequest,
-) -> JsonRpcResponse {
+async fn handle_task_cancel(bridge: Arc<SpacesBridge>, request: JsonRpcRequest) -> JsonRpcResponse {
     let params: TaskCancelParams = match serde_json::from_value(request.params.clone()) {
         Ok(p) => p,
         Err(e) => {
@@ -140,14 +129,9 @@ async fn handle_task_cancel(
     };
 
     match bridge.cancel_task(&params.id).await {
-        Ok(task) => JsonRpcResponse::success(
-            request.id,
-            serde_json::to_value(&task).unwrap_or_default(),
-        ),
-        Err(e) => JsonRpcResponse::error(
-            request.id,
-            error_codes::TASK_STATE_ERROR,
-            e.to_string(),
-        ),
+        Ok(task) => {
+            JsonRpcResponse::success(request.id, serde_json::to_value(&task).unwrap_or_default())
+        }
+        Err(e) => JsonRpcResponse::error(request.id, error_codes::TASK_STATE_ERROR, e.to_string()),
     }
 }
