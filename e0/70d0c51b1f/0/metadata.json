@@ -1,0 +1,34 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "e070d0c51b1f",
+  "session_id": "ab6d67d3-6181-4bd8-950b-1d7b49172cf1",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-05T21:05:52.282212Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".gitignore",
+    "docs/raw-dumps/lago-lakehouse-memory.md",
+    "interface/docs/conversations/Conversations.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "8f3d54e07d50",
+  "checkpoint_transcript_start": 284,
+  "transcript_lines_at_start": 284,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-05T21:05:52.136095Z",
+    "agent_lines": 2,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 2,
+    "agent_percentage": 100
+  }
+}
