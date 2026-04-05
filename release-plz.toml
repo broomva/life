@@ -6,6 +6,10 @@ publish_timeout = "30m"
 # with native build deps (protobuf, SpacetimeDB, etc).
 semver_check = false
 git_release_enable = false
+git_tag_enable = true
+# Skip cargo build verification during publish — the CI workflow handles this.
+publish_no_verify = true
+pr_labels = ["release"]
 
 # ─── aiOS: kernel contract ────────────────────────────────────────────
 [[package]]
