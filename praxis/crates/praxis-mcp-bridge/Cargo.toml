@@ -1,0 +1,32 @@
+[package]
+name = "praxis-mcp-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "MCP (Model Context Protocol) server bridge for the Praxis tool engine"
+
+[dependencies]
+aios-protocol.workspace = true
+axum.workspace = true
+praxis-core.workspace = true
+praxis-tools.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+praxis-core.workspace = true
+praxis-tools.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
