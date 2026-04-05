@@ -19,8 +19,6 @@ unsafe_code = "deny"
 
 [lints.clippy]
 dbg_macro = "warn"
-print_stdout = "warn"
-print_stderr = "warn"
 todo = "warn"
 
 [dependencies]
