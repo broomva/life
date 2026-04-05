@@ -1,0 +1,53 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "8d254fd32119",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "crates/aios/aios-runtime/src/lib.rs",
+    "crates/arcan/arcan-aios-adapters/src/provider.rs",
+    "crates/arcan/arcan-anima/src/lib.rs",
+    "crates/arcan/arcan-core/src/aisdk.rs",
+    "crates/arcan/arcan-core/src/prompt.rs",
+    "crates/arcan/arcan-core/src/queue.rs",
+    "crates/arcan/arcan-core/src/runtime.rs",
+    "crates/arcan/arcan-lago/src/learning.rs",
+    "crates/arcan/arcan-lago/src/repository.rs",
+    "crates/arcan/arcan-provider/src/anthropic.rs",
+    "crates/arcan/arcan-provider/src/openai.rs",
+    "crates/arcan/arcan-spaces/src/hive.rs",
+    "crates/arcan/arcan-tui/src/app.rs",
+    "crates/arcan/arcan-tui/src/models/state.rs",
+    "crates/arcan/arcan/src/config.rs",
+    "crates/arcan/arcan/src/consolidator.rs",
+    "crates/arcan/arcan/src/main.rs",
+    "crates/arcan/arcan/src/markdown.rs",
+    "crates/arcan/arcan/src/memory_tools.rs",
+    "crates/arcan/arcan/src/nous_observer.rs",
+    "crates/arcan/arcan/src/shell.rs",
+    "crates/arcan/arcan/src/skills.rs",
+    "crates/arcan/arcan/src/spinner.rs",
+    "crates/arcan/arcand/src/canonical.rs",
+    "crates/cli/life-cli/src/deploy/mod.rs",
+    "crates/relay/life-relayd/src/daemon.rs",
+    "docs/conversations/Conversations.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/8d/254fd32119/0/metadata.json",
+      "transcript": "/8d/254fd32119/0/full.jsonl",
+      "context": "/8d/254fd32119/0/context.md",
+      "content_hash": "/8d/254fd32119/0/content_hash.txt",
+      "prompt": "/8d/254fd32119/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  }
+}
