@@ -1,0 +1,18 @@
+# Build artifacts
+/target/
+/spacetimedb/target/
+
+# OS files
+.DS_Store
+
+# Credentials
+.spacetimedb_client_credentials/
+
+# Local overrides
+spacetime.local.json
+
+# Claude Code user-specific settings
+.claude/settings.local.json
+
+# Build tooling
+.entire/
