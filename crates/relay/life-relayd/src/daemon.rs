@@ -386,7 +386,7 @@ async fn find_most_recent_jsonl(dir: &std::path::Path) -> Option<std::path::Path
         }
         if let Ok(meta) = entry.metadata().await {
             if let Ok(modified) = meta.modified() {
-                if best.as_ref().map_or(true, |(_, t)| modified > *t) {
+                if best.as_ref().is_none_or(|(_, t)| modified > *t) {
                     best = Some((path, modified));
                 }
             }
