@@ -180,7 +180,7 @@ hkdf = "0.12"
 indexmap = { version = "2", features = ["serde"] }
 infer = "0.16"
 json-patch = "4"
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 k256 = { version = "0.13", features = ["ecdsa", "sha256"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
