@@ -27,3 +27,10 @@ test.txt
 # Local symlinks (absolute paths, not portable)
 crates/anima/anima-data
 crates/arcan/.claude/worktrees/
+
+# Symlinks to local machine paths (not portable across environments)
+.claude/skills/
+crates/*/.claude/skills/
+crates/*/.claude/worktrees/
+crates/anima/anima-data
+skills/
