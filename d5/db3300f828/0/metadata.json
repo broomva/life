@@ -1,0 +1,42 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "d5db3300f828",
+  "session_id": "ab6d67d3-6181-4bd8-950b-1d7b49172cf1",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-05T04:30:03.971505Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "autonomic",
+    "lago",
+    "nous",
+    "praxis",
+    ".gitmodules",
+    "aiOS",
+    "anima",
+    "arcan",
+    "haima",
+    "spaces",
+    "vigil"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "8f3d54e07d50",
+  "checkpoint_transcript_start": 284,
+  "transcript_lines_at_start": 284,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-05T04:30:03.835415Z",
+    "agent_lines": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 0,
+    "agent_percentage": 0
+  }
+}
