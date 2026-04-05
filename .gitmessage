@@ -1,0 +1,9 @@
+# <type>(<scope>): <subject>
+#
+# Types: feat, fix, chore, docs, refactor, test, ci, perf
+# Scopes: arcan, lago, autonomic, praxis, haima, nous, anima, vigil, spaces, aios
+#
+# Examples:
+#   feat(arcan): add streaming markdown renderer
+#   fix(lago): resolve journal compaction race condition
+#   chore: bump workspace dependencies

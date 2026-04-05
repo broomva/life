@@ -1,0 +1,14 @@
+# Life Agent OS — Code Ownership
+* @broomva
+
+# Module-specific ownership
+crates/aios/       @broomva
+crates/arcan/      @broomva
+crates/lago/       @broomva
+crates/autonomic/  @broomva
+crates/praxis/     @broomva
+crates/haima/      @broomva
+crates/nous/       @broomva
+crates/anima/      @broomva
+crates/vigil/      @broomva
+crates/spaces/     @broomva
