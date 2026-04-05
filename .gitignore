@@ -28,9 +28,6 @@ test.txt
 crates/anima/anima-data
 crates/arcan/.claude/worktrees/
 
-# Symlinks to local machine paths (not portable across environments)
-.claude/skills/
-crates/*/.claude/skills/
-crates/*/.claude/worktrees/
+# Local worktree symlinks (absolute paths, machine-specific)
+crates/arcan/.claude/worktrees/
 crates/anima/anima-data
-skills/
