@@ -1,0 +1,42 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "9ccac4fa9c6e",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "arcan/.arcan/memory/MEMORY.md",
+    "arcan/.arcan/memory/session_summary.md",
+    "arcan/.arcan/sessions/policy-test/checkpoints/32cdee08-0901-46ae-98c7-5c0cac650cf6/manifest.json",
+    "arcan/.arcan/sessions/policy-test/checkpoints/631bc17a-1b90-4238-8c56-9e22113b1955/manifest.json",
+    "arcan/.arcan/sessions/policy-test/checkpoints/87fec5c4-7793-447a-8c6b-1e028b2c09b4/manifest.json",
+    "arcan/.arcan/sessions/policy-test/state/heartbeat.json",
+    "crates/arcan/Dockerfile",
+    "crates/arcan/railway.json",
+    "crates/autonomic/Dockerfile",
+    "crates/haima/Dockerfile",
+    "crates/lago/Dockerfile",
+    "crates/lago/railway.toml",
+    "docker/arcan.Dockerfile",
+    "docker/autonomicd.Dockerfile",
+    "docker/haimad.Dockerfile",
+    "docker/lagod.Dockerfile",
+    "docs/conversations/Conversations.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/9c/cac4fa9c6e/0/metadata.json",
+      "transcript": "/9c/cac4fa9c6e/0/full.jsonl",
+      "context": "/9c/cac4fa9c6e/0/context.md",
+      "content_hash": "/9c/cac4fa9c6e/0/content_hash.txt",
+      "prompt": "/9c/cac4fa9c6e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  }
+}
