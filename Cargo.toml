@@ -34,7 +34,7 @@ members = [
     "crates/lago/lago-aios-eventstore-adapter",
     "crates/lago/lago-api",
     "crates/lago/lago-auth",
-    # "crates/lago/lago-billing", # excluded: pre-existing compile errors
+    "crates/lago/lago-billing",
     "crates/lago/lago-cli",
     "crates/lago/lago-compiler",
     "crates/lago/lago-core",
@@ -80,7 +80,7 @@ members = [
     "crates/anima/anima-lago",
     # Vigil — observability
     "crates/vigil/life-vigil",
-    # Spaces — networking (excluded: needs spacetimedb-sdk, own workspace)
+    # Spaces — networking (excluded: needs spacetime generate to update bindings)
     # "crates/spaces/life-spaces",
     # Relay — remote sessions
     "crates/relay/life-relay-api",
@@ -88,8 +88,8 @@ members = [
     "crates/relay/life-relayd",
     # CLI
     "crates/cli/life-cli",
-    # Spaces A2A (excluded: compile errors pending fix)
-    # "crates/spaces-a2a/spaces-a2a",
+    # Spaces A2A
+    "crates/spaces-a2a/spaces-a2a",
 ]
 exclude = ["crates/spaces/life-spaces/spacetimedb"]
 
@@ -228,6 +228,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 wait-timeout = "0.2"
 walkdir = "2"
 zeroize = { version = "1", features = ["derive"] }
+spacetimedb-sdk = "2.0"
 zstd = "0.13"
 
 [workspace.lints.clippy]

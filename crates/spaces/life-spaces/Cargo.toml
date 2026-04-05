@@ -6,11 +6,8 @@ description = "Distributed agent networking engine for the Life Agent OS — Spa
 license = "Apache-2.0"
 repository = "https://github.com/broomva/spaces"
 
-[workspace]
-exclude = ["spacetimedb"]
-
 [features]
 dm = []  # Enable after regenerating bindings with DM tables
 
 [dependencies]
-spacetimedb-sdk = { version = "2.0.*" }
+spacetimedb-sdk.workspace = true
