@@ -1,7 +1,7 @@
 [package]
 name = "life-vigil"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 rust-version = "1.85"
 description = "Observability foundation for the Life Agent OS — OpenTelemetry tracing, GenAI semantic conventions, and contract-derived instrumentation"
 license = "MIT"
@@ -20,7 +20,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "regis
 tracing-opentelemetry = "0.30"
 
 # Shared contract
-aios-protocol = { version = "0.2.0", path = "../aiOS/crates/aios-protocol" }
+aios-protocol = { version = "0.3.0", path = "../../aios/aios-protocol" }
 
 # Error handling
 thiserror = "2.0"
