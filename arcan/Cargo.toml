@@ -1,0 +1,157 @@
+# workspace — arcan agent runtime (cache-bust: 2026-03-25)
+[workspace]
+members = [
+  "crates/arcan-sandbox",
+  "crates/arcan-provider-vercel",
+  "crates/arcan-provider-bubblewrap",
+  "crates/arcan-provider-local",
+  "crates/arcan-anima",
+  "crates/arcan-console",
+  "crates/arcan-core",
+  "crates/arcan-harness",
+  "crates/arcan-praxis",
+  "crates/arcan-aios-adapters",
+  "crates/arcan-store",
+  "crates/arcan-provider",
+  "crates/arcan-tui",
+  "crates/arcand",
+  "crates/arcan-lago",
+  "crates/arcan-spaces",
+  "crates/arcan-commands",
+  "crates/arcan",
+]
+resolver = "2"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+# Restriction lints (cherry-picked, never enable the whole group)
+dbg_macro = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+todo = "warn"
+unimplemented = "warn"
+
+# Correctness & performance
+needless_pass_by_value = "warn"
+cloned_instead_of_copied = "warn"
+redundant_closure_for_method_calls = "warn"
+unnested_or_patterns = "warn"
+trivially_copy_pass_by_ref = "warn"
+implicit_clone = "warn"
+manual_let_else = "warn"
+
+[profile.dev]
+opt-level = 0
+debug = true
+split-debuginfo = "unpacked" # Faster linking on macOS
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["Arcan Contributors"]
+repository = "https://github.com/broomva/arcan"
+homepage = "https://docs.broomva.tech/docs/life/arcan"
+keywords = ["agent", "llm", "runtime", "daemon", "ai"]
+categories = ["command-line-utilities", "web-programming"]
+
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+bitflags = { version = "2", features = ["serde"] }
+axum = { version = "0.8", features = ["macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+dashmap = "6"
+hex = "0.4"
+json-patch = "4"
+schemars = { version = "0.8", features = ["chrono"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tokio-stream = "0.1"
+tower-http = { version = "0.6", features = ["cors"] }
+jsonwebtoken = "9"
+futures-util = "0.3"
+reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "uuid", "chrono"] }
+reqwest-eventsource = "0.6"
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+rig-core = "0.30"
+wait-timeout = "0.2"
+walkdir = "2"
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+utoipa = { version = "5", features = ["axum_extras", "chrono"] }
+utoipa-scalar = { version = "0.3", features = ["axum"] }
+
+# Agent OS protocol (canonical contract)
+aios-protocol = { path = "../aiOS/crates/aios-protocol", version = "0.2.0" }
+aios-runtime = { path = "../aiOS/crates/aios-runtime", version = "0.2.0" }
+aios-events = { path = "../aiOS/crates/aios-events", version = "0.2.0" }
+aios-policy = { path = "../aiOS/crates/aios-policy", version = "0.2.0" }
+aios-sandbox = { path = "../aiOS/crates/aios-sandbox", version = "0.2.0" }
+aios-tools = { path = "../aiOS/crates/aios-tools", version = "0.2.0" }
+
+# Praxis tool execution engine (canonical tool implementations)
+praxis-core = { path = "../praxis/crates/praxis-core", version = "0.1.0" }
+praxis-tools = { path = "../praxis/crates/praxis-tools", version = "0.1.0" }
+praxis-skills = { path = "../praxis/crates/praxis-skills", version = "0.1.0" }
+praxis-mcp-bridge = { path = "../praxis/crates/praxis-mcp-bridge", version = "0.1.0" }
+
+# Autonomic homeostasis controller (embedded controller support)
+autonomic-core = { path = "../autonomic/crates/autonomic-core", version = "0.1.0" }
+autonomic-controller = { path = "../autonomic/crates/autonomic-controller", version = "0.1.0" }
+
+# Haima agentic finance engine (x402 payments, wallet, policy)
+haima-core = { path = "../haima/crates/haima-core", version = "0.1.0" }
+haima-x402 = { path = "../haima/crates/haima-x402", version = "0.1.0" }
+haima-wallet = { path = "../haima/crates/haima-wallet", version = "0.1.0" }
+haima-lago = { path = "../haima/crates/haima-lago", version = "0.1.0" }
+
+# Nous metacognitive evaluation (inline quality scoring + async judge)
+nous-api = { path = "../nous/crates/nous-api", version = "0.1.0" }
+nous-core = { path = "../nous/crates/nous-core", version = "0.1.0" }
+nous-heuristics = { path = "../nous/crates/nous-heuristics", version = "0.1.0" }
+nous-judge = { path = "../nous/crates/nous-judge", version = "0.1.0" }
+nous-lago = { path = "../nous/crates/nous-lago", version = "0.1.0" }
+nous-middleware = { path = "../nous/crates/nous-middleware", version = "0.1.0" }
+
+# Lago persistence layer (path deps for local development)
+lago-api = { path = "../lago/crates/lago-api", version = "0.2.1" }
+lago-core = { path = "../lago/crates/lago-core", version = "0.2.1" }
+lago-fs = { path = "../lago/crates/lago-fs", version = "0.2.1" }
+lago-journal = { path = "../lago/crates/lago-journal", version = "0.2.1" }
+lago-store = { path = "../lago/crates/lago-store", version = "0.2.1" }
+lago-policy = { path = "../lago/crates/lago-policy", version = "0.2.1" }
+lago-lance = { path = "../lago/crates/lago-lance", version = "0.2.1" }
+lago-aios-eventstore-adapter = { path = "../lago/crates/lago-aios-eventstore-adapter", version = "0.2.1" }
+
+# Anima identity, beliefs, and self-model
+anima-core = { path = "../anima/crates/anima-core", version = "0.1.0" }
+anima-lago = { path = "../anima/crates/anima-lago", version = "0.1.0" }
+
+# Observability
+life-vigil = { version = "0.1.0", path = "../vigil" }
+opentelemetry = "0.29"
+opentelemetry_sdk = { version = "0.29", features = ["trace", "metrics"] }
+opentelemetry-otlp = { version = "0.29", features = ["trace", "metrics", "grpc-tonic"] }
+tracing-opentelemetry = "0.30"
+arcan-sandbox = { path = "crates/arcan-sandbox", version = "0.3.0" }
+arcan-provider-vercel = { path = "crates/arcan-provider-vercel", version = "0.3.0" }
+arcan-provider-bubblewrap = { path = "crates/arcan-provider-bubblewrap", version = "0.3.0" }
+arcan-provider-local = { path = "crates/arcan-provider-local", version = "0.3.0" }
