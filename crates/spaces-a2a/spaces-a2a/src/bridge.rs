@@ -25,6 +25,7 @@ pub struct SpacesBridge {
 
 /// Internal task representation bridging SpacetimeDB and A2A.
 #[derive(Debug, Clone)]
+#[expect(dead_code)]
 struct TaskData {
     task_id: String,
     context_id: String,
