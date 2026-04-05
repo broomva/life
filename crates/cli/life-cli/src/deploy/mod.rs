@@ -222,8 +222,8 @@ pub async fn list(args: ListArgs) -> Result<()> {
         }
         _ => {
             println!(
-                "{:<20} {:<25} {:<10} {:<18} {:<6} {}",
-                "Agent", "Project", "Target", "Template", "Svcs", "Deployed"
+                "{:<20} {:<25} {:<10} {:<18} {:<6} Deployed",
+                "Agent", "Project", "Target", "Template", "Svcs"
             );
             println!("{}", "─".repeat(95));
 
