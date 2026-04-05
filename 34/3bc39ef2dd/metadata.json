@@ -1,0 +1,41 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "343bc39ef2dd",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".gitignore",
+    "crates/lago/.claude/skills/axum",
+    "crates/lago/.claude/skills/cargo-fuzz",
+    "crates/lago/.claude/skills/cargo-machete",
+    "crates/lago/.claude/skills/event-sourcing-architect",
+    "crates/lago/.claude/skills/protobuf",
+    "crates/lago/.claude/skills/rust-async-patterns",
+    "crates/lago/.claude/skills/rust-best-practices",
+    "crates/lago/.claude/skills/tokio-concurrency",
+    "crates/lago/.claude/skills/tokio-patterns",
+    "crates/spaces/life-spaces/.claude/skills/control-metalayer-loop",
+    "crates/spaces/life-spaces/.claude/skills/harness-engineering-playbook",
+    "crates/spaces/life-spaces/skills/control-metalayer-loop",
+    "crates/spaces/life-spaces/skills/harness-engineering-playbook",
+    "skills/control-metalayer-loop",
+    "skills/harness-engineering-playbook"
+  ],
+  "sessions": [
+    {
+      "metadata": "/34/3bc39ef2dd/0/metadata.json",
+      "transcript": "/34/3bc39ef2dd/0/full.jsonl",
+      "context": "/34/3bc39ef2dd/0/context.md",
+      "content_hash": "/34/3bc39ef2dd/0/content_hash.txt",
+      "prompt": "/34/3bc39ef2dd/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  }
+}
