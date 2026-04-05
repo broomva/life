@@ -59,3 +59,5 @@ crates/anima/anima-data
 # Internal session logs and raw data (not for public)
 docs/conversations/
 raw-dumps/
+interface/docs/conversations/
+docs/raw-dumps/
