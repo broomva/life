@@ -23,3 +23,7 @@ interface/packages/*/dist/
 interface/apps/*/.next/
 .claude/worktrees/
 test.txt
+
+# Local symlinks (absolute paths, not portable)
+crates/anima/anima-data
+crates/arcan/.claude/worktrees/
