@@ -28,11 +28,9 @@ pr_labels = ["release"]
 [[package]]
 name = "aios-protocol"
 # Published at 0.2.0 — skip until 0.3.0 is manually published
-release = false
 
 [[package]]
 name = "aios-events"
-release = false
 
 [[package]]
 name = "aios-kernel"
@@ -41,33 +39,26 @@ semver_check = false
 
 [[package]]
 name = "aios-policy"
-release = false
 
 [[package]]
 name = "aios-runtime"
-release = false
 
 [[package]]
 name = "aios-sandbox"
-release = false
 
 [[package]]
 name = "aios-tools"
-release = false
 
 # ─── Arcan: agent runtime ────────────────────────────────────────────
 [[package]]
 name = "arcan"
-release = false
 git_release_enable = true
 
 [[package]]
 name = "arcan-core"
-release = false
 
 [[package]]
 name = "arcan-aios-adapters"
-release = false
 
 [[package]]
 name = "arcan-anima"
@@ -91,11 +82,9 @@ semver_check = false
 
 [[package]]
 name = "arcan-harness"
-release = false
 
 [[package]]
 name = "arcan-lago"
-release = false
 
 [[package]]
 name = "arcan-praxis"
@@ -104,7 +93,6 @@ semver_check = false
 
 [[package]]
 name = "arcan-provider"
-release = false
 
 [[package]]
 name = "arcan-provider-bubblewrap"
@@ -133,52 +121,40 @@ semver_check = false
 
 [[package]]
 name = "arcan-store"
-release = false
 
 [[package]]
 name = "arcan-tui"
-release = false
 
 [[package]]
 name = "arcand"
-release = false
 
 # ─── Lago: persistence substrate ─────────────────────────────────────
 [[package]]
 name = "lago-core"
-release = false
 
 [[package]]
 name = "lago-journal"
-release = false
 
 [[package]]
 name = "lago-store"
-release = false
 
 [[package]]
 name = "lago-fs"
-release = false
 
 [[package]]
 name = "lago-ingest"
-release = false
 
 [[package]]
 name = "lago-api"
-release = false
 
 [[package]]
 name = "lago-policy"
-release = false
 
 [[package]]
 name = "lago-knowledge"
-release = false
 
 [[package]]
 name = "lago-auth"
-release = false
 
 [[package]]
 name = "lago-billing"
@@ -197,25 +173,20 @@ semver_check = false
 
 [[package]]
 name = "lago-aios-eventstore-adapter"
-release = false
 
 [[package]]
 name = "lagod"
-release = false
 git_release_enable = true
 
 [[package]]
 name = "lago"
-release = false
 
 # ─── Autonomic: homeostasis controller ────────────────────────────────
 [[package]]
 name = "autonomic-core"
-release = false
 
 [[package]]
 name = "autonomic-controller"
-release = false
 
 [[package]]
 name = "autonomic-api"
@@ -229,7 +200,6 @@ semver_check = false
 
 [[package]]
 name = "autonomicd"
-release = false
 semver_check = false
 
 # ─── Praxis: tool execution engine ───────────────────────────────────
@@ -256,23 +226,18 @@ semver_check = false
 # ─── Haima: agentic finance engine ───────────────────────────────────
 [[package]]
 name = "haima-core"
-release = false
 
 [[package]]
 name = "haima-wallet"
-release = false
 
 [[package]]
 name = "haima-x402"
-release = false
 
 [[package]]
 name = "haima-lago"
-release = false
 
 [[package]]
 name = "haima-api"
-release = false
 
 [[package]]
 name = "haima-insurance"
@@ -286,13 +251,11 @@ semver_check = false
 
 [[package]]
 name = "haimad"
-release = false
 semver_check = false
 
 # ─── Nous: metacognitive evaluation ──────────────────────────────────
 [[package]]
 name = "nous-core"
-release = false
 
 [[package]]
 name = "nous-api"
@@ -321,7 +284,6 @@ semver_check = false
 
 [[package]]
 name = "nousd"
-release = false
 semver_check = false
 
 # ─── Anima: identity ─────────────────────────────────────────────────
@@ -343,7 +305,6 @@ semver_check = false
 # ─── Vigil: observability ────────────────────────────────────────────
 [[package]]
 name = "life-vigil"
-release = false
 
 # ─── Relay: remote sessions ──────────────────────────────────────────
 [[package]]
@@ -358,17 +319,14 @@ semver_check = false
 
 [[package]]
 name = "life-relayd"
-release = false
 semver_check = false
 
 # ─── CLI ──────────────────────────────────────────────────────────────
 [[package]]
 name = "life-cli"
-release = false
 semver_check = false
 
 # ─── Spaces A2A ──────────────────────────────────────────────────────
 [[package]]
 name = "spaces-a2a"
-release = false
 semver_check = false
