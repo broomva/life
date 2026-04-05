@@ -1,370 +1,374 @@
 [workspace]
 changelog_config = "cliff.toml"
 publish_timeout = "30m"
-# Disable semver_check globally — enable per-crate for published libraries.
-# semver_check requires building the crate, which can fail on CI for crates
-# with native build deps (protobuf, SpacetimeDB, etc).
 semver_check = false
 git_release_enable = false
 git_tag_enable = true
-# Skip cargo build verification during publish — the CI workflow handles this.
 publish_no_verify = true
 pr_labels = ["release"]
+
+# ─────────────────────────────────────────────────────────────────────
+# BOOTSTRAP NOTE (2026-04-05):
+# All crates were published at 0.2.x/0.1.x from pre-monorepo repos,
+# then the workspace was restructured (BRO-448) and versions bumped
+# to 0.3.0. release-plz cannot diff across the restructure boundary.
+#
+# Strategy:
+#   release = false  → Skip crates already on crates.io at older version
+#                      (will be re-enabled after first manual 0.3.0 publish)
+#   release = true   → New crates never published (release-plz can handle)
+#
+# To re-enable a crate after manual publish:
+#   1. cargo publish -p <crate>
+#   2. Create tag: git tag <crate>-v0.3.0 && git push origin --tags
+#   3. Change `release = false` → remove the line (default is true)
+# ─────────────────────────────────────────────────────────────────────
 
 # ─── aiOS: kernel contract ────────────────────────────────────────────
 [[package]]
 name = "aios-protocol"
-semver_check = true
+# Published at 0.2.0 — skip until 0.3.0 is manually published
+release = false
 
 [[package]]
 name = "aios-events"
-semver_check = true
+release = false
 
 [[package]]
 name = "aios-kernel"
-# Not yet published on crates.io — skip semver check
+# Never published — release-plz can handle first publish
 semver_check = false
 
 [[package]]
 name = "aios-policy"
-semver_check = true
+release = false
 
 [[package]]
 name = "aios-runtime"
-semver_check = true
+release = false
 
 [[package]]
 name = "aios-sandbox"
-semver_check = true
+release = false
 
 [[package]]
 name = "aios-tools"
-semver_check = true
+release = false
 
 # ─── Arcan: agent runtime ────────────────────────────────────────────
 [[package]]
 name = "arcan"
+release = false
 git_release_enable = true
-# Binary crate — no public API to check
-semver_check = false
 
 [[package]]
 name = "arcan-core"
-semver_check = true
+release = false
 
 [[package]]
 name = "arcan-aios-adapters"
-semver_check = true
+release = false
 
 [[package]]
 name = "arcan-anima"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "arcan-commands"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "arcan-console"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "arcan-fleet"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "arcan-harness"
-semver_check = true
+release = false
 
 [[package]]
 name = "arcan-lago"
-semver_check = true
+release = false
 
 [[package]]
 name = "arcan-praxis"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "arcan-provider"
-semver_check = true
+release = false
 
 [[package]]
 name = "arcan-provider-bubblewrap"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "arcan-provider-local"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "arcan-provider-vercel"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "arcan-sandbox"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "arcan-spaces"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "arcan-store"
-semver_check = true
+release = false
 
 [[package]]
 name = "arcan-tui"
-semver_check = true
+release = false
 
 [[package]]
 name = "arcand"
-semver_check = true
+release = false
 
 # ─── Lago: persistence substrate ─────────────────────────────────────
 [[package]]
 name = "lago-core"
-semver_check = true
+release = false
 
 [[package]]
 name = "lago-journal"
-semver_check = true
+release = false
 
 [[package]]
 name = "lago-store"
-semver_check = true
+release = false
 
 [[package]]
 name = "lago-fs"
-semver_check = true
+release = false
 
 [[package]]
 name = "lago-ingest"
-# Has protobuf build.rs — semver_check needs protoc
-semver_check = false
+release = false
 
 [[package]]
 name = "lago-api"
-semver_check = true
+release = false
 
 [[package]]
 name = "lago-policy"
-semver_check = true
+release = false
 
 [[package]]
 name = "lago-knowledge"
-semver_check = true
+release = false
 
 [[package]]
 name = "lago-auth"
-semver_check = true
+release = false
 
 [[package]]
 name = "lago-billing"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "lago-compiler"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "lago-lance"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "lago-aios-eventstore-adapter"
-semver_check = true
+release = false
 
 [[package]]
 name = "lagod"
-# Binary crate
-semver_check = false
+release = false
 git_release_enable = true
 
 [[package]]
 name = "lago"
-# Binary/CLI crate
-semver_check = false
+release = false
 
 # ─── Autonomic: homeostasis controller ────────────────────────────────
 [[package]]
 name = "autonomic-core"
-semver_check = true
+release = false
 
 [[package]]
 name = "autonomic-controller"
-semver_check = true
+release = false
 
 [[package]]
 name = "autonomic-api"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "autonomic-lago"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "autonomicd"
-# Binary crate, not yet published
 release = false
 semver_check = false
 
 # ─── Praxis: tool execution engine ───────────────────────────────────
 [[package]]
 name = "praxis-core"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "praxis-tools"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "praxis-skills"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "praxis-mcp-bridge"
-# Not yet published
+# Never published
 semver_check = false
 
 # ─── Haima: agentic finance engine ───────────────────────────────────
 [[package]]
 name = "haima-core"
-semver_check = true
+release = false
 
 [[package]]
 name = "haima-wallet"
-semver_check = true
+release = false
 
 [[package]]
 name = "haima-x402"
-semver_check = true
+release = false
 
 [[package]]
 name = "haima-lago"
-semver_check = true
+release = false
 
 [[package]]
 name = "haima-api"
-semver_check = true
+release = false
 
 [[package]]
 name = "haima-insurance"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "haima-outcome"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "haimad"
-# Binary crate, not yet published
 release = false
 semver_check = false
 
 # ─── Nous: metacognitive evaluation ──────────────────────────────────
 [[package]]
 name = "nous-core"
-semver_check = true
+release = false
 
 [[package]]
 name = "nous-api"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "nous-heuristics"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "nous-judge"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "nous-lago"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "nous-middleware"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "nousd"
-# Binary crate, not yet published
 release = false
 semver_check = false
 
 # ─── Anima: identity ─────────────────────────────────────────────────
 [[package]]
 name = "anima-core"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "anima-identity"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "anima-lago"
-# Not yet published
+# Never published
 semver_check = false
 
 # ─── Vigil: observability ────────────────────────────────────────────
 [[package]]
 name = "life-vigil"
-semver_check = true
+release = false
 
 # ─── Relay: remote sessions ──────────────────────────────────────────
 [[package]]
 name = "life-relay-api"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "life-relay-core"
-# Not yet published
+# Never published
 semver_check = false
 
 [[package]]
 name = "life-relayd"
-# Binary crate, not yet published
 release = false
 semver_check = false
 
 # ─── CLI ──────────────────────────────────────────────────────────────
 [[package]]
 name = "life-cli"
-# Binary crate, not yet published
 release = false
 semver_check = false
 
 # ─── Spaces A2A ──────────────────────────────────────────────────────
 [[package]]
 name = "spaces-a2a"
-# Binary crate, not yet published
 release = false
 semver_check = false
