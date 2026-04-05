@@ -63,11 +63,7 @@ interface/docs/conversations/
 docs/raw-dumps/
 .entire/
 
-# All skill symlinks (local development only, not portable)
-.claude/skills/
-crates/*/.claude/skills/
-crates/*/.agents/skills/
-crates/lago/.agents/
-crates/spaces/life-spaces/.claude/
-crates/spaces/life-spaces/skills/
-skills/
+# Arcan session data and worktrees (machine-specific)
+arcan/.arcan/
+crates/arcan/.claude/worktrees/
+crates/anima/anima-data
