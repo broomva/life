@@ -1,0 +1,62 @@
+# Life Agent OS
+
+> An open-source Rust monorepo for autonomous AI agents. 76 crates, 2,625+ tests.
+
+Life is a contract-first Agent Operating System that treats agents as living systems — with cognition, persistence, homeostasis, identity, finance, networking, observability, and evaluation as first-class computational primitives.
+
+## Install
+
+```bash
+cargo install arcan
+arcan shell --provider mock    # zero-config, works immediately
+arcan shell                    # auto-detects Anthropic/OpenAI/Ollama from env
+```
+
+## Modules
+
+- **aiOS** — Kernel contract: canonical types, traits, event taxonomy (aios-protocol)
+- **Arcan** — Agent runtime: event loop, multi-provider LLM, streaming, TUI, shell REPL
+- **Lago** — Event-sourced persistence: append-only journal, blob store, knowledge graph
+- **Autonomic** — Homeostasis: three-pillar regulation (operational, cognitive, economic)
+- **Praxis** — Tool execution: sandbox, hashline editing, MCP server/client bridge
+- **Haima** — Agentic finance: x402 machine-to-machine payments, per-task billing
+- **Nous** — Metacognitive evaluation: inline heuristics, LLM-as-judge, quality signals
+- **Anima** — Identity: soul profiles, belief states, trust networks
+- **Vigil** — Observability: OpenTelemetry tracing, GenAI semantic conventions
+- **Spaces** — Distributed networking: SpacetimeDB 2.0 real-time pub/sub
+
+## Architecture
+
+All modules depend on aiOS (the kernel contract). Arcan is the primary runtime that orchestrates all other modules. The agent's message history IS the application state — every action produces immutable events in Lago.
+
+## Key Capabilities
+
+- Multi-provider LLM support (Anthropic, OpenAI, Ollama, Apple on-device, any OpenAI-compatible API)
+- MCP server/client bridge via Praxis — expose or consume Model Context Protocol tools
+- Event-sourced persistence with Lago — every agent action is an immutable event
+- Streaming markdown rendering in terminal with ANSI styling
+- Reasoning/thinking token display for models like gemma4
+- Homeostatic regulation — automatic context compaction, budget management
+- x402 machine-to-machine payments via Haima
+- Real-time agent-to-agent communication via Spaces (SpacetimeDB)
+
+## API
+
+Arcan exposes an HTTP API on port 3000:
+- POST /chat — send message, receive streaming SSE response
+- GET /health — health check
+- GET /v1/sessions — list sessions
+- POST /v1/sessions/{id}/messages — send message to session
+
+## MCP Integration
+
+Praxis implements both MCP server and client:
+- Server: expose Arcan's tool registry to Claude Desktop, Cursor, or any MCP host
+- Client: connect to external MCP servers and bridge their tools into the agent loop
+
+## Repository
+
+- Source: https://github.com/broomva/life
+- Crates.io: https://crates.io/crates/arcan
+- Docs: https://broomva.tech/start-here
+- License: MIT

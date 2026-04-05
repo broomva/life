@@ -1,0 +1,43 @@
+{
+  "name": "Life Agent OS",
+  "description": "Open-source Rust Agent Operating System with cognition, persistence, homeostasis, and finance primitives",
+  "version": "0.3.0",
+  "url": "https://arcan.la",
+  "documentationUrl": "https://broomva.tech/start-here",
+  "sourceUrl": "https://github.com/broomva/life",
+  "provider": {
+    "organization": "Broomva",
+    "url": "https://broomva.tech"
+  },
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false,
+    "stateTransitionHistory": true
+  },
+  "authentication": {
+    "schemes": ["bearer"],
+    "credentials": "JWT token via ARCAN_JWT_SECRET"
+  },
+  "defaultInputModes": ["text"],
+  "defaultOutputModes": ["text"],
+  "skills": [
+    {
+      "id": "code-assist",
+      "name": "Code Assistant",
+      "description": "Read, write, edit, and search code across a workspace with sandboxed tool execution",
+      "tags": ["coding", "development", "rust", "agent"]
+    },
+    {
+      "id": "knowledge-query",
+      "name": "Knowledge Query",
+      "description": "Search and retrieve from the event-sourced knowledge graph (Lago)",
+      "tags": ["knowledge", "search", "memory"]
+    },
+    {
+      "id": "agent-orchestration",
+      "name": "Agent Orchestration",
+      "description": "Coordinate multi-agent workflows via Spaces distributed networking",
+      "tags": ["orchestration", "multi-agent", "distributed"]
+    }
+  ]
+}
