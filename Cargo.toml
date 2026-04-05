@@ -96,7 +96,7 @@ exclude = ["crates/spaces/life-spaces/spacetimedb"]
 [workspace.package]
 version = "0.3.0"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.93"
 license = "MIT"
 authors = ["Life Agent OS Contributors"]
 repository = "https://github.com/broomva/life"
