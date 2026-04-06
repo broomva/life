@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import type { StateEvent } from "../lib/types";
-import { cn } from "../lib/utils";
+import type { OpsisEvent } from "../lib/types";
+import { cn, eventSummary } from "../lib/utils";
 
 interface FeedPanelProps {
-  events: StateEvent[];
-  onEventClick?: (event: StateEvent) => void;
+  events: OpsisEvent[];
+  onEventClick?: (event: OpsisEvent) => void;
 }
 
 const TABS = ["All", "Emergency", "Weather", "Finance", "Trade"] as const;
@@ -14,7 +14,8 @@ const TABS = ["All", "Emergency", "Weather", "Finance", "Trade"] as const;
 export function FeedPanel({ events, onEventClick }: FeedPanelProps) {
   const [activeTab, setActiveTab] = useState<string>("All");
 
-  const filtered = activeTab === "All" ? events : events.filter((e) => e.domain === activeTab);
+  const filtered =
+    activeTab === "All" ? events : events.filter((e) => e.domain === activeTab);
 
   const recent = filtered.slice(-50).reverse();
 
@@ -55,15 +56,15 @@ export function FeedPanel({ events, onEventClick }: FeedPanelProps) {
                 <span
                   className={cn(
                     "w-1.5 h-1.5 rounded-full shrink-0",
-                    event.severity >= 0.7
+                    (event.severity ?? 0) >= 0.7
                       ? "bg-red-400"
-                      : event.severity >= 0.4
+                      : (event.severity ?? 0) >= 0.4
                         ? "bg-amber-400"
                         : "bg-emerald-400",
                   )}
                 />
-                <span className="text-slate-500 shrink-0">{event.domain}</span>
-                <span className="text-slate-300 truncate">{event.summary}</span>
+                <span className="text-slate-500 shrink-0">{event.domain ?? "System"}</span>
+                <span className="text-slate-300 truncate">{eventSummary(event)}</span>
               </div>
             </button>
           ))

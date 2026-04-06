@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { StateEvent } from "../lib/types";
+import type { GeoPoint, OpsisEvent } from "../lib/types";
+import { eventSummary } from "../lib/utils";
 
 // CesiumJS is loaded dynamically to avoid SSR issues.
 // Falls back to the CSS globe if Cesium fails to load.
 
 interface GlobeProps {
-  events: StateEvent[];
+  events: OpsisEvent[];
   selectedDomain: string | null;
   googleApiKey?: string;
   cesiumIonToken?: string;
@@ -61,8 +62,7 @@ export function Globe({ events, selectedDomain, googleApiKey, cesiumIonToken }: 
         if (!document.querySelector('link[href*="cesium/Build"]')) {
           const link = document.createElement("link");
           link.rel = "stylesheet";
-          link.href =
-            "https://cesium.com/downloads/cesiumjs/releases/1.131/Build/Cesium/Widgets/widgets.css";
+          link.href = "https://cesium.com/downloads/cesiumjs/releases/1.131/Build/Cesium/Widgets/widgets.css";
           document.head.appendChild(link);
         }
 
@@ -99,9 +99,7 @@ export function Globe({ events, selectedDomain, googleApiKey, cesiumIonToken }: 
     }
 
     loadCesium();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   // Create Cesium Viewer once loaded.
@@ -158,13 +156,11 @@ export function Globe({ events, selectedDomain, googleApiKey, cesiumIonToken }: 
         C.Cesium3DTileset.fromUrl(
           `https://tile.googleapis.com/v1/3dtiles/root.json?key=${googleApiKey}`,
           { showCreditsOnScreen: true },
-        )
-          .then((tileset) => {
-            viewer.scene.primitives.add(tileset);
-          })
-          .catch(() => {
-            // Google tiles unavailable — use default globe.
-          });
+        ).then((tileset) => {
+          viewer.scene.primitives.add(tileset);
+        }).catch(() => {
+          // Google tiles unavailable — use default globe.
+        });
       }
 
       viewerRef.current = viewer;
@@ -188,15 +184,17 @@ export function Globe({ events, selectedDomain, googleApiKey, cesiumIonToken }: 
 
     viewer.entities.removeAll();
 
-    const filtered = selectedDomain ? events.filter((e) => e.domain === selectedDomain) : events;
+    const filtered = selectedDomain
+      ? events.filter((e) => e.domain === selectedDomain)
+      : events;
 
     const located = filtered.filter((e) => e.location).slice(-200);
 
     for (const event of located) {
       if (!event.location) continue;
-      const rgb = DOMAIN_COLORS[event.domain] ?? [100, 116, 139];
-      const alpha = 0.4 + event.severity * 0.6;
-      const size = 4 + event.severity * 12;
+      const rgb = DOMAIN_COLORS[(event.domain ?? "System")] ?? [100, 116, 139];
+      const alpha = 0.4 + (event.severity ?? 0) * 0.6;
+      const size = 4 + (event.severity ?? 0) * 12;
 
       // Use any cast — Cesium Entity constructor types are complex with dynamic imports.
       // biome-ignore lint/suspicious/noExplicitAny: Cesium dynamic API
@@ -205,14 +203,14 @@ export function Globe({ events, selectedDomain, googleApiKey, cesiumIonToken }: 
         point: {
           pixelSize: size,
           color: C.Color.fromBytes(rgb[0]!, rgb[1]!, rgb[2]!, Math.round(alpha * 255)),
-          outlineWidth: event.severity >= 0.7 ? 1 : 0,
+          outlineWidth: (event.severity ?? 0) >= 0.7 ? 1 : 0,
           outlineColor: C.Color.fromBytes(rgb[0]!, rgb[1]!, rgb[2]!, 100),
         },
       };
 
-      if (event.severity >= 0.5) {
+      if ((event.severity ?? 0) >= 0.5) {
         entityOpts.label = {
-          text: event.summary.slice(0, 40),
+          text: eventSummary(event).slice(0, 40),
           font: "10px monospace",
           fillColor: C.Color.fromBytes(200, 200, 200, 200),
           outlineColor: C.Color.BLACK,
@@ -249,20 +247,19 @@ function FallbackGlobe({
   selectedDomain,
   error,
 }: {
-  events: StateEvent[];
+  events: OpsisEvent[];
   selectedDomain: string | null;
   error: string | null;
 }) {
-  const filtered = selectedDomain ? events.filter((e) => e.domain === selectedDomain) : events;
+  const filtered = selectedDomain
+    ? events.filter((e) => e.domain === selectedDomain)
+    : events;
   const located = filtered.filter((e) => e.location).slice(-300);
 
   return (
     <div className="absolute inset-0 bg-[var(--color-bg-space)]">
       {/* Globe gradient sphere */}
-      <div
-        className="absolute inset-0 flex items-center justify-center"
-        style={{ marginTop: "-5%" }}
-      >
+      <div className="absolute inset-0 flex items-center justify-center" style={{ marginTop: "-5%" }}>
         <div
           className="rounded-full"
           style={{
@@ -298,11 +295,11 @@ function FallbackGlobe({
           if (!event.location) return null;
           const x = ((event.location.lon + 180) / 360) * 100;
           const y = ((90 - event.location.lat) / 180) * 100;
-          const size = 3 + event.severity * 10;
-          const domainColor = DOMAIN_COLORS[event.domain];
-          const color = domainColor
-            ? `rgb(${domainColor.join(",")})`
-            : "#64748b";
+          const size = 3 + (event.severity ?? 0) * 10;
+          const color =
+            DOMAIN_COLORS[(event.domain ?? "System")]
+              ? `rgb(${DOMAIN_COLORS[(event.domain ?? "System")].join(",")})`
+              : "#64748b";
 
           return (
             <div
@@ -314,8 +311,9 @@ function FallbackGlobe({
                 width: size,
                 height: size,
                 backgroundColor: color,
-                opacity: 0.4 + event.severity * 0.6,
-                boxShadow: event.severity >= 0.6 ? `0 0 ${size * 2}px ${color}80` : undefined,
+                opacity: 0.4 + (event.severity ?? 0) * 0.6,
+                boxShadow:
+                  (event.severity ?? 0) >= 0.6 ? `0 0 ${size * 2}px ${color}80` : undefined,
                 transform: "translate(-50%, -50%)",
               }}
             />
