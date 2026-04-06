@@ -10,6 +10,10 @@ description = "Production agent deployment pipeline for Life Agent OS"
 keywords = ["agent", "deployment", "orchestration", "railway", "life"]
 categories = ["command-line-utilities"]
 
+[lib]
+name = "life_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "life"
 path = "src/main.rs"
