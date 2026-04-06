@@ -9,6 +9,13 @@ repository.workspace = true
 
 [dependencies]
 opsis-core.workspace = true
+opsis-engine.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [lints.rust]
 unused_must_use = "deny"
