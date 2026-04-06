@@ -65,6 +65,23 @@ export function eventSourceLabel(source: import("./types").EventSource | string 
   return "unknown";
 }
 
+/** Returns true if the event was produced by Gaia. */
+export function isGaiaEvent(event: import("./types").OpsisEvent): boolean {
+  return event.source === "Gaia";
+}
+
+/** Returns a short human-readable label for a Gaia event kind. */
+export function gaiaEventLabel(kind: import("./types").OpsisEventKind): string {
+  switch (kind.type) {
+    case "GaiaCorrelation":
+      return `Correlation (${kind.domains.slice(0, 3).join(", ")}${kind.domains.length > 3 ? "…" : ""})`;
+    case "GaiaAnomaly":
+      return `Anomaly: ${kind.domain} ${kind.sigma.toFixed(1)}σ`;
+    default:
+      return kind.type;
+  }
+}
+
 /** Default state domains in display order. */
 export const DEFAULT_DOMAINS = [
   "Emergency",

@@ -79,6 +79,7 @@ impl TickAggregator {
             tick,
             timestamp: chrono::Utc::now(),
             state_line_deltas,
+            gaia_insights: vec![],
         }
     }
 }

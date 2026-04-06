@@ -8,11 +8,13 @@ use tokio::time;
 use tracing::{info, warn};
 
 use opsis_core::clock::WorldClock;
+use opsis_core::event::WorldDelta;
 use opsis_core::feed::FeedIngestor;
 use opsis_core::state::WorldState;
 
 use crate::aggregator::TickAggregator;
 use crate::bus::EventBus;
+use crate::gaia::GaiaAnalyzer;
 
 /// Configuration for the Opsis engine.
 #[derive(Debug, Clone)]
@@ -38,6 +40,7 @@ pub struct OpsisEngine {
     pub bus: Arc<EventBus>,
     world: WorldState,
     aggregator: TickAggregator,
+    gaia: GaiaAnalyzer,
     feeds: Vec<Box<dyn FeedIngestor>>,
 }
 
@@ -50,6 +53,7 @@ impl OpsisEngine {
             bus: Arc::new(EventBus::new()),
             world: WorldState::new(clock),
             aggregator: TickAggregator::new(),
+            gaia: GaiaAnalyzer::new(),
             feeds: Vec::new(),
         }
     }
@@ -157,6 +161,22 @@ impl OpsisEngine {
                             "tick flush"
                         );
                     }
+
+                    // Run Gaia analysis post-flush.
+                    let gaia_insights = self.gaia.analyze(&self.world, &delta);
+                    if !gaia_insights.is_empty() {
+                        info!(
+                            tick = %self.world.clock.tick,
+                            count = gaia_insights.len(),
+                            "gaia insights generated"
+                        );
+                    }
+
+                    // Bundle Gaia insights into the delta before broadcast.
+                    let delta = WorldDelta {
+                        gaia_insights,
+                        ..delta
+                    };
 
                     // Always broadcast — UI needs tick updates even when no events.
                     bus.publish_delta(delta);

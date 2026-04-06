@@ -1,10 +1,35 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { StateDomain, StateLine, WorldDelta, WorldState } from "../lib/types";
+import type { GaiaState, OpsisEvent, StateDomain, StateLine, WorldDelta, WorldState } from "../lib/types";
 import { DEFAULT_DOMAINS } from "../lib/utils";
 
 const MAX_EVENTS = 500;
+const MAX_GAIA_INSIGHTS = 20;
+
+function createInitialGaiaState(): GaiaState {
+  return { recentInsights: [], tensionScore: 0, activeCorrelations: 0 };
+}
+
+function computeGaiaState(insights: OpsisEvent[]): GaiaState {
+  const correlations = insights.filter(
+    (e) => e.kind.type === "GaiaCorrelation",
+  );
+  const tensionScore =
+    correlations.length > 0
+      ? Math.round(
+          correlations.reduce((sum, e) => {
+            const kind = e.kind as { type: "GaiaCorrelation"; confidence: number };
+            return sum + kind.confidence * 100;
+          }, 0) / correlations.length,
+        )
+      : 0;
+  return {
+    recentInsights: insights,
+    tensionScore,
+    activeCorrelations: correlations.length,
+  };
+}
 
 function createInitialState(): WorldState {
   const stateLines = new Map<StateDomain, StateLine>();
@@ -30,6 +55,8 @@ export interface UseOpsisStreamOptions {
 export interface UseOpsisStreamReturn {
   /** Current accumulated world state. */
   worldState: WorldState;
+  /** Accumulated Gaia intelligence state. */
+  gaiaState: GaiaState;
   /** Connection status. */
   status: "connecting" | "connected" | "disconnected" | "error";
   /** Last error message, if any. */
@@ -44,6 +71,7 @@ export function useOpsisStream(options: UseOpsisStreamOptions = {}): UseOpsisStr
   const { url = "http://localhost:3010", autoConnect = true } = options;
 
   const [worldState, setWorldState] = useState<WorldState>(createInitialState);
+  const [gaiaState, setGaiaState] = useState<GaiaState>(createInitialGaiaState);
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected" | "error">(
     "disconnected",
   );
@@ -77,6 +105,18 @@ export function useOpsisStream(options: UseOpsisStreamOptions = {}): UseOpsisStr
 
       return { tick: delta.tick, stateLines: newLines, allEvents: newEvents };
     });
+
+    // Accumulate Gaia insights separately.
+    const incoming = delta.gaia_insights ?? [];
+    if (incoming.length > 0) {
+      setGaiaState((prev) => {
+        const insights = [...incoming, ...prev.recentInsights].slice(
+          0,
+          MAX_GAIA_INSIGHTS,
+        );
+        return computeGaiaState(insights);
+      });
+    }
   }, []);
 
   const connect = useCallback(() => {
@@ -136,5 +176,5 @@ export function useOpsisStream(options: UseOpsisStreamOptions = {}): UseOpsisStr
     };
   }, [autoConnect, connect, disconnect]);
 
-  return { worldState, status, error, connect, disconnect };
+  return { worldState, gaiaState, status, error, connect, disconnect };
 }
