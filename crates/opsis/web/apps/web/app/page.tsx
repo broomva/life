@@ -221,8 +221,24 @@ export default function OpsisPage() {
               Feed
             </span>
             <div className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-live)] animate-pulse" />
-              <span className="text-[10px] text-[var(--color-live)]">LIVE</span>
+              <span className={cn(
+                "w-1.5 h-1.5 rounded-full",
+                status === "connected" ? "bg-[var(--color-live)] animate-pulse" :
+                status === "connecting" ? "bg-amber-400 animate-pulse" :
+                "bg-slate-600",
+              )} />
+              <span className={cn(
+                "text-[10px]",
+                status === "connected" ? "text-[var(--color-live)]" :
+                status === "connecting" ? "text-amber-400" :
+                status === "error" ? "text-red-400" :
+                "text-slate-500",
+              )}>
+                {status === "connected" ? "LIVE" :
+                 status === "connecting" ? "CONNECTING" :
+                 status === "error" ? "RECONNECTING" :
+                 "OFFLINE"}
+              </span>
             </div>
           </div>
           {/* Filter pills */}
@@ -250,7 +266,10 @@ export default function OpsisPage() {
           {filteredEvents.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-[var(--color-text-muted)] text-xs">
-                Waiting for events...
+                {status === "connected" ? "Waiting for events..." :
+                 status === "connecting" ? "Connecting to opsisd..." :
+                 status === "error" ? "Connection lost — retrying..." :
+                 "Offline — start opsisd to begin"}
               </p>
             </div>
           ) : (
