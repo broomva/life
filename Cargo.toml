@@ -222,7 +222,7 @@ opentelemetry-otlp = { version = "0.29", features = ["trace", "metrics", "grpc-t
 opentelemetry_sdk = { version = "0.29", features = ["trace", "metrics"] }
 parking_lot = "0.12"
 parquet = { version = "53", features = ["async"] }
-portable-pty = "0.8"
+portable-pty = "0.9"
 prost = "0.14"
 prost-types = "0.14"
 rand = "0.8"
