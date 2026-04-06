@@ -121,6 +121,9 @@ pub struct WorldDelta {
     pub timestamp: DateTime<Utc>,
     /// Per-domain deltas (only domains that changed).
     pub state_line_deltas: Vec<StateLineDelta>,
+    /// Gaia-generated insights for this tick (cross-domain correlations, anomalies).
+    #[serde(default)]
+    pub gaia_insights: Vec<OpsisEvent>,
 }
 
 #[cfg(test)]
@@ -162,9 +165,18 @@ mod tests {
             tick: WorldTick(1),
             timestamp: Utc::now(),
             state_line_deltas: vec![],
+            gaia_insights: vec![],
         };
         let json = serde_json::to_string(&delta).unwrap();
         assert!(json.contains("\"tick\""));
+    }
+
+    #[test]
+    fn world_delta_gaia_insights_default_empty() {
+        // Deserialising old JSON (no gaia_insights field) must not fail.
+        let json = r#"{"tick":1,"timestamp":"2026-01-01T00:00:00Z","state_line_deltas":[]}"#;
+        let delta: WorldDelta = serde_json::from_str(json).unwrap();
+        assert!(delta.gaia_insights.is_empty());
     }
 
     #[test]

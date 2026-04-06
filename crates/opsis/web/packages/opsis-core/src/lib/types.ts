@@ -89,6 +89,18 @@ export interface WorldDelta {
   readonly tick: number;
   readonly timestamp: string;
   readonly state_line_deltas: StateLineDelta[];
+  /** Gaia-generated cross-domain insights for this tick (may be empty). */
+  readonly gaia_insights: OpsisEvent[];
+}
+
+/** Accumulated Gaia intelligence state (client-side). */
+export interface GaiaState {
+  /** Recent Gaia insights (last 20), newest first. */
+  recentInsights: OpsisEvent[];
+  /** Global tension score derived from recent GaiaCorrelation confidence (0–100). */
+  tensionScore: number;
+  /** Number of GaiaCorrelation events in recent insights. */
+  activeCorrelations: number;
 }
 
 /** Per-domain state line (client-side accumulated state). */

@@ -14,6 +14,7 @@ export type {
   WorldDelta,
   StateLine,
   WorldState,
+  GaiaState,
   HealthResponse,
 } from "./lib/types";
 
@@ -25,6 +26,8 @@ export {
   formatActivity,
   eventSummary,
   eventSourceLabel,
+  isGaiaEvent,
+  gaiaEventLabel,
   DEFAULT_DOMAINS,
 } from "./lib/utils";
 

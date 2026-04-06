@@ -296,10 +296,8 @@ function FallbackGlobe({
           const x = ((event.location.lon + 180) / 360) * 100;
           const y = ((90 - event.location.lat) / 180) * 100;
           const size = 3 + (event.severity ?? 0) * 10;
-          const color =
-            DOMAIN_COLORS[(event.domain ?? "System")]
-              ? `rgb(${DOMAIN_COLORS[(event.domain ?? "System")].join(",")})`
-              : "#64748b";
+          const domainRgb = DOMAIN_COLORS[(event.domain ?? "System")];
+          const color = domainRgb ? `rgb(${domainRgb.join(",")})` : "#64748b";
 
           return (
             <div

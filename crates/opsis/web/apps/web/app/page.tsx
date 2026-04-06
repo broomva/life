@@ -11,12 +11,13 @@ import {
   formatActivity,
   eventSummary,
   eventSourceLabel,
+  gaiaEventLabel,
   cn,
 } from "@opsis/core";
-import type { StateDomain, OpsisEvent } from "@opsis/core";
+import type { GaiaState, StateDomain, OpsisEvent, OpsisEventKind } from "@opsis/core";
 
 export default function OpsisPage() {
-  const { worldState, status, error } = useOpsisStream();
+  const { worldState, gaiaState, status, error } = useOpsisStream();
   const [selectedDomain, setSelectedDomain] = useState<StateDomain | null>(null);
   const [showLegend, setShowLegend] = useState(true);
 
@@ -179,6 +180,9 @@ export default function OpsisPage() {
         </div>
       )}
 
+      {/* ═══ GAIA INTELLIGENCE PANEL ═══ */}
+      <GaiaPanel gaiaState={gaiaState} />
+
       {/* ═══ TOP-LEFT HUD — Coordinates & Info (WorldView style) ═══ */}
       <div className="absolute bottom-16 left-4 z-20 text-[10px] font-mono text-[var(--color-cyan-dim)]">
         <div>TICK: {worldState.tick.toString().padStart(6, "0")}</div>
@@ -304,6 +308,136 @@ export default function OpsisPage() {
             </span>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Gaia Intelligence Panel ═══ */
+function GaiaPanel({ gaiaState }: { gaiaState: GaiaState }) {
+  const { recentInsights, tensionScore, activeCorrelations } = gaiaState;
+  const hasInsights = recentInsights.length > 0;
+  const anomalies = recentInsights.filter((e) => e.kind.type === "GaiaAnomaly");
+
+  const tensionColor =
+    tensionScore >= 60 ? "text-red-400" : tensionScore >= 30 ? "text-amber-400" : "text-emerald-400";
+  const tensionBg =
+    tensionScore >= 60 ? "bg-red-500" : tensionScore >= 30 ? "bg-amber-500" : "bg-emerald-500";
+
+  return (
+    <div className="absolute bottom-24 left-4 z-20 w-52 glass-deep p-2.5 bracket-tl bracket-bl">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] font-bold tracking-wider text-[var(--color-cyan-dim)] uppercase">
+          Gaia Intelligence
+        </span>
+        <div className="flex items-center gap-1">
+          <span
+            className={cn(
+              "w-1.5 h-1.5 rounded-full",
+              hasInsights ? "bg-[var(--color-cyan)] animate-pulse" : "bg-slate-600",
+            )}
+          />
+          <span
+            className={cn(
+              "text-[9px] font-bold uppercase",
+              hasInsights ? "text-[var(--color-cyan)]" : "text-[var(--color-text-muted)]",
+            )}
+          >
+            {hasInsights ? "ACTIVE" : "STANDBY"}
+          </span>
+        </div>
+      </div>
+
+      {!hasInsights ? (
+        <p className="text-[10px] text-[var(--color-text-muted)] text-center py-2">
+          Awaiting Gaia...
+        </p>
+      ) : (
+        <>
+          {/* Stats row */}
+          <div className="flex items-center justify-between mb-2 text-[10px]">
+            <span className="text-[var(--color-text-muted)]">
+              Corr:{" "}
+              <span className="text-[var(--color-text-dim)] font-bold tabular-nums">
+                {activeCorrelations}
+              </span>
+            </span>
+            <span className="text-[var(--color-text-muted)]">
+              Anom:{" "}
+              <span className="text-[var(--color-text-dim)] font-bold tabular-nums">
+                {anomalies.length}
+              </span>
+            </span>
+            <span className={cn("font-bold tabular-nums text-[10px]", tensionColor)}>
+              {tensionScore}%
+            </span>
+          </div>
+
+          {/* Tension bar */}
+          <div className="h-1 w-full bg-[oklch(0.15_0.02_250)] rounded-full mb-2 overflow-hidden">
+            <div
+              className={cn("h-full rounded-full transition-all duration-500", tensionBg, "opacity-70")}
+              style={{ width: `${tensionScore}%` }}
+            />
+          </div>
+
+          {/* Recent insights */}
+          <div className="space-y-1">
+            {recentInsights.slice(0, 4).map((event) => (
+              <GaiaInsightRow key={event.id} event={event} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function GaiaInsightRow({ event }: { event: OpsisEvent }) {
+  const isCorrelation = event.kind.type === "GaiaCorrelation";
+  const isAnomaly = event.kind.type === "GaiaAnomaly";
+
+  return (
+    <div className="flex gap-1.5 py-1 border-b border-[var(--color-border)] last:border-0">
+      {/* Type badge */}
+      <span
+        className={cn(
+          "shrink-0 text-[8px] px-1 py-0.5 rounded font-bold uppercase self-start mt-0.5",
+          isCorrelation && "bg-violet-500/15 text-violet-400",
+          isAnomaly && "bg-amber-500/15 text-amber-400",
+        )}
+      >
+        {isCorrelation ? "CORR" : isAnomaly ? "ANOM" : "GAIA"}
+      </span>
+      <div className="min-w-0 flex-1">
+        {/* Domain badges for correlations */}
+        {isCorrelation && event.kind.type === "GaiaCorrelation" && (
+          <div className="flex flex-wrap gap-0.5 mb-0.5">
+            {(event.kind as Extract<OpsisEventKind, { type: "GaiaCorrelation" }>).domains
+              .slice(0, 3)
+              .map((d) => (
+                <span key={d} className="text-[8px] px-1 rounded bg-slate-700/50 text-slate-300">
+                  {d}
+                </span>
+              ))}
+          </div>
+        )}
+        <p className="text-[10px] text-[var(--color-text-dim)] leading-tight truncate">
+          {gaiaEventLabel(event.kind)}
+        </p>
+        {event.severity != null && (
+          <span
+            className={cn(
+              "text-[9px] tabular-nums",
+              (event.severity ?? 0) >= 0.7 ? "text-red-400" :
+              (event.severity ?? 0) >= 0.4 ? "text-amber-400" :
+              "text-slate-500",
+            )}
+          >
+            sev {((event.severity ?? 0) * 100).toFixed(0)}%
+          </span>
+        )}
       </div>
     </div>
   );
