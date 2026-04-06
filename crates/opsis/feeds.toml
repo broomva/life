@@ -1,8 +1,10 @@
 # Opsis feed configuration
 #
-# Each [[feeds]] entry declares a data feed that the engine will poll.
-# The `connector` field selects the transport: "poll", "websocket", or "rss".
-# The `name` field must match a registered FeedIngestor implementation.
+# Each [[feeds]] entry declares a data feed.
+# Feeds with [feeds.normalize] use the generic poll connector (no Rust code).
+# Feeds without it use registered custom implementations (by name).
+
+# ── Custom feeds (Rust implementations) ─────────────────────────────
 
 [[feeds]]
 name = "usgs-earthquake"
@@ -19,3 +21,49 @@ url = "https://api.open-meteo.com/v1/forecast"
 interval_secs = 300
 schema = "openmeteo.current.v1"
 domain = "Weather"
+
+# ── Generic feeds (declarative, no Rust code) ───────────────────────
+
+[[feeds]]
+name = "usgs-significant"
+connector = "poll"
+url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_month.geojson"
+interval_secs = 900
+schema = "usgs.significant.v1"
+domain = "Emergency"
+
+[feeds.normalize]
+events_path = "$.features[*]"
+summary = "$.properties.place"
+severity = "$.properties.mag"
+severity_range = [0, 10]
+lat = "$.geometry.coordinates[1]"
+lon = "$.geometry.coordinates[0]"
+tags = ["earthquake", "significant"]
+
+[[feeds]]
+name = "github-events"
+connector = "poll"
+url = "https://api.github.com/events"
+interval_secs = 120
+schema = "github.events.v1"
+domain = "Technology"
+
+[feeds.normalize]
+events_path = "$[*]"
+summary = "$.type"
+tags = ["github", "opensource"]
+
+[[feeds]]
+name = "iss-position"
+connector = "poll"
+url = "http://api.open-notify.org/iss-now.json"
+interval_secs = 30
+schema = "iss.position.v1"
+domain = "Space"
+
+[feeds.normalize]
+summary = "$.iss_position"
+lat = "$.iss_position.latitude"
+lon = "$.iss_position.longitude"
+tags = ["iss", "space", "orbit"]

@@ -35,6 +35,7 @@ export function AgentTerminal({
   const [historyIdx, setHistoryIdx] = useState(-1);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const seededRef = useRef(false);
 
   // Auto-scroll on new lines.
   useEffect(() => {
@@ -46,9 +47,11 @@ export function AgentTerminal({
     inputRef.current?.focus();
   }, []);
 
-  // Seed terminal with recent agent events.
+  // Seed terminal with recent agent events (once).
   useEffect(() => {
-    if (recentEvents.length === 0) return;
+    if (seededRef.current || recentEvents.length === 0) return;
+    seededRef.current = true;
+
     const eventLines: TerminalLine[] = recentEvents
       .slice(0, 5)
       .reverse()
@@ -64,7 +67,7 @@ export function AgentTerminal({
         return { type: "output" as const, text: "agent event" };
       });
     setLines((prev) => [...prev, ...eventLines]);
-  }, []); // Only on mount
+  }, [recentEvents]);
 
   const handleSubmit = useCallback(async () => {
     const msg = input.trim();
@@ -116,10 +119,36 @@ export function AgentTerminal({
       }
 
       const data = await res.json();
-      const answer =
-        data.final_answer ?? data.answer ?? JSON.stringify(data).slice(0, 500);
 
-      setLines((prev) => [...prev, { type: "output", text: answer }]);
+      // Extract meaningful answer from various response formats.
+      let answer = data.final_answer ?? data.answer ?? null;
+      if (!answer && data.events) {
+        // Extract text deltas from agent events.
+        const textEvents = data.events?.filter(
+          (e: any) => e.TextDelta?.delta || e.type === "TextDelta",
+        );
+        if (textEvents?.length > 0) {
+          answer = textEvents
+            .map((e: any) => e.TextDelta?.delta ?? e.delta ?? "")
+            .join("");
+        }
+      }
+      if (!answer && data.mode === "recover") {
+        answer = `[session recovery] progress: ${data.state?.progress ?? 0}%, budget: ${data.state?.budget?.tokens_remaining ?? "?"} tokens`;
+      }
+      if (!answer) {
+        answer = JSON.stringify(data, null, 2).slice(0, 500);
+      }
+
+      // Split long answers into lines.
+      const answerLines = answer.split("\n");
+      setLines((prev) => [
+        ...prev,
+        ...answerLines.map((line: string) => ({
+          type: "output" as const,
+          text: line,
+        })),
+      ]);
     } catch (err) {
       setLines((prev) => [
         ...prev,
