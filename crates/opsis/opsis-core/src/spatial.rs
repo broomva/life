@@ -60,7 +60,7 @@ pub struct GeoHotspot {
     /// Center of the hotspot.
     pub center: GeoPoint,
     /// Radius in kilometres.
-    pub radius_km: f64,
+    pub radius_km: f32,
     /// Normalised intensity (0.0–1.0).
     pub intensity: f32,
     /// Number of events that contributed to this hotspot.

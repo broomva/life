@@ -36,6 +36,12 @@ impl SchemaKey {
     }
 }
 
+impl fmt::Display for SchemaKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// Trait for components that ingest data from an external feed and normalise
 /// it into [`StateEvent`]s.
 ///
