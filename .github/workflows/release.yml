@@ -52,6 +52,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Publish to crates.io
+        continue-on-error: true
         uses: MarcoIeni/release-plz-action@v0.5
         with:
           command: release
