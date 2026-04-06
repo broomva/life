@@ -71,3 +71,9 @@ crates/anima/anima-data
 # Conversation bridge (local only, generates docs/conversations/)
 scripts/conversation-history.py
 scripts/conversation-bridge-hook.sh
+
+# Opsis frontend (crates/opsis/web/)
+crates/opsis/web/.turbo/
+crates/opsis/web/docs/conversations/
+crates/opsis/web/scripts/conversation-history.py
+crates/opsis/web/scripts/conversation-bridge-hook.sh

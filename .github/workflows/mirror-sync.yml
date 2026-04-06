@@ -52,6 +52,8 @@ jobs:
             repo: broomva/nous
           - module: vigil
             repo: broomva/vigil
+          - module: opsis
+            repo: broomva/opsis
     steps:
       - uses: actions/checkout@v4
         with:

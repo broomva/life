@@ -1,0 +1,170 @@
+@import "tailwindcss";
+
+/* ── Opsis Design System: WorldView + Glint Tactical ── */
+
+@theme {
+  /* Base palette — deep navy-black like WorldView */
+  --color-bg: oklch(0.10 0.02 250);
+  --color-bg-space: oklch(0.06 0.01 250);
+
+  /* Glass panels — translucent floating HUD */
+  --color-panel: oklch(0.12 0.02 250 / 0.85);
+  --color-panel-hover: oklch(0.15 0.02 250 / 0.9);
+  --color-border: oklch(0.22 0.04 250 / 0.4);
+  --color-border-bright: oklch(0.35 0.06 250 / 0.5);
+
+  /* Accent colors — tactical HUD */
+  --color-cyan: oklch(0.75 0.14 195);
+  --color-cyan-dim: oklch(0.55 0.10 195);
+  --color-cyan-glow: oklch(0.75 0.14 195 / 0.3);
+
+  /* Severity colors */
+  --color-critical: oklch(0.65 0.22 25);
+  --color-high: oklch(0.75 0.18 45);
+  --color-medium: oklch(0.75 0.15 85);
+  --color-low: oklch(0.65 0.12 145);
+
+  /* Status */
+  --color-live: oklch(0.70 0.20 145);
+  --color-warning: oklch(0.75 0.15 85);
+
+  /* Text */
+  --color-text: oklch(0.85 0.01 250);
+  --color-text-dim: oklch(0.55 0.02 250);
+  --color-text-muted: oklch(0.40 0.02 250);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.25 0.02 250) transparent;
+}
+
+html, body {
+  background: var(--color-bg-space);
+  color: var(--color-text);
+  font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Liquid Glass HUD Panel ── */
+.hud-panel {
+  background: oklch(0.11 0.02 250 / 0.75);
+  border: 1px solid oklch(0.30 0.05 210 / 0.25);
+  backdrop-filter: blur(24px) saturate(1.4) brightness(1.05);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4) brightness(1.05);
+  border-radius: 6px;
+  box-shadow:
+    0 0 1px oklch(0.75 0.14 195 / 0.2),
+    0 1px 0 oklch(0.50 0.06 210 / 0.08) inset,
+    0 8px 32px oklch(0.04 0.01 250 / 0.6);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.hud-panel:hover {
+  border-color: oklch(0.35 0.06 210 / 0.35);
+  box-shadow:
+    0 0 2px oklch(0.75 0.14 195 / 0.25),
+    0 1px 0 oklch(0.50 0.06 210 / 0.1) inset,
+    0 12px 40px oklch(0.04 0.01 250 / 0.7);
+}
+
+/* ── Glass with stronger refraction (for key panels) ── */
+.glass-deep {
+  background: oklch(0.09 0.02 250 / 0.65);
+  backdrop-filter: blur(40px) saturate(1.6) brightness(1.1);
+  -webkit-backdrop-filter: blur(40px) saturate(1.6) brightness(1.1);
+  border: 1px solid oklch(0.35 0.06 210 / 0.2);
+  border-radius: 8px;
+  box-shadow:
+    0 0 1px oklch(0.70 0.12 195 / 0.15),
+    0 2px 0 oklch(0.50 0.06 210 / 0.06) inset,
+    -1px -1px 0 oklch(0.50 0.06 210 / 0.04) inset,
+    0 16px 48px oklch(0.04 0.01 250 / 0.7);
+}
+
+/* ── Corner bracket decoration (WorldView style) ── */
+.bracket-tl::before,
+.bracket-tr::before,
+.bracket-bl::before,
+.bracket-br::before {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-color: var(--color-cyan-dim);
+  border-style: solid;
+}
+.bracket-tl::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+.bracket-tr::before { top: -1px; right: -1px; border-width: 1px 1px 0 0; }
+.bracket-bl::before { bottom: -1px; left: -1px; border-width: 0 0 1px 1px; }
+.bracket-br::before { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+
+/* ── Scan line overlay ── */
+.scanlines {
+  position: relative;
+}
+.scanlines::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    oklch(0.10 0.01 250 / 0.08) 3px,
+    oklch(0.10 0.01 250 / 0.08) 6px
+  );
+  pointer-events: none;
+  z-index: 100;
+}
+
+/* ── Ticker tape animation ── */
+@keyframes ticker {
+  from { transform: translateX(0%); }
+  to { transform: translateX(-50%); }
+}
+.ticker-scroll {
+  animation: ticker 60s linear infinite;
+}
+
+/* ── Glow effects ── */
+.glow-cyan { text-shadow: 0 0 8px var(--color-cyan-glow); }
+.glow-dot {
+  box-shadow: 0 0 6px var(--color-cyan), 0 0 12px var(--color-cyan-glow);
+}
+
+/* ── Event severity dot ── */
+.severity-critical { background: var(--color-critical); box-shadow: 0 0 6px var(--color-critical); }
+.severity-high { background: var(--color-high); box-shadow: 0 0 4px var(--color-high); }
+.severity-medium { background: var(--color-medium); }
+.severity-low { background: var(--color-low); }
+
+/* ── Category pills (Glint style) ── */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.pill-active {
+  background: oklch(0.20 0.04 250);
+  border-color: var(--color-border-bright);
+  color: var(--color-cyan);
+}
+.pill-inactive {
+  color: var(--color-text-muted);
+}
+.pill-inactive:hover {
+  color: var(--color-text-dim);
+  background: oklch(0.15 0.02 250 / 0.5);
+}
+
+/* ── Custom scrollbar ── */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: oklch(0.25 0.03 250); border-radius: 2px; }

@@ -1,0 +1,10 @@
+node_modules
+.next
+.turbo
+dist
+*.tsbuildinfo
+.env
+.env.local
+# bun.lock — committed for reproducibility
+.vercel
+.env.vercel.local
