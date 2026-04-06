@@ -164,6 +164,39 @@ html, body {
   background: oklch(0.15 0.02 250 / 0.5);
 }
 
+/* ── Agent Phosphor 80s Hacker Theme ── */
+.agent-panel {
+  background-image: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.04) 2px, rgba(0,0,0,0.04) 4px
+  );
+  border-color: #0d9aff;
+}
+.agent-header { color: #4fc3f7; }
+.agent-text { color: #4fc3f7; text-shadow: 0 0 6px rgba(79,195,247,0.5); }
+.agent-diamond { color: #4fc3f7; animation: agent-blink 2s step-end infinite; }
+.agent-dot-active { background: #4fc3f7; box-shadow: 0 0 6px #4fc3f7; animation: agent-blink 2s step-end infinite; }
+.agent-streaming::after { content: '\2588'; animation: agent-blink 1s step-end infinite; color: #4fc3f7; }
+@keyframes agent-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.agent-terminal {
+  background: #050d1a;
+  border: 1px solid #0d9aff;
+  box-shadow: 0 0 12px rgba(13,154,255,0.3), inset 0 0 24px rgba(0,0,0,0.6);
+  font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  color: #4fc3f7;
+  letter-spacing: 0.02em;
+}
+.agent-terminal input {
+  background: transparent;
+  color: #4fc3f7;
+  caret-color: #4fc3f7;
+  outline: none;
+}
+.agent-terminal input::placeholder { color: #1a3a5c; }
+
 /* ── Custom scrollbar ── */
 ::-webkit-scrollbar { width: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }

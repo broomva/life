@@ -1,14 +1,88 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GaiaState, OpsisEvent, StateDomain, StateLine, WorldDelta, WorldState } from "../lib/types";
+import type { AgentPresence, AgentState, GaiaState, OpsisEvent, StateDomain, StateLine, WorldDelta, WorldState } from "../lib/types";
 import { DEFAULT_DOMAINS } from "../lib/utils";
 
 const MAX_EVENTS = 500;
 const MAX_GAIA_INSIGHTS = 20;
+const MAX_AGENT_OBSERVATIONS = 20;
+const MAX_AGENT_ALERTS = 10;
+const MAX_UNROUTED = 50;
 
 function createInitialGaiaState(): GaiaState {
   return { recentInsights: [], tensionScore: 0, activeCorrelations: 0 };
+}
+
+function createInitialAgentState(): AgentState {
+  return { activeAgents: [], recentObservations: [], recentAlerts: [] };
+}
+
+function isAgentEvent(event: OpsisEvent): boolean {
+  return typeof event.source === "object" && "Agent" in event.source;
+}
+
+function getAgentId(event: OpsisEvent): string | null {
+  if (typeof event.source === "object" && "Agent" in event.source) {
+    return (event.source as { Agent: string }).Agent;
+  }
+  return null;
+}
+
+function computeAgentState(
+  prev: AgentState,
+  newEvents: OpsisEvent[],
+  tick: number,
+): AgentState {
+  const agentEvents = newEvents.filter(isAgentEvent);
+  if (agentEvents.length === 0) return prev;
+
+  const agents = new Map<string, AgentPresence>(
+    prev.activeAgents.map((a) => [a.agentId, { ...a }]),
+  );
+
+  const newObs: OpsisEvent[] = [];
+  const newAlerts: OpsisEvent[] = [];
+
+  for (const event of agentEvents) {
+    const agentId = getAgentId(event);
+    if (!agentId) continue;
+
+    const existing = agents.get(agentId) ?? {
+      agentId,
+      lastSeenTick: 0,
+      observationCount: 0,
+      alertCount: 0,
+    };
+    existing.lastSeenTick = tick;
+
+    if (event.kind.type === "AgentObservation") {
+      existing.observationCount++;
+      newObs.push(event);
+    } else if (event.kind.type === "AgentAlert") {
+      existing.alertCount++;
+      newAlerts.push(event);
+    } else {
+      existing.observationCount++;
+      newObs.push(event);
+    }
+
+    agents.set(agentId, existing);
+  }
+
+  return {
+    activeAgents: [...agents.values()].sort(
+      (a, b) => b.lastSeenTick - a.lastSeenTick,
+    ),
+    recentObservations: [...newObs, ...prev.recentObservations].slice(
+      0,
+      MAX_AGENT_OBSERVATIONS,
+    ),
+    recentAlerts: [...newAlerts, ...prev.recentAlerts].slice(
+      0,
+      MAX_AGENT_ALERTS,
+    ),
+  };
 }
 
 function computeGaiaState(insights: OpsisEvent[]): GaiaState {
@@ -57,6 +131,10 @@ export interface UseOpsisStreamReturn {
   worldState: WorldState;
   /** Accumulated Gaia intelligence state. */
   gaiaState: GaiaState;
+  /** Accumulated agent state (presence, observations, alerts). */
+  agentState: AgentState;
+  /** Unrouted events (domain: null) for debug/pattern discovery. */
+  unroutedEvents: OpsisEvent[];
   /** Connection status. */
   status: "connecting" | "connected" | "disconnected" | "error";
   /** Last error message, if any. */
@@ -72,6 +150,8 @@ export function useOpsisStream(options: UseOpsisStreamOptions = {}): UseOpsisStr
 
   const [worldState, setWorldState] = useState<WorldState>(createInitialState);
   const [gaiaState, setGaiaState] = useState<GaiaState>(createInitialGaiaState);
+  const [agentState, setAgentState] = useState<AgentState>(createInitialAgentState);
+  const [unroutedEvents, setUnroutedEvents] = useState<OpsisEvent[]>([]);
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected" | "error">(
     "disconnected",
   );
@@ -116,6 +196,21 @@ export function useOpsisStream(options: UseOpsisStreamOptions = {}): UseOpsisStr
         );
         return computeGaiaState(insights);
       });
+    }
+
+    // Accumulate agent state from all events.
+    const allNewEvents = delta.state_line_deltas.flatMap((sld) => sld.new_events);
+    const unrouted = delta.unrouted_events ?? [];
+    const combined = [...allNewEvents, ...unrouted];
+    if (combined.some(isAgentEvent)) {
+      setAgentState((prev) => computeAgentState(prev, combined, delta.tick));
+    }
+
+    // Collect unrouted events.
+    if (unrouted.length > 0) {
+      setUnroutedEvents((prev) =>
+        [...unrouted, ...prev].slice(0, MAX_UNROUTED),
+      );
     }
   }, []);
 
@@ -176,5 +271,5 @@ export function useOpsisStream(options: UseOpsisStreamOptions = {}): UseOpsisStr
     };
   }, [autoConnect, connect, disconnect]);
 
-  return { worldState, gaiaState, status, error, connect, disconnect };
+  return { worldState, gaiaState, agentState, unroutedEvents, status, error, connect, disconnect };
 }
