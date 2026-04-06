@@ -38,8 +38,8 @@ uuid = { version = "1", features = ["v4"] }
 dirs = "6"
 
 # Relay daemon (local agent ↔ broomva.tech bridge)
-life-relayd = { path = "../../relay/life-relayd" }
-life-relay-core = { path = "../../relay/life-relay-core" }
+life-relayd = { path = "../../relay/life-relayd", version = "0.3.0" }
+life-relay-core = { path = "../../relay/life-relay-core", version = "0.3.0" }
 
 [profile.release]
 opt-level = 3

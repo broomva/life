@@ -20,7 +20,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
-arcan-sandbox = { path = "../../arcan/arcan-sandbox" }
+arcan-sandbox = { path = "../../arcan/arcan-sandbox", version = "0.3.0" }
 async-trait = "0.1"
 
 [dev-dependencies]
