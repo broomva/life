@@ -25,13 +25,15 @@ impl TickAggregator {
     pub fn flush(&mut self, world: &mut WorldState) -> WorldDelta {
         let tick = world.clock.tick;
 
-        // Group buffered events by domain, skipping events without a domain.
+        // Group buffered events by domain; collect domain-less events separately.
         let mut domain_events: BTreeMap<StateDomain, Vec<OpsisEvent>> = BTreeMap::new();
+        let mut unrouted: Vec<OpsisEvent> = Vec::new();
         for event in self.buffer.drain(..) {
             if let Some(ref domain) = event.domain {
                 domain_events.entry(domain.clone()).or_default().push(event);
+            } else {
+                unrouted.push(event);
             }
-            // Events without a domain are silently skipped from aggregation.
         }
 
         let mut state_line_deltas = Vec::new();
@@ -80,6 +82,7 @@ impl TickAggregator {
             timestamp: chrono::Utc::now(),
             state_line_deltas,
             gaia_insights: vec![],
+            unrouted_events: unrouted,
         }
     }
 }
@@ -205,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn events_without_domain_are_skipped() {
+    fn events_without_domain_go_to_unrouted() {
         let mut agg = TickAggregator::new();
         let mut world = WorldState::new(WorldClock::default());
 
@@ -216,6 +219,7 @@ mod tests {
 
         let delta = agg.flush(&mut world);
         assert!(delta.state_line_deltas.is_empty());
+        assert_eq!(delta.unrouted_events.len(), 1);
     }
 
     #[test]

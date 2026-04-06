@@ -7,7 +7,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::response::Json;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::routing::get;
+use axum::routing::{get, post};
 use futures_util::StreamExt;
 use serde::Serialize;
 use tokio_stream::wrappers::BroadcastStream;
@@ -16,13 +16,16 @@ use tower_http::cors::CorsLayer;
 use opsis_core::subscription::{ClientId, Subscription};
 
 use crate::bus::EventBus;
+use crate::inject;
 use crate::registry::ClientRegistry;
+use crate::schema_registry::SchemaRegistry;
 
 /// Shared application state for axum handlers.
 #[derive(Clone)]
 pub struct AppState {
     pub bus: Arc<EventBus>,
     pub registry: ClientRegistry,
+    pub schema_registry: Arc<SchemaRegistry>,
     pub started_at: std::time::Instant,
 }
 
@@ -36,11 +39,14 @@ struct HealthResponse {
     connected_clients: usize,
 }
 
-/// Build the axum router with `/health` and `/stream` endpoints.
+/// Build the axum router with all endpoints.
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/stream", get(sse_stream))
+        .route("/events/inject", post(inject::inject_events))
+        .route("/schemas", get(inject::list_schemas))
+        .route("/schemas/{key}", get(inject::get_schema))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

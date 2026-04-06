@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
@@ -12,6 +13,7 @@ use opsis_engine::engine::{EngineConfig, OpsisEngine};
 use opsis_engine::feeds::usgs::UsgsEarthquakeFeed;
 use opsis_engine::feeds::weather::OpenMeteoWeatherFeed;
 use opsis_engine::registry::ClientRegistry;
+use opsis_engine::schema_registry::SchemaRegistry;
 use opsis_engine::stream::{AppState, build_router};
 
 #[derive(Parser)]
@@ -94,6 +96,7 @@ async fn main() -> Result<()> {
     let app_state = AppState {
         bus: engine.bus.clone(),
         registry: ClientRegistry::new(),
+        schema_registry: Arc::new(SchemaRegistry::new()),
         started_at: std::time::Instant::now(),
     };
     let router = build_router(app_state);

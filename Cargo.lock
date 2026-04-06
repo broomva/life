@@ -511,6 +511,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "arcan-opsis"
+version = "0.3.0"
+dependencies = [
+ "arcan-core",
+ "chrono",
+ "opsis-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "arcan-praxis"
 version = "0.3.0"
 dependencies = [
@@ -5276,16 +5292,19 @@ dependencies = [
 name = "life-os"
 version = "0.3.0"
 dependencies = [
+ "anyhow",
  "life-aios",
  "life-anima",
  "life-arcan",
  "life-autonomic",
+ "life-cli",
  "life-haima",
  "life-lago",
  "life-nous",
  "life-praxis",
  "life-relay",
  "life-vigil",
+ "tokio",
 ]
 
 [[package]]

@@ -6,6 +6,7 @@ pub mod clock;
 pub mod error;
 pub mod event;
 pub mod feed;
+pub mod schema;
 pub mod spatial;
 pub mod state;
 pub mod subscription;
@@ -17,6 +18,7 @@ pub use event::{
     EventId, EventSource, OpsisEvent, OpsisEventKind, RawFeedEvent, StateLineDelta, WorldDelta,
 };
 pub use feed::{ConnectorConfig, FeedConfig, FeedIngestor, FeedSource, FeedsConfig, SchemaKey};
+pub use schema::{OpsisEventKindHint, SchemaDefinition, SchemaProducer, builtin_schemas};
 pub use spatial::{Bbox, GeoHotspot, GeoPoint};
 pub use state::{StateDomain, StateLine, Trend, WorldState};
 pub use subscription::{ClientId, Subscription};

@@ -124,6 +124,9 @@ pub struct WorldDelta {
     /// Gaia-generated insights for this tick (cross-domain correlations, anomalies).
     #[serde(default)]
     pub gaia_insights: Vec<OpsisEvent>,
+    /// Events without a domain — not dropped, exposed for pattern discovery.
+    #[serde(default)]
+    pub unrouted_events: Vec<OpsisEvent>,
 }
 
 #[cfg(test)]
@@ -166,6 +169,7 @@ mod tests {
             timestamp: Utc::now(),
             state_line_deltas: vec![],
             gaia_insights: vec![],
+            unrouted_events: vec![],
         };
         let json = serde_json::to_string(&delta).unwrap();
         assert!(json.contains("\"tick\""));
@@ -173,10 +177,11 @@ mod tests {
 
     #[test]
     fn world_delta_gaia_insights_default_empty() {
-        // Deserialising old JSON (no gaia_insights field) must not fail.
+        // Deserialising old JSON (no gaia_insights/unrouted_events field) must not fail.
         let json = r#"{"tick":1,"timestamp":"2026-01-01T00:00:00Z","state_line_deltas":[]}"#;
         let delta: WorldDelta = serde_json::from_str(json).unwrap();
         assert!(delta.gaia_insights.is_empty());
+        assert!(delta.unrouted_events.is_empty());
     }
 
     #[test]

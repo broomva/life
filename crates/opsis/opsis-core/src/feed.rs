@@ -62,6 +62,8 @@ pub enum ConnectorConfig {
         /// Poll interval in seconds.
         interval_secs: u64,
     },
+    #[serde(rename = "agent_stream")]
+    AgentStream { url: String },
 }
 
 /// Authentication configuration for a feed.
@@ -186,6 +188,26 @@ schema = "ws.v1"
                 assert_eq!(url, "wss://example.com/ws");
             }
             other => panic!("expected WebSocket, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn connector_config_agent_stream_variant() {
+        let toml_str = r#"
+[[feeds]]
+name = "arcan-agent-0"
+connector = "agent_stream"
+url = "http://localhost:3000"
+schema = "arcan.agent.v1"
+"#;
+        let config: FeedsConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.feeds.len(), 1);
+        assert_eq!(config.feeds[0].name, "arcan-agent-0");
+        match &config.feeds[0].connector {
+            ConnectorConfig::AgentStream { url } => {
+                assert_eq!(url, "http://localhost:3000");
+            }
+            other => panic!("expected AgentStream, got {:?}", other),
         }
     }
 
