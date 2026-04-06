@@ -67,3 +67,7 @@ docs/raw-dumps/
 arcan/.arcan/
 crates/arcan/.claude/worktrees/
 crates/anima/anima-data
+
+# Conversation bridge (local only, generates docs/conversations/)
+scripts/conversation-history.py
+scripts/conversation-bridge-hook.sh

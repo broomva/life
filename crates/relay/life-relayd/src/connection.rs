@@ -143,11 +143,11 @@ pub async fn run_polling_loop(
 
     loop {
         // 1. Poll for commands
-        if let Some(cmd) = poll_commands(client, server_url, token, node_id).await {
-            if inbound_tx.send(cmd).await.is_err() {
-                error!("daemon receiver dropped");
-                return;
-            }
+        if let Some(cmd) = poll_commands(client, server_url, token, node_id).await
+            && inbound_tx.send(cmd).await.is_err()
+        {
+            error!("daemon receiver dropped");
+            return;
         }
 
         // 2. Drain outbound events and push them

@@ -110,17 +110,17 @@ fn extract_first_numeric_value(
 fn extract_fallback_score(response: &str, session_id: &str) -> NousResult<Vec<EvalScore>> {
     for word in response.split_whitespace() {
         let cleaned = word.trim_matches(|c: char| !c.is_ascii_digit() && c != '.');
-        if let Ok(value) = cleaned.parse::<f64>() {
-            if (0.0..=1.0).contains(&value) {
-                let score = EvalScore::new(
-                    "task_completion",
-                    value,
-                    EvalLayer::Reasoning,
-                    EvalTiming::Async,
-                    session_id,
-                )?;
-                return Ok(vec![score]);
-            }
+        if let Ok(value) = cleaned.parse::<f64>()
+            && (0.0..=1.0).contains(&value)
+        {
+            let score = EvalScore::new(
+                "task_completion",
+                value,
+                EvalLayer::Reasoning,
+                EvalTiming::Async,
+                session_id,
+            )?;
+            return Ok(vec![score]);
         }
     }
     Ok(vec![])

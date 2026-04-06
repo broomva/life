@@ -384,12 +384,11 @@ async fn find_most_recent_jsonl(dir: &std::path::Path) -> Option<std::path::Path
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
             continue;
         }
-        if let Ok(meta) = entry.metadata().await {
-            if let Ok(modified) = meta.modified() {
-                if best.as_ref().is_none_or(|(_, t)| modified > *t) {
-                    best = Some((path, modified));
-                }
-            }
+        if let Ok(meta) = entry.metadata().await
+            && let Ok(modified) = meta.modified()
+            && best.as_ref().is_none_or(|(_, t)| modified > *t)
+        {
+            best = Some((path, modified));
         }
     }
 
@@ -464,10 +463,10 @@ fn parse_jsonl_history(content: &str) -> Vec<HistoryMessage> {
                     let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
                     match block_type {
                         "text" => {
-                            if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
-                                if !t.is_empty() {
-                                    text_parts.push(t.to_string());
-                                }
+                            if let Some(t) = block.get("text").and_then(|t| t.as_str())
+                                && !t.is_empty()
+                            {
+                                text_parts.push(t.to_string());
                             }
                         }
                         "tool_use" => {
