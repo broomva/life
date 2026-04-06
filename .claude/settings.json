@@ -1,4 +1,16 @@
 {
-    "hooks": {},
+    "hooks": {
+        "Stop": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 scripts/conversation-history.py",
+                        "timeout": 10
+                    }
+                ]
+            }
+        ]
+    },
     "permissions": {}
 }
