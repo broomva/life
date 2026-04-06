@@ -32,7 +32,10 @@ export function formatActivity(activity: number): string {
 }
 
 /** Extract a display summary from an OpsisEvent. */
-export function eventSummary(event: { kind: import("./types").OpsisEventKind }): string {
+export function eventSummary(event: { kind?: import("./types").OpsisEventKind; summary?: string }): string {
+  // Handle legacy events that have summary as a direct field
+  if (!event.kind && event.summary) return event.summary;
+  if (!event.kind) return "Unknown event";
   const k = event.kind;
   switch (k.type) {
     case "WorldObservation":
@@ -53,7 +56,8 @@ export function eventSummary(event: { kind: import("./types").OpsisEventKind }):
 }
 
 /** Extract a display source label from an EventSource. */
-export function eventSourceLabel(source: import("./types").EventSource): string {
+export function eventSourceLabel(source: import("./types").EventSource | string | undefined): string {
+  if (!source) return "unknown";
   if (typeof source === "string") return source.toLowerCase();
   if ("Feed" in source) return source.Feed;
   if ("Agent" in source) return `agent:${source.Agent}`;
