@@ -239,6 +239,7 @@ mod tests {
             timestamp: Utc::now(),
             state_line_deltas: vec![],
             gaia_insights: vec![],
+            unrouted_events: vec![],
         }
     }
 

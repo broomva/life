@@ -310,6 +310,7 @@ dependencies = [
  "arcan-core",
  "arcan-harness",
  "arcan-lago",
+ "arcan-opsis",
  "arcan-praxis",
  "arcan-provider",
  "arcan-provider-bubblewrap",
@@ -348,6 +349,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "opsis-core",
  "praxis-core",
  "praxis-mcp-bridge",
  "praxis-skills",
@@ -508,6 +510,22 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "arcan-opsis"
+version = "0.3.0"
+dependencies = [
+ "arcan-core",
+ "chrono",
+ "opsis-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]
@@ -5276,16 +5294,19 @@ dependencies = [
 name = "life-os"
 version = "0.3.0"
 dependencies = [
+ "anyhow",
  "life-aios",
  "life-anima",
  "life-arcan",
  "life-autonomic",
+ "life-cli",
  "life-haima",
  "life-lago",
  "life-nous",
  "life-praxis",
  "life-relay",
  "life-vigil",
+ "tokio",
 ]
 
 [[package]]

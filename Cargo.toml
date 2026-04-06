@@ -20,6 +20,7 @@ members = [
     "crates/arcan/arcan-fleet",
     "crates/arcan/arcan-harness",
     "crates/arcan/arcan-lago",
+    "crates/arcan/arcan-opsis",
     "crates/arcan/arcan-praxis",
     "crates/arcan/arcan-provider",
     "crates/arcan/arcan-provider-bubblewrap",

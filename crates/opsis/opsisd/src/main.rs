@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
@@ -12,6 +13,7 @@ use opsis_engine::engine::{EngineConfig, OpsisEngine};
 use opsis_engine::feeds::usgs::UsgsEarthquakeFeed;
 use opsis_engine::feeds::weather::OpenMeteoWeatherFeed;
 use opsis_engine::registry::ClientRegistry;
+use opsis_engine::schema_registry::SchemaRegistry;
 use opsis_engine::stream::{AppState, build_router};
 
 #[derive(Parser)]
@@ -64,6 +66,18 @@ async fn main() -> Result<()> {
                     "open-meteo" => {
                         engine.add_feed(Box::new(OpenMeteoWeatherFeed::new()));
                     }
+                    _ if matches!(
+                        feed_cfg.connector,
+                        opsis_core::feed::ConnectorConfig::AgentStream { .. }
+                    ) =>
+                    {
+                        // Agent stream feeds push events via POST /events/inject.
+                        // No pull-based ingestor needed — just log the registration.
+                        info!(
+                            name = %feed_cfg.name,
+                            "registered agent_stream feed (inject-mode)"
+                        );
+                    }
                     other => {
                         tracing::warn!(name = other, "unknown feed in config — skipping");
                     }
@@ -94,6 +108,7 @@ async fn main() -> Result<()> {
     let app_state = AppState {
         bus: engine.bus.clone(),
         registry: ClientRegistry::new(),
+        schema_registry: Arc::new(SchemaRegistry::new()),
         started_at: std::time::Instant::now(),
     };
     let router = build_router(app_state);
