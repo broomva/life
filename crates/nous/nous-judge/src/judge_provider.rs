@@ -25,12 +25,11 @@ pub fn parse_judge_scores(response: &str) -> Option<serde_json::Value> {
         return Some(v);
     }
     // Try to find a JSON object embedded in the response text.
-    if let Some(start) = trimmed.find('{') {
-        if let Some(end) = trimmed.rfind('}') {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&trimmed[start..=end]) {
-                return Some(v);
-            }
-        }
+    if let Some(start) = trimmed.find('{')
+        && let Some(end) = trimmed.rfind('}')
+        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&trimmed[start..=end])
+    {
+        return Some(v);
     }
     None
 }

@@ -98,17 +98,17 @@ impl EvalProjection {
             "eval.InlineCompleted" => {
                 self.state.inline_eval_count += 1;
 
-                if let Some(evaluator) = data.get("evaluator").and_then(serde_json::Value::as_str) {
-                    if let Some(score) = data.get("score").and_then(serde_json::Value::as_f64) {
-                        self.state
-                            .evaluator_scores
-                            .insert(evaluator.to_owned(), score);
+                if let Some(evaluator) = data.get("evaluator").and_then(serde_json::Value::as_str)
+                    && let Some(score) = data.get("score").and_then(serde_json::Value::as_f64)
+                {
+                    self.state
+                        .evaluator_scores
+                        .insert(evaluator.to_owned(), score);
 
-                        let prev = self.state.aggregate_quality_score;
-                        self.state.aggregate_quality_score =
-                            EVAL_EMA_ALPHA * score + (1.0 - EVAL_EMA_ALPHA) * prev;
-                        self.state.quality_trend = self.state.aggregate_quality_score - prev;
-                    }
+                    let prev = self.state.aggregate_quality_score;
+                    self.state.aggregate_quality_score =
+                        EVAL_EMA_ALPHA * score + (1.0 - EVAL_EMA_ALPHA) * prev;
+                    self.state.quality_trend = self.state.aggregate_quality_score - prev;
                 }
             }
             "eval.AsyncCompleted" => {
@@ -119,20 +119,17 @@ impl EvalProjection {
                         if let Some(evaluator) = score_obj
                             .get("evaluator")
                             .and_then(serde_json::Value::as_str)
-                        {
-                            if let Some(score) =
+                            && let Some(score) =
                                 score_obj.get("value").and_then(serde_json::Value::as_f64)
-                            {
-                                self.state
-                                    .evaluator_scores
-                                    .insert(evaluator.to_owned(), score);
+                        {
+                            self.state
+                                .evaluator_scores
+                                .insert(evaluator.to_owned(), score);
 
-                                let prev = self.state.aggregate_quality_score;
-                                self.state.aggregate_quality_score =
-                                    EVAL_EMA_ALPHA * score + (1.0 - EVAL_EMA_ALPHA) * prev;
-                                self.state.quality_trend =
-                                    self.state.aggregate_quality_score - prev;
-                            }
+                            let prev = self.state.aggregate_quality_score;
+                            self.state.aggregate_quality_score =
+                                EVAL_EMA_ALPHA * score + (1.0 - EVAL_EMA_ALPHA) * prev;
+                            self.state.quality_trend = self.state.aggregate_quality_score - prev;
                         }
                     }
                 }
@@ -162,12 +159,12 @@ impl Default for EvalProjection {
 
 impl Projection for EvalProjection {
     fn on_event(&mut self, event: &EventEnvelope) -> LagoResult<()> {
-        if let EventKind::Custom { event_type, data } = &event.payload {
-            if NousEvent::is_eval_event(event_type) {
-                // Convert timestamp from micros to millis for consistency
-                let ts_ms = event.timestamp / 1000;
-                self.apply_eval_event(event_type, data, ts_ms);
-            }
+        if let EventKind::Custom { event_type, data } = &event.payload
+            && NousEvent::is_eval_event(event_type)
+        {
+            // Convert timestamp from micros to millis for consistency
+            let ts_ms = event.timestamp / 1000;
+            self.apply_eval_event(event_type, data, ts_ms);
         }
         Ok(())
     }

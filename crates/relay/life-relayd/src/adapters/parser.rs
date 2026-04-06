@@ -136,12 +136,12 @@ pub fn parse_line(line: &str) -> ClaudeEvent {
     let json_start = stripped.find('{');
     let json_end = stripped.rfind('}');
 
-    if let (Some(start), Some(end)) = (json_start, json_end) {
-        if end > start {
-            let candidate = &stripped[start..=end];
-            if let Ok(raw) = serde_json::from_str::<RawEvent>(candidate) {
-                return parse_raw_event(raw, line);
-            }
+    if let (Some(start), Some(end)) = (json_start, json_end)
+        && end > start
+    {
+        let candidate = &stripped[start..=end];
+        if let Ok(raw) = serde_json::from_str::<RawEvent>(candidate) {
+            return parse_raw_event(raw, line);
         }
     }
 

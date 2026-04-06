@@ -89,14 +89,14 @@ impl NousEvaluator for ArgumentValidity {
         // Check basic type constraints from "properties".
         if let Some(Value::Object(properties)) = schema.get("properties") {
             for (prop_name, prop_schema) in properties {
-                if let Some(arg_value) = args_obj.get(prop_name) {
-                    if let Some(Value::String(expected_type)) = prop_schema.get("type") {
-                        total_checks += 1;
-                        if !value_matches_type(arg_value, expected_type) {
-                            violations.push(format!(
-                                "field '{prop_name}' expected type '{expected_type}'"
-                            ));
-                        }
+                if let Some(arg_value) = args_obj.get(prop_name)
+                    && let Some(Value::String(expected_type)) = prop_schema.get("type")
+                {
+                    total_checks += 1;
+                    if !value_matches_type(arg_value, expected_type) {
+                        violations.push(format!(
+                            "field '{prop_name}' expected type '{expected_type}'"
+                        ));
                     }
                 }
             }

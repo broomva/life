@@ -480,10 +480,10 @@ impl Tool for GrepTool {
             }
 
             // Skip large files (>10MB)
-            if let Ok(metadata) = path.metadata() {
-                if metadata.len() > 10 * 1024 * 1024 {
-                    continue;
-                }
+            if let Ok(metadata) = path.metadata()
+                && metadata.len() > 10 * 1024 * 1024
+            {
+                continue;
             }
 
             let Ok(file) = std::fs::File::open(path) else {
