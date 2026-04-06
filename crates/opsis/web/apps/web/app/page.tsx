@@ -5,6 +5,8 @@ import {
   useOpsisStream,
   ConnectionStatus,
   Globe,
+  AgentPresencePanel,
+  AgentTerminal,
   DEFAULT_DOMAINS,
   activityColor,
   trendIndicator,
@@ -14,12 +16,13 @@ import {
   gaiaEventLabel,
   cn,
 } from "@opsis/core";
-import type { GaiaState, StateDomain, OpsisEvent, OpsisEventKind } from "@opsis/core";
+import type { AgentState, GaiaState, StateDomain, OpsisEvent, OpsisEventKind } from "@opsis/core";
 
 export default function OpsisPage() {
-  const { worldState, gaiaState, status, error } = useOpsisStream();
+  const { worldState, gaiaState, agentState, unroutedEvents, status, error } = useOpsisStream();
   const [selectedDomain, setSelectedDomain] = useState<StateDomain | null>(null);
   const [showLegend, setShowLegend] = useState(true);
+  const [terminalAgent, setTerminalAgent] = useState<string | null>(null);
 
   // Accumulate timeline history.
   const historyRef = useRef<Map<StateDomain, number[]>>(new Map());
@@ -182,6 +185,26 @@ export default function OpsisPage() {
 
       {/* ═══ GAIA INTELLIGENCE PANEL ═══ */}
       <GaiaPanel gaiaState={gaiaState} />
+
+      {/* ═══ AGENT PRESENCE PANEL ═══ */}
+      <div className="absolute top-24 right-[22rem] z-20 w-48">
+        <AgentPresencePanel
+          agentState={agentState}
+          onAgentClick={(id) => setTerminalAgent(terminalAgent === id ? null : id)}
+        />
+      </div>
+
+      {/* ═══ AGENT TERMINAL ═══ */}
+      {terminalAgent && (
+        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-30 w-[32rem]">
+          <AgentTerminal
+            agentId={terminalAgent}
+            recentEvents={agentState.recentObservations}
+            arcanUrl={process.env.NEXT_PUBLIC_ARCAN_URL ?? "http://localhost:3000"}
+            onClose={() => setTerminalAgent(null)}
+          />
+        </div>
+      )}
 
       {/* ═══ TOP-LEFT HUD — Coordinates & Info (WorldView style) ═══ */}
       <div className="absolute bottom-16 left-4 z-20 text-[10px] font-mono text-[var(--color-cyan-dim)]">

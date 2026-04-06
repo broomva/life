@@ -109,6 +109,7 @@ async fn main() -> Result<()> {
         bus: engine.bus.clone(),
         registry: ClientRegistry::new(),
         schema_registry: Arc::new(SchemaRegistry::new()),
+        snapshot: engine.snapshot.clone(),
         started_at: std::time::Instant::now(),
     };
     let router = build_router(app_state);

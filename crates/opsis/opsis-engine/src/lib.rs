@@ -11,7 +11,7 @@ pub mod schema_registry;
 pub mod stream;
 
 pub use config::load_feeds_config;
-pub use engine::{EngineConfig, OpsisEngine};
+pub use engine::{EngineConfig, OpsisEngine, SnapshotHandle, WorldSnapshot};
 pub use error::{EngineError, EngineResult};
 pub use gaia::GaiaAnalyzer;
 pub use schema_registry::SchemaRegistry;

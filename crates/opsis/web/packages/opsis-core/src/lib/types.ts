@@ -91,6 +91,23 @@ export interface WorldDelta {
   readonly state_line_deltas: StateLineDelta[];
   /** Gaia-generated cross-domain insights for this tick (may be empty). */
   readonly gaia_insights: OpsisEvent[];
+  /** Events without a domain — exposed for pattern discovery (may be empty). */
+  readonly unrouted_events?: OpsisEvent[];
+}
+
+/** Agent presence tracking (client-side). */
+export interface AgentPresence {
+  agentId: string;
+  lastSeenTick: number;
+  observationCount: number;
+  alertCount: number;
+}
+
+/** Accumulated agent state (client-side). */
+export interface AgentState {
+  activeAgents: AgentPresence[];
+  recentObservations: OpsisEvent[];
+  recentAlerts: OpsisEvent[];
 }
 
 /** Accumulated Gaia intelligence state (client-side). */

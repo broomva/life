@@ -3,18 +3,34 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::broadcast;
+use tokio::sync::{RwLock, broadcast};
 use tokio::time;
 use tracing::{info, warn};
 
 use opsis_core::clock::WorldClock;
-use opsis_core::event::WorldDelta;
+use opsis_core::event::{OpsisEvent, WorldDelta};
 use opsis_core::feed::FeedIngestor;
 use opsis_core::state::WorldState;
 
 use crate::aggregator::TickAggregator;
 use crate::bus::EventBus;
 use crate::gaia::GaiaAnalyzer;
+
+/// A serializable snapshot of the world state for new clients.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WorldSnapshot {
+    /// Current world state (domains, activities, trends).
+    pub world_state: WorldState,
+    /// Most recent WorldDelta (last tick).
+    pub last_delta: Option<WorldDelta>,
+    /// Recent events across all domains (last 200).
+    pub recent_events: Vec<OpsisEvent>,
+    /// Recent Gaia insights (last 20).
+    pub recent_gaia_insights: Vec<OpsisEvent>,
+}
+
+const MAX_SNAPSHOT_EVENTS: usize = 200;
+const MAX_SNAPSHOT_GAIA: usize = 20;
 
 /// Configuration for the Opsis engine.
 #[derive(Debug, Clone)]
@@ -34,14 +50,23 @@ impl Default for EngineConfig {
     }
 }
 
+/// Shared handle for reading the current world snapshot.
+pub type SnapshotHandle = Arc<RwLock<Option<WorldSnapshot>>>;
+
 /// The main Opsis world state engine.
 pub struct OpsisEngine {
     pub config: EngineConfig,
     pub bus: Arc<EventBus>,
+    /// Shared snapshot updated every tick — readable by HTTP handlers.
+    pub snapshot: SnapshotHandle,
     world: WorldState,
     aggregator: TickAggregator,
     gaia: GaiaAnalyzer,
     feeds: Vec<Box<dyn FeedIngestor>>,
+    /// Ring buffer of recent events for the snapshot.
+    recent_events: Vec<OpsisEvent>,
+    /// Ring buffer of recent Gaia insights for the snapshot.
+    recent_gaia: Vec<OpsisEvent>,
 }
 
 impl OpsisEngine {
@@ -51,10 +76,13 @@ impl OpsisEngine {
         Self {
             config,
             bus: Arc::new(EventBus::new()),
+            snapshot: Arc::new(RwLock::new(None)),
             world: WorldState::new(clock),
             aggregator: TickAggregator::new(),
             gaia: GaiaAnalyzer::new(),
             feeds: Vec::new(),
+            recent_events: Vec::new(),
+            recent_gaia: Vec::new(),
         }
     }
 
@@ -73,6 +101,7 @@ impl OpsisEngine {
         );
 
         let bus = self.bus.clone();
+        let snapshot_handle = self.snapshot.clone();
 
         // Subscribe to event bus BEFORE spawning feeds to avoid missing early events.
         let mut event_rx = bus.subscribe_events();
@@ -177,6 +206,32 @@ impl OpsisEngine {
                         gaia_insights,
                         ..delta
                     };
+
+                    // Accumulate recent events for the snapshot.
+                    for sld in &delta.state_line_deltas {
+                        self.recent_events.extend(sld.new_events.iter().cloned());
+                    }
+                    self.recent_events.extend(delta.unrouted_events.iter().cloned());
+                    if self.recent_events.len() > MAX_SNAPSHOT_EVENTS {
+                        let drain = self.recent_events.len() - MAX_SNAPSHOT_EVENTS;
+                        self.recent_events.drain(..drain);
+                    }
+                    self.recent_gaia.extend(delta.gaia_insights.iter().cloned());
+                    if self.recent_gaia.len() > MAX_SNAPSHOT_GAIA {
+                        let drain = self.recent_gaia.len() - MAX_SNAPSHOT_GAIA;
+                        self.recent_gaia.drain(..drain);
+                    }
+
+                    // Update shared snapshot (non-blocking write).
+                    {
+                        let snap = WorldSnapshot {
+                            world_state: self.world.clone(),
+                            last_delta: Some(delta.clone()),
+                            recent_events: self.recent_events.clone(),
+                            recent_gaia_insights: self.recent_gaia.clone(),
+                        };
+                        *snapshot_handle.write().await = Some(snap);
+                    }
 
                     // Always broadcast — UI needs tick updates even when no events.
                     bus.publish_delta(delta);

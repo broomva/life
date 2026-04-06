@@ -14,6 +14,8 @@ export type {
   WorldDelta,
   StateLine,
   WorldState,
+  AgentPresence,
+  AgentState,
   GaiaState,
   HealthResponse,
 } from "./lib/types";
@@ -41,3 +43,5 @@ export { FeedPanel } from "./components/feed-panel";
 export { Timeline } from "./components/timeline";
 export { ConnectionStatus } from "./components/connection-status";
 export { Globe } from "./components/globe";
+export { AgentPresencePanel } from "./components/agent-presence-panel";
+export { AgentTerminal } from "./components/agent-terminal";
