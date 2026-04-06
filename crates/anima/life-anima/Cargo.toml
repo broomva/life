@@ -1,0 +1,17 @@
+[package]
+name = "life-anima"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Identity and beliefs facade for the Life Agent OS — re-exports anima-core, anima-identity, and anima-lago"
+
+[dependencies]
+anima-core = { path = "../anima-core", version = "0.3.0" }
+anima-identity = { path = "../anima-identity", version = "0.3.0" }
+anima-lago = { path = "../anima-lago", version = "0.3.0" }
+
+[lints]
+workspace = true

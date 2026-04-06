@@ -5179,6 +5179,62 @@ dependencies = [
 ]
 
 [[package]]
+name = "life"
+version = "0.3.0"
+dependencies = [
+ "life-aios",
+ "life-anima",
+ "life-arcan",
+ "life-autonomic",
+ "life-haima",
+ "life-lago",
+ "life-nous",
+ "life-praxis",
+ "life-relay",
+ "life-vigil",
+]
+
+[[package]]
+name = "life-aios"
+version = "0.3.0"
+dependencies = [
+ "aios-events",
+ "aios-kernel",
+ "aios-protocol",
+ "aios-runtime",
+]
+
+[[package]]
+name = "life-anima"
+version = "0.3.0"
+dependencies = [
+ "anima-core",
+ "anima-identity",
+ "anima-lago",
+]
+
+[[package]]
+name = "life-arcan"
+version = "0.3.0"
+dependencies = [
+ "arcan-aios-adapters",
+ "arcan-core",
+ "arcan-harness",
+ "arcan-provider",
+ "arcan-store",
+ "arcand",
+]
+
+[[package]]
+name = "life-autonomic"
+version = "0.3.0"
+dependencies = [
+ "autonomic-api",
+ "autonomic-controller",
+ "autonomic-core",
+]
+
+[[package]]
 name = "life-cli"
 version = "0.3.0"
 dependencies = [
@@ -5198,6 +5254,56 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "life-haima"
+version = "0.3.0"
+dependencies = [
+ "haima-api",
+ "haima-core",
+ "haima-wallet",
+ "haima-x402",
+]
+
+[[package]]
+name = "life-lago"
+version = "0.3.0"
+dependencies = [
+ "lago-api",
+ "lago-core",
+ "lago-fs",
+ "lago-journal",
+ "lago-policy",
+ "lago-store",
+]
+
+[[package]]
+name = "life-nous"
+version = "0.3.0"
+dependencies = [
+ "nous-api",
+ "nous-core",
+ "nous-heuristics",
+ "nous-judge",
+]
+
+[[package]]
+name = "life-praxis"
+version = "0.3.0"
+dependencies = [
+ "praxis-core",
+ "praxis-mcp-bridge",
+ "praxis-skills",
+ "praxis-tools",
+]
+
+[[package]]
+name = "life-relay"
+version = "0.3.0"
+dependencies = [
+ "life-relay-api",
+ "life-relay-core",
 ]
 
 [[package]]
