@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
-use crate::event::StateEvent;
+use crate::event::OpsisEvent;
 use crate::spatial::Bbox;
 use crate::state::StateDomain;
 
@@ -15,7 +15,7 @@ impl Default for ClientId {
     }
 }
 
-/// A subscription filter — decides which [`StateEvent`]s a client receives.
+/// A subscription filter — decides which [`OpsisEvent`]s a client receives.
 ///
 /// All non-empty filter fields are combined with AND logic.  An empty filter
 /// (e.g. `Subscription::all()`) matches everything.
@@ -27,7 +27,7 @@ pub struct Subscription {
     pub bbox: Option<Bbox>,
     /// Minimum severity threshold (events below this are skipped).
     pub severity_threshold: f32,
-    /// Only match events whose summary or tags contain any of these keywords.
+    /// Only match events whose tags contain any of these keywords.
     /// Empty = no keyword filter.
     pub keywords: Vec<String>,
 }
@@ -44,14 +44,18 @@ impl Subscription {
     }
 
     /// Returns `true` if the given event matches all active filters.
-    pub fn matches(&self, event: &StateEvent) -> bool {
-        // Domain filter
-        if !self.domains.is_empty() && !self.domains.contains(&event.domain) {
-            return false;
+    pub fn matches(&self, event: &OpsisEvent) -> bool {
+        // Domain filter — skip if event has no domain and we're filtering by domain.
+        if !self.domains.is_empty() {
+            match &event.domain {
+                Some(domain) if self.domains.contains(domain) => {}
+                _ => return false,
+            }
         }
 
-        // Severity filter
-        if event.severity < self.severity_threshold {
+        // Severity filter — events without severity are treated as 0.0.
+        let severity = event.severity.unwrap_or(0.0);
+        if severity < self.severity_threshold {
             return false;
         }
 
@@ -67,15 +71,14 @@ impl Subscription {
             }
         }
 
-        // Keyword filter
+        // Keyword filter — match against tags.
         if !self.keywords.is_empty() {
             let has_keyword = self.keywords.iter().any(|kw| {
                 let kw_lower = kw.to_lowercase();
-                event.summary.to_lowercase().contains(&kw_lower)
-                    || event
-                        .tags
-                        .iter()
-                        .any(|t| t.to_lowercase().contains(&kw_lower))
+                event
+                    .tags
+                    .iter()
+                    .any(|t| t.to_lowercase().contains(&kw_lower))
             });
             if !has_keyword {
                 return false;
@@ -90,21 +93,25 @@ impl Subscription {
 mod tests {
     use super::*;
     use crate::clock::WorldTick;
-    use crate::event::EventId;
-    use crate::feed::FeedSource;
+    use crate::event::{EventId, EventSource, OpsisEventKind};
+    use crate::feed::{FeedSource, SchemaKey};
     use crate::spatial::GeoPoint;
+    use chrono::Utc;
 
-    fn sample_event() -> StateEvent {
-        StateEvent {
+    fn sample_event() -> OpsisEvent {
+        OpsisEvent {
             id: EventId::default(),
             tick: WorldTick(1),
-            domain: StateDomain::Finance,
+            timestamp: Utc::now(),
+            source: EventSource::Feed(FeedSource::new("test")),
+            kind: OpsisEventKind::WorldObservation {
+                summary: "Stock market surge".into(),
+            },
             location: Some(GeoPoint::new(5.0, 5.0)),
-            severity: 0.7,
-            summary: "Stock market surge".into(),
-            source: FeedSource::new("test"),
+            domain: Some(StateDomain::Finance),
+            severity: Some(0.7),
+            schema_key: SchemaKey::new("test.v1"),
             tags: vec!["finance".into(), "market".into()],
-            raw_ref: EventId::default(),
         }
     }
 
@@ -130,6 +137,17 @@ mod tests {
     }
 
     #[test]
+    fn domain_filter_no_domain_event() {
+        let mut evt = sample_event();
+        evt.domain = None;
+        let sub = Subscription {
+            domains: vec![StateDomain::Finance],
+            ..Subscription::all()
+        };
+        assert!(!sub.matches(&evt));
+    }
+
+    #[test]
     fn severity_filter() {
         let sub = Subscription {
             severity_threshold: 0.9,
@@ -142,6 +160,17 @@ mod tests {
             ..Subscription::all()
         };
         assert!(sub.matches(&sample_event()));
+    }
+
+    #[test]
+    fn severity_filter_none_severity() {
+        let mut evt = sample_event();
+        evt.severity = None;
+        let sub = Subscription {
+            severity_threshold: 0.1,
+            ..Subscription::all()
+        };
+        assert!(!sub.matches(&evt));
     }
 
     #[test]
@@ -164,7 +193,7 @@ mod tests {
     #[test]
     fn keyword_filter() {
         let sub = Subscription {
-            keywords: vec!["surge".into()],
+            keywords: vec!["finance".into()],
             ..Subscription::all()
         };
         assert!(sub.matches(&sample_event()));

@@ -1,4 +1,4 @@
-import { type ClassValue, clsx } from "clsx";
+import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
@@ -29,6 +29,40 @@ export function trendIndicator(trend: string): string {
 /** Format activity as percentage string. */
 export function formatActivity(activity: number): string {
   return (activity * 100).toFixed(0);
+}
+
+/** Extract a display summary from an OpsisEvent. */
+export function eventSummary(event: { kind?: import("./types").OpsisEventKind; summary?: string }): string {
+  // Handle legacy events that have summary as a direct field
+  if (!event.kind && event.summary) return event.summary;
+  if (!event.kind) return "Unknown event";
+  const k = event.kind;
+  switch (k.type) {
+    case "WorldObservation":
+      return k.summary;
+    case "GaiaCorrelation":
+      return k.description;
+    case "GaiaAnomaly":
+      return `${k.domain}: ${k.description} (${k.sigma.toFixed(1)}σ)`;
+    case "AgentObservation":
+      return k.insight;
+    case "AgentAlert":
+      return k.message;
+    case "Custom":
+      return k.event_type;
+    default:
+      return "Unknown event";
+  }
+}
+
+/** Extract a display source label from an EventSource. */
+export function eventSourceLabel(source: import("./types").EventSource | string | undefined): string {
+  if (!source) return "unknown";
+  if (typeof source === "string") return source.toLowerCase();
+  if ("Feed" in source) return source.Feed;
+  if ("Agent" in source) return `agent:${source.Agent}`;
+  if ("Universe" in source) return `universe:${source.Universe}`;
+  return "unknown";
 }
 
 /** Default state domains in display order. */

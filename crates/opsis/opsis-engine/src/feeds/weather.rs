@@ -7,7 +7,7 @@ use std::time::Duration;
 use chrono::Utc;
 use opsis_core::clock::WorldTick;
 use opsis_core::error::OpsisResult;
-use opsis_core::event::{EventId, RawFeedEvent, StateEvent};
+use opsis_core::event::{EventId, EventSource, OpsisEvent, OpsisEventKind, RawFeedEvent};
 use opsis_core::feed::{FeedIngestor, FeedSource, SchemaKey};
 use opsis_core::spatial::GeoPoint;
 use opsis_core::state::StateDomain;
@@ -135,7 +135,7 @@ impl FeedIngestor for OpenMeteoWeatherFeed {
         })
     }
 
-    fn normalize(&self, raw: &RawFeedEvent) -> OpsisResult<Vec<StateEvent>> {
+    fn normalize(&self, raw: &RawFeedEvent) -> OpsisResult<Vec<OpsisEvent>> {
         let city = raw.payload["city"].as_str().unwrap_or("Unknown");
         let current = &raw.payload["current"];
         let weather_code = current["weather_code"].as_i64().unwrap_or(0);
@@ -145,16 +145,19 @@ impl FeedIngestor for OpenMeteoWeatherFeed {
         let severity = Self::weather_code_to_severity(weather_code);
         let description = Self::weather_code_to_description(weather_code);
 
-        Ok(vec![StateEvent {
+        Ok(vec![OpsisEvent {
             id: EventId::default(),
             tick: WorldTick::zero(),
-            domain: StateDomain::Weather,
+            timestamp: Utc::now(),
+            source: EventSource::Feed(raw.source.clone()),
+            kind: OpsisEventKind::WorldObservation {
+                summary: format!("{city}: {description} ({temp:.1}°C, wind {wind:.0} km/h)"),
+            },
             location: raw.location,
-            severity,
-            summary: format!("{city}: {description} ({temp:.1}°C, wind {wind:.0} km/h)"),
-            source: raw.source.clone(),
+            domain: Some(StateDomain::Weather),
+            severity: Some(severity),
+            schema_key: self.schema(),
             tags: vec!["weather".into(), city.to_lowercase()],
-            raw_ref: raw.id.clone(),
         }])
     }
 
@@ -197,8 +200,14 @@ mod tests {
         };
         let events = feed.normalize(&raw).unwrap();
         assert_eq!(events.len(), 1);
-        assert!(events[0].summary.contains("Bogota"));
-        assert!(events[0].summary.contains("Rain"));
-        assert_eq!(events[0].domain, StateDomain::Weather);
+        match &events[0].kind {
+            OpsisEventKind::WorldObservation { summary } => {
+                assert!(summary.contains("Bogota"));
+                assert!(summary.contains("Rain"));
+            }
+            other => panic!("expected WorldObservation, got {:?}", other),
+        }
+        assert_eq!(events[0].domain, Some(StateDomain::Weather));
+        assert!(matches!(events[0].source, EventSource::Feed(_)));
     }
 }

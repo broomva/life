@@ -1,27 +1,40 @@
 // Types
-
-export { ConnectionStatus } from "./components/connection-status";
-export { FeedPanel } from "./components/feed-panel";
-export { Globe } from "./components/globe";
-// Components
-export { StatePanel } from "./components/state-panel";
-export { Timeline } from "./components/timeline";
-export type { UseOpsisStreamOptions, UseOpsisStreamReturn } from "./hooks/use-opsis-stream";
-// Hooks
-export { useOpsisStream } from "./hooks/use-opsis-stream";
 export type {
+  WorldTick,
+  GeoPoint,
   Bbox,
   GeoHotspot,
-  GeoPoint,
-  HealthResponse,
   StateDomain,
-  StateEvent,
-  StateLine,
-  StateLineDelta,
   Trend,
+  EventSource,
+  OpsisEventKind,
+  OpsisEvent,
+  StateEvent,
+  StateLineDelta,
   WorldDelta,
+  StateLine,
   WorldState,
-  WorldTick,
+  HealthResponse,
 } from "./lib/types";
+
 // Utilities
-export { activityColor, cn, DEFAULT_DOMAINS, formatActivity, trendIndicator } from "./lib/utils";
+export {
+  cn,
+  activityColor,
+  trendIndicator,
+  formatActivity,
+  eventSummary,
+  eventSourceLabel,
+  DEFAULT_DOMAINS,
+} from "./lib/utils";
+
+// Hooks
+export { useOpsisStream } from "./hooks/use-opsis-stream";
+export type { UseOpsisStreamOptions, UseOpsisStreamReturn } from "./hooks/use-opsis-stream";
+
+// Components
+export { StatePanel } from "./components/state-panel";
+export { FeedPanel } from "./components/feed-panel";
+export { Timeline } from "./components/timeline";
+export { ConnectionStatus } from "./components/connection-status";
+export { Globe } from "./components/globe";

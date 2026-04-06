@@ -1,16 +1,19 @@
 "use client";
 
-import type { StateDomain } from "@opsis/core";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  activityColor,
-  ConnectionStatus,
-  cn,
-  DEFAULT_DOMAINS,
-  Globe,
-  trendIndicator,
   useOpsisStream,
+  ConnectionStatus,
+  Globe,
+  DEFAULT_DOMAINS,
+  activityColor,
+  trendIndicator,
+  formatActivity,
+  eventSummary,
+  eventSourceLabel,
+  cn,
 } from "@opsis/core";
-import { useEffect, useRef, useState } from "react";
+import type { StateDomain, OpsisEvent } from "@opsis/core";
 
 export default function OpsisPage() {
   const { worldState, status, error } = useOpsisStream();
@@ -30,17 +33,11 @@ export default function OpsisPage() {
 
   // Compute global tension score (average of all activity levels).
   const allActivities = [...worldState.stateLines.values()].map((l) => l.activity);
-  const globalTension =
-    allActivities.length > 0
-      ? Math.round((allActivities.reduce((a, b) => a + b, 0) / allActivities.length) * 100)
-      : 0;
+  const globalTension = allActivities.length > 0
+    ? Math.round((allActivities.reduce((a, b) => a + b, 0) / allActivities.length) * 100)
+    : 0;
   const tensionLevel = globalTension >= 60 ? "SEVERE" : globalTension >= 30 ? "ELEVATED" : "NORMAL";
-  const tensionColor =
-    globalTension >= 60
-      ? "text-red-400"
-      : globalTension >= 30
-        ? "text-amber-400"
-        : "text-emerald-400";
+  const tensionColor = globalTension >= 60 ? "text-red-400" : globalTension >= 30 ? "text-amber-400" : "text-emerald-400";
 
   // Recent events for the feed.
   const recentEvents = worldState.allEvents.slice(-100).reverse();
@@ -63,42 +60,36 @@ export default function OpsisPage() {
         {/* News ticker */}
         <div className="h-6 bg-[oklch(0.08_0.01_250_/_0.9)] border-b border-[var(--color-border)] overflow-hidden flex items-center">
           <div className="ticker-scroll whitespace-nowrap flex gap-8 text-[10px]">
-            {recentEvents.slice(0, 20).map((e) => (
-              <span key={e.id} className="flex items-center gap-1.5">
-                <span
-                  className={cn(
-                    "px-1.5 py-0 rounded text-[9px] font-bold uppercase",
-                    e.severity >= 0.7
-                      ? "bg-red-500/20 text-red-400"
-                      : e.severity >= 0.4
-                        ? "bg-amber-500/20 text-amber-400"
-                        : "bg-cyan-500/10 text-cyan-600",
-                  )}
-                >
-                  {e.severity >= 0.7 ? "HIGH" : e.severity >= 0.4 ? "MED" : "LOW"}
+            {recentEvents.slice(0, 20).map((e, i) => (
+              <span key={`${e.id}-${i}`} className="flex items-center gap-1.5">
+                <span className={cn(
+                  "px-1.5 py-0 rounded text-[9px] font-bold uppercase",
+                  (e.severity ?? 0) >= 0.7 ? "bg-red-500/20 text-red-400" :
+                  (e.severity ?? 0) >= 0.4 ? "bg-amber-500/20 text-amber-400" :
+                  "bg-cyan-500/10 text-cyan-600"
+                )}>
+                  {(e.severity ?? 0) >= 0.7 ? "HIGH" : (e.severity ?? 0) >= 0.4 ? "MED" : "LOW"}
                 </span>
-                <span className="text-[var(--color-text-dim)]">{e.summary}</span>
+                <span className="text-[var(--color-text-dim)]">{eventSummary(e)}</span>
               </span>
             ))}
             {recentEvents.length === 0 && (
-              <span className="text-[var(--color-text-muted)]">Awaiting world state events...</span>
+              <span className="text-[var(--color-text-muted)]">
+                Awaiting world state events...
+              </span>
             )}
             {/* Duplicate for seamless loop */}
-            {recentEvents.slice(0, 20).map((e) => (
-              <span key={`dup-${e.id}`} className="flex items-center gap-1.5">
-                <span
-                  className={cn(
-                    "px-1.5 py-0 rounded text-[9px] font-bold uppercase",
-                    e.severity >= 0.7
-                      ? "bg-red-500/20 text-red-400"
-                      : e.severity >= 0.4
-                        ? "bg-amber-500/20 text-amber-400"
-                        : "bg-cyan-500/10 text-cyan-600",
-                  )}
-                >
-                  {e.severity >= 0.7 ? "HIGH" : e.severity >= 0.4 ? "MED" : "LOW"}
+            {recentEvents.slice(0, 20).map((e, i) => (
+              <span key={`dup-${e.id}-${i}`} className="flex items-center gap-1.5">
+                <span className={cn(
+                  "px-1.5 py-0 rounded text-[9px] font-bold uppercase",
+                  (e.severity ?? 0) >= 0.7 ? "bg-red-500/20 text-red-400" :
+                  (e.severity ?? 0) >= 0.4 ? "bg-amber-500/20 text-amber-400" :
+                  "bg-cyan-500/10 text-cyan-600"
+                )}>
+                  {(e.severity ?? 0) >= 0.7 ? "HIGH" : (e.severity ?? 0) >= 0.4 ? "MED" : "LOW"}
                 </span>
-                <span className="text-[var(--color-text-dim)]">{e.summary}</span>
+                <span className="text-[var(--color-text-dim)]">{eventSummary(e)}</span>
               </span>
             ))}
           </div>
@@ -117,16 +108,7 @@ export default function OpsisPage() {
 
           {/* Global tension indicator (Glint style) */}
           <div className="hud-panel px-3 py-1 flex items-center gap-2">
-            <span
-              className={cn(
-                "w-2 h-2 rounded-full",
-                globalTension >= 60
-                  ? "severity-critical"
-                  : globalTension >= 30
-                    ? "severity-high"
-                    : "severity-low",
-              )}
-            />
+            <span className={cn("w-2 h-2 rounded-full", globalTension >= 60 ? "severity-critical" : globalTension >= 30 ? "severity-high" : "severity-low")} />
             <span className="text-[10px] text-[var(--color-text-dim)] uppercase tracking-wider">
               Global Tension
             </span>
@@ -240,7 +222,9 @@ export default function OpsisPage() {
         <div className="hud-panel flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
           {filteredEvents.length === 0 ? (
             <div className="text-center py-8">
-              <p className="text-[var(--color-text-muted)] text-xs">Waiting for events...</p>
+              <p className="text-[var(--color-text-muted)] text-xs">
+                Waiting for events...
+              </p>
             </div>
           ) : (
             filteredEvents.slice(0, 50).map((event) => (
@@ -249,39 +233,29 @@ export default function OpsisPage() {
                 className="flex gap-2 py-1.5 px-1 rounded hover:bg-[oklch(0.15_0.02_250_/_0.5)] transition-colors border-b border-[var(--color-border)] last:border-0"
               >
                 <div className="shrink-0 mt-1">
-                  <span
-                    className={cn(
-                      "w-2 h-2 rounded-full block",
-                      event.severity >= 0.7
-                        ? "severity-critical"
-                        : event.severity >= 0.4
-                          ? "severity-high"
-                          : event.severity >= 0.2
-                            ? "severity-medium"
-                            : "severity-low",
-                    )}
-                  />
+                  <span className={cn(
+                    "w-2 h-2 rounded-full block",
+                    (event.severity ?? 0) >= 0.7 ? "severity-critical" :
+                    (event.severity ?? 0) >= 0.4 ? "severity-high" :
+                    (event.severity ?? 0) >= 0.2 ? "severity-medium" : "severity-low",
+                  )} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 mb-0.5">
-                    <span
-                      className={cn(
-                        "text-[9px] px-1 rounded font-bold uppercase",
-                        event.severity >= 0.7
-                          ? "bg-red-500/15 text-red-400"
-                          : event.severity >= 0.4
-                            ? "bg-amber-500/15 text-amber-400"
-                            : "bg-slate-500/15 text-slate-400",
-                      )}
-                    >
+                    <span className={cn(
+                      "text-[9px] px-1 rounded font-bold uppercase",
+                      (event.severity ?? 0) >= 0.7 ? "bg-red-500/15 text-red-400" :
+                      (event.severity ?? 0) >= 0.4 ? "bg-amber-500/15 text-amber-400" :
+                      "bg-slate-500/15 text-slate-400",
+                    )}>
                       {event.domain}
                     </span>
                     <span className="text-[9px] text-[var(--color-text-muted)]">
-                      {event.source}
+                      {eventSourceLabel(event.source)}
                     </span>
                   </div>
                   <p className="text-[11px] text-[var(--color-text-dim)] leading-tight truncate">
-                    {event.summary}
+                    {eventSummary(event)}
                   </p>
                 </div>
               </div>
@@ -302,7 +276,9 @@ export default function OpsisPage() {
                 <button
                   key={domain}
                   type="button"
-                  onClick={() => setSelectedDomain(selectedDomain === domain ? null : domain)}
+                  onClick={() =>
+                    setSelectedDomain(selectedDomain === domain ? null : domain)
+                  }
                   className={cn(
                     "flex items-center gap-1.5 text-[10px] py-0.5 px-2 rounded transition-colors",
                     selectedDomain === domain
@@ -360,3 +336,4 @@ const DOMAIN_COLORS: Record<string, string> = {
   Personal: "#f472b6",
   Infrastructure: "#64748b",
 };
+

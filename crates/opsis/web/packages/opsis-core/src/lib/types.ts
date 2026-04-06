@@ -42,17 +42,37 @@ export type StateDomain =
 /** Activity trend direction. */
 export type Trend = "Rising" | "Falling" | "Stable" | "Spike" | "Crash";
 
-/** A normalized event that drives state lines. */
-export interface StateEvent {
+// ═══ OpsisEvent Protocol (mirrors Rust opsis-core) ═══
+
+/** Who produced this event. */
+export type EventSource =
+  | { Feed: string }
+  | { Agent: string }
+  | "Gaia"
+  | "System"
+  | { Universe: string };
+
+/** What happened — tagged union matching Rust OpsisEventKind. */
+export type OpsisEventKind =
+  | { type: "WorldObservation"; summary: string }
+  | { type: "GaiaCorrelation"; domains: StateDomain[]; description: string; confidence: number }
+  | { type: "GaiaAnomaly"; domain: StateDomain; sigma: number; description: string }
+  | { type: "AgentObservation"; insight: string; confidence: number }
+  | { type: "AgentAlert"; message: string }
+  | { type: "Custom"; event_type: string; data: unknown };
+
+/** Universal event envelope for all Opsis events. */
+export interface OpsisEvent {
   readonly id: string;
   readonly tick: number;
-  readonly domain: StateDomain;
+  readonly timestamp: string;
+  readonly source: EventSource;
+  readonly kind: OpsisEventKind;
   readonly location: GeoPoint | null;
-  readonly severity: number;
-  readonly summary: string;
-  readonly source: string;
+  readonly domain: StateDomain | null;
+  readonly severity: number | null;
+  readonly schema_key: string;
   readonly tags: string[];
-  readonly raw_ref: string;
 }
 
 /** Change in a single state line during one tick. */
@@ -60,7 +80,7 @@ export interface StateLineDelta {
   readonly domain: StateDomain;
   readonly activity: number;
   readonly trend: Trend;
-  readonly new_events: StateEvent[];
+  readonly new_events: OpsisEvent[];
   readonly hotspots: GeoHotspot[];
 }
 
@@ -77,14 +97,14 @@ export interface StateLine {
   activity: number;
   trend: Trend;
   hotspots: GeoHotspot[];
-  recentEvents: StateEvent[];
+  recentEvents: OpsisEvent[];
 }
 
 /** Full client-side world state. */
 export interface WorldState {
   tick: number;
   stateLines: Map<StateDomain, StateLine>;
-  allEvents: StateEvent[];
+  allEvents: OpsisEvent[];
 }
 
 /** Health check response from opsisd. */
@@ -95,3 +115,7 @@ export interface HealthResponse {
   readonly uptime_seconds: number;
   readonly connected_clients: number;
 }
+
+// ═══ Legacy alias for backward compatibility ═══
+/** @deprecated Use OpsisEvent instead */
+export type StateEvent = OpsisEvent;
