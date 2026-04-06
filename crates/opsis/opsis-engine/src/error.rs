@@ -30,6 +30,10 @@ pub enum EngineError {
     /// HTTP client error from reqwest.
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
+
+    /// Configuration error (e.g. invalid feeds.toml).
+    #[error("config error: {0}")]
+    Config(String),
 }
 
 /// Convenience alias used throughout the engine crate.

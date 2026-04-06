@@ -1,0 +1,21 @@
+# Opsis feed configuration
+#
+# Each [[feeds]] entry declares a data feed that the engine will poll.
+# The `connector` field selects the transport: "poll", "websocket", or "rss".
+# The `name` field must match a registered FeedIngestor implementation.
+
+[[feeds]]
+name = "usgs-earthquake"
+connector = "poll"
+url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
+interval_secs = 30
+schema = "usgs.geojson.v1"
+domain = "Emergency"
+
+[[feeds]]
+name = "open-meteo"
+connector = "poll"
+url = "https://api.open-meteo.com/v1/forecast"
+interval_secs = 300
+schema = "openmeteo.current.v1"
+domain = "Weather"

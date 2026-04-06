@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::Parser;
 use tokio::net::TcpListener;
@@ -5,6 +7,7 @@ use tokio::sync::broadcast;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+use opsis_engine::config::load_feeds_config;
 use opsis_engine::engine::{EngineConfig, OpsisEngine};
 use opsis_engine::feeds::usgs::UsgsEarthquakeFeed;
 use opsis_engine::feeds::weather::OpenMeteoWeatherFeed;
@@ -21,6 +24,10 @@ struct Cli {
     /// Tick rate in Hz.
     #[arg(long, default_value = "1.0")]
     hz: f64,
+
+    /// Path to feeds.toml configuration file.
+    #[arg(long, default_value = "feeds.toml")]
+    feeds_config: PathBuf,
 }
 
 #[tokio::main]
@@ -42,10 +49,43 @@ async fn main() -> Result<()> {
     };
     let mut engine = OpsisEngine::new(config);
 
-    // Register feeds.
-    engine.add_feed(Box::new(UsgsEarthquakeFeed::new()));
-    engine.add_feed(Box::new(OpenMeteoWeatherFeed::new()));
-    info!("registered 2 feeds: usgs-earthquake, open-meteo");
+    // Try to load feeds from config file; fall back to hardcoded feeds.
+    match load_feeds_config(&cli.feeds_config) {
+        Ok(feeds_config) => {
+            let count = feeds_config.feeds.len();
+            // For now, we still use the hardcoded feed implementations keyed by name.
+            // The feeds.toml serves as the declarative source of truth for which feeds
+            // to enable; the actual FeedIngestor impl is matched by name.
+            for feed_cfg in &feeds_config.feeds {
+                match feed_cfg.name.as_str() {
+                    "usgs-earthquake" => {
+                        engine.add_feed(Box::new(UsgsEarthquakeFeed::new()));
+                    }
+                    "open-meteo" => {
+                        engine.add_feed(Box::new(OpenMeteoWeatherFeed::new()));
+                    }
+                    other => {
+                        tracing::warn!(name = other, "unknown feed in config — skipping");
+                    }
+                }
+            }
+            info!(
+                path = %cli.feeds_config.display(),
+                feeds = count,
+                "loaded feeds from config"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                path = %cli.feeds_config.display(),
+                error = %e,
+                "failed to load feeds config — using hardcoded defaults"
+            );
+            engine.add_feed(Box::new(UsgsEarthquakeFeed::new()));
+            engine.add_feed(Box::new(OpenMeteoWeatherFeed::new()));
+            info!("registered 2 default feeds: usgs-earthquake, open-meteo");
+        }
+    }
 
     // Shutdown signal.
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);

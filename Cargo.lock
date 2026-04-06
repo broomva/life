@@ -5179,22 +5179,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "life"
-version = "0.3.0"
-dependencies = [
- "life-aios",
- "life-anima",
- "life-arcan",
- "life-autonomic",
- "life-haima",
- "life-lago",
- "life-nous",
- "life-praxis",
- "life-relay",
- "life-vigil",
-]
-
-[[package]]
 name = "life-aios"
 version = "0.3.0"
 dependencies = [
@@ -5286,6 +5270,22 @@ dependencies = [
  "nous-core",
  "nous-heuristics",
  "nous-judge",
+]
+
+[[package]]
+name = "life-os"
+version = "0.3.0"
+dependencies = [
+ "life-aios",
+ "life-anima",
+ "life-arcan",
+ "life-autonomic",
+ "life-haima",
+ "life-lago",
+ "life-nous",
+ "life-praxis",
+ "life-relay",
+ "life-vigil",
 ]
 
 [[package]]
@@ -6247,6 +6247,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "toml 0.9.12+spec-1.1.0",
  "ulid",
 ]
 
@@ -6262,9 +6263,11 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "toml 0.9.12+spec-1.1.0",
  "tower-http",
  "tracing",
  "ulid",
@@ -6280,6 +6283,7 @@ dependencies = [
  "opsis-core",
  "opsis-engine",
  "tokio",
+ "toml 0.9.12+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
 ]

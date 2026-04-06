@@ -8,7 +8,7 @@ use chrono::Utc;
 use opsis_core::OpsisError;
 use opsis_core::clock::WorldTick;
 use opsis_core::error::OpsisResult;
-use opsis_core::event::{EventId, RawFeedEvent, StateEvent};
+use opsis_core::event::{EventId, EventSource, OpsisEvent, OpsisEventKind, RawFeedEvent};
 use opsis_core::feed::{FeedIngestor, FeedSource, SchemaKey};
 use opsis_core::spatial::GeoPoint;
 use opsis_core::state::StateDomain;
@@ -91,24 +91,28 @@ impl FeedIngestor for UsgsEarthquakeFeed {
         })
     }
 
-    fn normalize(&self, raw: &RawFeedEvent) -> OpsisResult<Vec<StateEvent>> {
+    fn normalize(&self, raw: &RawFeedEvent) -> OpsisResult<Vec<OpsisEvent>> {
         let props = &raw.payload["properties"];
         let mag = props["mag"].as_f64().unwrap_or(0.0);
         let place = props["place"]
             .as_str()
             .unwrap_or("Unknown location")
             .to_string();
+        let severity = Self::magnitude_to_severity(mag);
 
-        Ok(vec![StateEvent {
+        Ok(vec![OpsisEvent {
             id: EventId::default(),
             tick: WorldTick::zero(), // Engine sets actual tick.
-            domain: StateDomain::Emergency,
+            timestamp: Utc::now(),
+            source: EventSource::Feed(raw.source.clone()),
+            kind: OpsisEventKind::WorldObservation {
+                summary: format!("M{mag:.1} earthquake — {place}"),
+            },
             location: raw.location,
-            severity: Self::magnitude_to_severity(mag),
-            summary: format!("M{mag:.1} earthquake — {place}"),
-            source: raw.source.clone(),
+            domain: Some(StateDomain::Emergency),
+            severity: Some(severity),
+            schema_key: self.schema(),
             tags: vec!["earthquake".into(), "seismic".into()],
-            raw_ref: raw.id.clone(),
         }])
     }
 
@@ -147,8 +151,15 @@ mod tests {
         };
         let events = feed.normalize(&raw).unwrap();
         assert_eq!(events.len(), 1);
-        assert!(events[0].severity > 0.7);
-        assert!(events[0].summary.contains("6.2"));
-        assert!(events[0].summary.contains("Cali"));
+        assert!(events[0].severity.unwrap() > 0.7);
+        match &events[0].kind {
+            OpsisEventKind::WorldObservation { summary } => {
+                assert!(summary.contains("6.2"));
+                assert!(summary.contains("Cali"));
+            }
+            other => panic!("expected WorldObservation, got {:?}", other),
+        }
+        assert_eq!(events[0].domain, Some(StateDomain::Emergency));
+        assert!(matches!(events[0].source, EventSource::Feed(_)));
     }
 }

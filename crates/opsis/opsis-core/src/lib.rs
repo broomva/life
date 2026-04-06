@@ -13,8 +13,10 @@ pub mod subscription;
 // Re-export key types for convenience.
 pub use clock::{WorldClock, WorldTick};
 pub use error::{OpsisError, OpsisResult};
-pub use event::{EventId, RawFeedEvent, StateEvent, StateLineDelta, WorldDelta};
-pub use feed::{FeedIngestor, FeedSource, SchemaKey};
+pub use event::{
+    EventId, EventSource, OpsisEvent, OpsisEventKind, RawFeedEvent, StateLineDelta, WorldDelta,
+};
+pub use feed::{ConnectorConfig, FeedConfig, FeedIngestor, FeedSource, FeedsConfig, SchemaKey};
 pub use spatial::{Bbox, GeoHotspot, GeoPoint};
 pub use state::{StateDomain, StateLine, Trend, WorldState};
 pub use subscription::{ClientId, Subscription};

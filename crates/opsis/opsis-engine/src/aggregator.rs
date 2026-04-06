@@ -2,13 +2,13 @@
 
 use std::collections::BTreeMap;
 
-use opsis_core::event::{StateEvent, StateLineDelta, WorldDelta};
+use opsis_core::event::{OpsisEvent, StateLineDelta, WorldDelta};
 use opsis_core::spatial::{GeoHotspot, GeoPoint};
 use opsis_core::state::{StateDomain, WorldState};
 
 /// Buffers events between ticks and flushes to produce a [`WorldDelta`].
 pub struct TickAggregator {
-    buffer: Vec<StateEvent>,
+    buffer: Vec<OpsisEvent>,
 }
 
 impl TickAggregator {
@@ -17,7 +17,7 @@ impl TickAggregator {
     }
 
     /// Add an event to the tick buffer.
-    pub fn push(&mut self, event: StateEvent) {
+    pub fn push(&mut self, event: OpsisEvent) {
         self.buffer.push(event);
     }
 
@@ -25,13 +25,13 @@ impl TickAggregator {
     pub fn flush(&mut self, world: &mut WorldState) -> WorldDelta {
         let tick = world.clock.tick;
 
-        // Group buffered events by domain.
-        let mut domain_events: BTreeMap<StateDomain, Vec<StateEvent>> = BTreeMap::new();
+        // Group buffered events by domain, skipping events without a domain.
+        let mut domain_events: BTreeMap<StateDomain, Vec<OpsisEvent>> = BTreeMap::new();
         for event in self.buffer.drain(..) {
-            domain_events
-                .entry(event.domain.clone())
-                .or_default()
-                .push(event);
+            if let Some(ref domain) = event.domain {
+                domain_events.entry(domain.clone()).or_default().push(event);
+            }
+            // Events without a domain are silently skipped from aggregation.
         }
 
         let mut state_line_deltas = Vec::new();
@@ -39,7 +39,7 @@ impl TickAggregator {
         // Update each domain that received events.
         for (domain, events) in &domain_events {
             let event_count = events.len() as f32;
-            let severity_sum: f32 = events.iter().map(|e| e.severity).sum();
+            let severity_sum: f32 = events.iter().map(|e| e.severity.unwrap_or(0.0)).sum();
             let avg_severity = severity_sum / event_count.max(1.0);
 
             let line = world.state_line_mut(domain);
@@ -51,8 +51,10 @@ impl TickAggregator {
             // Top-K events by severity (max 10).
             let mut top_events = events.clone();
             top_events.sort_by(|a, b| {
-                b.severity
-                    .partial_cmp(&a.severity)
+                let sev_b = b.severity.unwrap_or(0.0);
+                let sev_a = a.severity.unwrap_or(0.0);
+                sev_b
+                    .partial_cmp(&sev_a)
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
             top_events.truncate(10);
@@ -134,21 +136,25 @@ fn cluster_simple(points: &[GeoPoint], eps_km: f64) -> Vec<GeoHotspot> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use opsis_core::clock::{WorldClock, WorldTick};
-    use opsis_core::event::EventId;
-    use opsis_core::feed::FeedSource;
+    use opsis_core::event::{EventId, EventSource, OpsisEventKind};
+    use opsis_core::feed::{FeedSource, SchemaKey};
 
-    fn make_event(domain: StateDomain, severity: f32, location: Option<GeoPoint>) -> StateEvent {
-        StateEvent {
+    fn make_event(domain: StateDomain, severity: f32, location: Option<GeoPoint>) -> OpsisEvent {
+        OpsisEvent {
             id: EventId::default(),
             tick: WorldTick::zero(),
-            domain,
+            timestamp: Utc::now(),
+            source: EventSource::Feed(FeedSource::new("test")),
+            kind: OpsisEventKind::WorldObservation {
+                summary: "test".into(),
+            },
             location,
-            severity,
-            summary: "test".into(),
-            source: FeedSource::new("test"),
+            domain: Some(domain),
+            severity: Some(severity),
+            schema_key: SchemaKey::new("test.v1"),
             tags: vec![],
-            raw_ref: EventId::default(),
         }
     }
 
@@ -188,9 +194,27 @@ mod tests {
         assert_eq!(delta.state_line_deltas[0].new_events.len(), 10);
         // Highest severity first.
         assert!(
-            delta.state_line_deltas[0].new_events[0].severity
-                > delta.state_line_deltas[0].new_events[9].severity
+            delta.state_line_deltas[0].new_events[0]
+                .severity
+                .unwrap_or(0.0)
+                > delta.state_line_deltas[0].new_events[9]
+                    .severity
+                    .unwrap_or(0.0)
         );
+    }
+
+    #[test]
+    fn events_without_domain_are_skipped() {
+        let mut agg = TickAggregator::new();
+        let mut world = WorldState::new(WorldClock::default());
+
+        // Push an event with no domain.
+        let mut evt = make_event(StateDomain::Emergency, 0.5, None);
+        evt.domain = None;
+        agg.push(evt);
+
+        let delta = agg.flush(&mut world);
+        assert!(delta.state_line_deltas.is_empty());
     }
 
     #[test]

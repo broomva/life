@@ -1,11 +1,11 @@
 //! Event bus — broadcast channels for distributing world state events.
 //!
 //! Three channels with different capacities serve different consumers:
-//! - **event_tx** (16 384) — all normalised state events
+//! - **event_tx** (16 384) — all normalised opsis events
 //! - **delta_tx** (256) — per-tick world deltas (SSE consumers)
 //! - **fast_path_tx** (1 024) — high-severity events (severity >= 0.8)
 
-use opsis_core::event::{StateEvent, WorldDelta};
+use opsis_core::event::{OpsisEvent, WorldDelta};
 use tokio::sync::broadcast;
 use tracing::warn;
 
@@ -18,9 +18,9 @@ const FAST_PATH_SEVERITY: f32 = 0.8;
 /// (`subscribe_*`) are fully decoupled.
 #[derive(Debug)]
 pub struct EventBus {
-    event_tx: broadcast::Sender<StateEvent>,
+    event_tx: broadcast::Sender<OpsisEvent>,
     delta_tx: broadcast::Sender<WorldDelta>,
-    fast_path_tx: broadcast::Sender<StateEvent>,
+    fast_path_tx: broadcast::Sender<OpsisEvent>,
 }
 
 impl EventBus {
@@ -38,11 +38,12 @@ impl EventBus {
 
     // ── Publish ──────────────────────────────────────────────────────
 
-    /// Send a state event to all subscribers.
+    /// Send an opsis event to all subscribers.
     ///
     /// If `severity >= 0.8`, the event is also sent to the fast-path channel.
-    pub fn publish_event(&self, event: StateEvent) {
-        if event.severity >= FAST_PATH_SEVERITY && self.fast_path_tx.send(event.clone()).is_err() {
+    pub fn publish_event(&self, event: OpsisEvent) {
+        let severity = event.severity.unwrap_or(0.0);
+        if severity >= FAST_PATH_SEVERITY && self.fast_path_tx.send(event.clone()).is_err() {
             warn!("fast_path_tx has no receivers");
         }
         let _ = self.event_tx.send(event);
@@ -57,8 +58,8 @@ impl EventBus {
 
     // ── Subscribe ────────────────────────────────────────────────────
 
-    /// Subscribe to all state events.
-    pub fn subscribe_events(&self) -> broadcast::Receiver<StateEvent> {
+    /// Subscribe to all opsis events.
+    pub fn subscribe_events(&self) -> broadcast::Receiver<OpsisEvent> {
         self.event_tx.subscribe()
     }
 
@@ -68,7 +69,7 @@ impl EventBus {
     }
 
     /// Subscribe to high-severity events only.
-    pub fn subscribe_fast_path(&self) -> broadcast::Receiver<StateEvent> {
+    pub fn subscribe_fast_path(&self) -> broadcast::Receiver<OpsisEvent> {
         self.fast_path_tx.subscribe()
     }
 }
@@ -82,23 +83,27 @@ impl Default for EventBus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use opsis_core::clock::WorldTick;
-    use opsis_core::event::EventId;
-    use opsis_core::feed::FeedSource;
+    use opsis_core::event::{EventId, EventSource, OpsisEventKind};
+    use opsis_core::feed::{FeedSource, SchemaKey};
     use opsis_core::state::StateDomain;
 
-    /// Helper to build a state event with a given severity.
-    fn make_event(severity: f32) -> StateEvent {
-        StateEvent {
+    /// Helper to build an opsis event with a given severity.
+    fn make_event(severity: f32) -> OpsisEvent {
+        OpsisEvent {
             id: EventId::default(),
             tick: WorldTick(1),
-            domain: StateDomain::Emergency,
+            timestamp: Utc::now(),
+            source: EventSource::Feed(FeedSource::new("test")),
+            kind: OpsisEventKind::WorldObservation {
+                summary: format!("test event severity={severity}"),
+            },
             location: None,
-            severity,
-            summary: format!("test event severity={severity}"),
-            source: FeedSource::new("test"),
+            domain: Some(StateDomain::Emergency),
+            severity: Some(severity),
+            schema_key: SchemaKey::new("test.v1"),
             tags: vec![],
-            raw_ref: EventId::default(),
         }
     }
 
