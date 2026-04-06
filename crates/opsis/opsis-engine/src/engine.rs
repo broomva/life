@@ -70,6 +70,9 @@ impl OpsisEngine {
 
         let bus = self.bus.clone();
 
+        // Subscribe to event bus BEFORE spawning feeds to avoid missing early events.
+        let mut event_rx = bus.subscribe_events();
+
         // Spawn one task per feed.
         let mut feed_handles = Vec::new();
         for feed in self.feeds.drain(..) {
@@ -107,9 +110,6 @@ impl OpsisEngine {
             feed_handles.push(handle);
         }
 
-        // Subscribe to event bus for aggregation.
-        let mut event_rx = bus.subscribe_events();
-
         // Tick loop.
         let tick_duration = Duration::from_secs_f64(1.0 / self.config.hz);
         let mut tick_interval = time::interval(tick_duration);
@@ -134,9 +134,8 @@ impl OpsisEngine {
                     self.world.clock.advance();
                     let delta = self.aggregator.flush(&mut self.world);
 
-                    if !delta.state_line_deltas.is_empty() {
-                        bus.publish_delta(delta);
-                    }
+                    // Always broadcast — UI needs tick updates even when no events.
+                    bus.publish_delta(delta);
                 }
                 _ = shutdown.recv() => {
                     info!("opsis engine shutting down");
