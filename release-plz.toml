@@ -5,6 +5,7 @@ semver_check = false
 git_release_enable = false
 git_tag_enable = true
 publish_no_verify = true
+allow_dirty = true
 pr_labels = ["release"]
 
 # ─────────────────────────────────────────────────────────────────────

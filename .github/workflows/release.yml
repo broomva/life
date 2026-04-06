@@ -43,6 +43,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Create release PR
+        continue-on-error: true
         uses: MarcoIeni/release-plz-action@v0.5
         with:
           command: release-pr
