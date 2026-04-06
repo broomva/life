@@ -378,6 +378,6 @@ name = "life-relay"
 semver_check = false
 
 [[package]]
-name = "life"
+name = "life-os"
 # Never published — top-level facade
 semver_check = false

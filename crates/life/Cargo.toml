@@ -1,12 +1,12 @@
 [package]
-name = "life"
+name = "life-os"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Life Agent OS — unified facade re-exporting all subsystem crates (aios, arcan, lago, praxis, autonomic, haima, nous, anima, relay, vigil)"
+description = "Life Agent OS (life-os): — unified facade re-exporting all subsystem crates (aios, arcan, lago, praxis, autonomic, haima, nous, anima, relay, vigil)"
 
 [dependencies]
 life-aios = { path = "../aios/life-aios", version = "0.3.0" }
