@@ -330,3 +330,54 @@ semver_check = false
 [[package]]
 name = "spaces-a2a"
 semver_check = false
+
+# ─── Facade crates ──────────────────────────────────────────────────
+[[package]]
+name = "life-aios"
+# Never published
+semver_check = false
+
+[[package]]
+name = "life-arcan"
+# Never published
+semver_check = false
+
+[[package]]
+name = "life-lago"
+# Never published
+semver_check = false
+
+[[package]]
+name = "life-praxis"
+# Never published
+semver_check = false
+
+[[package]]
+name = "life-autonomic"
+# Never published
+semver_check = false
+
+[[package]]
+name = "life-haima"
+# Never published
+semver_check = false
+
+[[package]]
+name = "life-nous"
+# Never published
+semver_check = false
+
+[[package]]
+name = "life-anima"
+# Never published
+semver_check = false
+
+[[package]]
+name = "life-relay"
+# Never published
+semver_check = false
+
+[[package]]
+name = "life"
+# Never published — top-level facade
+semver_check = false

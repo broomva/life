@@ -1,0 +1,18 @@
+[package]
+name = "life-nous"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Metacognitive evaluation facade for the Life Agent OS — re-exports nous-core, nous-api, nous-heuristics, and nous-judge"
+
+[dependencies]
+nous-core = { path = "../nous-core", version = "0.3.0" }
+nous-api = { path = "../nous-api", version = "0.3.0" }
+nous-heuristics = { path = "../nous-heuristics", version = "0.3.0" }
+nous-judge = { path = "../nous-judge", version = "0.3.0" }
+
+[lints]
+workspace = true
