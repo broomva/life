@@ -1,0 +1,17 @@
+[package]
+name = "opsis-engine"
+description = "Engine for the Opsis world state system"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+opsis-core.workspace = true
+
+[lints.rust]
+unused_must_use = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"

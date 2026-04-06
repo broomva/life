@@ -6239,6 +6239,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "opsis-core"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "ulid",
+]
+
+[[package]]
+name = "opsis-engine"
+version = "0.3.0"
+dependencies = [
+ "opsis-core",
+]
+
+[[package]]
+name = "opsisd"
+version = "0.3.0"
+dependencies = [
+ "opsis-core",
+]
+
+[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
