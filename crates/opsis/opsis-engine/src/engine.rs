@@ -87,17 +87,28 @@ impl OpsisEngine {
                 loop {
                     match feed.poll_raw().await {
                         Ok(raw_events) => {
+                            let raw_count = raw_events.len();
+                            let mut published = 0u32;
                             for raw in &raw_events {
                                 match feed.normalize(raw) {
                                     Ok(state_events) => {
                                         for event in state_events {
                                             bus.publish_event(event);
+                                            published += 1;
                                         }
                                     }
                                     Err(e) => {
                                         warn!(source = %feed.source(), "normalize error: {e}");
                                     }
                                 }
+                            }
+                            if raw_count > 0 {
+                                info!(
+                                    source = %feed.source(),
+                                    raw = raw_count,
+                                    published = published,
+                                    "feed poll complete"
+                                );
                             }
                         }
                         Err(e) => {
@@ -118,9 +129,13 @@ impl OpsisEngine {
             tokio::select! {
                 _ = tick_interval.tick() => {
                     // Drain pending events into the aggregator.
+                    let mut drained = 0u32;
                     loop {
                         match event_rx.try_recv() {
-                            Ok(event) => self.aggregator.push(event),
+                            Ok(event) => {
+                                self.aggregator.push(event);
+                                drained += 1;
+                            }
                             Err(broadcast::error::TryRecvError::Empty) => break,
                             Err(broadcast::error::TryRecvError::Lagged(n)) => {
                                 warn!(lagged = n, "event bus lagged — events dropped");
@@ -133,6 +148,15 @@ impl OpsisEngine {
                     // Advance clock and flush aggregator.
                     self.world.clock.advance();
                     let delta = self.aggregator.flush(&mut self.world);
+
+                    if drained > 0 || !delta.state_line_deltas.is_empty() {
+                        info!(
+                            tick = %self.world.clock.tick,
+                            drained,
+                            deltas = delta.state_line_deltas.len(),
+                            "tick flush"
+                        );
+                    }
 
                     // Always broadcast — UI needs tick updates even when no events.
                     bus.publish_delta(delta);

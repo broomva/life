@@ -1,9 +1,7 @@
 //! USGS earthquake real-time feed ingestor.
 
-use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use chrono::Utc;
@@ -20,7 +18,6 @@ const USGS_URL: &str = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summar
 /// USGS earthquake feed — polls hourly GeoJSON summary, deduplicates by ID.
 pub struct UsgsEarthquakeFeed {
     client: reqwest::Client,
-    seen_ids: Mutex<HashSet<String>>,
 }
 
 impl Default for UsgsEarthquakeFeed {
@@ -33,7 +30,6 @@ impl UsgsEarthquakeFeed {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
-            seen_ids: Mutex::new(HashSet::new()),
         }
     }
 
@@ -76,15 +72,7 @@ impl FeedIngestor for UsgsEarthquakeFeed {
             let features = geojson["features"].as_array().unwrap_or(&empty);
             let mut events = Vec::new();
 
-            let mut seen = self.seen_ids.lock().unwrap();
-
             for feature in features {
-                let usgs_id = feature["id"].as_str().unwrap_or_default().to_string();
-                if seen.contains(&usgs_id) {
-                    continue;
-                }
-                seen.insert(usgs_id);
-
                 let coords = &feature["geometry"]["coordinates"];
                 let lon = coords[0].as_f64().unwrap_or(0.0);
                 let lat = coords[1].as_f64().unwrap_or(0.0);
@@ -97,11 +85,6 @@ impl FeedIngestor for UsgsEarthquakeFeed {
                     location: Some(GeoPoint::new(lat, lon)),
                     payload: feature.clone(),
                 });
-            }
-
-            // Prevent unbounded growth.
-            if seen.len() > 500 {
-                seen.clear();
             }
 
             Ok(events)
