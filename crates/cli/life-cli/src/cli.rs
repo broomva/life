@@ -18,6 +18,9 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Initialize a .life/ directory in the current project.
+    Init,
+
     /// Interactive setup wizard — configure providers, keys, and modules.
     Setup,
 

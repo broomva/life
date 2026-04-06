@@ -3,6 +3,7 @@
 pub mod cli;
 pub mod cost;
 pub mod deploy;
+pub mod init;
 pub mod logs;
 pub mod relay;
 pub mod scale;
@@ -29,6 +30,7 @@ pub async fn run() -> Result<()> {
             Ok(())
         }
         Some(cmd) => match cmd {
+            cli::Command::Init => init::run(),
             cli::Command::Setup => setup::run().await,
             cli::Command::Deploy(args) => deploy::run(args).await,
             cli::Command::Status(args) => status::run(args).await,

@@ -191,8 +191,6 @@ struct LifeConfig {
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct ProviderConfig {
     name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    api_key: Option<String>,
     model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     base_url: Option<String>,
@@ -486,7 +484,6 @@ fn save_config(
     let cfg = LifeConfig {
         provider: ProviderConfig {
             name: provider.name().to_string(),
-            api_key: api_key.clone(),
             model: model.to_string(),
             base_url: base_url.clone(),
         },
@@ -499,20 +496,24 @@ fn save_config(
     std::fs::write(&path, &content)
         .with_context(|| format!("failed to write {}", path.display()))?;
 
-    // Set restrictive permissions on the config (contains API keys)
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-            .context("failed to set config permissions")?;
-    }
-
     eprintln!();
     eprintln!(
         "  {} Config saved to {}",
         c(GREEN, "ok"),
         dim(&path.display().to_string())
     );
+
+    // Store the API key securely via credential cascade (keychain → .env fallback)
+    if let Some(key) = api_key {
+        let (env_var, kc_account) =
+            life_paths::credentials::provider_credential_names(provider.name());
+        let source = life_paths::credentials::store_credential(env_var, kc_account, key);
+        eprintln!(
+            "  {} API key stored in {}",
+            c(GREEN, "ok"),
+            dim(&source.to_string())
+        );
+    }
 
     Ok(())
 }
@@ -652,25 +653,19 @@ fn print_success(provider: &Provider, api_key: &Option<String>) {
     eprintln!("    {}  check deployments", c(CYAN, "life status"));
     eprintln!();
 
-    // Show environment export hint for key-based providers
-    if let Some(key) = api_key {
-        let env_var = match provider {
-            Provider::Anthropic => "ANTHROPIC_API_KEY",
-            Provider::OpenAi => "OPENAI_API_KEY",
-            Provider::Vercel => "VERCEL_AI_GATEWAY_KEY",
-            _ => "",
+    // Show credential storage location (never print the raw key)
+    if api_key.is_some() && provider.needs_api_key() {
+        let (env_var, kc_account) =
+            life_paths::credentials::provider_credential_names(provider.name());
+        let storage_hint = if life_paths::keychain::is_available() {
+            format!("keychain (account: {kc_account})")
+        } else {
+            "~/.life/credentials/.env".to_string()
         };
-        if !env_var.is_empty() {
-            let visible = if key.len() > 12 {
-                format!("{}...{}", &key[..8], &key[key.len() - 4..])
-            } else {
-                "****".to_string()
-            };
-            eprintln!("  {}", bold("Environment"));
-            eprintln!();
-            eprintln!("    export {env_var}={visible}");
-            eprintln!();
-        }
+        eprintln!("  {}", bold("Credentials"));
+        eprintln!();
+        eprintln!("    {env_var} stored in {}", dim(&storage_hint),);
+        eprintln!();
     }
 
     eprintln!("  Or run directly:");

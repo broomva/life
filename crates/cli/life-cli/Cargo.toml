@@ -45,6 +45,12 @@ dirs = "6"
 life-relayd = { path = "../../relay/life-relayd", version = "0.3.0" }
 life-relay-core = { path = "../../relay/life-relay-core", version = "0.3.0" }
 
+# Shared path resolution + credential cascade
+life-paths = { path = "../../life-paths", version = "0.3.0" }
+
+[dev-dependencies]
+tempfile = "3"
+
 [profile.release]
 opt-level = 3
 lto = true
