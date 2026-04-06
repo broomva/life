@@ -1,8 +1,11 @@
-//! Life CLI — Production agent deployment pipeline for Life Agent OS.
+//! Life CLI — Agent Operating System for Life Agent OS.
 //!
-//! One-command deployment of pre-configured agent stacks to Railway, Fly.io, or AWS ECS.
+//! Run `life` with no arguments for a branded welcome screen,
+//! or `life setup` for the interactive onboarding wizard.
 //!
 //! Usage:
+//!   life                        — show banner + quick help
+//!   life setup                  — interactive setup wizard
 //!   life deploy --agent coding-agent --target railway
 //!   life status --agent coding-agent
 //!   life destroy --agent coding-agent
@@ -15,6 +18,7 @@ mod deploy;
 mod logs;
 mod relay;
 mod scale;
+mod setup;
 mod status;
 mod template;
 
@@ -33,14 +37,19 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Deploy(args) => deploy::run(args).await,
-        Command::Status(args) => status::run(args).await,
-        Command::List(args) => deploy::list(args).await,
-        Command::Destroy(args) => deploy::destroy(args).await,
-        Command::Templates(args) => template::run(args),
-        Command::Cost(args) => cost::run(args).await,
-        Command::Logs(args) => logs::run(args).await,
-        Command::Scale(args) => scale::run(args).await,
-        Command::Relay { command } => relay::run(command).await,
+        None => {
+            setup::print_quick_help();
+            Ok(())
+        }
+        Some(Command::Setup) => setup::run().await,
+        Some(Command::Deploy(args)) => deploy::run(args).await,
+        Some(Command::Status(args)) => status::run(args).await,
+        Some(Command::List(args)) => deploy::list(args).await,
+        Some(Command::Destroy(args)) => deploy::destroy(args).await,
+        Some(Command::Templates(args)) => template::run(args),
+        Some(Command::Cost(args)) => cost::run(args).await,
+        Some(Command::Logs(args)) => logs::run(args).await,
+        Some(Command::Scale(args)) => scale::run(args).await,
+        Some(Command::Relay { command }) => relay::run(command).await,
     }
 }

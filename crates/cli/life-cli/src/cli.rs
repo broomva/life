@@ -7,17 +7,20 @@ use crate::relay::RelayCommand;
 #[derive(Parser)]
 #[command(
     name = "life",
-    about = "Production agent deployment pipeline for Life Agent OS",
+    about = "Agent Operating System — deploy, configure, and manage agents",
     version,
     propagate_version = true
 )]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Interactive setup wizard — configure providers, keys, and modules.
+    Setup,
+
     /// Deploy an agent to a cloud target.
     Deploy(DeployArgs),
 
