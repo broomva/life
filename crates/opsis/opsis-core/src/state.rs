@@ -24,6 +24,27 @@ pub enum StateDomain {
     Custom(String),
 }
 
+impl StateDomain {
+    /// Parse a domain name string into a StateDomain.
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "Emergency" => Self::Emergency,
+            "Health" => Self::Health,
+            "Finance" => Self::Finance,
+            "Trade" => Self::Trade,
+            "Conflict" => Self::Conflict,
+            "Politics" => Self::Politics,
+            "Weather" => Self::Weather,
+            "Space" => Self::Space,
+            "Ocean" => Self::Ocean,
+            "Technology" => Self::Technology,
+            "Personal" => Self::Personal,
+            "Infrastructure" => Self::Infrastructure,
+            other => Self::Custom(other.to_owned()),
+        }
+    }
+}
+
 impl fmt::Display for StateDomain {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
