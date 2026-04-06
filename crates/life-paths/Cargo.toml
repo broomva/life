@@ -1,0 +1,15 @@
+[package]
+name = "life-paths"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Shared path resolution for Life Agent OS — project discovery, module dirs, credentials"
+
+[dependencies]
+dirs = "6"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

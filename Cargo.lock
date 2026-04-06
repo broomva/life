@@ -5310,6 +5310,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "life-paths"
+version = "0.3.0"
+dependencies = [
+ "dirs 6.0.0",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "life-praxis"
 version = "0.3.0"
 dependencies = [

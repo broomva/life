@@ -102,6 +102,8 @@ members = [
     "crates/anima/life-anima",
     "crates/relay/life-relay",
     "crates/life",
+    # Paths — shared path resolution
+    "crates/life-paths",
     # Opsis — world state engine
     "crates/opsis/opsis-core",
     "crates/opsis/opsis-engine",
@@ -184,6 +186,7 @@ life-haima = { path = "crates/haima/life-haima", version = "0.3.0" }
 life-nous = { path = "crates/nous/life-nous", version = "0.3.0" }
 life-anima = { path = "crates/anima/life-anima", version = "0.3.0" }
 life-relay = { path = "crates/relay/life-relay", version = "0.3.0" }
+life-paths = { path = "crates/life-paths", version = "0.3.0" }
 
 # ── External dependencies ──
 anyhow = "1"
