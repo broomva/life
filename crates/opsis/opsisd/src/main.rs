@@ -66,6 +66,18 @@ async fn main() -> Result<()> {
                     "open-meteo" => {
                         engine.add_feed(Box::new(OpenMeteoWeatherFeed::new()));
                     }
+                    _ if matches!(
+                        feed_cfg.connector,
+                        opsis_core::feed::ConnectorConfig::AgentStream { .. }
+                    ) =>
+                    {
+                        // Agent stream feeds push events via POST /events/inject.
+                        // No pull-based ingestor needed — just log the registration.
+                        info!(
+                            name = %feed_cfg.name,
+                            "registered agent_stream feed (inject-mode)"
+                        );
+                    }
                     other => {
                         tracing::warn!(name = other, "unknown feed in config — skipping");
                     }
