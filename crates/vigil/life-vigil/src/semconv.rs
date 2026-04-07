@@ -50,6 +50,14 @@ pub const GEN_AI_AGENT_NAME: &str = "gen_ai.agent.name";
 /// Agent ID.
 pub const GEN_AI_AGENT_ID: &str = "gen_ai.agent.id";
 
+// ─── GenAI Content Event Names ──────────────────────────────────────────────
+
+/// Span event name for recording prompt/input content on a GenAI span.
+pub const GEN_AI_CONTENT_PROMPT: &str = "gen_ai.content.prompt";
+
+/// Span event name for recording completion/output content on a GenAI span.
+pub const GEN_AI_CONTENT_COMPLETION: &str = "gen_ai.content.completion";
+
 // ─── Server Attributes ──────────────────────────────────────────────────────
 
 /// Server hostname or IP.
