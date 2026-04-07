@@ -305,6 +305,169 @@ mod tests {
         assert!(events[0].severity.is_none());
     }
 
+    /// Simulates a real GDELT DOC API v2 artlist response to validate the normalizer config.
+    #[test]
+    fn normalize_gdelt_artlist_response() {
+        let normalizer = NormalizerConfig {
+            events_path: Some("$.articles[*]".into()),
+            summary: "$.title".into(),
+            severity: None,
+            severity_range: [0.0, 1.0],
+            lat: None,
+            lon: None,
+            tags: vec!["gdelt".into(), "conflict".into(), "news".into()],
+        };
+        let config = FeedConfig {
+            name: "gdelt-conflict".into(),
+            connector: ConnectorConfig::Poll {
+                url: "https://api.gdeltproject.org/api/v2/doc/doc?query=conflict&mode=ArtList&maxrecords=25&format=json".into(),
+                interval_secs: 900,
+            },
+            schema: "gdelt.doc.v2".into(),
+            domain: Some("Conflict".into()),
+            auth: None,
+            normalize: Some(normalizer.clone()),
+        };
+
+        let feed = GenericPollFeed::new(config, normalizer);
+
+        // Simulate GDELT artlist response.
+        let gdelt_response = json!({
+            "articles": [
+                {
+                    "url": "https://example.com/article1",
+                    "url_mobile": "",
+                    "title": "Tensions rise in Eastern Europe amid military buildup",
+                    "seendate": "20260406T120000Z",
+                    "socialimage": "https://example.com/img1.jpg",
+                    "domain": "example.com",
+                    "language": "English",
+                    "sourcecountry": "United States"
+                },
+                {
+                    "url": "https://example.com/article2",
+                    "url_mobile": "",
+                    "title": "Peace talks resume after ceasefire agreement",
+                    "seendate": "20260406T110000Z",
+                    "socialimage": "",
+                    "domain": "example.com",
+                    "language": "English",
+                    "sourcecountry": "United Kingdom"
+                }
+            ]
+        });
+
+        // Extract articles array.
+        let items = crate::jsonpath::extract_array(&gdelt_response, "$.articles[*]");
+        assert_eq!(items.len(), 2);
+
+        // Build raw events (simulating poll_raw).
+        let raw = RawFeedEvent {
+            id: EventId::default(),
+            timestamp: chrono::Utc::now(),
+            source: feed.source(),
+            feed_schema: feed.schema(),
+            location: None, // GDELT artlist has no coordinates
+            payload: items[0].clone(),
+        };
+
+        let events = feed.normalize(&raw).unwrap();
+        assert_eq!(events.len(), 1);
+
+        let event = &events[0];
+        match &event.kind {
+            OpsisEventKind::WorldObservation { summary } => {
+                assert_eq!(
+                    summary,
+                    "Tensions rise in Eastern Europe amid military buildup"
+                );
+            }
+            _ => panic!("expected WorldObservation"),
+        }
+        assert!(event.location.is_none()); // No geo for artlist
+        assert!(event.severity.is_none()); // No tone data in artlist
+        assert_eq!(event.domain, Some(StateDomain::Conflict));
+        assert_eq!(event.tags, vec!["gdelt", "conflict", "news"]);
+        assert_eq!(event.schema_key.to_string(), "gdelt.doc.v2");
+    }
+
+    /// Simulates NASA EONET v3 response — events with coordinates and magnitude.
+    #[test]
+    fn normalize_eonet_response() {
+        let normalizer = NormalizerConfig {
+            events_path: Some("$.events[*]".into()),
+            summary: "$.title".into(),
+            severity: Some("$.geometry[0].magnitudeValue".into()),
+            severity_range: [0.0, 10000.0],
+            lat: Some("$.geometry[0].coordinates[1]".into()),
+            lon: Some("$.geometry[0].coordinates[0]".into()),
+            tags: vec!["nasa".into(), "eonet".into(), "natural-events".into()],
+        };
+        let config = FeedConfig {
+            name: "nasa-eonet".into(),
+            connector: ConnectorConfig::Poll {
+                url: "https://eonet.gsfc.nasa.gov/api/v3/events?limit=50&status=open".into(),
+                interval_secs: 600,
+            },
+            schema: "nasa.eonet.v3".into(),
+            domain: Some("Emergency".into()),
+            auth: None,
+            normalize: Some(normalizer.clone()),
+        };
+
+        let feed = GenericPollFeed::new(config, normalizer);
+
+        // Simulate EONET event (wildfire with coordinates).
+        let eonet_event = json!({
+            "id": "EONET_19351",
+            "title": "EASTER PASTURE Wildfire, Hendry, Florida",
+            "description": "15 Miles E from IMMOKALEE, FL",
+            "categories": [{"id": "wildfires", "title": "Wildfires"}],
+            "geometry": [{
+                "magnitudeValue": 562.0,
+                "magnitudeUnit": "acres",
+                "date": "2026-04-05T22:32:00Z",
+                "type": "Point",
+                "coordinates": [-81.0269444, 26.4713889]
+            }]
+        });
+
+        // Verify jsonpath extraction of nested coordinates.
+        let lat = crate::jsonpath::extract_f64(&eonet_event, "$.geometry[0].coordinates[1]");
+        let lon = crate::jsonpath::extract_f64(&eonet_event, "$.geometry[0].coordinates[0]");
+        assert!((lat.unwrap() - 26.4713889).abs() < 0.001);
+        assert!((lon.unwrap() - (-81.0269444)).abs() < 0.001);
+
+        // Verify magnitude extraction.
+        let mag = crate::jsonpath::extract_f64(&eonet_event, "$.geometry[0].magnitudeValue");
+        assert!((mag.unwrap() - 562.0).abs() < 0.001);
+
+        // Build raw event and normalize.
+        let raw = RawFeedEvent {
+            id: EventId::default(),
+            timestamp: chrono::Utc::now(),
+            source: feed.source(),
+            feed_schema: feed.schema(),
+            location: Some(GeoPoint::new(26.4713889, -81.0269444)),
+            payload: eonet_event,
+        };
+
+        let events = feed.normalize(&raw).unwrap();
+        assert_eq!(events.len(), 1);
+
+        let event = &events[0];
+        match &event.kind {
+            OpsisEventKind::WorldObservation { summary } => {
+                assert_eq!(summary, "EASTER PASTURE Wildfire, Hendry, Florida");
+            }
+            _ => panic!("expected WorldObservation"),
+        }
+        // 562 / 10000 = 0.0562
+        assert!((event.severity.unwrap() - 0.0562).abs() < 0.001);
+        assert_eq!(event.domain, Some(StateDomain::Emergency));
+        assert_eq!(event.tags, vec!["nasa", "eonet", "natural-events"]);
+    }
+
     #[test]
     fn normalize_missing_summary_defaults() {
         let feed = GenericPollFeed::new(make_config(make_normalizer()), make_normalizer());

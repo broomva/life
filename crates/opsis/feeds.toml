@@ -67,3 +67,68 @@ summary = "$.iss_position"
 lat = "$.iss_position.latitude"
 lon = "$.iss_position.longitude"
 tags = ["iss", "space", "orbit"]
+
+# ── NASA EONET (Earth Observatory Natural Events) ──────────────────
+# Real-time natural events: wildfires, storms, volcanoes, icebergs.
+# Free, no auth, returns GeoJSON-like with coordinates + magnitude.
+
+[[feeds]]
+name = "nasa-eonet"
+connector = "poll"
+url = "https://eonet.gsfc.nasa.gov/api/v3/events?limit=50&status=open"
+interval_secs = 600
+schema = "nasa.eonet.v3"
+domain = "Emergency"
+
+[feeds.normalize]
+events_path = "$.events[*]"
+summary = "$.title"
+severity = "$.geometry[0].magnitudeValue"
+severity_range = [0, 10000]
+lat = "$.geometry[0].coordinates[1]"
+lon = "$.geometry[0].coordinates[0]"
+tags = ["nasa", "eonet", "natural-events"]
+
+# ── GDELT feeds (BRO-509) ──────────────────────────────────────────
+# GDELT DOC API v2 returns global news articles matching query terms.
+# Articles lack coordinates — events flow through Gaia for domain-level
+# anomaly detection but don't pin to globe. Rate limit: 1 req / 5s.
+
+[[feeds]]
+name = "gdelt-conflict"
+connector = "poll"
+url = "https://api.gdeltproject.org/api/v2/doc/doc?query=conflict%20OR%20war%20OR%20military%20OR%20attack&mode=ArtList&maxrecords=25&format=json&TIMESPAN=15min"
+interval_secs = 900
+schema = "gdelt.doc.v2"
+domain = "Conflict"
+
+[feeds.normalize]
+events_path = "$.articles[*]"
+summary = "$.title"
+tags = ["gdelt", "conflict", "news"]
+
+[[feeds]]
+name = "gdelt-politics"
+connector = "poll"
+url = "https://api.gdeltproject.org/api/v2/doc/doc?query=election%20OR%20sanctions%20OR%20diplomacy%20OR%20treaty&mode=ArtList&maxrecords=25&format=json&TIMESPAN=15min"
+interval_secs = 900
+schema = "gdelt.doc.v2"
+domain = "Politics"
+
+[feeds.normalize]
+events_path = "$.articles[*]"
+summary = "$.title"
+tags = ["gdelt", "politics", "news"]
+
+[[feeds]]
+name = "gdelt-trade"
+connector = "poll"
+url = "https://api.gdeltproject.org/api/v2/doc/doc?query=trade%20OR%20tariff%20OR%20export%20OR%20import%20OR%20economic%20crisis&mode=ArtList&maxrecords=25&format=json&TIMESPAN=15min"
+interval_secs = 900
+schema = "gdelt.doc.v2"
+domain = "Trade"
+
+[feeds.normalize]
+events_path = "$.articles[*]"
+summary = "$.title"
+tags = ["gdelt", "trade", "economics"]

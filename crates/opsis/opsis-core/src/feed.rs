@@ -277,34 +277,30 @@ token_env = "EXAMPLE_API_TOKEN"
     fn feed_config_with_normalizer() {
         let toml_str = r#"
 [[feeds]]
-name = "gdelt-events"
+name = "gdelt-conflict"
 connector = "poll"
-url = "http://data.gdeltproject.org/gdeltv2/lastupdate.json"
+url = "https://api.gdeltproject.org/api/v2/doc/doc?query=conflict&mode=ArtList&maxrecords=25&format=json&TIMESPAN=15min"
 interval_secs = 900
-schema = "gdelt.events.v2"
+schema = "gdelt.doc.v2"
 domain = "Conflict"
 
 [feeds.normalize]
-events_path = "$.data[*]"
-summary = "$.headline"
-severity = "$.goldstein_scale"
-severity_range = [-10, 10]
-lat = "$.lat"
-lon = "$.lon"
-tags = ["gdelt", "news"]
+events_path = "$.articles[*]"
+summary = "$.title"
+tags = ["gdelt", "conflict", "news"]
 "#;
         let config: FeedsConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.feeds.len(), 1);
         let feed = &config.feeds[0];
-        assert_eq!(feed.name, "gdelt-events");
+        assert_eq!(feed.name, "gdelt-conflict");
         assert_eq!(feed.domain.as_deref(), Some("Conflict"));
 
         let norm = feed.normalize.as_ref().unwrap();
-        assert_eq!(norm.events_path.as_deref(), Some("$.data[*]"));
-        assert_eq!(norm.summary, "$.headline");
-        assert_eq!(norm.severity.as_deref(), Some("$.goldstein_scale"));
-        assert_eq!(norm.severity_range, [-10.0, 10.0]);
-        assert_eq!(norm.tags, vec!["gdelt", "news"]);
+        assert_eq!(norm.events_path.as_deref(), Some("$.articles[*]"));
+        assert_eq!(norm.summary, "$.title");
+        assert!(norm.severity.is_none()); // GDELT artlist has no tone data
+        assert!(norm.lat.is_none()); // No coordinates in artlist mode
+        assert_eq!(norm.tags, vec!["gdelt", "conflict", "news"]);
     }
 
     #[test]
