@@ -10,9 +10,12 @@ repository.workspace = true
 [dependencies]
 opsis-core.workspace = true
 opsis-engine.workspace = true
+opsis-lago.workspace = true
+lago-core.workspace = true
+lago-journal.workspace = true
 anyhow.workspace = true
 axum.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["env"] }
 toml.workspace = true
 tokio.workspace = true
 tracing.workspace = true

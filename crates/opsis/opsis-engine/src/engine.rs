@@ -53,6 +53,12 @@ impl Default for EngineConfig {
 /// Shared handle for reading the current world snapshot.
 pub type SnapshotHandle = Arc<RwLock<Option<WorldSnapshot>>>;
 
+/// Optional callback to persist events to an external store (e.g. opsis-lago).
+///
+/// Receives a batch of OpsisEvents produced each tick. The implementation
+/// must be non-blocking (return immediately, queue internally).
+pub type EventPersistFn = Box<dyn Fn(&[OpsisEvent]) + Send + Sync>;
+
 /// The main Opsis world state engine.
 pub struct OpsisEngine {
     pub config: EngineConfig,
@@ -67,6 +73,8 @@ pub struct OpsisEngine {
     recent_events: Vec<OpsisEvent>,
     /// Ring buffer of recent Gaia insights for the snapshot.
     recent_gaia: Vec<OpsisEvent>,
+    /// Optional persistence callback (e.g. opsis-lago writer).
+    persist_fn: Option<EventPersistFn>,
 }
 
 impl OpsisEngine {
@@ -83,7 +91,27 @@ impl OpsisEngine {
             feeds: Vec::new(),
             recent_events: Vec::new(),
             recent_gaia: Vec::new(),
+            persist_fn: None,
         }
+    }
+
+    /// Set a persistence callback for event durability (e.g. opsis-lago).
+    pub fn set_persist_fn(&mut self, f: EventPersistFn) {
+        self.persist_fn = Some(f);
+    }
+
+    /// Inject replayed events into the engine's state (for startup replay).
+    pub fn replay_events(&mut self, events: Vec<OpsisEvent>) {
+        let count = events.len();
+        for event in events {
+            self.aggregator.push(event);
+        }
+        // Flush all replayed events into world state.
+        let _delta = self.aggregator.flush(&mut self.world);
+        info!(
+            replayed = count,
+            "replayed persisted events into world state"
+        );
     }
 
     /// Register a data feed ingestor.
@@ -208,10 +236,21 @@ impl OpsisEngine {
                     };
 
                     // Accumulate recent events for the snapshot.
+                    let mut tick_events: Vec<OpsisEvent> = Vec::new();
                     for sld in &delta.state_line_deltas {
-                        self.recent_events.extend(sld.new_events.iter().cloned());
+                        tick_events.extend(sld.new_events.iter().cloned());
                     }
-                    self.recent_events.extend(delta.unrouted_events.iter().cloned());
+                    tick_events.extend(delta.unrouted_events.iter().cloned());
+                    tick_events.extend(delta.gaia_insights.iter().cloned());
+
+                    // Persist events to Lago (non-blocking).
+                    if let Some(ref persist) = self.persist_fn
+                        && !tick_events.is_empty()
+                    {
+                        persist(&tick_events);
+                    }
+
+                    self.recent_events.extend(tick_events);
                     if self.recent_events.len() > MAX_SNAPSHOT_EVENTS {
                         let drain = self.recent_events.len() - MAX_SNAPSHOT_EVENTS;
                         self.recent_events.drain(..drain);

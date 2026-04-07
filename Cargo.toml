@@ -107,6 +107,7 @@ members = [
     # Opsis — world state engine
     "crates/opsis/opsis-core",
     "crates/opsis/opsis-engine",
+    "crates/opsis/opsis-lago",
     "crates/opsis/opsisd",
 ]
 exclude = ["crates/spaces/life-spaces/spacetimedb"]
@@ -169,6 +170,7 @@ nous-middleware = { path = "crates/nous/nous-middleware", version = "0.3.0" }
 # Opsis
 opsis-core = { path = "crates/opsis/opsis-core", version = "0.3.0" }
 opsis-engine = { path = "crates/opsis/opsis-engine", version = "0.3.0" }
+opsis-lago = { path = "crates/opsis/opsis-lago", version = "0.3.0" }
 # Relay
 life-relay-api = { path = "crates/relay/life-relay-api", version = "0.3.0" }
 life-relay-core = { path = "crates/relay/life-relay-core", version = "0.3.0" }
