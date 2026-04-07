@@ -50,6 +50,10 @@ pub struct VigConfig {
 
     /// Whether to capture prompt/completion content in spans (privacy-sensitive).
     pub capture_content: bool,
+
+    /// When true, duplicate key span attributes with `langsmith.metadata.*` prefix
+    /// for LangSmith UI visibility. Default false (no vendor lock-in).
+    pub langsmith_enrichment: bool,
 }
 
 impl Default for VigConfig {
@@ -62,6 +66,7 @@ impl Default for VigConfig {
             log_format: LogFormat::default(),
             sampling_ratio: 1.0,
             capture_content: false,
+            langsmith_enrichment: false,
         }
     }
 }
@@ -90,6 +95,7 @@ impl VigConfig {
     /// - `VIGIL_LOG_FORMAT` → `log_format` ("json" or "pretty")
     /// - `VIGIL_CAPTURE_CONTENT` → `capture_content` ("true" or "1")
     /// - `VIGIL_SAMPLING_RATIO` → `sampling_ratio` (float 0.0..=1.0)
+    /// - `VIGIL_LANGSMITH_ENRICHMENT` → `langsmith_enrichment` ("true", "1", or "yes")
     pub fn with_env_overrides(mut self) -> Self {
         if let Ok(endpoint) = env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
             if !endpoint.is_empty() {
@@ -132,6 +138,10 @@ impl VigConfig {
             if let Ok(r) = ratio.parse::<f64>() {
                 self.sampling_ratio = r.clamp(0.0, 1.0);
             }
+        }
+
+        if let Ok(val) = env::var("VIGIL_LANGSMITH_ENRICHMENT") {
+            self.langsmith_enrichment = matches!(val.as_str(), "true" | "1" | "yes");
         }
 
         self
@@ -262,6 +272,7 @@ mod tests {
             log_format: LogFormat::Json,
             sampling_ratio: 0.5,
             capture_content: true,
+            langsmith_enrichment: true,
         };
         assert_eq!(cfg.service_name, "test");
         assert_eq!(cfg.otlp_endpoint.as_deref(), Some("http://localhost:4317"));
@@ -270,5 +281,12 @@ mod tests {
         assert_eq!(cfg.log_format, LogFormat::Json);
         assert!((cfg.sampling_ratio - 0.5).abs() < 0.001);
         assert!(cfg.capture_content);
+        assert!(cfg.langsmith_enrichment);
+    }
+
+    #[test]
+    fn langsmith_enrichment_default_false() {
+        let cfg = VigConfig::default();
+        assert!(!cfg.langsmith_enrichment);
     }
 }
