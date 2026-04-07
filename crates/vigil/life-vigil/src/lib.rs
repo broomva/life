@@ -24,6 +24,7 @@
 
 pub mod config;
 pub mod envelope;
+pub mod jsonl;
 pub mod metrics;
 pub mod pricing;
 pub mod semconv;
@@ -31,6 +32,7 @@ pub mod spans;
 
 pub use config::{LogFormat, OtlpProtocol, VigConfig};
 pub use envelope::{CircuitState, CostSource, LlmRequestEnvelope, LlmResponseEconomics};
+pub use jsonl::{JsonlWriter, LlmCallRecord};
 pub use metrics::GenAiMetrics;
 pub use pricing::{ModelPricing, PRICING_SNAPSHOT, estimate_cost, lookup_pricing};
 
