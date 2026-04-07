@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
+use lago_core::id::{BranchId, SessionId};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tracing::info;
@@ -16,6 +17,7 @@ use opsis_engine::feeds::weather::OpenMeteoWeatherFeed;
 use opsis_engine::registry::ClientRegistry;
 use opsis_engine::schema_registry::SchemaRegistry;
 use opsis_engine::stream::{AppState, build_router};
+use opsis_lago::{OpsisEventWriter, OpsisReplay};
 
 #[derive(Parser)]
 #[command(name = "opsisd", about = "Opsis world state engine daemon")]
@@ -31,6 +33,11 @@ struct Cli {
     /// Path to feeds.toml configuration file.
     #[arg(long, default_value = "feeds.toml")]
     feeds_config: PathBuf,
+
+    /// Lago data directory for event persistence. When set, opsisd
+    /// persists all events to a local RedbJournal and replays on startup.
+    #[arg(long, env = "OPSIS_LAGO_DATA_DIR")]
+    lago_data_dir: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -51,6 +58,43 @@ async fn main() -> Result<()> {
         bind_addr: cli.bind.clone(),
     };
     let mut engine = OpsisEngine::new(config);
+
+    // ── Lago persistence (optional) ────────────────────────────────
+    if let Some(ref data_dir) = cli.lago_data_dir {
+        std::fs::create_dir_all(data_dir)?;
+        let journal_path = data_dir.join("opsis-journal.redb");
+        let journal = Arc::new(
+            lago_journal::RedbJournal::open(&journal_path)
+                .map_err(|e| anyhow::anyhow!("failed to open Lago journal: {e}"))?,
+        );
+
+        let session_id = SessionId::from_string("opsis-world");
+        let branch_id = BranchId::from("main");
+
+        // Replay persisted events on startup.
+        let replay = OpsisReplay::new(journal.clone(), session_id.clone(), branch_id.clone());
+        match replay.load_events().await {
+            Ok(events) if !events.is_empty() => {
+                let count = events.len();
+                engine.replay_events(events);
+                info!(events = count, "restored world state from Lago journal");
+            }
+            Ok(_) => {
+                info!("no persisted events found — starting fresh");
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "replay failed — starting fresh");
+            }
+        }
+
+        // Spawn background event writer.
+        let writer = OpsisEventWriter::spawn(journal, session_id, branch_id, 1024);
+        engine.set_persist_fn(Box::new(move |events| {
+            writer.send_batch(events.iter().cloned());
+        }));
+
+        info!(path = %journal_path.display(), "opsis-lago persistence enabled");
+    }
 
     // Try to load feeds from config file; fall back to hardcoded feeds.
     match load_feeds_config(&cli.feeds_config) {

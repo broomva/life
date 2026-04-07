@@ -6310,14 +6310,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "opsis-lago"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "lago-core",
+ "lago-journal",
+ "opsis-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "opsisd"
 version = "0.3.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
  "clap",
+ "lago-core",
+ "lago-journal",
  "opsis-core",
  "opsis-engine",
+ "opsis-lago",
  "tokio",
  "toml",
  "tracing",
