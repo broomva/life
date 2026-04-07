@@ -88,6 +88,16 @@ impl NousMiddleware {
                             hook = hook.as_str(),
                             "nous eval score"
                         );
+
+                        // Emit Vigil evaluation span event for OTel export.
+                        life_vigil::spans::eval_event(
+                            &score.evaluator,
+                            score.value,
+                            score.label.as_str(),
+                            &score.layer.to_string(),
+                            "inline",
+                        );
+
                         if let Some(ref cb) = self.on_score {
                             cb(score);
                         }

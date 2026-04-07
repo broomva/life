@@ -12,7 +12,7 @@ use serde_json::json;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tracing::debug;
+use tracing::info;
 
 // ── ReadFileTool ─────────────────────────────────────────────────────
 
@@ -61,10 +61,10 @@ impl Tool for ReadFileTool {
                 message: "Missing or invalid 'path' argument".into(),
             })?;
 
-        let span = tracing::debug_span!(
-            "read_file",
-            fs.path = %path_str,
-            fs.bytes_read = tracing::field::Empty,
+        let span = tracing::info_span!(
+            "praxis.fs",
+            "praxis.operation" = "read",
+            "praxis.path" = %path_str,
         );
         let _guard = span.enter();
 
@@ -84,8 +84,7 @@ impl Tool for ReadFileTool {
                 message: format!("Failed to read file: {e}"),
             })?;
 
-        span.record("fs.bytes_read", content.len());
-        debug!(bytes = content.len(), "file read");
+        info!(bytes = content.len(), "file read");
 
         let hashed_content = render_hashed_content(&content);
 
@@ -154,10 +153,10 @@ impl Tool for WriteFileTool {
                 message: "Missing or invalid 'content' argument".into(),
             })?;
 
-        let _span = tracing::debug_span!(
-            "write_file",
-            fs.path = %path_str,
-            fs.bytes_written = content.len(),
+        let _span = tracing::info_span!(
+            "praxis.fs",
+            "praxis.operation" = "write",
+            "praxis.path" = %path_str,
         )
         .entered();
 
@@ -176,7 +175,7 @@ impl Tool for WriteFileTool {
                 message: format!("Failed to write file: {e}"),
             })?;
 
-        debug!(bytes = content.len(), "file written");
+        info!(bytes = content.len(), "file written");
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),
@@ -235,7 +234,12 @@ impl Tool for ListDirTool {
                 message: "Missing or invalid 'path' argument".into(),
             })?;
 
-        let _span = tracing::debug_span!("list_dir", fs.path = %path_str).entered();
+        let _span = tracing::info_span!(
+            "praxis.fs",
+            "praxis.operation" = "list",
+            "praxis.path" = %path_str,
+        )
+        .entered();
 
         let path =
             self.fs
@@ -259,7 +263,7 @@ impl Tool for ListDirTool {
             })
             .collect::<Vec<_>>();
 
-        debug!(entry_count = entries.len(), "directory listed");
+        info!(entry_count = entries.len(), "directory listed");
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),
@@ -319,10 +323,10 @@ impl Tool for GlobTool {
                 message: "Missing or invalid 'pattern' argument".into(),
             })?;
 
-        let span = tracing::debug_span!(
-            "glob_search",
-            fs.pattern = %pattern,
-            fs.matches_found = tracing::field::Empty,
+        let span = tracing::info_span!(
+            "praxis.fs",
+            "praxis.operation" = "glob",
+            "praxis.path" = %pattern,
         );
         let _guard = span.enter();
 
@@ -358,8 +362,7 @@ impl Tool for GlobTool {
             .collect();
 
         let count = matches.len();
-        span.record("fs.matches_found", count);
-        debug!(count, "glob search completed");
+        info!(count, "glob search completed");
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),
@@ -421,10 +424,10 @@ impl Tool for GrepTool {
                 message: "Missing or invalid 'pattern' argument".into(),
             })?;
 
-        let span = tracing::debug_span!(
-            "grep_search",
-            fs.pattern = %pattern_str,
-            fs.matches_found = tracing::field::Empty,
+        let span = tracing::info_span!(
+            "praxis.fs",
+            "praxis.operation" = "grep",
+            "praxis.path" = %pattern_str,
         );
         let _guard = span.enter();
 
@@ -520,8 +523,7 @@ impl Tool for GrepTool {
         }
 
         let count = matches.len();
-        span.record("fs.matches_found", count);
-        debug!(count, "grep search completed");
+        info!(count, "grep search completed");
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),

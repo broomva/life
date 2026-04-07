@@ -200,11 +200,21 @@ impl Tool for EditFileTool {
                 message: format!("Invalid 'ops' format: {e}"),
             })?;
 
+        // Derive operation name from the ops mix.
+        let op_label = if ops.len() == 1 {
+            match &ops[0] {
+                TaggedEditOp::ReplaceLine { .. } => "replace",
+                TaggedEditOp::InsertAfterTag { .. } => "insert",
+                TaggedEditOp::DeleteLine { .. } => "delete",
+            }
+        } else {
+            "multi"
+        };
+
         let span = tracing::info_span!(
-            "edit_file",
-            hashline.file = %path_str,
-            hashline.ops_count = ops.len(),
-            hashline.lines_changed = tracing::field::Empty,
+            "praxis.edit",
+            "praxis.path" = %path_str,
+            "praxis.operation" = op_label,
         );
         let _guard = span.enter();
 
@@ -233,7 +243,6 @@ impl Tool for EditFileTool {
 
         let new_line_count = new_content.lines().count();
         let lines_changed = (new_line_count as isize - original_line_count as isize).unsigned_abs();
-        span.record("hashline.lines_changed", lines_changed);
 
         self.fs
             .write(&path, new_content.as_bytes())
