@@ -89,12 +89,31 @@ pub fn tool_span(tool_name: &str, tool_call_id: &str) -> Span {
     )
 }
 
-/// Record token usage on the current span.
+/// Record token usage on the current span via attributes.
 ///
 /// Sets `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`.
 pub fn record_token_usage(span: &Span, usage: &TokenUsage) {
     span.record(semconv::GEN_AI_USAGE_INPUT_TOKENS, usage.prompt_tokens);
     span.record(semconv::GEN_AI_USAGE_OUTPUT_TOKENS, usage.completion_tokens);
+}
+
+/// Emit a `gen_ai.usage` span event with token counts.
+///
+/// This uses the span event mechanism (which reliably propagates through
+/// `tracing-opentelemetry` → LangSmith) rather than `span.record()` on
+/// Empty fields, which may not be exported by some OTel bridges.
+///
+/// Must be called within an entered span context (the chat span).
+pub fn record_usage_event(input_tokens: u32, output_tokens: u32, model: &str, finish_reason: &str) {
+    tracing::event!(
+        name: "gen_ai.usage",
+        tracing::Level::INFO,
+        "gen_ai.usage.input_tokens" = input_tokens,
+        "gen_ai.usage.output_tokens" = output_tokens,
+        "gen_ai.usage.total_tokens" = input_tokens + output_tokens,
+        "gen_ai.response.model" = model,
+        "gen_ai.response.finish_reasons" = finish_reason,
+    );
 }
 
 /// Record the finish reason on the current span.
