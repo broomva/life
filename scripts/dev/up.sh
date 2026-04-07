@@ -9,6 +9,15 @@ if ! command -v cargo >/dev/null 2>&1 && [ -f "$HOME/.cargo/env" ]; then
   . "$HOME/.cargo/env"
 fi
 
+# Source .env if present (OTEL, provider keys, service ports).
+if [ -f "$ROOT/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT/.env"
+  set +a
+  log "loaded .env"
+fi
+
 AIOS_STATE_ROOT="${AIOS_STATE_ROOT:-/home/exedev/.aios}"
 TENANT_ID="${AIOS_TENANT_ID:-default}"
 PROJECT_ID="${AIOS_PROJECT_ID:-life}"

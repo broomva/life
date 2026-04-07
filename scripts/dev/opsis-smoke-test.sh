@@ -22,6 +22,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# Source .env if present (provider keys, OTEL config, ports).
+if [ -f "$ROOT/.env" ]; then
+  set -a; . "$ROOT/.env"; set +a
+fi
+
 OPSISD_PORT="${OPSISD_PORT:-3010}"
 OPSISD_URL="http://127.0.0.1:${OPSISD_PORT}"
 ARCAN_PORT="${ARCAN_PORT:-3000}"
