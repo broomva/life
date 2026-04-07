@@ -97,7 +97,7 @@ tags = ["nasa", "eonet", "natural-events"]
 [[feeds]]
 name = "gdelt-conflict"
 connector = "poll"
-url = "https://api.gdeltproject.org/api/v2/doc/doc?query=conflict%20OR%20war%20OR%20military%20OR%20attack&mode=ArtList&maxrecords=25&format=json&TIMESPAN=15min"
+url = "https://api.gdeltproject.org/api/v2/doc/doc?query=conflict%20OR%20war%20OR%20military%20OR%20attack&mode=ArtList&maxrecords=25&format=json"
 interval_secs = 900
 schema = "gdelt.doc.v2"
 domain = "Conflict"
@@ -110,7 +110,7 @@ tags = ["gdelt", "conflict", "news"]
 [[feeds]]
 name = "gdelt-politics"
 connector = "poll"
-url = "https://api.gdeltproject.org/api/v2/doc/doc?query=election%20OR%20sanctions%20OR%20diplomacy%20OR%20treaty&mode=ArtList&maxrecords=25&format=json&TIMESPAN=15min"
+url = "https://api.gdeltproject.org/api/v2/doc/doc?query=election%20OR%20sanctions%20OR%20diplomacy%20OR%20treaty&mode=ArtList&maxrecords=25&format=json"
 interval_secs = 900
 schema = "gdelt.doc.v2"
 domain = "Politics"
@@ -123,7 +123,7 @@ tags = ["gdelt", "politics", "news"]
 [[feeds]]
 name = "gdelt-trade"
 connector = "poll"
-url = "https://api.gdeltproject.org/api/v2/doc/doc?query=trade%20OR%20tariff%20OR%20export%20OR%20import%20OR%20economic%20crisis&mode=ArtList&maxrecords=25&format=json&TIMESPAN=15min"
+url = "https://api.gdeltproject.org/api/v2/doc/doc?query=trade%20OR%20tariff%20OR%20export%20OR%20import%20OR%20economic%20crisis&mode=ArtList&maxrecords=25&format=json"
 interval_secs = 900
 schema = "gdelt.doc.v2"
 domain = "Trade"
