@@ -100,6 +100,8 @@ fn init_with_otel(
     endpoint: &str,
     env_filter: EnvFilter,
 ) -> Result<VigGuard, VigError> {
+    // Resource::builder() automatically includes EnvResourceDetector,
+    // which reads OTEL_RESOURCE_ATTRIBUTES (e.g. langsmith.project.name=arcan).
     let resource = Resource::builder()
         .with_service_name(config.service_name.clone())
         .build();
