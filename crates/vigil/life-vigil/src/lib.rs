@@ -120,9 +120,12 @@ fn init_with_otel(
     let meter_provider = build_meter_provider(&config, endpoint, resource)?;
     global::set_meter_provider(meter_provider.clone());
 
-    // Create OTel tracing layer
+    // Create OTel tracing layer with INFO filter to exclude debug-level
+    // infrastructure spans (e.g. lago.journal.append) from OTLP export.
     let tracer = tracer_provider.tracer(config.service_name.clone());
-    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+    let otel_layer = tracing_opentelemetry::layer()
+        .with_tracer(tracer)
+        .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
 
     // Build subscriber with OTel layer + fmt layer
     let registry = tracing_subscriber::registry().with(otel_layer);
