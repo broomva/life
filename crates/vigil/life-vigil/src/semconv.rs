@@ -122,6 +122,17 @@ pub const LIFE_TOOL_STATUS: &str = "life.tool.status";
 /// Tool execution output (when content capture is enabled).
 pub const LIFE_TOOL_OUTPUT: &str = "life.tool.output";
 
+// ─── Reliability Attributes ─────────────────────────────────────────────────
+
+/// Number of retries before the request succeeded (0 = first attempt).
+pub const LIFE_RETRY_COUNT: &str = "life.reliability.retry_count";
+
+/// Whether a fallback provider was used for this call.
+pub const LIFE_FALLBACK_TRIGGERED: &str = "life.reliability.fallback_triggered";
+
+/// Circuit breaker state at time of call (closed, open, half_open).
+pub const LIFE_CIRCUIT_STATE: &str = "life.reliability.circuit_state";
+
 // ─── Autonomic Attributes ────────────────────────────────────────────────────
 
 /// Autonomic economic mode (sovereign, conserving, hustle, hibernate).

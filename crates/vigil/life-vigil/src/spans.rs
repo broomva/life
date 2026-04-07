@@ -69,6 +69,10 @@ pub fn chat_span(
         { semconv::GEN_AI_USAGE_OUTPUT_TOKENS } = tracing::field::Empty,
         { semconv::GEN_AI_RESPONSE_FINISH_REASONS } = tracing::field::Empty,
         { semconv::GEN_AI_RESPONSE_ID } = tracing::field::Empty,
+        // Reliability (filled via record_reliability after provider call):
+        { semconv::LIFE_RETRY_COUNT } = tracing::field::Empty,
+        { semconv::LIFE_FALLBACK_TRIGGERED } = tracing::field::Empty,
+        { semconv::LIFE_CIRCUIT_STATE } = tracing::field::Empty,
         // LangSmith thread grouping: session.id on the GenAI span itself.
         "session.id" = session_id,
     )
@@ -132,6 +136,21 @@ pub fn record_completion_content(content: &str) {
         tracing::Level::INFO,
         "gen_ai.completion" = content,
     );
+}
+
+/// Record reliability attributes on a chat span.
+///
+/// Emits retry count, fallback status, and circuit breaker state.
+/// Call after a provider call completes (successful or not).
+pub fn record_reliability(
+    span: &Span,
+    retry_count: u32,
+    fallback_triggered: bool,
+    circuit_state: &str,
+) {
+    span.record(semconv::LIFE_RETRY_COUNT, retry_count);
+    span.record(semconv::LIFE_FALLBACK_TRIGGERED, fallback_triggered);
+    span.record(semconv::LIFE_CIRCUIT_STATE, circuit_state);
 }
 
 /// Emit a `gen_ai.evaluation.result` span event with eval attributes.
@@ -335,6 +354,13 @@ mod tests {
         let span = chat_span("test-model", "test", None, None, "sess-completion");
         let _guard = span.enter();
         record_completion_content("I'm doing well, thanks!");
+    }
+
+    #[test]
+    fn record_reliability_does_not_panic() {
+        ensure_subscriber();
+        let span = chat_span("test-model", "test", None, None, "sess-reliability");
+        record_reliability(&span, 2, true, "half_open");
     }
 
     #[test]
