@@ -87,6 +87,14 @@ pub fn builtin_schemas() -> Vec<SchemaDefinition> {
             event_kind_hint: OpsisEventKindHint::WorldObservation,
             domain_hint: Some(StateDomain::Emergency),
         },
+        SchemaDefinition {
+            key: SchemaKey::new("opensky.states.v1"),
+            version: 1,
+            description: "OpenSky Network live aircraft state vectors".into(),
+            producer: SchemaProducer::Feed,
+            event_kind_hint: OpsisEventKindHint::WorldObservation,
+            domain_hint: Some(StateDomain::Infrastructure),
+        },
     ]
 }
 
@@ -123,8 +131,8 @@ mod tests {
     }
 
     #[test]
-    fn six_builtin_schemas() {
-        assert_eq!(builtin_schemas().len(), 6);
+    fn seven_builtin_schemas() {
+        assert_eq!(builtin_schemas().len(), 7);
     }
 
     #[test]

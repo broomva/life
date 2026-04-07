@@ -68,6 +68,18 @@ lat = "$.iss_position.latitude"
 lon = "$.iss_position.longitude"
 tags = ["iss", "space", "orbit"]
 
+# ── OpenSky Network (Flight Tracking) ──────────────────────────────
+# Live aircraft state vectors. Custom feed (array-of-arrays format).
+# Free, no auth, 10s rate limit. ~6000 aircraft over North America.
+
+[[feeds]]
+name = "opensky-flights"
+connector = "poll"
+url = "https://opensky-network.org/api/states/all"
+interval_secs = 15
+schema = "opensky.states.v1"
+domain = "Infrastructure"
+
 # ── NASA EONET (Earth Observatory Natural Events) ──────────────────
 # Real-time natural events: wildfires, storms, volcanoes, icebergs.
 # Free, no auth, returns GeoJSON-like with coordinates + magnitude.
