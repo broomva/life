@@ -95,6 +95,14 @@ pub fn builtin_schemas() -> Vec<SchemaDefinition> {
             event_kind_hint: OpsisEventKindHint::WorldObservation,
             domain_hint: Some(StateDomain::Infrastructure),
         },
+        SchemaDefinition {
+            key: SchemaKey::new("aisstream.position.v1"),
+            version: 1,
+            description: "AISStream.io ship position reports via WebSocket".into(),
+            producer: SchemaProducer::Feed,
+            event_kind_hint: OpsisEventKindHint::WorldObservation,
+            domain_hint: Some(StateDomain::Ocean),
+        },
     ]
 }
 
@@ -131,8 +139,8 @@ mod tests {
     }
 
     #[test]
-    fn seven_builtin_schemas() {
-        assert_eq!(builtin_schemas().len(), 7);
+    fn eight_builtin_schemas() {
+        assert_eq!(builtin_schemas().len(), 8);
     }
 
     #[test]

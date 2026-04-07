@@ -80,6 +80,19 @@ interval_secs = 15
 schema = "opensky.states.v1"
 domain = "Infrastructure"
 
+# ── AISStream.io (Ship Tracking) ───────────────────────────────────
+# Real-time AIS position reports via WebSocket (poll-batch mode).
+# Requires AISSTREAM_API_KEY env var. Free tier available.
+# Gracefully skips if API key not set.
+
+[[feeds]]
+name = "ais-ships"
+connector = "poll"
+url = "wss://stream.aisstream.io/v0/stream"
+interval_secs = 30
+schema = "aisstream.position.v1"
+domain = "Ocean"
+
 # ── NASA EONET (Earth Observatory Natural Events) ──────────────────
 # Real-time natural events: wildfires, storms, volcanoes, icebergs.
 # Free, no auth, returns GeoJSON-like with coordinates + magnitude.

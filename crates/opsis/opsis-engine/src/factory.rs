@@ -8,6 +8,7 @@
 use opsis_core::feed::{ConnectorConfig, FeedConfig, FeedIngestor};
 
 use crate::error::{EngineError, EngineResult};
+use crate::feeds::ais::AisStreamFeed;
 use crate::feeds::generic_poll::GenericPollFeed;
 use crate::feeds::opensky::OpenSkyFeed;
 use crate::feeds::usgs::UsgsEarthquakeFeed;
@@ -44,6 +45,7 @@ pub fn build_feed(config: &FeedConfig) -> EngineResult<Box<dyn FeedIngestor>> {
             };
             Ok(Box::new(OpenSkyFeed::with_config(url, interval)))
         }
+        "ais-ships" => Ok(Box::new(AisStreamFeed::new())),
         _ => Err(EngineError::Config(format!(
             "unknown feed '{}' — add a [feeds.normalize] section for generic feeds \
              or register a custom FeedIngestor",
