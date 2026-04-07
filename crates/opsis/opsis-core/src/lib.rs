@@ -17,7 +17,9 @@ pub use error::{OpsisError, OpsisResult};
 pub use event::{
     EventId, EventSource, OpsisEvent, OpsisEventKind, RawFeedEvent, StateLineDelta, WorldDelta,
 };
-pub use feed::{ConnectorConfig, FeedConfig, FeedIngestor, FeedSource, FeedsConfig, SchemaKey};
+pub use feed::{
+    ConnectorConfig, FeedConfig, FeedIngestor, FeedSource, FeedsConfig, NormalizerConfig, SchemaKey,
+};
 pub use schema::{OpsisEventKindHint, SchemaDefinition, SchemaProducer, builtin_schemas};
 pub use spatial::{Bbox, GeoHotspot, GeoPoint};
 pub use state::{StateDomain, StateLine, Trend, WorldState};

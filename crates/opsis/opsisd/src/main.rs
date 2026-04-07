@@ -8,6 +8,7 @@ use tokio::sync::broadcast;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+use opsis_core::feed::ConnectorConfig;
 use opsis_engine::config::load_feeds_config;
 use opsis_engine::engine::{EngineConfig, OpsisEngine};
 use opsis_engine::feeds::usgs::UsgsEarthquakeFeed;
@@ -55,34 +56,30 @@ async fn main() -> Result<()> {
     match load_feeds_config(&cli.feeds_config) {
         Ok(feeds_config) => {
             let count = feeds_config.feeds.len();
-            // For now, we still use the hardcoded feed implementations keyed by name.
-            // The feeds.toml serves as the declarative source of truth for which feeds
-            // to enable; the actual FeedIngestor impl is matched by name.
+
             for feed_cfg in &feeds_config.feeds {
-                match feed_cfg.name.as_str() {
-                    "usgs-earthquake" => {
-                        engine.add_feed(Box::new(UsgsEarthquakeFeed::new()));
+                // Agent stream feeds use POST /events/inject — no pull ingestor.
+                if matches!(feed_cfg.connector, ConnectorConfig::AgentStream { .. }) {
+                    info!(name = %feed_cfg.name, "registered agent_stream feed (inject-mode)");
+                    continue;
+                }
+
+                // Use the feed factory to build the ingestor.
+                match opsis_engine::build_feed(feed_cfg) {
+                    Ok(ingestor) => {
+                        info!(name = %feed_cfg.name, schema = %feed_cfg.schema, "registered feed");
+                        engine.add_feed(ingestor);
                     }
-                    "open-meteo" => {
-                        engine.add_feed(Box::new(OpenMeteoWeatherFeed::new()));
-                    }
-                    _ if matches!(
-                        feed_cfg.connector,
-                        opsis_core::feed::ConnectorConfig::AgentStream { .. }
-                    ) =>
-                    {
-                        // Agent stream feeds push events via POST /events/inject.
-                        // No pull-based ingestor needed — just log the registration.
-                        info!(
+                    Err(e) => {
+                        tracing::warn!(
                             name = %feed_cfg.name,
-                            "registered agent_stream feed (inject-mode)"
+                            error = %e,
+                            "failed to build feed — skipping"
                         );
-                    }
-                    other => {
-                        tracing::warn!(name = other, "unknown feed in config — skipping");
                     }
                 }
             }
+
             info!(
                 path = %cli.feeds_config.display(),
                 feeds = count,

@@ -76,6 +76,44 @@ pub struct AuthConfig {
     pub token_env: Option<String>,
 }
 
+/// Declarative field extraction for generic JSON feeds.
+///
+/// Allows defining event normalization in `feeds.toml` without Rust code.
+/// Dot-path expressions (e.g. `$.features[*].properties.mag`) extract
+/// values from the raw JSON response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NormalizerConfig {
+    /// Dot-path to the array of events in the response.
+    /// e.g. `"$.features[*]"` for GeoJSON, `"$.data[*]"` for flat arrays.
+    /// If None, treats entire response as a single event.
+    pub events_path: Option<String>,
+
+    /// Dot-path to the field used for WorldObservation summary.
+    pub summary: String,
+
+    /// Dot-path to the severity field (numeric). Normalized to 0.0–1.0.
+    pub severity: Option<String>,
+
+    /// Input range [min, max] for severity normalization.
+    /// e.g. `[-10, 10]` for Goldstein scale, `[0, 10]` for magnitude.
+    #[serde(default = "default_severity_range")]
+    pub severity_range: [f64; 2],
+
+    /// Dot-path to latitude field.
+    pub lat: Option<String>,
+
+    /// Dot-path to longitude field.
+    pub lon: Option<String>,
+
+    /// Static tags applied to all events from this feed.
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+fn default_severity_range() -> [f64; 2] {
+    [0.0, 1.0]
+}
+
 /// Declarative feed definition (from feeds.toml).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeedConfig {
@@ -85,6 +123,9 @@ pub struct FeedConfig {
     pub schema: String,
     pub domain: Option<String>,
     pub auth: Option<AuthConfig>,
+    /// Declarative normalizer for generic JSON feeds.
+    /// When present, the feed uses GenericPollFeed instead of a named implementation.
+    pub normalize: Option<NormalizerConfig>,
 }
 
 /// Top-level feeds.toml structure.
@@ -230,5 +271,76 @@ token_env = "EXAMPLE_API_TOKEN"
         let auth = feed.auth.as_ref().unwrap();
         assert_eq!(auth.auth_type, "bearer");
         assert_eq!(auth.token_env.as_deref(), Some("EXAMPLE_API_TOKEN"));
+    }
+
+    #[test]
+    fn feed_config_with_normalizer() {
+        let toml_str = r#"
+[[feeds]]
+name = "gdelt-events"
+connector = "poll"
+url = "http://data.gdeltproject.org/gdeltv2/lastupdate.json"
+interval_secs = 900
+schema = "gdelt.events.v2"
+domain = "Conflict"
+
+[feeds.normalize]
+events_path = "$.data[*]"
+summary = "$.headline"
+severity = "$.goldstein_scale"
+severity_range = [-10, 10]
+lat = "$.lat"
+lon = "$.lon"
+tags = ["gdelt", "news"]
+"#;
+        let config: FeedsConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.feeds.len(), 1);
+        let feed = &config.feeds[0];
+        assert_eq!(feed.name, "gdelt-events");
+        assert_eq!(feed.domain.as_deref(), Some("Conflict"));
+
+        let norm = feed.normalize.as_ref().unwrap();
+        assert_eq!(norm.events_path.as_deref(), Some("$.data[*]"));
+        assert_eq!(norm.summary, "$.headline");
+        assert_eq!(norm.severity.as_deref(), Some("$.goldstein_scale"));
+        assert_eq!(norm.severity_range, [-10.0, 10.0]);
+        assert_eq!(norm.tags, vec!["gdelt", "news"]);
+    }
+
+    #[test]
+    fn feed_config_without_normalizer_parses() {
+        let toml_str = r#"
+[[feeds]]
+name = "usgs-earthquake"
+connector = "poll"
+url = "https://earthquake.usgs.gov/feed"
+interval_secs = 30
+schema = "usgs.geojson.v1"
+domain = "Emergency"
+"#;
+        let config: FeedsConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.feeds[0].normalize.is_none());
+    }
+
+    #[test]
+    fn normalizer_config_minimal() {
+        let toml_str = r#"
+[[feeds]]
+name = "simple"
+connector = "poll"
+url = "http://example.com/api"
+interval_secs = 60
+schema = "simple.v1"
+
+[feeds.normalize]
+summary = "$.title"
+"#;
+        let config: FeedsConfig = toml::from_str(toml_str).unwrap();
+        let norm = config.feeds[0].normalize.as_ref().unwrap();
+        assert_eq!(norm.summary, "$.title");
+        assert!(norm.events_path.is_none());
+        assert!(norm.severity.is_none());
+        assert_eq!(norm.severity_range, [0.0, 1.0]); // default
+        assert!(norm.tags.is_empty());
     }
 }
