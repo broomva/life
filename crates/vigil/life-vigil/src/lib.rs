@@ -23,11 +23,13 @@
 //! structured logging only via `tracing-subscriber`.
 
 pub mod config;
+pub mod envelope;
 pub mod metrics;
 pub mod semconv;
 pub mod spans;
 
 pub use config::{LogFormat, OtlpProtocol, VigConfig};
+pub use envelope::{CircuitState, CostSource, LlmRequestEnvelope, LlmResponseEconomics};
 pub use metrics::GenAiMetrics;
 
 use opentelemetry::global;

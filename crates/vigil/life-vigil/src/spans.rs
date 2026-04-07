@@ -47,11 +47,15 @@ pub fn phase_span(phase: LoopPhase) -> Span {
 ///
 /// Follows the OTel GenAI semantic convention for client spans:
 /// `chat {gen_ai.request.model}` naming pattern.
+///
+/// Includes `session.id` for LangSmith thread grouping — traces sharing
+/// the same session ID appear together in the Threads tab.
 pub fn chat_span(
     model: &str,
     provider: &str,
     max_tokens: Option<u32>,
     temperature: Option<f64>,
+    session_id: &str,
 ) -> Span {
     tracing::info_span!(
         "chat",
@@ -60,11 +64,13 @@ pub fn chat_span(
         { semconv::GEN_AI_REQUEST_MODEL } = model,
         { semconv::GEN_AI_REQUEST_MAX_TOKENS } = max_tokens,
         { semconv::GEN_AI_REQUEST_TEMPERATURE } = temperature,
-        // These will be filled in after the response:
+        // Filled after the response via record_token_usage / record_finish_reason:
         { semconv::GEN_AI_USAGE_INPUT_TOKENS } = tracing::field::Empty,
         { semconv::GEN_AI_USAGE_OUTPUT_TOKENS } = tracing::field::Empty,
         { semconv::GEN_AI_RESPONSE_FINISH_REASONS } = tracing::field::Empty,
         { semconv::GEN_AI_RESPONSE_ID } = tracing::field::Empty,
+        // LangSmith thread grouping: session.id on the GenAI span itself.
+        "session.id" = session_id,
     )
 }
 
@@ -100,6 +106,32 @@ pub fn record_response_id(span: &Span, response_id: &str) {
 /// Record tool execution status on a tool span.
 pub fn record_tool_status(span: &Span, status: &str) {
     span.record(semconv::LIFE_TOOL_STATUS, status);
+}
+
+/// Emit a `gen_ai.content.prompt` span event recording the input messages.
+///
+/// Follows the OTel GenAI semantic conventions for content events.
+/// Must be called within an entered span context (the chat span).
+/// Only call when content capture is enabled (`VIGIL_CAPTURE_CONTENT=true`).
+pub fn record_prompt_content(content: &str) {
+    tracing::event!(
+        name: "gen_ai.content.prompt",
+        tracing::Level::INFO,
+        "gen_ai.prompt" = content,
+    );
+}
+
+/// Emit a `gen_ai.content.completion` span event recording the output content.
+///
+/// Follows the OTel GenAI semantic conventions for content events.
+/// Must be called within an entered span context (the chat span).
+/// Only call when content capture is enabled (`VIGIL_CAPTURE_CONTENT=true`).
+pub fn record_completion_content(content: &str) {
+    tracing::event!(
+        name: "gen_ai.content.completion",
+        tracing::Level::INFO,
+        "gen_ai.completion" = content,
+    );
 }
 
 /// Emit a `gen_ai.evaluation.result` span event with eval attributes.
@@ -232,6 +264,7 @@ mod tests {
             "anthropic",
             Some(4096),
             Some(0.7),
+            "sess-chat-1",
         );
         assert!(!span.is_disabled());
     }
@@ -272,7 +305,7 @@ mod tests {
     #[test]
     fn record_token_usage_does_not_panic() {
         ensure_subscriber();
-        let span = chat_span("test-model", "test", None, None);
+        let span = chat_span("test-model", "test", None, None, "sess-usage");
         let usage = TokenUsage {
             prompt_tokens: 100,
             completion_tokens: 50,
@@ -284,8 +317,24 @@ mod tests {
     #[test]
     fn record_finish_reason_does_not_panic() {
         ensure_subscriber();
-        let span = chat_span("test-model", "test", None, None);
+        let span = chat_span("test-model", "test", None, None, "sess-finish");
         record_finish_reason(&span, "stop");
+    }
+
+    #[test]
+    fn record_prompt_content_does_not_panic() {
+        ensure_subscriber();
+        let span = chat_span("test-model", "test", None, None, "sess-prompt");
+        let _guard = span.enter();
+        record_prompt_content("Hello, how are you?");
+    }
+
+    #[test]
+    fn record_completion_content_does_not_panic() {
+        ensure_subscriber();
+        let span = chat_span("test-model", "test", None, None, "sess-completion");
+        let _guard = span.enter();
+        record_completion_content("I'm doing well, thanks!");
     }
 
     #[test]
