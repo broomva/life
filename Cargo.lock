@@ -5917,6 +5917,7 @@ name = "nous-middleware"
 version = "0.3.0"
 dependencies = [
  "arcan-core",
+ "life-vigil",
  "nous-core",
  "nous-heuristics",
  "serde_json",

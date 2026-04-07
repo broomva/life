@@ -12,6 +12,7 @@ description = "Arcan Middleware implementation for Nous — wires evaluators int
 nous-core.workspace = true
 nous-heuristics.workspace = true
 arcan-core.workspace = true
+life-vigil.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

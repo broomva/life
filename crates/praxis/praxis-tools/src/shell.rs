@@ -9,6 +9,7 @@ use aios_protocol::tool::{
 use praxis_core::sandbox::{CommandRequest, CommandRunner, SandboxPolicy};
 use serde_json::json;
 use std::path::PathBuf;
+use std::time::Instant;
 use tracing::info;
 
 /// Tool that executes bash commands within the sandbox.
@@ -60,12 +61,13 @@ impl Tool for BashTool {
             })?;
 
         let span = tracing::info_span!(
-            "bash_execute",
-            tool.name = "bash",
-            call_id = %call.call_id,
-            bash.exit_code = tracing::field::Empty,
+            "praxis.shell.execute",
+            "praxis.command" = %command_line,
+            "praxis.exit_code" = tracing::field::Empty,
+            "praxis.duration_ms" = tracing::field::Empty,
         );
         let _guard = span.enter();
+        let start = Instant::now();
 
         let cwd = call
             .input
@@ -89,8 +91,13 @@ impl Tool for BashTool {
                     message: e.to_string(),
                 })?;
 
-        span.record("bash.exit_code", result.exit_code);
-        info!(exit_code = result.exit_code, "bash command completed");
+        let duration_ms = start.elapsed().as_millis() as u64;
+        span.record("praxis.exit_code", result.exit_code);
+        span.record("praxis.duration_ms", duration_ms);
+        info!(
+            exit_code = result.exit_code,
+            duration_ms, "bash command completed"
+        );
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),
