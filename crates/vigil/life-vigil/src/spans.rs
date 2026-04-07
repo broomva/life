@@ -23,8 +23,10 @@ pub fn agent_span(session_id: &str, agent_name: &str) -> Span {
         { semconv::GEN_AI_AGENT_NAME } = agent_name,
         { semconv::GEN_AI_AGENT_ID } = session_id,
         { semconv::LIFE_SESSION_ID } = session_id,
-        // LangSmith thread grouping: session.id maps to Threads tab.
+        // OTel standard session attribute.
         "session.id" = session_id,
+        // LangSmith-specific: thread_id groups traces in the Threads tab.
+        "langsmith.metadata.thread_id" = session_id,
     )
 }
 
@@ -73,8 +75,9 @@ pub fn chat_span(
         { semconv::LIFE_RETRY_COUNT } = tracing::field::Empty,
         { semconv::LIFE_FALLBACK_TRIGGERED } = tracing::field::Empty,
         { semconv::LIFE_CIRCUIT_STATE } = tracing::field::Empty,
-        // LangSmith thread grouping: session.id on the GenAI span itself.
+        // OTel standard + LangSmith thread grouping.
         "session.id" = session_id,
+        "langsmith.metadata.thread_id" = session_id,
     )
 }
 
