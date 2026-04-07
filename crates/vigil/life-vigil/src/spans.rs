@@ -13,6 +13,9 @@ use crate::semconv;
 ///
 /// This is the top-level span for an agent invocation, containing all
 /// loop phases and LLM calls as children.
+///
+/// Emits `session.id` for LangSmith thread grouping alongside the
+/// canonical `life.session_id` attribute.
 pub fn agent_span(session_id: &str, agent_name: &str) -> Span {
     tracing::info_span!(
         "invoke_agent",
@@ -20,6 +23,8 @@ pub fn agent_span(session_id: &str, agent_name: &str) -> Span {
         { semconv::GEN_AI_AGENT_NAME } = agent_name,
         { semconv::GEN_AI_AGENT_ID } = session_id,
         { semconv::LIFE_SESSION_ID } = session_id,
+        // LangSmith thread grouping: session.id maps to Threads tab.
+        "session.id" = session_id,
     )
 }
 
