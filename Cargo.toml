@@ -222,7 +222,7 @@ metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 opentelemetry = "0.29"
 opentelemetry-otlp = { version = "0.29", features = ["trace", "metrics", "grpc-tonic"] }
-opentelemetry_sdk = { version = "0.29", features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.31", features = ["trace", "metrics"] }
 parking_lot = "0.12"
 parquet = { version = "53", features = ["async"] }
 portable-pty = "0.8"
