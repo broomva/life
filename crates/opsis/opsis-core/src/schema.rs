@@ -71,6 +71,22 @@ pub fn builtin_schemas() -> Vec<SchemaDefinition> {
             event_kind_hint: OpsisEventKindHint::AgentObservation,
             domain_hint: None,
         },
+        SchemaDefinition {
+            key: SchemaKey::new("gdelt.doc.v2"),
+            version: 2,
+            description: "GDELT DOC API v2 article list — global news events".into(),
+            producer: SchemaProducer::Feed,
+            event_kind_hint: OpsisEventKindHint::WorldObservation,
+            domain_hint: None, // Domain set per-feed (Conflict, Politics, Trade)
+        },
+        SchemaDefinition {
+            key: SchemaKey::new("nasa.eonet.v3"),
+            version: 3,
+            description: "NASA EONET v3 — natural events (wildfires, storms, volcanoes)".into(),
+            producer: SchemaProducer::Feed,
+            event_kind_hint: OpsisEventKindHint::WorldObservation,
+            domain_hint: Some(StateDomain::Emergency),
+        },
     ]
 }
 
@@ -107,7 +123,17 @@ mod tests {
     }
 
     #[test]
-    fn four_builtin_schemas() {
-        assert_eq!(builtin_schemas().len(), 4);
+    fn six_builtin_schemas() {
+        assert_eq!(builtin_schemas().len(), 6);
+    }
+
+    #[test]
+    fn gdelt_schema_exists() {
+        let schemas = builtin_schemas();
+        assert!(
+            schemas
+                .iter()
+                .any(|s| s.key == SchemaKey::new("gdelt.doc.v2"))
+        );
     }
 }
