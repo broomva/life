@@ -21,7 +21,7 @@ System design for the control plane governing the `/life` monorepo.
 ## Components
 
 ```
-.control/                          Declarative policy, commands, topology
+.life/control/                          Declarative policy, commands, topology
   ├── policy.yaml                  Gate sequence, retry budget, escalation rules
   ├── commands.yaml                Canonical command definitions (smoke, check, test, recover)
   ├── topology.yaml                Zone ownership, criticality, agent permissions
@@ -68,7 +68,7 @@ conformance/run.sh                 8-suite canonical behavior validation
 
 ### Persistence Boundary
 - Serialize state transitions through Lago's append-only journal.
-- Control state persisted in `.control/state.json` (audit timestamps, controller mode).
+- Control state persisted in `.life/control/state.json` (audit timestamps, controller mode).
 
 ### Control Boundary
 - Control scripts never modify production code — they only measure, validate, and report.
@@ -87,7 +87,7 @@ conformance/run.sh                 8-suite canonical behavior validation
 | `praxis/` | Tool engine | HIGH | fmt + clippy + test |
 | `spaces/` | Networking | HIGH | fmt + clippy + check |
 | `docs/` | Shared | MEDIUM | Existence audit |
-| `.control/` | Control plane | HIGH | Strict audit |
+| `.life/control/` | Control plane | HIGH | Strict audit |
 | `.github/workflows/` | CI | MEDIUM | Syntax validation |
 
 ---
@@ -216,7 +216,7 @@ The feedback loop is **open**: Arcan and Autonomic use separate Lago journals. E
 ### Primary Pipeline (`control-harness.yml`)
 - Triggers on: push to main, all PRs
 - Steps: checkout → submodules → protoc → rust toolchain → `make ci` → `make control-audit` → capture state
-- Artifacts: `.control/state.json` uploaded for 30-day retention
+- Artifacts: `.life/control/state.json` uploaded for 30-day retention
 
 ### Nightly Pipeline (`control-nightly.yml`)
 - Triggers on: cron (daily 04:00 UTC)

@@ -29,6 +29,11 @@ Thumbs.db
 .aios/
 .aios-*/
 
+# Life unified filesystem (runtime state is gitignored, control/ is committed)
+.life/*
+!.life/config.toml
+!.life/control/
+
 # Claude Code worktrees
 .claude/worktrees/
 

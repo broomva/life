@@ -306,9 +306,9 @@ This workspace operates as a **control loop for autonomous agent development** u
 
 The control plane consists of:
 
-- **Policy** (`.control/policy.yaml`): RBAC rules, capability gates, escalation conditions
-- **Commands** (`.control/commands.yaml`): Canonical commands with setpoints and actuators
-- **Topology** (`.control/topology.yaml`): Repository structure, agent roles, permission matrix
+- **Policy** (`.life/control/policy.yaml`): RBAC rules, capability gates, escalation conditions
+- **Commands** (`.life/control/commands.yaml`): Canonical commands with setpoints and actuators
+- **Topology** (`.life/control/topology.yaml`): Repository structure, agent roles, permission matrix
 - **Control Loop** (`docs/control/CONTROL_LOOP.md`): Feedback system with sensors and actuators
 - **Observability** (`docs/control/OBSERVABILITY.md`): Metrics, traces, audit logs
 

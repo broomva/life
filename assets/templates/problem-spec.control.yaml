@@ -19,7 +19,7 @@ constraints:
 
 artifacts:
   mutable:
-    - path: ".control/policy.yaml"
+    - path: ".life/control/policy.yaml"
       type: config
       description: "Governance policy — gates, profiles, setpoints, shield config"
     - path: "arcan/arcan-core/src/agent_loop.rs"
@@ -53,7 +53,7 @@ evaluator:
 
 plant:
   type: cyber
-  config_path: ".control/plant.yaml"
+  config_path: ".life/control/plant.yaml"
   shield_enabled: true
   shield_type: composite
   fallback_controller: "autonomic-controller (Recover mode)"

@@ -42,7 +42,7 @@ Heartbeat checks are not feature tests. They validate that the **feedback system
 
 1. Toolchain prerequisites (`git`, `make`, `cargo`, `jq`)
 2. Capacity guard (minimum disk headroom before heavy build/test loops)
-3. Control artifacts (`.control/policy.yaml`, `.control/commands.yaml`, `.control/topology.yaml`)
+3. Control artifacts (`.life/control/policy.yaml`, `.life/control/commands.yaml`, `.life/control/topology.yaml`)
 4. Hook wiring (`core.hooksPath = .githooks`)
 5. Baseline control audit
 6. Baseline harness audit

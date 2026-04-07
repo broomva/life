@@ -37,7 +37,7 @@ else
 fi
 
 echo "== heartbeat: repo control invariants =="
-if [ -f .control/policy.yaml ] && [ -f .control/commands.yaml ] && [ -f .control/topology.yaml ]; then
+if [ -f .life/control/policy.yaml ] && [ -f .life/control/commands.yaml ] && [ -f .life/control/topology.yaml ]; then
   ok "control policy artifacts present"
 else
   err "control policy artifacts missing"

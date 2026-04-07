@@ -115,10 +115,10 @@ check_contains ".github/workflows/harness.yml" "make ci" "control harness workfl
 if [ "$strict" -eq 1 ]; then
   echo
   strict_files=(
-    ".control/policy.yaml"
-    ".control/commands.yaml"
-    ".control/topology.yaml"
-    ".control/state.json"
+    ".life/control/policy.yaml"
+    ".life/control/commands.yaml"
+    ".life/control/topology.yaml"
+    ".life/control/state.json"
     "docs/control/CONTROL_LOOP.md"
     "evals/control-metrics.yaml"
     "scripts/control/install_hooks.sh"

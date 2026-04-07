@@ -23,7 +23,7 @@ Plant (Life Agent OS)
 
 - **Plant ID**: `life-agent-os`
 - **Plant type**: Cyber (discrete state, human-scale cadence)
-- **Config**: `.control/plant.yaml`
+- **Config**: `.life/control/plant.yaml`
 - **State schema**: `schemas/state.schema.json`
 - **Action schema**: `schemas/action.schema.json`
 
@@ -69,7 +69,7 @@ Plant (Life Agent OS)
 
 | Layer | Type | Description |
 |-------|------|-------------|
-| Policy Gate | Rule-based | Hard rules from `.control/policy.yaml` — block on failing checks, require plans |
+| Policy Gate | Rule-based | Hard rules from `.life/control/policy.yaml` — block on failing checks, require plans |
 | Capability Gate | Rule-based | aiOS CapabilityPolicy — per-tool approval based on OperatingMode |
 | Budget Gate | Threshold | Autonomic economic gating — block when budget exhausted |
 | Sandbox Boundary | Containment | Praxis FsPolicy — workspace boundary enforcement |
@@ -107,7 +107,7 @@ Plant (Life Agent OS)
 
 - Code edits (agent loop, rules, policies)
 - Script updates (gates, heartbeat, E2E)
-- Policy updates (.control/*.yaml)
+- Policy updates (.life/control/*.yaml)
 - Documentation updates (STATUS.md, ARCHITECTURE.md)
 - Hook and workflow updates (.githooks/, .github/workflows/)
 
@@ -115,7 +115,7 @@ Plant (Life Agent OS)
 
 ```
 1. Measure   — Run sensors (CI gates, audits, heartbeat, runtime health)
-2. Compare   — Check measured vs setpoints (.control/policy.yaml)
+2. Compare   — Check measured vs setpoints (.life/control/policy.yaml)
 3. Decide    — Controller selects action (θ_t) based on belief state
 4. Shield    — Safety filter ensures action is safe (composite shield)
 5. Act       — Apply safe action (code edit, policy update, mode switch)
@@ -131,7 +131,7 @@ Plant (Life Agent OS)
 | Auto-memory | `~/.claude/.../memory/` | Cross-session agent learning |
 | Conversation logs | `docs/conversations/` | Permanent episodic memory |
 | Knowledge graph | `docs/`, `~/broomva-vault/` | Architectural patterns, wikilinks |
-| Policy rules | `.control/policy.yaml` | Enforceable constraints |
+| Policy rules | `.life/control/policy.yaml` | Enforceable constraints |
 | Typed schemas | `schemas/` | Canonical interfaces |
 | Invariants | `CLAUDE.md` | Foundational truths |
 

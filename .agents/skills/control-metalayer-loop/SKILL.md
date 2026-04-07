@@ -67,9 +67,9 @@ python3 scripts/control_wizard.py init <repo-path> --profile governed
 
 This adds the core control plane:
 
-- `.control/policy.yaml`
-- `.control/commands.yaml`
-- `.control/topology.yaml`
+- `.life/control/policy.yaml`
+- `.life/control/commands.yaml`
+- `.life/control/topology.yaml`
 - `docs/control/CONTROL_LOOP.md`
 - `evals/control-metrics.yaml`
 
@@ -89,7 +89,7 @@ Adds:
 - `.github/workflows/cli-e2e.yml`
 - `tests/e2e/web/*` + `playwright.config.ts`
 - `tests/e2e/cli/smoke.sh`
-- `.control/state.json`
+- `.life/control/state.json`
 - `.github/workflows/control-nightly.yml`
 
 ## Step 4: Validate

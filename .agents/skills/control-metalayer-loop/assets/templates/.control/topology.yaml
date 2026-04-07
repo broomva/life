@@ -7,7 +7,7 @@ zones:
       - packages/
   control_plane:
     paths:
-      - .control/
+      - .life/control/
       - docs/control/
       - scripts/control/
       - evals/

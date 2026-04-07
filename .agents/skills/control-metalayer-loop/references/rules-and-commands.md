@@ -34,7 +34,7 @@ For each command:
 - Recovery action
 - Escalation path
 
-Store this in `.control/commands.yaml`.
+Store this in `.life/control/commands.yaml`.
 
 ## End-To-End Validation
 

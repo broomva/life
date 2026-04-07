@@ -242,9 +242,9 @@ The harness and control layers exist to produce **meaningful, actionable feedbac
 
 | Component | Location | Purpose |
 | --- | --- | --- |
-| Policy | .control/policy.yaml | RBAC rules, capability gates, escalation conditions |
-| Commands | .control/commands.yaml | Canonical commands (smoke, check, test, recover) |
-| Topology | .control/topology.yaml | Repository structure and agent permissions |
+| Policy | .life/control/policy.yaml | RBAC rules, capability gates, escalation conditions |
+| Commands | .life/control/commands.yaml | Canonical commands (smoke, check, test, recover) |
+| Topology | .life/control/topology.yaml | Repository structure and agent permissions |
 | Control Loop | docs/control/CONTROL_LOOP.md | Setpoints, sensors, actuators, feedback |
 | Architecture | docs/control/ARCHITECTURE.md | System design and dependencies |
 | Observability | docs/control/OBSERVABILITY.md | Metrics, tracing, and audit logs |

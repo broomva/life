@@ -83,7 +83,7 @@ The agent discovers and improves its own retrieval strategies over time. Fixed h
 │  │  memory/*.md        → individual memories       │     │
 │  │  CLAUDE.md          → project rules             │     │
 │  │  AGENTS.md          → operational boundaries    │     │
-│  │  .control/policy.yaml → governance constraints  │     │
+│  │  .life/control/policy.yaml → governance constraints  │     │
 │  │  docs/*.md          → project knowledge         │     │
 │  └────────────────────────────────────────────────┘     │
 │                                                          │

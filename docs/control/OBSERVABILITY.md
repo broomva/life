@@ -127,7 +127,7 @@ Defined in `evals/control-metrics.yaml` (calibrated 2026-02-28):
 
 | Artifact | Retention | Location |
 |----------|-----------|----------|
-| `.control/state.json` | 30 days | GitHub Actions artifact |
+| `.life/control/state.json` | 30 days | GitHub Actions artifact |
 | Gate pass/fail summary | Per-run | `$GITHUB_STEP_SUMMARY` |
 | Test output logs | Per-run | CI job output |
 

@@ -18,9 +18,9 @@ The autonomous development loop for this repository. All control primitives are 
 
 1. **Measure**: Capture sensor outputs (CI results, test outcomes, static checks).
 2. **Compare**: Compute error against setpoints (see Metrics below).
-3. **Select**: Choose control action based on policy (.control/policy.yaml).
+3. **Select**: Choose control action based on policy (.life/control/policy.yaml).
 4. **Execute**: Run command/action through gate sequence (smoke → check → test).
-5. **Verify**: Re-measure and persist results to .control/state.json.
+5. **Verify**: Re-measure and persist results to .life/control/state.json.
 
 ## Gate Sequence
 

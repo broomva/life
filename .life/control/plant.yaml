@@ -125,8 +125,8 @@ shield:
   type: composite
   layers:
     - name: policy-gate
-      description: "Hard rules from .control/policy.yaml — block merge on failing checks, require plan for long tasks"
-      config: .control/policy.yaml
+      description: "Hard rules from .life/control/policy.yaml — block merge on failing checks, require plan for long tasks"
+      config: .life/control/policy.yaml
     - name: capability-gate
       description: "aiOS CapabilityPolicy — per-tool approval based on operating mode"
       config: arcan-core (CapabilityPolicy)

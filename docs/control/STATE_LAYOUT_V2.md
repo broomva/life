@@ -58,7 +58,7 @@ All stateful services must read/write under this root only.
 - `autonomicd`
   - controller state: `${AIOS_STATE_ROOT}/control/state`
   - logs/pid: runtime dirs above
-- control metadata (`.control/*`) should move to `${AIOS_STATE_ROOT}/control/*`
+- control metadata (`.life/control/*`) should move to `${AIOS_STATE_ROOT}/control/*`
 
 ## Policy Rules
 

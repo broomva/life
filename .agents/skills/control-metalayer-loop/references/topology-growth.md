@@ -6,7 +6,7 @@ This skill uses a split between product code and control-plane artifacts.
 
 - Product code: existing repo structure.
 - Control plane:
-  - `.control/` for policy, command catalog, topology, and state.
+  - `.life/control/` for policy, command catalog, topology, and state.
   - `docs/control/` for architecture, observability, and loop docs.
   - `scripts/control/` for deterministic command wrappers.
   - `.githooks/` for local gate enforcement.

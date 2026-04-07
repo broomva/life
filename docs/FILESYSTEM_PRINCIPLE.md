@@ -32,7 +32,7 @@ Each level is additive. Lower levels always work. Higher levels make agents smar
 
 1. **Every memory must be a readable file.** MemCubes in Lance are the engine, but `.arcan/memory/*.md` files are the interface. The lakehouse writes both.
 
-2. **Every config must be a readable file.** `.control/policy.yaml`, `CLAUDE.md`, `AGENTS.md` — never locked in a database.
+2. **Every config must be a readable file.** `.life/control/policy.yaml`, `CLAUDE.md`, `AGENTS.md` — never locked in a database.
 
 3. **Git is the version control.** Lance has versioning, but git is what agents use. The lakehouse observes git, not replaces it.
 
