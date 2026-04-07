@@ -25,12 +25,14 @@
 pub mod config;
 pub mod envelope;
 pub mod metrics;
+pub mod pricing;
 pub mod semconv;
 pub mod spans;
 
 pub use config::{LogFormat, OtlpProtocol, VigConfig};
 pub use envelope::{CircuitState, CostSource, LlmRequestEnvelope, LlmResponseEconomics};
 pub use metrics::GenAiMetrics;
+pub use pricing::{ModelPricing, PRICING_SNAPSHOT, estimate_cost, lookup_pricing};
 
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
