@@ -24,8 +24,10 @@ const OPENSKY_URL: &str = "https://opensky-network.org/api/states/all";
 /// OpenSky flight tracking feed — polls state vectors for live aircraft.
 pub struct OpenSkyFeed {
     client: reqwest::Client,
-    /// Optional bounding box: (lamin, lomin, lamax, lomax).
-    bbox: Option<(f64, f64, f64, f64)>,
+    /// The URL to poll (may include bbox query params from feeds.toml).
+    pub(crate) url: String,
+    /// Poll interval in seconds.
+    interval_secs: u64,
 }
 
 impl Default for OpenSkyFeed {
@@ -38,24 +40,17 @@ impl OpenSkyFeed {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
-            bbox: None,
+            url: OPENSKY_URL.into(),
+            interval_secs: 15,
         }
     }
 
-    /// Create with a geographic bounding box filter.
-    pub fn with_bbox(lamin: f64, lomin: f64, lamax: f64, lomax: f64) -> Self {
+    /// Create with a custom URL and interval (from feeds.toml config).
+    pub fn with_config(url: String, interval_secs: u64) -> Self {
         Self {
             client: reqwest::Client::new(),
-            bbox: Some((lamin, lomin, lamax, lomax)),
-        }
-    }
-
-    fn url(&self) -> String {
-        match self.bbox {
-            Some((lamin, lomin, lamax, lomax)) => {
-                format!("{OPENSKY_URL}?lamin={lamin}&lomin={lomin}&lamax={lamax}&lomax={lomax}")
-            }
-            None => OPENSKY_URL.into(),
+            url,
+            interval_secs,
         }
     }
 
@@ -82,7 +77,7 @@ impl FeedIngestor for OpenSkyFeed {
     fn poll_raw(
         &self,
     ) -> Pin<Box<dyn Future<Output = OpsisResult<Vec<RawFeedEvent>>> + Send + '_>> {
-        let url = self.url();
+        let url = self.url.clone();
         let client = self.client.clone();
 
         Box::pin(async move {
@@ -176,7 +171,7 @@ impl FeedIngestor for OpenSkyFeed {
     }
 
     fn poll_interval(&self) -> Duration {
-        Duration::from_secs(15) // OpenSky anonymous rate limit
+        Duration::from_secs(self.interval_secs)
     }
 }
 
@@ -233,13 +228,13 @@ mod tests {
     }
 
     #[test]
-    fn url_with_bbox() {
-        let feed = OpenSkyFeed::with_bbox(25.0, -130.0, 50.0, -60.0);
-        let url = feed.url();
-        assert!(url.contains("lamin=25"));
-        assert!(url.contains("lomin=-130"));
-        assert!(url.contains("lamax=50"));
-        assert!(url.contains("lomax=-60"));
+    fn config_with_custom_url_and_interval() {
+        let url =
+            "https://opensky-network.org/api/states/all?lamin=25&lomin=-130&lamax=50&lomax=-60";
+        let feed = OpenSkyFeed::with_config(url.into(), 30);
+        assert!(feed.url.contains("lamin=25"));
+        assert!(feed.url.contains("lomin=-130"));
+        assert_eq!(feed.poll_interval(), Duration::from_secs(30));
     }
 
     #[test]

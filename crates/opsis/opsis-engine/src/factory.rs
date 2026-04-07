@@ -37,10 +37,12 @@ pub fn build_feed(config: &FeedConfig) -> EngineResult<Box<dyn FeedIngestor>> {
     match config.name.as_str() {
         "usgs-earthquake" => Ok(Box::new(UsgsEarthquakeFeed::new())),
         "open-meteo" => Ok(Box::new(OpenMeteoWeatherFeed::new())),
-        "opensky-flights" => Ok(Box::new(OpenSkyFeed::new())),
-        name if name.starts_with("opensky-") => {
-            // Support regional feeds like "opensky-us", "opensky-europe" etc.
-            Ok(Box::new(OpenSkyFeed::new()))
+        name if name.starts_with("opensky") => {
+            let (url, interval) = match &config.connector {
+                ConnectorConfig::Poll { url, interval_secs } => (url.clone(), *interval_secs),
+                _ => ("https://opensky-network.org/api/states/all".into(), 15),
+            };
+            Ok(Box::new(OpenSkyFeed::with_config(url, interval)))
         }
         _ => Err(EngineError::Config(format!(
             "unknown feed '{}' — add a [feeds.normalize] section for generic feeds \
