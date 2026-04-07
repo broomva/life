@@ -128,7 +128,10 @@ export interface UseOpsisStreamReturn {
 }
 
 export function useOpsisStream(options: UseOpsisStreamOptions = {}): UseOpsisStreamReturn {
-  const { url = "http://localhost:3010", autoConnect = true } = options;
+  const defaultUrl = typeof window !== "undefined"
+    ? (process.env.NEXT_PUBLIC_OPSIS_URL ?? "http://localhost:3010")
+    : "http://localhost:3010";
+  const { url = defaultUrl, autoConnect = true } = options;
 
   const [worldState, setWorldState] = useState<WorldState>(createInitialState);
   const [gaiaState, setGaiaState] = useState<GaiaState>(createInitialGaiaState);
