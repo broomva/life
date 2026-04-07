@@ -81,13 +81,13 @@ mod tests {
         };
         reg.register(custom);
         assert!(reg.lookup(&SchemaKey::new("custom.feed.v1")).is_some());
-        assert_eq!(reg.all().len(), 7);
+        assert_eq!(reg.all().len(), 8);
     }
 
     #[test]
     fn all_returns_all_schemas() {
         let reg = SchemaRegistry::new();
-        assert_eq!(reg.all().len(), 6);
+        assert_eq!(reg.all().len(), 7);
     }
 
     #[test]
