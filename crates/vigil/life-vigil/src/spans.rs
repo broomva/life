@@ -17,7 +17,7 @@ use crate::semconv;
 /// Emits `session.id` for LangSmith thread grouping alongside the
 /// canonical `life.session_id` attribute.
 pub fn agent_span(session_id: &str, agent_name: &str) -> Span {
-    tracing::info_span!(
+    let span = tracing::info_span!(
         "invoke_agent",
         { semconv::GEN_AI_OPERATION_NAME } = "invoke_agent",
         { semconv::GEN_AI_AGENT_NAME } = agent_name,
@@ -27,7 +27,12 @@ pub fn agent_span(session_id: &str, agent_name: &str) -> Span {
         "session.id" = session_id,
         // LangSmith-specific: thread_id groups traces in the Threads tab.
         "langsmith.metadata.thread_id" = session_id,
-    )
+        "langsmith.metadata.agent_name" = tracing::field::Empty,
+    );
+    if crate::langsmith_enrichment_enabled() {
+        span.record("langsmith.metadata.agent_name", agent_name);
+    }
+    span
 }
 
 /// Create a child span for a loop phase.
@@ -42,7 +47,15 @@ pub fn phase_span(phase: LoopPhase) -> Span {
         LoopPhase::Sleep => "sleep",
     };
 
-    tracing::info_span!("loop_phase", { semconv::LIFE_LOOP_PHASE } = phase_str,)
+    let span = tracing::info_span!(
+        "loop_phase",
+        { semconv::LIFE_LOOP_PHASE } = phase_str,
+        "langsmith.metadata.loop_phase" = tracing::field::Empty,
+    );
+    if crate::langsmith_enrichment_enabled() {
+        span.record("langsmith.metadata.loop_phase", phase_str);
+    }
+    span
 }
 
 /// Create a GenAI `chat` client span for an LLM call.
@@ -59,7 +72,7 @@ pub fn chat_span(
     temperature: Option<f64>,
     session_id: &str,
 ) -> Span {
-    tracing::info_span!(
+    let span = tracing::info_span!(
         "chat",
         { semconv::GEN_AI_OPERATION_NAME } = "chat",
         { semconv::GEN_AI_SYSTEM } = provider,
@@ -78,7 +91,12 @@ pub fn chat_span(
         // OTel standard + LangSmith thread grouping.
         "session.id" = session_id,
         "langsmith.metadata.thread_id" = session_id,
-    )
+        "langsmith.metadata.model" = tracing::field::Empty,
+    );
+    if crate::langsmith_enrichment_enabled() {
+        span.record("langsmith.metadata.model", model);
+    }
+    span
 }
 
 /// Create a GenAI `execute_tool` span for a tool call.

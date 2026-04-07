@@ -36,6 +36,8 @@ pub use jsonl::{JsonlWriter, LlmCallRecord};
 pub use metrics::GenAiMetrics;
 pub use pricing::{ModelPricing, PRICING_SNAPSHOT, estimate_cost, lookup_pricing};
 
+use std::sync::OnceLock;
+
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::WithExportConfig as _;
@@ -46,6 +48,16 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
+
+static VIGIL_CONFIG: OnceLock<VigConfig> = OnceLock::new();
+
+/// Check if LangSmith enrichment is enabled.
+pub fn langsmith_enrichment_enabled() -> bool {
+    VIGIL_CONFIG
+        .get()
+        .map(|c| c.langsmith_enrichment)
+        .unwrap_or(false)
+}
 
 /// Errors during telemetry initialization.
 #[derive(Debug, thiserror::Error)]
@@ -91,6 +103,8 @@ impl Drop for VigGuard {
 ///
 /// If no OTLP endpoint is set, only structured logging is configured.
 pub fn init_telemetry(config: VigConfig) -> Result<VigGuard, VigError> {
+    let _ = VIGIL_CONFIG.set(config.clone());
+
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     if let Some(ref endpoint) = config.otlp_endpoint {
