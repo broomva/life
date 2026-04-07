@@ -65,9 +65,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 }
 
 /// GET /snapshot — returns the current accumulated world state for client hydration.
-async fn snapshot(
-    State(state): State<AppState>,
-) -> axum::response::Response {
+async fn snapshot(State(state): State<AppState>) -> axum::response::Response {
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
 
