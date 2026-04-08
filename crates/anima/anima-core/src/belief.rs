@@ -21,6 +21,22 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AnimaError, AnimaResult};
 use crate::policy::PolicyManifest;
 
+/// A detected knowledge gap — a topic the agent needs but does not yet have.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct KnowledgeGap {
+    /// The topic slug (e.g., "rust-async-patterns", "x402-protocol").
+    pub topic: String,
+
+    /// When this gap was first identified.
+    pub identified_at: DateTime<Utc>,
+
+    /// Priority of filling this gap (0.0 = low, 1.0 = critical).
+    pub priority: f64,
+
+    /// What triggered the gap detection (e.g., "tool_call:knowledge:read", "task_failure").
+    pub source: String,
+}
+
 /// The agent's mutable model of its own capabilities, constraints,
 /// trust relationships, and economic situation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -39,6 +55,15 @@ pub struct AgentBelief {
 
     /// The agent's understanding of its economic situation.
     pub economic_belief: EconomicBelief,
+
+    /// Knowledge relevance scores — which topics matter to this agent's mission.
+    /// Projected from `knowledge.accessed` events. Keys are topic slugs.
+    #[serde(default)]
+    pub knowledge_relevance: HashMap<String, f64>,
+
+    /// Known knowledge gaps — topics the agent needs but doesn't have.
+    #[serde(default)]
+    pub knowledge_gaps: Vec<KnowledgeGap>,
 
     /// Timestamp of the last belief update.
     pub last_updated: DateTime<Utc>,
@@ -204,6 +229,8 @@ impl Default for AgentBelief {
             trust_scores: HashMap::new(),
             reputation: ReputationVector::default(),
             economic_belief: EconomicBelief::default(),
+            knowledge_relevance: HashMap::new(),
+            knowledge_gaps: Vec::new(),
             last_updated: Utc::now(),
             last_event_seq: 0,
         }
@@ -277,6 +304,55 @@ impl AgentBelief {
         for score in self.trust_scores.values_mut() {
             score.decay(now);
         }
+    }
+
+    /// Record that a knowledge topic was accessed, boosting its relevance.
+    ///
+    /// The relevance score is clamped to `[0.0, 1.0]`. Repeated access
+    /// accumulates relevance, modelling the agent's growing expertise.
+    pub fn record_knowledge_access(&mut self, topic: &str, boost: f64) {
+        let entry = self
+            .knowledge_relevance
+            .entry(topic.to_string())
+            .or_insert(0.0);
+        *entry = (*entry + boost).min(1.0);
+        self.last_updated = Utc::now();
+    }
+
+    /// Record a knowledge gap — something the agent needs but lacks.
+    ///
+    /// Duplicate topics are silently ignored (idempotent).
+    pub fn record_knowledge_gap(&mut self, topic: String, priority: f64, source: String) {
+        if !self.knowledge_gaps.iter().any(|g| g.topic == topic) {
+            self.knowledge_gaps.push(KnowledgeGap {
+                topic,
+                identified_at: Utc::now(),
+                priority,
+                source,
+            });
+            self.last_updated = Utc::now();
+        }
+    }
+
+    /// Remove a gap when the knowledge is acquired.
+    pub fn resolve_knowledge_gap(&mut self, topic: &str) {
+        let before = self.knowledge_gaps.len();
+        self.knowledge_gaps.retain(|g| g.topic != topic);
+        if self.knowledge_gaps.len() != before {
+            self.last_updated = Utc::now();
+        }
+    }
+
+    /// Get top-k most relevant knowledge topics, sorted by descending relevance.
+    pub fn top_knowledge_topics(&self, k: usize) -> Vec<(&str, f64)> {
+        let mut sorted: Vec<_> = self
+            .knowledge_relevance
+            .iter()
+            .map(|(t, s)| (t.as_str(), *s))
+            .collect();
+        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.truncate(k);
+        sorted
     }
 
     /// Validate that the entire belief state is consistent with the soul's policy.
@@ -417,5 +493,111 @@ mod tests {
 
         belief.grant_capability(grant, &policy).unwrap();
         assert!(!belief.has_capability("chat:send"));
+    }
+
+    // ── Knowledge awareness tests ──────────────────────────────────────
+
+    #[test]
+    fn serde_roundtrip_with_knowledge_fields() {
+        let mut belief = AgentBelief::default();
+        belief.record_knowledge_access("rust-async", 0.7);
+        belief.record_knowledge_gap("x402-protocol".into(), 0.9, "task_failure".into());
+
+        let json = serde_json::to_string(&belief).unwrap();
+        let deserialized: AgentBelief = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.knowledge_relevance["rust-async"], 0.7);
+        assert_eq!(deserialized.knowledge_gaps.len(), 1);
+        assert_eq!(deserialized.knowledge_gaps[0].topic, "x402-protocol");
+        assert!((deserialized.knowledge_gaps[0].priority - 0.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn backwards_compat_deserialize_without_knowledge_fields() {
+        // Simulate old JSON that lacks the new fields entirely.
+        let old_json = serde_json::json!({
+            "capabilities": [],
+            "constraints": [],
+            "trust_scores": {},
+            "reputation": { "overall": 0.5, "tasks_completed": 0, "tasks_failed": 0, "violations": 0 },
+            "economic_belief": {
+                "balance_micro_credits": 0,
+                "burn_rate_per_hour": 0.0,
+                "hours_until_exhaustion": null,
+                "economic_mode": "sovereign",
+                "session_spend_micro_credits": 0
+            },
+            "last_updated": "2026-01-01T00:00:00Z",
+            "last_event_seq": 42
+        });
+
+        let belief: AgentBelief = serde_json::from_value(old_json).unwrap();
+        assert!(belief.knowledge_relevance.is_empty());
+        assert!(belief.knowledge_gaps.is_empty());
+        assert_eq!(belief.last_event_seq, 42);
+    }
+
+    #[test]
+    fn knowledge_access_boosts_and_clamps() {
+        let mut belief = AgentBelief::default();
+
+        belief.record_knowledge_access("topic-a", 0.3);
+        assert!((belief.knowledge_relevance["topic-a"] - 0.3).abs() < f64::EPSILON);
+
+        belief.record_knowledge_access("topic-a", 0.5);
+        assert!((belief.knowledge_relevance["topic-a"] - 0.8).abs() < f64::EPSILON);
+
+        // Should clamp at 1.0
+        belief.record_knowledge_access("topic-a", 0.5);
+        assert!((belief.knowledge_relevance["topic-a"] - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn knowledge_gap_no_duplicate() {
+        let mut belief = AgentBelief::default();
+
+        belief.record_knowledge_gap("topic-x".into(), 0.8, "source-1".into());
+        belief.record_knowledge_gap("topic-x".into(), 0.9, "source-2".into());
+
+        assert_eq!(belief.knowledge_gaps.len(), 1);
+        // First insertion wins
+        assert_eq!(belief.knowledge_gaps[0].source, "source-1");
+    }
+
+    #[test]
+    fn resolve_knowledge_gap_removes() {
+        let mut belief = AgentBelief::default();
+
+        belief.record_knowledge_gap("gap-a".into(), 0.5, "src".into());
+        belief.record_knowledge_gap("gap-b".into(), 0.7, "src".into());
+        assert_eq!(belief.knowledge_gaps.len(), 2);
+
+        belief.resolve_knowledge_gap("gap-a");
+        assert_eq!(belief.knowledge_gaps.len(), 1);
+        assert_eq!(belief.knowledge_gaps[0].topic, "gap-b");
+
+        // Resolving a non-existent gap is a no-op
+        belief.resolve_knowledge_gap("gap-nonexistent");
+        assert_eq!(belief.knowledge_gaps.len(), 1);
+    }
+
+    #[test]
+    fn top_knowledge_topics_sorts_correctly() {
+        let mut belief = AgentBelief::default();
+
+        belief.record_knowledge_access("low", 0.1);
+        belief.record_knowledge_access("high", 0.9);
+        belief.record_knowledge_access("mid", 0.5);
+
+        let top2 = belief.top_knowledge_topics(2);
+        assert_eq!(top2.len(), 2);
+        assert_eq!(top2[0].0, "high");
+        assert!((top2[0].1 - 0.9).abs() < f64::EPSILON);
+        assert_eq!(top2[1].0, "mid");
+        assert!((top2[1].1 - 0.5).abs() < f64::EPSILON);
+
+        // k larger than entries returns all
+        let all = belief.top_knowledge_topics(100);
+        assert_eq!(all.len(), 3);
     }
 }
