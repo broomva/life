@@ -497,6 +497,7 @@ dependencies = [
  "lago-core",
  "lago-fs",
  "lago-journal",
+ "lago-knowledge",
  "lago-policy",
  "lago-store",
  "praxis-core",
@@ -4440,6 +4441,7 @@ dependencies = [
  "lago-fs",
  "lago-ingest",
  "lago-journal",
+ "lago-knowledge",
  "lago-policy",
  "lago-store",
  "lagod",
@@ -5886,9 +5888,14 @@ dependencies = [
 name = "nous-heuristics"
 version = "0.3.0"
 dependencies = [
+ "lago-core",
+ "lago-knowledge",
+ "lago-store",
  "nous-core",
  "serde",
  "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]
