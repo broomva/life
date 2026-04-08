@@ -9,13 +9,18 @@ repository.workspace = true
 description = "Inline heuristic evaluators for Nous — fast (< 2ms), no I/O"
 
 [dependencies]
+lago-knowledge.workspace = true
 nous-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
+lago-core.workspace = true
+lago-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tempfile = "3"
 
 [lints]
 workspace = true

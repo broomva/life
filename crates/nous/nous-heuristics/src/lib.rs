@@ -5,6 +5,7 @@
 
 pub mod argument_validity;
 pub mod budget_adherence;
+pub mod knowledge;
 pub mod safety_compliance;
 pub mod step_efficiency;
 pub mod token_efficiency;
@@ -12,6 +13,9 @@ pub mod tool_correctness;
 
 pub use argument_validity::ArgumentValidity;
 pub use budget_adherence::BudgetAdherence;
+pub use knowledge::{
+    KnowledgeCoherenceEvaluator, KnowledgeCoverageEvaluator, KnowledgeFreshnessEvaluator,
+};
 pub use safety_compliance::SafetyCompliance;
 pub use step_efficiency::StepEfficiency;
 pub use token_efficiency::TokenEfficiency;
