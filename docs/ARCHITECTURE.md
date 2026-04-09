@@ -183,7 +183,10 @@ The reasoning/knowledge path now follows the same canonical event route as the r
 2. `wiki_search` / `wiki_lint` finish as ordinary `ToolCallCompleted` events.
 3. Arcan turn middleware derives typed `KnowledgeSearched`, `KnowledgeRetrieved`, and `KnowledgeEvaluated` events from those canonical tool results.
 4. Autonomic folds the typed knowledge events into cognitive regulation state.
-5. Nous middleware enriches `EvalContext` with knowledge freshness, coverage, retrieval count, top relevance, and most recent query.
+5. `arcand` reconstructs run-finished reasoning inputs from canonical session events into a typed `RunCompletionContext`:
+   final answer, assistant messages, executed tool summary, and the latest knowledge evidence from `wiki_search`.
+6. `NousToolObserver` executes `registry_with_reasoning()` against that typed payload, populating `EvalContext` with tool summary + knowledge metadata for async judge evaluation.
+7. The async observer handoff runs under `run_observer.notify`, so post-run judge scores and EGRI outcome events stay attached to the originating trace.
 
 This keeps knowledge observability aligned with the contract-first architecture: tools stay pure, the kernel event spine remains authoritative, and downstream regulation/evaluation consume the same typed substrate.
 

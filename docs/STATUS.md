@@ -40,9 +40,17 @@ The baseline unification is active and enforced in production paths:
 - 2026-04-09: Reasoning observability Phase 3 judge substrate landed in
   `nous-judge`. Async `ReasoningCoherence` and `KnowledgeUtilization`
   evaluators now exist, plus `registry_with_reasoning()` for the
-  five-evaluator async judge set. This is verified locally but not yet wired
-  into the active Arcan run-finished observer path; registry/tracing
-  integration remains the next step.
+  five-evaluator async judge set.
+- 2026-04-09: Reasoning observability Phase 4 registry integration is now
+  active on the canonical host path. `ToolHarnessObserver` run completion now
+  flows through a typed `RunCompletionContext`, `arcand` reconstructs
+  assistant output + executed tool summaries + knowledge evidence from the
+  canonical event spine, and `NousToolObserver` now executes the shared
+  `registry_with_reasoning()` async judge set instead of a hand-built trio.
+  The async observer notification path is instrumented under
+  `run_observer.notify`, preserving trace lineage for post-run evaluation and
+  score publication. Dedicated knowledge-operation Vigil spans remain the
+  remaining observability gap.
 
 ## Health Summary
 
@@ -122,7 +130,9 @@ Validation gates currently pass:
   knowledge bootstrap emits typed retrieval events at session spawn, and
   a kernel turn middleware derives typed knowledge observability events from
   `wiki_search` / `wiki_lint` tool completions without coupling persistence
-  into the tool trait itself.
+  into the tool trait itself. Run completion now also moves through a typed
+  observer payload so post-run evaluators consume canonical assistant/tool/
+  knowledge context instead of re-deriving ad hoc metadata.
 
 ### Runtime Surface
 
