@@ -1,11 +1,23 @@
-//! Knowledge lifecycle event helpers.
+//! Knowledge lifecycle event helpers and runtime observability middleware.
 //!
-//! Emit knowledge-related events to the Lago journal for observability,
-//! Autonomic monitoring, and EGRI optimization.
+//! The legacy helpers emit Lago `Custom("knowledge.*")` events. The
+//! `KnowledgeEventMiddleware` derives typed `aios-protocol` events from the
+//! kernel's canonical tool-completion events so knowledge observability lands
+//! on the same event stream as the rest of the turn.
 
+use std::sync::Arc;
+
+use aios_protocol::{
+    BranchId as KernelBranchId, EventKind, EventRecord, EventStorePort,
+    SessionId as KernelSessionId, SpanStatus,
+};
+use aios_runtime::{TickOutput, TurnContext, TurnMiddleware, TurnNext};
+use anyhow::Result;
+use async_trait::async_trait;
 use lago_core::event::{EventEnvelope, EventPayload};
 use lago_core::id::*;
 use serde_json::json;
+use tracing::warn;
 
 /// Create an event recording that a knowledge index was built/rebuilt.
 pub fn knowledge_indexed_event(
@@ -72,9 +84,192 @@ fn now_micros() -> u64 {
         .as_micros() as u64
 }
 
+/// Runtime middleware that derives typed knowledge events from tool-completion events.
+///
+/// This preserves the purity of the tool trait while still emitting
+/// first-class `Knowledge*` events in the active kernel runtime.
+pub struct KnowledgeEventMiddleware {
+    event_store: Arc<dyn EventStorePort>,
+    read_limit: usize,
+}
+
+impl KnowledgeEventMiddleware {
+    pub fn new(event_store: Arc<dyn EventStorePort>) -> Self {
+        Self {
+            event_store,
+            read_limit: 512,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_read_limit(mut self, read_limit: usize) -> Self {
+        self.read_limit = read_limit.max(1);
+        self
+    }
+
+    async fn append_kind(
+        &self,
+        session_id: &KernelSessionId,
+        branch_id: &KernelBranchId,
+        kind: EventKind,
+    ) -> Result<()> {
+        let next_seq = self
+            .event_store
+            .head(session_id.clone(), branch_id.clone())
+            .await?
+            .saturating_add(1);
+        let record = EventRecord::new(session_id.clone(), branch_id.clone(), next_seq, kind);
+        self.event_store.append(record).await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl TurnMiddleware for KnowledgeEventMiddleware {
+    async fn process(&self, ctx: &mut TurnContext, next: TurnNext<'_>) -> Result<TickOutput> {
+        let start_seq = self
+            .event_store
+            .head(ctx.session_id.clone(), ctx.branch_id.clone())
+            .await?;
+
+        let mut output = next.run(ctx).await?;
+        let records = self
+            .event_store
+            .read(
+                ctx.session_id.clone(),
+                ctx.branch_id.clone(),
+                start_seq.saturating_add(1),
+                self.read_limit,
+            )
+            .await?;
+
+        let mut appended = 0_u64;
+        for record in records {
+            for kind in derive_knowledge_events(&record.kind) {
+                if let Err(error) = self
+                    .append_kind(&ctx.session_id, &ctx.branch_id, kind)
+                    .await
+                {
+                    warn!(
+                        session_id = %ctx.session_id,
+                        branch = %ctx.branch_id,
+                        error = %error,
+                        "failed to append typed knowledge event"
+                    );
+                } else {
+                    appended += 1;
+                }
+            }
+        }
+
+        output.events_emitted += appended;
+        output.last_sequence += appended;
+        Ok(output)
+    }
+}
+
+fn derive_knowledge_events(kind: &EventKind) -> Vec<EventKind> {
+    let EventKind::ToolCallCompleted {
+        tool_name,
+        result,
+        status,
+        ..
+    } = kind
+    else {
+        return Vec::new();
+    };
+
+    if *status != SpanStatus::Ok {
+        return Vec::new();
+    }
+
+    let Some(output) = successful_output(result) else {
+        return Vec::new();
+    };
+
+    match tool_name.as_str() {
+        "wiki_search" => derive_search_events(output),
+        "wiki_lint" => derive_lint_events(output),
+        _ => Vec::new(),
+    }
+}
+
+fn successful_output(result: &serde_json::Value) -> Option<&serde_json::Value> {
+    (result.get("status").and_then(serde_json::Value::as_str) == Some("success"))
+        .then(|| result.get("output"))
+        .flatten()
+}
+
+fn derive_search_events(output: &serde_json::Value) -> Vec<EventKind> {
+    let query = output
+        .get("query")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let result_count = output
+        .get("count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as u32;
+    let top_relevance = output
+        .get("top_relevance")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0);
+    let duration_ms = output
+        .get("duration_ms")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let context_tokens = output
+        .get("context_tokens")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as u32;
+
+    let mut events = vec![EventKind::KnowledgeSearched {
+        query,
+        result_count,
+        top_relevance,
+        duration_ms,
+    }];
+
+    if result_count > 0 {
+        events.push(EventKind::KnowledgeRetrieved {
+            note_count: result_count,
+            context_tokens,
+            source: "tool_search".to_owned(),
+        });
+    }
+
+    events
+}
+
+fn derive_lint_events(output: &serde_json::Value) -> Vec<EventKind> {
+    vec![EventKind::KnowledgeEvaluated {
+        health_score: output
+            .get("health_score")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0) as f32,
+        note_count: output
+            .get("note_count")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u32,
+        contradictions: output
+            .get("contradictions")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u32,
+        missing_pages: output
+            .get("missing_pages")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u32,
+        orphans: output
+            .get("orphans")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u32,
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aios_protocol::ToolRunId;
 
     #[test]
     fn indexed_event_has_correct_type() {
@@ -105,5 +300,85 @@ mod tests {
             }
             _ => panic!("expected Custom event"),
         }
+    }
+
+    #[test]
+    fn derive_search_events_emits_typed_search_and_retrieval() {
+        let events = derive_knowledge_events(&EventKind::ToolCallCompleted {
+            tool_run_id: ToolRunId::default(),
+            call_id: Some("call-1".into()),
+            tool_name: "wiki_search".into(),
+            result: serde_json::json!({
+                "status": "success",
+                "output": {
+                    "query": "temporal validity",
+                    "count": 3,
+                    "top_relevance": 5.2,
+                    "duration_ms": 18,
+                    "context_tokens": 44,
+                }
+            }),
+            duration_ms: 18,
+            status: SpanStatus::Ok,
+        });
+
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            &events[0],
+            EventKind::KnowledgeSearched {
+                query,
+                result_count,
+                top_relevance,
+                duration_ms
+            } if query == "temporal validity"
+                && *result_count == 3
+                && (*top_relevance - 5.2).abs() < f64::EPSILON
+                && *duration_ms == 18
+        ));
+        assert!(matches!(
+            &events[1],
+            EventKind::KnowledgeRetrieved {
+                note_count,
+                context_tokens,
+                source
+            } if *note_count == 3 && *context_tokens == 44 && source == "tool_search"
+        ));
+    }
+
+    #[test]
+    fn derive_lint_events_emits_typed_knowledge_evaluated() {
+        let events = derive_knowledge_events(&EventKind::ToolCallCompleted {
+            tool_run_id: ToolRunId::default(),
+            call_id: Some("call-2".into()),
+            tool_name: "wiki_lint".into(),
+            result: serde_json::json!({
+                "status": "success",
+                "output": {
+                    "health_score": 0.82,
+                    "note_count": 64,
+                    "contradictions": 1,
+                    "missing_pages": 2,
+                    "orphans": 3,
+                }
+            }),
+            duration_ms: 11,
+            status: SpanStatus::Ok,
+        });
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            EventKind::KnowledgeEvaluated {
+                health_score,
+                note_count,
+                contradictions,
+                missing_pages,
+                orphans
+            } if (*health_score - 0.82).abs() < f32::EPSILON
+                && *note_count == 64
+                && *contradictions == 1
+                && *missing_pages == 2
+                && *orphans == 3
+        ));
     }
 }

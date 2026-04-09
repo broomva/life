@@ -14,10 +14,14 @@ nous-heuristics.workspace = true
 arcan-core.workspace = true
 life-vigil.workspace = true
 tracing.workspace = true
+lago-knowledge.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 nous-heuristics.workspace = true
+lago-core.workspace = true
+lago-store.workspace = true
+tempfile = "3"
 
 [lints]
 workspace = true

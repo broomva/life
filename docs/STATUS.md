@@ -24,6 +24,19 @@ The baseline unification is active and enforced in production paths:
 - Lago is the persistence backend through canonical port adapters.
 - Arcan hosts the canonical runtime and provides integration adapters.
 - Public runtime API surface is the canonical session API family.
+- 2026-04-08: Reasoning observability Phase 1 landed in shared contracts.
+  `aios-protocol` now defines typed `KnowledgeSearched`,
+  `KnowledgeRetrieved`, and `KnowledgeEvaluated` events, and `nous-core`
+  `EvalContext` now carries optional knowledge metrics for later middleware
+  population and evaluator correlation.
+- 2026-04-09: Reasoning observability Phase 2 landed on the active runtime path.
+  Arcan now emits typed knowledge events from two production seams:
+  wake-up knowledge bootstrap (`KnowledgeRetrieved`) and kernel turn
+  middleware derived from canonical `ToolCallCompleted` events
+  (`KnowledgeSearched`, `KnowledgeRetrieved`, `KnowledgeEvaluated`).
+  Autonomic folds the typed knowledge variants directly, and
+  `nous-middleware` now populates `EvalContext` with live knowledge
+  coverage, freshness, retrieval count, relevance, and query metadata.
 
 ## Health Summary
 
@@ -99,6 +112,11 @@ Validation gates currently pass:
 - `arcan` binary hosts `aios-runtime` as production runtime path.
 - `arcan-aios-adapters` implements canonical provider/tool/policy/approval/memory ports.
 - `arcand` serves the canonical session API router.
+- Reasoning observability is active on the canonical host path:
+  knowledge bootstrap emits typed retrieval events at session spawn, and
+  a kernel turn middleware derives typed knowledge observability events from
+  `wiki_search` / `wiki_lint` tool completions without coupling persistence
+  into the tool trait itself.
 
 ### Runtime Surface
 
@@ -182,6 +200,10 @@ Current suite validates:
   - **Remote** (opt-in via `--autonomic-url`): Consults standalone daemon via HTTP GET `/gating/{session_id}`; failures are non-fatal.
 - Economic gate handle wired to provider layer: Hibernate blocks model calls, Hustle caps tokens.
 - Token usage flows through RunFinished events → event mapping → Autonomic fold.
+- Typed knowledge observability now flows through the same fold:
+  `KnowledgeSearched` increments search volume,
+  `KnowledgeRetrieved` accounts for injected context-token cost, and
+  `KnowledgeEvaluated` updates knowledge health and indexed-note count.
 - Lago journal integration via `--lago-data-dir` flag; on-demand session bootstrapping.
 
 ### Integration Points

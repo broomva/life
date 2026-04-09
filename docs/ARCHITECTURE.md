@@ -57,6 +57,10 @@ Life is a contract-first architecture for building artificial life from computat
 3. Lago persistence is consumed through canonical adapter implementation.
 4. Arcan hosts the runtime and provides adapter implementations for provider/harness/policy/approval/memory.
 5. Runtime API is the canonical session API family.
+6. Reasoning observability hangs off the canonical event spine:
+   knowledge bootstrap and knowledge tool completions emit typed
+   `Knowledge*` events, Nous consumes knowledge-aware `EvalContext`, and
+   Autonomic folds the same typed events into cognitive regulation.
 
 ## 2) Canonical Boundaries
 
@@ -170,6 +174,18 @@ Canonical run flow:
 4. Events are appended/read through canonical event-store port implementation.
 5. State and lifecycle updates are emitted as canonical events.
 6. Clients consume event replay or event stream through canonical endpoints.
+
+### Reasoning Observability Spine
+
+The reasoning/knowledge path now follows the same canonical event route as the rest of the runtime:
+
+1. Consciousness bootstrap assembles wake-up knowledge context and emits `KnowledgeRetrieved`.
+2. `wiki_search` / `wiki_lint` finish as ordinary `ToolCallCompleted` events.
+3. Arcan turn middleware derives typed `KnowledgeSearched`, `KnowledgeRetrieved`, and `KnowledgeEvaluated` events from those canonical tool results.
+4. Autonomic folds the typed knowledge events into cognitive regulation state.
+5. Nous middleware enriches `EvalContext` with knowledge freshness, coverage, retrieval count, top relevance, and most recent query.
+
+This keeps knowledge observability aligned with the contract-first architecture: tools stay pure, the kernel event spine remains authoritative, and downstream regulation/evaluation consume the same typed substrate.
 
 Branch flow:
 
