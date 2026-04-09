@@ -37,6 +37,12 @@ The baseline unification is active and enforced in production paths:
   Autonomic folds the typed knowledge variants directly, and
   `nous-middleware` now populates `EvalContext` with live knowledge
   coverage, freshness, retrieval count, relevance, and query metadata.
+- 2026-04-09: Reasoning observability Phase 3 judge substrate landed in
+  `nous-judge`. Async `ReasoningCoherence` and `KnowledgeUtilization`
+  evaluators now exist, plus `registry_with_reasoning()` for the
+  five-evaluator async judge set. This is verified locally but not yet wired
+  into the active Arcan run-finished observer path; registry/tracing
+  integration remains the next step.
 
 ## Health Summary
 
