@@ -58,6 +58,15 @@ The baseline unification is active and enforced in production paths:
   `arcan-lago` has an integration test proving wake-up retrieval, search,
   eval, and lint events can be reconstructed as one reasoning trace by
   `trace_id`.
+- 2026-04-09: EGRI calibration Phase 5 substrate landed in `lago-knowledge`.
+  The crate now exposes a typed `KnowledgeThresholdArtifact` with hard bounds,
+  parameterized BM25/search config so threshold mutation affects the live plant,
+  and a benchmark schema/runner for Recall@1 and Recall@5 across dev/holdout
+  splits. A 50-question seed benchmark file now lives under
+  `crates/lago/lago-knowledge/benchmarks/knowledge-benchmark.json`; because the
+  entity-page corpus referenced by the approved design was not present in the
+  workspace, that file is a bootstrap seed that should be regenerated from the
+  canonical entity corpus once mounted.
 
 ## Health Summary
 
@@ -178,6 +187,9 @@ Validation gates currently pass:
 
 - 12 crates total (was 10): added `lago-knowledge` (34 tests) and `lago-auth` (5 tests).
 - `lago-knowledge`: YAML frontmatter parsing, `[[wikilink]]` extraction, in-memory knowledge index, scored search (+2 name, +1 body, +1 tag), BFS graph traversal.
+- `lago-knowledge`: also now includes EGRI calibration substrate —
+  typed benchmark schema/runner, a seed benchmark corpus, parameterized BM25
+  tuning surface, and `KnowledgeThresholdArtifact` bounds/validation.
 - `lago-auth`: JWT validation (HS256 shared secret), axum auth middleware, user→session mapping (`vault:{user_id}`).
 - `lago-api`: Auth-protected `/v1/memory/*` routes (manifest, file CRUD, search, traverse, note resolution).
 - `lagod`: `LAGO_JWT_SECRET` env var or `[auth]` TOML section. Session map rebuilt on startup. Backward-compatible when no secret set.

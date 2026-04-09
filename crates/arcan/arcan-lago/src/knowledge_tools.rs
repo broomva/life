@@ -80,11 +80,11 @@ impl Tool for WikiSearchTool {
             .read()
             .map_err(|e| tool_err(format!("index lock: {e}")))?;
 
-        let bm25 = Bm25Index::build(index.notes());
         let config = HybridSearchConfig {
             max_results,
             ..Default::default()
         };
+        let bm25 = Bm25Index::build_with_params(index.notes(), config.bm25_k1, config.bm25_b);
 
         let results = index.search_hybrid(query, &bm25, &config);
         let top_relevance = results.first().map(|result| result.score).unwrap_or(0.0);

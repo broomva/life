@@ -136,6 +136,10 @@ Lago substrate provides:
 - filesystem/manifest capabilities
 - policy engine support
 - API and stream formatting utilities used by integration layers
+- `lago-knowledge` now also carries the EGRI-facing calibration contract:
+  a typed benchmark schema/runner plus a bounded `KnowledgeThresholdArtifact`
+  that parameterizes BM25 and hybrid-search behavior without breaking the
+  contract-first layering.
 
 ## 5) Adapter Architecture
 
