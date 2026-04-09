@@ -292,27 +292,31 @@ impl SessionConsciousness {
                 let branch = branch.clone();
                 let note_count = knowledge.note_count;
                 let context_tokens = knowledge.context_tokens;
-                tokio::spawn(async move {
-                    if let Err(error) = runtime
-                        .record_external_event_on_branch(
-                            &session_id,
-                            &branch,
-                            EventKind::KnowledgeRetrieved {
-                                note_count,
-                                context_tokens,
-                                source: "wake_up".to_owned(),
-                            },
-                        )
-                        .await
-                    {
-                        warn!(
-                            session = %session_id,
-                            branch = %branch,
-                            error = %error,
-                            "failed to record knowledge wake-up event"
-                        );
+                let event_span = tracing::Span::current();
+                tokio::spawn(
+                    async move {
+                        if let Err(error) = runtime
+                            .record_external_event_on_branch(
+                                &session_id,
+                                &branch,
+                                EventKind::KnowledgeRetrieved {
+                                    note_count,
+                                    context_tokens,
+                                    source: "wake_up".to_owned(),
+                                },
+                            )
+                            .await
+                        {
+                            warn!(
+                                session = %session_id,
+                                branch = %branch,
+                                error = %error,
+                                "failed to record knowledge wake-up event"
+                            );
+                        }
                     }
-                });
+                    .instrument(event_span),
+                );
             }
             assembly.map(|knowledge| knowledge.block.content)
         });

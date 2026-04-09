@@ -34,6 +34,9 @@ pub fn build_knowledge_block_with_stats(
     wiki_dir: &std::path::Path,
     token_budget: usize,
 ) -> Option<KnowledgeBlockAssembly> {
+    let span = life_vigil::spans::knowledge_context_build_span("wake_up");
+    let _guard = span.enter();
+
     let md_files = collect_md_files(wiki_dir);
     if md_files.is_empty() {
         debug!(dir = %wiki_dir.display(), "no .md files found, skipping knowledge block");
@@ -129,6 +132,7 @@ pub fn build_knowledge_block_with_stats(
         tokens = tokens_used,
         "knowledge context block assembled"
     );
+    life_vigil::spans::record_knowledge_context(&span, note_count as u32, tokens_used as u32);
 
     Some(KnowledgeBlockAssembly {
         note_count: note_count as u32,

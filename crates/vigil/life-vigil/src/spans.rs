@@ -110,6 +110,73 @@ pub fn tool_span(tool_name: &str, tool_call_id: &str) -> Span {
     )
 }
 
+/// Create a span for knowledge context assembly.
+pub fn knowledge_context_build_span(source: &str) -> Span {
+    tracing::info_span!(
+        "knowledge.context_build",
+        "life.knowledge.source" = source,
+        "life.knowledge.note_count" = tracing::field::Empty,
+        "life.knowledge.context_tokens" = tracing::field::Empty,
+    )
+}
+
+/// Record note/token metrics on a knowledge context assembly span.
+pub fn record_knowledge_context(span: &Span, note_count: u32, context_tokens: u32) {
+    span.record("life.knowledge.note_count", note_count);
+    span.record("life.knowledge.context_tokens", context_tokens);
+}
+
+/// Create a span for a knowledge search operation.
+pub fn knowledge_search_span(query: &str) -> Span {
+    tracing::info_span!(
+        "knowledge.search",
+        "life.knowledge.query" = query,
+        "life.knowledge.result_count" = tracing::field::Empty,
+        "life.knowledge.top_relevance" = tracing::field::Empty,
+        "life.knowledge.duration_ms" = tracing::field::Empty,
+        "life.knowledge.context_tokens" = tracing::field::Empty,
+    )
+}
+
+/// Record result metrics on a knowledge search span.
+pub fn record_knowledge_search(
+    span: &Span,
+    result_count: u32,
+    top_relevance: f64,
+    duration_ms: u64,
+    context_tokens: u32,
+) {
+    span.record("life.knowledge.result_count", result_count);
+    span.record("life.knowledge.top_relevance", top_relevance);
+    span.record("life.knowledge.duration_ms", duration_ms);
+    span.record("life.knowledge.context_tokens", context_tokens);
+}
+
+/// Create a span for a knowledge lint/evaluation operation.
+pub fn knowledge_lint_span() -> Span {
+    tracing::info_span!(
+        "knowledge.lint",
+        "life.knowledge.health_score" = tracing::field::Empty,
+        "life.knowledge.note_count" = tracing::field::Empty,
+        "life.knowledge.contradictions" = tracing::field::Empty,
+        "life.knowledge.missing_pages" = tracing::field::Empty,
+    )
+}
+
+/// Record lint result metrics on a knowledge lint span.
+pub fn record_knowledge_lint(
+    span: &Span,
+    health_score: f64,
+    note_count: u32,
+    contradictions: u32,
+    missing_pages: u32,
+) {
+    span.record("life.knowledge.health_score", health_score);
+    span.record("life.knowledge.note_count", note_count);
+    span.record("life.knowledge.contradictions", contradictions);
+    span.record("life.knowledge.missing_pages", missing_pages);
+}
+
 /// Record token usage on the current span via attributes.
 ///
 /// Sets `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`.
@@ -222,6 +289,17 @@ pub fn eval_event(evaluator: &str, score: f64, label: &str, layer: &str, timing:
 /// This enables dual-write: events carry OTel correlation IDs so that
 /// persisted events can be linked back to their traces.
 pub fn write_trace_context(envelope: &mut EventEnvelope) {
+    if let Some((trace_id, span_id)) = current_trace_context() {
+        envelope.trace_id = Some(trace_id);
+        envelope.span_id = Some(span_id);
+    }
+}
+
+/// Return the current OTel trace context as `(trace_id, span_id)`.
+///
+/// Bridges that persist non-protocol envelope types can use this helper to
+/// serialize trace lineage without taking a dependency on protocol envelopes.
+pub fn current_trace_context() -> Option<(String, String)> {
     use opentelemetry::trace::TraceContextExt;
     use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -231,8 +309,12 @@ pub fn write_trace_context(envelope: &mut EventEnvelope) {
     let span_context = span_ref.span_context();
 
     if span_context.is_valid() {
-        envelope.trace_id = Some(span_context.trace_id().to_string());
-        envelope.span_id = Some(span_context.span_id().to_string());
+        Some((
+            span_context.trace_id().to_string(),
+            span_context.span_id().to_string(),
+        ))
+    } else {
+        None
     }
 }
 

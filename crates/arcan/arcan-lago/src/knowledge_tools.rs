@@ -72,6 +72,8 @@ impl Tool for WikiSearchTool {
             .and_then(serde_json::Value::as_u64)
             .map(|v| v as usize)
             .unwrap_or(5);
+        let span = life_vigil::spans::knowledge_search_span(query);
+        let _guard = span.enter();
 
         let index = self
             .index
@@ -110,6 +112,13 @@ impl Tool for WikiSearchTool {
         }
         let duration_ms = started.elapsed().as_millis() as u64;
         let context_tokens = (text.len() / 4) as u32;
+        life_vigil::spans::record_knowledge_search(
+            &span,
+            results.len() as u32,
+            top_relevance,
+            duration_ms,
+            context_tokens,
+        );
 
         Ok(ToolResult {
             call_id: call.call_id.clone(),
@@ -160,6 +169,8 @@ impl Tool for WikiLintTool {
     }
 
     fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> Result<ToolResult, CoreError> {
+        let span = life_vigil::spans::knowledge_lint_span();
+        let _guard = span.enter();
         let index = self
             .index
             .read()
@@ -167,6 +178,13 @@ impl Tool for WikiLintTool {
 
         let report = index.lint();
         let note_count = index.len();
+        life_vigil::spans::record_knowledge_lint(
+            &span,
+            report.health_score.into(),
+            note_count as u32,
+            report.contradictions.len() as u32,
+            report.missing_pages.len() as u32,
+        );
 
         let mut text = format!(
             "## Knowledge Lint Report\n\nHealth: **{:.0}%** | Notes: {note_count}\n\n",

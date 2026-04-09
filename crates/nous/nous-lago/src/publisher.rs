@@ -9,6 +9,13 @@ use nous_core::events::NousEvent;
 use nous_core::score::EvalScore;
 use tracing::{debug, instrument, warn};
 
+fn write_trace_context(metadata: &mut std::collections::HashMap<String, String>) {
+    if let Some((trace_id, span_id)) = life_vigil::spans::current_trace_context() {
+        metadata.insert("trace_id".to_string(), trace_id);
+        metadata.insert("span_id".to_string(), span_id);
+    }
+}
+
 /// Static helpers that convert Nous types into `EventKind` payloads.
 ///
 /// Thin adapter that converts `EvalScore` / `NousEvent` to
@@ -68,6 +75,7 @@ impl LivePublisher {
 
         let mut metadata = std::collections::HashMap::new();
         metadata.insert("agent_id".to_string(), self.agent_id.clone());
+        write_trace_context(&mut metadata);
 
         let envelope = EventEnvelope {
             event_id: EventId::new(),
@@ -95,6 +103,7 @@ impl LivePublisher {
 
         let mut metadata = std::collections::HashMap::new();
         metadata.insert("agent_id".to_string(), self.agent_id.clone());
+        write_trace_context(&mut metadata);
 
         let envelope = EventEnvelope {
             event_id: EventId::new(),
@@ -129,6 +138,7 @@ impl LivePublisher {
                 let event_kind = NousPublisher::event_to_event_kind(event);
                 let mut metadata = std::collections::HashMap::new();
                 metadata.insert("agent_id".to_string(), self.agent_id.clone());
+                write_trace_context(&mut metadata);
 
                 EventEnvelope {
                     event_id: EventId::new(),

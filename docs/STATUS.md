@@ -49,8 +49,15 @@ The baseline unification is active and enforced in production paths:
   `registry_with_reasoning()` async judge set instead of a hand-built trio.
   The async observer notification path is instrumented under
   `run_observer.notify`, preserving trace lineage for post-run evaluation and
-  score publication. Dedicated knowledge-operation Vigil spans remain the
-  remaining observability gap.
+  score publication.
+- 2026-04-09: Reasoning observability trace completion is now active across the
+  knowledge path. Vigil emits dedicated `knowledge.context_build`,
+  `knowledge.search`, and `knowledge.lint` spans; derived `Knowledge*` events
+  inherit the source event trace/span IDs; `nous-lago` publishes eval events
+  with the current trace context serialized into Lago metadata; and
+  `arcan-lago` has an integration test proving wake-up retrieval, search,
+  eval, and lint events can be reconstructed as one reasoning trace by
+  `trace_id`.
 
 ## Health Summary
 
@@ -275,7 +282,7 @@ Current suite validates:
 ### Observability Foundation
 
 - OpenTelemetry-native tracing and GenAI metrics for the Agent OS.
-- 1 crate: `vigil` (26 tests + 2 ignored).
+- 1 crate: `vigil` (56 tests + 2 ignored).
 - Depends only on `aios-protocol` — no dependency on Arcan, Lago, Autonomic, or Praxis.
 - Implements contract-derived spans (EventKind → OTel spans), GenAI semantic conventions (`gen_ai.*` attributes), and dual-write architecture (OTel spans + EventEnvelope trace context).
 
@@ -283,7 +290,7 @@ Current suite validates:
 
 - **config**: `VigConfig` with env var overrides (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `VIGIL_LOG_FORMAT`, `VIGIL_CAPTURE_CONTENT`, `VIGIL_SAMPLING_RATIO`).
 - **semconv**: GenAI semantic conventions (`gen_ai.*`), Life attributes (`life.*`), Autonomic attributes (`autonomic.*`), Lago attributes (`lago.*`).
-- **spans**: Contract-derived span builders (`agent_span`, `phase_span`, `chat_span`, `tool_span`), trace context dual-write (`write_trace_context` / `extract_trace_context`).
+- **spans**: Contract-derived span builders (`agent_span`, `phase_span`, `chat_span`, `tool_span`), knowledge-operation spans (`knowledge.context_build`, `knowledge.search`, `knowledge.lint`), and trace context helpers (`current_trace_context`, `write_trace_context`, `extract_trace_context`).
 - **metrics**: `GenAiMetrics` — OTel instruments for token usage, operation duration, tool executions, budget gauges, mode transitions.
 
 ### Integration Points

@@ -7,10 +7,7 @@
 
 use std::sync::Arc;
 
-use aios_protocol::{
-    BranchId as KernelBranchId, EventKind, EventRecord, EventStorePort,
-    SessionId as KernelSessionId, SpanStatus,
-};
+use aios_protocol::{EventKind, EventRecord, EventStorePort, SpanStatus};
 use aios_runtime::{TickOutput, TurnContext, TurnMiddleware, TurnNext};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -107,20 +104,13 @@ impl KnowledgeEventMiddleware {
         self
     }
 
-    async fn append_kind(
-        &self,
-        session_id: &KernelSessionId,
-        branch_id: &KernelBranchId,
-        kind: EventKind,
-    ) -> Result<()> {
-        let next_seq = self
-            .event_store
-            .head(session_id.clone(), branch_id.clone())
-            .await?
-            .saturating_add(1);
-        let record = EventRecord::new(session_id.clone(), branch_id.clone(), next_seq, kind);
-        self.event_store.append(record).await?;
-        Ok(())
+    async fn append_records(&self, records: Vec<EventRecord>) -> Result<u64> {
+        let mut appended = 0_u64;
+        for record in records {
+            self.event_store.append(record).await?;
+            appended += 1;
+        }
+        Ok(appended)
     }
 }
 
@@ -144,20 +134,27 @@ impl TurnMiddleware for KnowledgeEventMiddleware {
             .await?;
 
         let mut appended = 0_u64;
+        let mut next_seq = self
+            .event_store
+            .head(ctx.session_id.clone(), ctx.branch_id.clone())
+            .await?
+            .saturating_add(1);
         for record in records {
-            for kind in derive_knowledge_events(&record.kind) {
-                if let Err(error) = self
-                    .append_kind(&ctx.session_id, &ctx.branch_id, kind)
-                    .await
-                {
+            let derived = derive_knowledge_records(&record, next_seq);
+            next_seq = next_seq.saturating_add(derived.len() as u64);
+            if derived.is_empty() {
+                continue;
+            }
+
+            match self.append_records(derived).await {
+                Ok(count) => appended += count,
+                Err(error) => {
                     warn!(
                         session_id = %ctx.session_id,
                         branch = %ctx.branch_id,
                         error = %error,
                         "failed to append typed knowledge event"
                     );
-                } else {
-                    appended += 1;
                 }
             }
         }
@@ -266,10 +263,35 @@ fn derive_lint_events(output: &serde_json::Value) -> Vec<EventKind> {
     }]
 }
 
+/// Derive typed knowledge records from a canonical source record.
+///
+/// Derived records preserve trace lineage from the source record and point back
+/// to it via `causation_id`, which keeps post-hoc reasoning reconstruction
+/// aligned with the kernel event spine.
+pub fn derive_knowledge_records(source: &EventRecord, first_sequence: u64) -> Vec<EventRecord> {
+    derive_knowledge_events(&source.kind)
+        .into_iter()
+        .enumerate()
+        .map(|(offset, kind)| {
+            let mut record = EventRecord::new(
+                source.session_id.clone(),
+                source.branch_id.clone(),
+                first_sequence.saturating_add(offset as u64),
+                kind,
+            );
+            record.causation_id = Some(source.event_id.clone());
+            record.correlation_id = source.correlation_id.clone();
+            record.trace_id = source.trace_id.clone();
+            record.span_id = source.span_id.clone();
+            record
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aios_protocol::ToolRunId;
+    use aios_protocol::{BranchId as KernelBranchId, SessionId as KernelSessionId, ToolRunId};
 
     #[test]
     fn indexed_event_has_correct_type() {
@@ -380,5 +402,41 @@ mod tests {
                 && *missing_pages == 2
                 && *orphans == 3
         ));
+    }
+
+    #[test]
+    fn derive_knowledge_records_inherits_trace_context() {
+        let mut source = EventRecord::new(
+            KernelSessionId::from_string("sess-1"),
+            KernelBranchId::from_string("main"),
+            7,
+            EventKind::ToolCallCompleted {
+                tool_run_id: ToolRunId::default(),
+                call_id: Some("call-1".into()),
+                tool_name: "wiki_search".into(),
+                result: serde_json::json!({
+                    "status": "success",
+                    "output": {
+                        "query": "trace me",
+                        "count": 1,
+                        "top_relevance": 0.9,
+                        "duration_ms": 8,
+                        "context_tokens": 32,
+                    }
+                }),
+                duration_ms: 8,
+                status: SpanStatus::Ok,
+            },
+        );
+        source.trace_id = Some("trace-123".into());
+        source.span_id = Some("span-456".into());
+
+        let derived = derive_knowledge_records(&source, 8);
+        assert_eq!(derived.len(), 2);
+        assert_eq!(derived[0].sequence, 8);
+        assert_eq!(derived[1].sequence, 9);
+        assert_eq!(derived[0].trace_id.as_deref(), Some("trace-123"));
+        assert_eq!(derived[0].span_id.as_deref(), Some("span-456"));
+        assert_eq!(derived[0].causation_id, Some(source.event_id.clone()));
     }
 }
