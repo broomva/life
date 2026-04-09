@@ -237,7 +237,7 @@ fn validate_u32(name: &str, value: u32, bound: NumericBound<u32>, issues: &mut V
         return;
     }
 
-    if (value - bound.min) % bound.step != 0 {
+    if !(value - bound.min).is_multiple_of(bound.step) {
         issues.push(format!(
             "{name} must align to step {} from minimum {}",
             bound.step, bound.min
@@ -254,7 +254,7 @@ fn validate_u64(name: &str, value: u64, bound: NumericBound<u64>, issues: &mut V
         return;
     }
 
-    if (value - bound.min) % bound.step != 0 {
+    if !(value - bound.min).is_multiple_of(bound.step) {
         issues.push(format!(
             "{name} must align to step {} from minimum {}",
             bound.step, bound.min
@@ -271,7 +271,7 @@ fn validate_usize(name: &str, value: usize, bound: NumericBound<usize>, issues: 
         return;
     }
 
-    if (value - bound.min) % bound.step != 0 {
+    if !(value - bound.min).is_multiple_of(bound.step) {
         issues.push(format!(
             "{name} must align to step {} from minimum {}",
             bound.step, bound.min

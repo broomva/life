@@ -77,20 +77,20 @@ fn scored_response(
     response: &str,
     session_id: &str,
 ) -> NousResult<Vec<EvalScore>> {
-    if let Some(parsed) = parse_judge_scores(response) {
-        if let Some(score) = parsed.get("score").and_then(serde_json::Value::as_f64) {
-            let mut eval = EvalScore::new(
-                evaluator,
-                score.clamp(0.0, 1.0),
-                EvalLayer::Reasoning,
-                EvalTiming::Async,
-                session_id,
-            )?;
-            if let Some(explanation) = parsed.get("explanation").and_then(|v| v.as_str()) {
-                eval = eval.with_explanation(explanation.to_owned());
-            }
-            return Ok(vec![eval]);
+    if let Some(parsed) = parse_judge_scores(response)
+        && let Some(score) = parsed.get("score").and_then(serde_json::Value::as_f64)
+    {
+        let mut eval = EvalScore::new(
+            evaluator,
+            score.clamp(0.0, 1.0),
+            EvalLayer::Reasoning,
+            EvalTiming::Async,
+            session_id,
+        )?;
+        if let Some(explanation) = parsed.get("explanation").and_then(|v| v.as_str()) {
+            eval = eval.with_explanation(explanation.to_owned());
         }
+        return Ok(vec![eval]);
     }
 
     for token in response.split_whitespace() {
