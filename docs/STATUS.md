@@ -86,6 +86,15 @@ The baseline unification is active and enforced in production paths:
   evaluator-compatible JSON metrics, carries explicit Arcan/Nous runtime signal
   inputs, and returns immutable `KnowledgeQualityOutcome`s for proposer
   feedback and future promotion decisions.
+- 2026-04-10: EGRI calibration promotion persistence is active in
+  `lago-knowledge`. `promote_to_lago_toml()` validates approved threshold
+  artifacts, writes the promoted parameters into the `lago.toml` `[knowledge]`
+  section with version/rollback metadata, preserves unrelated TOML sections,
+  uses a path-scoped writer lock plus atomic rename, tolerates unversioned
+  hand-authored knowledge baselines, and produces an
+  `egri.knowledge.promoted` Lago event payload for audit and future Autonomic
+  regression monitoring. Local `cargo test -p lago-knowledge` passes with 139
+  tests.
 
 ## Health Summary
 
@@ -204,14 +213,16 @@ Validation gates currently pass:
 
 ### Context Engine (2026-03-19)
 
-- 12 crates total (was 10): added `lago-knowledge` (131 tests) and `lago-auth` (5 tests).
+- 12 crates total (was 10): added `lago-knowledge` (139 tests) and `lago-auth` (5 tests).
 - `lago-knowledge`: YAML frontmatter parsing, `[[wikilink]]` extraction, in-memory knowledge index, scored search (+2 name, +1 body, +1 tag), BFS graph traversal.
 - `lago-knowledge`: also now includes EGRI calibration substrate —
   typed benchmark schema/runner, a seed benchmark corpus, parameterized BM25
   tuning surface, `KnowledgeThresholdArtifact` bounds/validation, and a
   deterministic `KnowledgeThresholdProposer`, `KnowledgeQualityEvaluator`, and
   `KnowledgeTrialExecutor` for bounded calibration candidates, immutable
-  composite scoring, and evaluator-ready trial execution.
+  composite scoring, evaluator-ready trial execution, and governed promotion to
+  the `lago.toml` `[knowledge]` section with versioned rollback metadata plus
+  `egri.knowledge.promoted` audit events.
 - `lago-auth`: JWT validation (HS256 shared secret), axum auth middleware, user→session mapping (`vault:{user_id}`).
 - `lago-api`: Auth-protected `/v1/memory/*` routes (manifest, file CRUD, search, traverse, note resolution).
 - `lagod`: `LAGO_JWT_SECRET` env var or `[auth]` TOML section. Session map rebuilt on startup. Backward-compatible when no secret set.

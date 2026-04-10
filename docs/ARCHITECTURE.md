@@ -141,11 +141,15 @@ Lago substrate provides:
   deterministic `KnowledgeThresholdProposer`, an immutable
   `KnowledgeQualityEvaluator`, and a `KnowledgeTrialExecutor` that applies a
   candidate artifact to the local benchmark/search plant and produces
-  evaluator-compatible metrics plus outcome metadata. This keeps the mutable
-  calibration artifact local to Lago knowledge while allowing future Arcan/Nous
-  runtime collectors to attach reasoning, health, token, speed, and safety
-  signals without mutating the evaluator or crossing the contract-first
-  layering boundary.
+  evaluator-compatible metrics plus outcome metadata.
+- The same calibration contract includes the promotion persistence seam:
+  `promote_to_lago_toml()` validates an approved threshold artifact, writes the
+  versioned `lago.toml` `[knowledge]` section, records rollback metadata, and
+  can publish the corresponding `egri.knowledge.promoted` Lago event payload.
+  This keeps the mutable calibration artifact local to Lago knowledge while
+  allowing future Arcan/Nous runtime collectors to attach reasoning, health,
+  token, speed, and safety signals without mutating the evaluator or crossing
+  the contract-first layering boundary.
 
 ## 5) Adapter Architecture
 
