@@ -137,9 +137,11 @@ Lago substrate provides:
 - policy engine support
 - API and stream formatting utilities used by integration layers
 - `lago-knowledge` now also carries the EGRI-facing calibration contract:
-  a typed benchmark schema/runner plus a bounded `KnowledgeThresholdArtifact`
-  that parameterizes BM25 and hybrid-search behavior without breaking the
-  contract-first layering.
+  a typed benchmark schema/runner, a bounded `KnowledgeThresholdArtifact`, and
+  a deterministic `KnowledgeThresholdProposer`. This keeps the mutable
+  calibration artifact local to Lago knowledge while allowing future
+  executor/evaluator components to run trials without mutating the evaluator or
+  crossing the contract-first layering boundary.
 
 ## 5) Adapter Architecture
 
