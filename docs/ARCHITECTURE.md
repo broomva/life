@@ -138,12 +138,14 @@ Lago substrate provides:
 - API and stream formatting utilities used by integration layers
 - `lago-knowledge` now also carries the EGRI-facing calibration contract:
   a typed benchmark schema/runner, a bounded `KnowledgeThresholdArtifact`, a
-  deterministic `KnowledgeThresholdProposer`, and an immutable
-  `KnowledgeQualityEvaluator` that converts trial metrics into the approved
-  weighted score plus hard/soft constraint outcomes. This keeps the mutable
-  calibration artifact local to Lago knowledge while allowing future executor
-  components to run trials without mutating the evaluator or crossing the
-  contract-first layering boundary.
+  deterministic `KnowledgeThresholdProposer`, an immutable
+  `KnowledgeQualityEvaluator`, and a `KnowledgeTrialExecutor` that applies a
+  candidate artifact to the local benchmark/search plant and produces
+  evaluator-compatible metrics plus outcome metadata. This keeps the mutable
+  calibration artifact local to Lago knowledge while allowing future Arcan/Nous
+  runtime collectors to attach reasoning, health, token, speed, and safety
+  signals without mutating the evaluator or crossing the contract-first
+  layering boundary.
 
 ## 5) Adapter Architecture
 
