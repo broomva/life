@@ -129,13 +129,19 @@ The baseline unification is active and enforced in production paths:
   `vigil.llm_call` custom event, so Lago replay can correlate provider
   economics with the same canonical session event spine used for reasoning
   observability and Autonomic regulation.
+- 2026-04-10: `memory_graph` v1 is active in Arcan shell. The tool builds a
+  derived Lago knowledge index over `.arcan/memory`, resolves starts by exact
+  path/name/wikilink target, performs bounded wikilink traversal with cycle
+  protection, and returns compact nodes plus `references` edges with
+  provenance. The graph remains a derived retrieval layer; no new authoritative
+  graph store or mandatory Lago route was introduced.
 
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Build | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Tests | PASS (96) | PASS (466+16 w/ spacetimedb) | PASS (335) | PASS (219 targeted) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
+| Tests | PASS (96) | PASS (474+16 w/ spacetimedb) | PASS (336) | PASS (219 targeted) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
 | Clippy (-D warnings) | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | CROSS-CUTTING | BRIDGED (arcan-spaces) |
 | Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | OBSERVABILITY | NETWORKING |
@@ -247,7 +253,7 @@ Validation gates currently pass:
 
 ### Context Engine (2026-03-19)
 
-- 12 crates total (was 10): added `lago-knowledge` (142 tests) and `lago-auth` (5 tests).
+- 12 crates total (was 10): added `lago-knowledge` (143 tests) and `lago-auth` (5 tests).
 - `lago-knowledge`: YAML frontmatter parsing, `[[wikilink]]` extraction, in-memory knowledge index, scored search (+2 name, +1 body, +1 tag), BFS graph traversal.
 - `lago-knowledge`: also now includes EGRI calibration substrate —
   typed benchmark schema/runner, a seed benchmark corpus, parameterized BM25
@@ -258,6 +264,11 @@ Validation gates currently pass:
   execution, full campaign orchestration, and governed promotion to the
   `lago.toml` `[knowledge]` section with versioned rollback metadata plus
   `egri.knowledge.promoted` audit events.
+- `lago-knowledge` traversal resolution now accepts exact paths, relative
+  paths, path stems, and wikilink syntax for graph starts. `arcan-lago` shapes
+  those traversal primitives into `MemoryGraphResponse`, and Arcan shell
+  exposes the read-only `memory_graph` tool beside the existing agent-driven
+  memory retrieval tools.
 - Autonomic: EGRI rollback monitoring folds promoted knowledge threshold
   versions and regression counters, emits durable `autonomic.RollbackRequested`
   advisories after sustained post-promotion health regression, and marks the

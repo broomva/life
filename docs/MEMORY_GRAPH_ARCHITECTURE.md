@@ -1,7 +1,7 @@
 # Memory Graph Architecture
 
 > **Date**: 2026-04-03
-> **Status**: Design specification
+> **Status**: Phase 2 implemented (`BRO-445`)
 > **Linear**: `BRO-444`, `BRO-445`, `BRO-446`, `BRO-447`
 > **Scope**: Lago graph projection + Arcan retrieval tool over the cognitive substrate
 
@@ -396,10 +396,22 @@ Ship the contract:
 
 Ship v1:
 
-- bounded graph retrieval over `lago-knowledge`
-- `memory_graph` tool in Arcan
-- deterministic tests
-- no mandatory new Lago route
+- [x] bounded graph retrieval over `lago-knowledge`
+- [x] `memory_graph` tool in Arcan shell
+- [x] deterministic tests for chain, cycle, bounds, missing start, and edge filtering
+- [x] no mandatory new Lago route
+
+Implementation notes:
+
+- `lago-knowledge::KnowledgeIndex::resolve_note_ref()` accepts exact manifest
+  paths, relative paths, path stems, plain wikilink targets, and bracketed
+  wikilinks.
+- `arcan-lago::memory_graph` owns bounded response shaping with
+  `MemoryGraphQuery`, `MemoryGraphResponse`, compact nodes, `references` edges,
+  provenance paths, and hard caps.
+- `arcan::memory_tools::MemoryGraphTool` maps missing start nodes to a clear
+  non-error empty JSON result so agents can recover by trying `memory_search`,
+  `memory_browse`, or `memory_similar`.
 
 ### Phase 3 — `BRO-446`
 

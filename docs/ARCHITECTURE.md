@@ -166,6 +166,13 @@ Lago substrate provides:
   `autonomic.RollbackRequested` advisory event to Lago when a journal is
   configured. EGRI remains responsible for consuming that signal and restoring
   the prior artifact.
+- Memory graph retrieval is a derived projection over existing markdown memory
+  artifacts, not a second source of truth. `lago-knowledge` owns start-node
+  resolution and bounded wikilink traversal; `arcan-lago` shapes traversal into
+  compact `MemoryGraphResponse` nodes/edges with provenance; Arcan shell exposes
+  this through a read-only `memory_graph` tool. V1 supports only `references`
+  edges and hard caps depth/nodes/edges so graph retrieval remains safe for
+  prompt consumption.
 
 ## 5) Adapter Architecture
 
@@ -225,6 +232,26 @@ The reasoning/knowledge path now follows the same canonical event route as the r
 8. The async observer handoff runs under `run_observer.notify`, and both derived `Knowledge*` events plus `nous-lago` eval publications preserve the active trace context, so post-run judge scores and EGRI outcome events stay attached to the originating trace.
 
 This keeps knowledge observability aligned with the contract-first architecture: tools stay pure, the kernel event spine remains authoritative, and downstream regulation/evaluation consume the same typed substrate.
+
+### Memory Graph Retrieval
+
+The agent-driven memory path now includes graph-shaped retrieval for causal and
+evidence-chain questions:
+
+1. Arcan shell registers `memory_graph` as a read-only, idempotent memory tool.
+2. The tool parses `start`, optional `depth`, `max_nodes`, `max_edges`, and
+   `edge_types` arguments, then delegates to `arcan-lago`.
+3. `arcan-lago` builds a transient `KnowledgeIndex` from `.arcan/memory` via the
+   existing blob-backed `build_index_from_dir()` helper.
+4. `lago-knowledge` resolves the start node by exact path, relative path, path
+   stem, or wikilink target and traverses outgoing wikilinks with BFS, visited
+   set, and node bounds.
+5. `arcan-lago` returns compact nodes and `references` edges with source paths
+   as provenance. Missing starts return a clear empty result at the tool layer.
+
+This path is intentionally topology-only in v1. Hybrid graph + semantic ranking
+belongs to the next memory graph phase, where Lance similarity can narrow or
+rank nodes without changing the authoritative memory model.
 
 ### LLM Cost Envelope Spine
 
