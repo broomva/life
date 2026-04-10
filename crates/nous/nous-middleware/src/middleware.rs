@@ -347,6 +347,7 @@ mod tests {
             iteration: 1,
             messages: vec![],
             tools: vec![],
+            max_tokens: None,
             state: AppState::default(),
         };
         let response = ModelTurn {
@@ -518,6 +519,7 @@ mod tests {
             iteration: 1,
             messages: vec![],
             tools: vec![],
+            max_tokens: None,
             state: AppState::default(),
         };
         let response = ModelTurn {
