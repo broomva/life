@@ -376,12 +376,12 @@ Current suite validates:
 - **semconv**: GenAI semantic conventions (`gen_ai.*`), Life attributes (`life.*`), Autonomic attributes (`autonomic.*`), Lago attributes (`lago.*`).
 - **envelope/jsonl/pricing**: typed LLM call envelope, best-effort JSONL dual-write, and local model-pricing snapshot for response-side cost estimation.
 - **spans**: Contract-derived span builders (`agent_span`, `phase_span`, `chat_span`, `tool_span`), knowledge-operation spans (`knowledge.context_build`, `knowledge.search`, `knowledge.lint`), typed LLM envelope attributes, and trace context helpers (`current_trace_context`, `write_trace_context`, `extract_trace_context`).
-- **metrics**: `GenAiMetrics` — OTel instruments for token usage, operation duration, tool executions, budget gauges, mode transitions.
+- **metrics**: `GenAiMetrics` — OTel instruments for token usage, operation duration, LLM request outcomes, estimated cost, tool executions, budget gauges, and mode transitions.
 
 ### Integration Points
 
 - Depends on `aios-protocol` (canonical contract — `EventEnvelope`, `LoopPhase`, `TokenUsage`).
-- Consumed by Arcan provider adapters for chat-span enrichment, local JSONL LLM call artifacts, and serialized cost-envelope persistence through `ModelCompletion`.
+- Consumed by Arcan provider adapters for chat-span enrichment, aggregate GenAI/Vigil metrics, local JSONL LLM call artifacts, and serialized cost-envelope persistence through `ModelCompletion`.
 - Graceful degradation: structured logging via `tracing-subscriber` when no OTLP endpoint is configured.
 
 ### Known Gaps

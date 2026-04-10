@@ -178,6 +178,12 @@ pub const VIGIL_LLM_PII_DETECTED: &str = "vigil.llm.pii_detected";
 /// Whether provider-bound content was redacted.
 pub const VIGIL_LLM_REDACTION_APPLIED: &str = "vigil.llm.redaction_applied";
 
+/// Low-cardinality operation status used for Vigil metrics (success, error).
+pub const VIGIL_STATUS: &str = "vigil.status";
+
+/// Low-cardinality route or policy label used for cost attribution metrics.
+pub const VIGIL_ROUTE: &str = "vigil.route";
+
 // ─── Reliability Attributes ─────────────────────────────────────────────────
 
 /// Number of retries before the request succeeded (0 = first attempt).
@@ -272,6 +278,8 @@ mod tests {
         assert!(VIGIL_LLM_PROVIDER_REQUESTED.starts_with("vigil.llm."));
         assert!(VIGIL_LLM_ESTIMATED_COST_USD.starts_with("vigil.llm."));
         assert!(VIGIL_LLM_POLICY_DECISION.starts_with("vigil.llm."));
+        assert!(VIGIL_STATUS.starts_with("vigil."));
+        assert!(VIGIL_ROUTE.starts_with("vigil."));
     }
 
     #[test]
