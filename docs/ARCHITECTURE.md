@@ -239,19 +239,28 @@ The agent-driven memory path now includes graph-shaped retrieval for causal and
 evidence-chain questions:
 
 1. Arcan shell registers `memory_graph` as a read-only, idempotent memory tool.
-2. The tool parses `start`, optional `depth`, `max_nodes`, `max_edges`, and
-   `edge_types` arguments, then delegates to `arcan-lago`.
+2. The tool parses `start`, optional `query`, `depth`, `max_nodes`,
+   `max_edges`, and `edge_types` arguments, then delegates to `arcan-lago`.
 3. `arcan-lago` builds a transient `KnowledgeIndex` from `.arcan/memory` via the
    existing blob-backed `build_index_from_dir()` helper.
 4. `lago-knowledge` resolves the start node by exact path, relative path, path
    stem, or wikilink target and traverses outgoing wikilinks with BFS, visited
    set, and node bounds.
-5. `arcan-lago` returns compact nodes and `references` edges with source paths
+5. If `query` is present, Arcan optionally embeds the query and asks the shared
+   workspace Lance journal for vector neighbors, then passes normalized semantic
+   score hints into `arcan-lago`. If embeddings or Lance are unavailable, this
+   step is skipped.
+6. `arcan-lago` ranks bounded graph candidates by depth, lexical query
+   relevance, optional semantic score, frontmatter importance/recency, and edge
+   weight. It keeps the root first, reapplies `max_nodes`/`max_edges`, and
+   labels the path as `graph_bfs`, `hybrid_lexical_graph`, or
+   `hybrid_vector_graph`.
+7. `arcan-lago` returns compact nodes and `references` edges with source paths
    as provenance. Missing starts return a clear empty result at the tool layer.
 
-This path is intentionally topology-only in v1. Hybrid graph + semantic ranking
-belongs to the next memory graph phase, where Lance similarity can narrow or
-rank nodes without changing the authoritative memory model.
+The authoritative memory model is unchanged: markdown memory artifacts and Lago
+events remain source-of-truth, and Lance only contributes optional ranking
+hints.
 
 ### LLM Cost Envelope Spine
 
