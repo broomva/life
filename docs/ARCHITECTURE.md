@@ -230,7 +230,7 @@ This keeps knowledge observability aligned with the contract-first architecture:
 
 Provider economics now follows the same canonical event route:
 
-1. `arcan-aios-adapters` creates a Vigil `LlmRequestEnvelope` before each provider call using session, branch, run, step, provider/model, allowed-tools, and Autonomic economic mode where available.
+1. `arcan-aios-adapters` creates a Vigil `LlmRequestEnvelope` before each provider call using session, branch, run, step, provider/model, allowed-tools, and the active policy mode where available.
 2. The envelope is recorded on the `chat` span under `vigil.llm.*` attributes alongside standard `gen_ai.*` token fields.
 3. Provider responses are enriched with `LlmResponseEconomics` from the local pricing snapshot when token usage is available.
 4. When `VIGIL_JSONL_PATH` is set, the full `LlmCallRecord` is written as local JSONL without blocking the agent loop.

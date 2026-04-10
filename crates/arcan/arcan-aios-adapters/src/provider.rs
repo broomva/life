@@ -247,6 +247,7 @@ impl ModelProviderPort for ArcanProviderAdapter {
         envelope.model_tier = Some(infer_model_tier(&model_name).to_owned());
         envelope.routing_decision = Some("direct_provider_handle".to_owned());
         envelope.allowed_tools = request.allowed_tools.clone();
+        let mut max_tokens = None;
 
         // Consult economic gates (advisory — if handle is absent, proceed normally).
         if let Some(ref handle) = self.economic_handle {
@@ -277,6 +278,8 @@ impl ModelProviderPort for ArcanProviderAdapter {
                                 max_tokens = max,
                                 "Autonomic: Hustle mode — capping tokens"
                             );
+                            max_tokens = Some(max);
+                            envelope.max_tokens = Some(max);
                         }
                         envelope.policy_decision = Some("allowed_with_token_cap".to_owned());
                     }
@@ -342,6 +345,7 @@ impl ModelProviderPort for ArcanProviderAdapter {
             iteration: request.step_index + 1,
             messages,
             tools,
+            max_tokens,
             state: AppState::default(),
         };
 
@@ -579,7 +583,7 @@ impl ModelProviderPort for ArcanProviderAdapter {
         let llm_call_record = serde_json::to_value(&call_record).ok();
 
         Ok(ModelCompletion {
-            provider: model_name.clone(),
+            provider: provider_system,
             model: model_name,
             llm_call_record,
             directives,
@@ -655,7 +659,13 @@ mod tests {
         assert_eq!(lines.len(), 1);
 
         let record: LlmCallRecord = serde_json::from_str(lines[0]).unwrap();
-        assert_eq!(record.envelope.request_id, "sess-1:run-1:2");
+        assert!(
+            record
+                .envelope
+                .request_id
+                .starts_with("sess-1:run-1:2:anthropic:claude-sonnet-4-20250514:")
+        );
+        assert_eq!(completion.provider, "anthropic");
         assert_eq!(record.envelope.provider_requested, "anthropic");
         assert_eq!(record.envelope.provider_selected, "anthropic");
         assert_eq!(record.envelope.model, "claude-sonnet-4-20250514");

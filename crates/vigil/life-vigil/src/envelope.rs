@@ -17,9 +17,12 @@
 //! 6. **Cache / Eval** — cache key, eval run metadata
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::semconv;
+
+static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 // ─── CostSource Provenance ─────────────────────────────────────────────────
 
@@ -215,7 +218,9 @@ impl LlmRequestEnvelope {
         let agent_name = agent_name.into();
         let provider = provider.into();
         let model = model.into();
-        let request_id = format!("{session_id}:{run_id}:{step_index}");
+        let sequence = REQUEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let request_id =
+            format!("{session_id}:{run_id}:{step_index}:{provider}:{model}:{sequence}");
 
         Self {
             request_id,
@@ -475,6 +480,10 @@ mod tests {
     fn envelope_new_has_sensible_defaults() {
         let env = LlmRequestEnvelope::new("sess-1", "run-1", "arcan", 0, "anthropic", "claude");
         assert_eq!(env.session_id, "sess-1");
+        assert!(
+            env.request_id
+                .starts_with("sess-1:run-1:0:anthropic:claude:")
+        );
         assert_eq!(env.provider, "anthropic");
         assert_eq!(env.retry_count, 0);
         assert!(!env.fallback_triggered);
@@ -491,6 +500,16 @@ mod tests {
         assert_eq!(deserialized.session_id, "s1");
         assert_eq!(deserialized.step_index, 3);
         assert_eq!(deserialized.model, "gpt-4o");
+    }
+
+    #[test]
+    fn envelope_request_id_is_unique_per_call() {
+        let first = LlmRequestEnvelope::new("s1", "r1", "arcan", 3, "openai", "gpt-4o");
+        let second = LlmRequestEnvelope::new("s1", "r1", "arcan", 3, "openai", "gpt-4o");
+
+        assert_ne!(first.request_id, second.request_id);
+        assert!(first.request_id.starts_with("s1:r1:3:openai:gpt-4o:"));
+        assert!(second.request_id.starts_with("s1:r1:3:openai:gpt-4o:"));
     }
 
     #[test]
