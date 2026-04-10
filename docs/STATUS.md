@@ -93,7 +93,7 @@ The baseline unification is active and enforced in production paths:
   uses a path-scoped writer lock plus atomic rename, tolerates unversioned
   hand-authored knowledge baselines, and produces an
   `egri.knowledge.promoted` Lago event payload for audit and future Autonomic
-  regression monitoring. Local `cargo test -p lago-knowledge` passes with 139
+  regression monitoring. Local `cargo test -p lago-knowledge` passes with 143
   tests.
 - 2026-04-10: EGRI calibration rollback monitoring is active in Autonomic.
   The projection reducer now folds `egri.knowledge.promoted` into typed

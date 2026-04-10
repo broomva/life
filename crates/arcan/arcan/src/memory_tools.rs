@@ -463,6 +463,22 @@ impl Tool for MemoryGraphTool {
             max_edges,
             edge_types,
         };
+        let bounded_query = query.clone().bounded();
+        let effective_depth = if bounded_query.edge_types.is_empty()
+            || bounded_query
+                .edge_types
+                .iter()
+                .any(|edge_type| edge_type == "references")
+        {
+            bounded_query.depth
+        } else {
+            0
+        };
+        let edge_filter = if bounded_query.edge_types.is_empty() {
+            vec!["references".to_string()]
+        } else {
+            bounded_query.edge_types.clone()
+        };
 
         match memory_graph_from_dir(&self.memory_dir, query) {
             Ok(graph) => Ok(ToolResult::json(
@@ -477,10 +493,16 @@ impl Tool for MemoryGraphTool {
                     "found": false,
                     "start": start,
                     "message": "Memory graph start node not found",
+                    "root": null,
                     "nodes": [],
                     "edges": [],
                     "total_nodes": 0,
                     "total_edges": 0,
+                    "truncated": false,
+                    "depth": effective_depth,
+                    "max_nodes": bounded_query.max_nodes,
+                    "max_edges": bounded_query.max_edges,
+                    "edge_filter": edge_filter,
                 }),
             )),
             Err(err) => Err(ToolError::ExecutionFailed {
@@ -1299,6 +1321,15 @@ mod tests {
 
         assert!(!result.output["found"].as_bool().unwrap());
         assert_eq!(result.output["total_nodes"], 0);
+        assert_eq!(result.output["total_edges"], 0);
+        assert!(result.output["root"].is_null());
+        assert_eq!(result.output["nodes"].as_array().unwrap().len(), 0);
+        assert_eq!(result.output["edges"].as_array().unwrap().len(), 0);
+        assert!(!result.output["truncated"].as_bool().unwrap());
+        assert_eq!(result.output["depth"], DEFAULT_GRAPH_DEPTH);
+        assert_eq!(result.output["max_nodes"], DEFAULT_MAX_NODES);
+        assert_eq!(result.output["max_edges"], DEFAULT_MAX_EDGES);
+        assert_eq!(result.output["edge_filter"], json!(["references"]));
         assert!(!result.is_error);
     }
 

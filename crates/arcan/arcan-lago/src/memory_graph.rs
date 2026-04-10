@@ -4,7 +4,7 @@
 //! shapes Lago traversal primitives into compact, provenance-preserving payloads
 //! that Arcan can expose as an agent tool.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use lago_knowledge::{KnowledgeError, KnowledgeIndex};
@@ -128,8 +128,23 @@ pub fn memory_graph_from_index(
         0
     };
 
-    let traversal = index.traverse(&start_note.path, effective_depth, query.max_nodes);
+    let mut traversal = index.traverse(
+        &start_note.path,
+        effective_depth,
+        query.max_nodes.saturating_add(1),
+    );
+    let nodes_overflowed = traversal.len() > query.max_nodes;
+    traversal.truncate(query.max_nodes);
+
     let returned_paths: HashSet<&str> = traversal.iter().map(|node| node.path.as_str()).collect();
+
+    let graph_edges = if query.includes_references() {
+        graph_edges(index, &traversal, &returned_paths, query.max_edges)
+    } else {
+        GraphEdges::default()
+    };
+    let edges_overflowed = graph_edges.overflowed;
+    let mut outgoing_links_by_source = graph_edges.outgoing_links_by_source;
 
     let nodes = traversal
         .iter()
@@ -141,26 +156,22 @@ pub fn memory_graph_from_index(
                 summary: note_summary(note),
                 source_ref: note.path.clone(),
                 depth: node.depth,
-                outgoing_links: note.links.clone(),
+                outgoing_links: outgoing_links_by_source
+                    .remove(&note.path)
+                    .unwrap_or_default(),
             })
         })
         .collect::<Vec<_>>();
 
-    let edges = if query.includes_references() {
-        graph_edges(index, &traversal, &returned_paths, query.max_edges)
-    } else {
-        Vec::new()
-    };
-
-    let truncated = nodes.len() == query.max_nodes || edges.len() == query.max_edges;
+    let truncated = nodes_overflowed || edges_overflowed;
     Ok(MemoryGraphResponse {
         found: true,
         start: query.start,
         root: Some(start_note.path.clone()),
         total_nodes: nodes.len(),
-        total_edges: edges.len(),
+        total_edges: graph_edges.edges.len(),
         nodes,
-        edges,
+        edges: graph_edges.edges,
         truncated,
         depth: effective_depth,
         max_nodes: query.max_nodes,
@@ -173,14 +184,23 @@ pub fn memory_graph_from_index(
     })
 }
 
+#[derive(Debug, Default)]
+struct GraphEdges {
+    edges: Vec<MemoryGraphEdge>,
+    outgoing_links_by_source: HashMap<String, Vec<String>>,
+    overflowed: bool,
+}
+
 fn graph_edges(
     index: &KnowledgeIndex,
     traversal: &[lago_knowledge::TraversalResult],
     returned_paths: &HashSet<&str>,
     max_edges: usize,
-) -> Vec<MemoryGraphEdge> {
+) -> GraphEdges {
     let mut edges = Vec::new();
+    let mut outgoing_links_by_source: HashMap<String, Vec<String>> = HashMap::new();
     let mut seen = HashSet::new();
+    let mut overflowed = false;
 
     for source in traversal {
         let Some(note) = index.get_note(&source.path) else {
@@ -188,9 +208,6 @@ fn graph_edges(
         };
 
         for link in &note.links {
-            if edges.len() >= max_edges {
-                return edges;
-            }
             let Some(target) = index.resolve_note_ref(link) else {
                 continue;
             };
@@ -202,6 +219,11 @@ fn graph_edges(
                 continue;
             }
 
+            if edges.len() >= max_edges {
+                overflowed = true;
+                continue;
+            }
+
             edges.push(MemoryGraphEdge {
                 source: note.path.clone(),
                 target: target.path.clone(),
@@ -209,10 +231,18 @@ fn graph_edges(
                 label: link.clone(),
                 source_ref: note.path.clone(),
             });
+            outgoing_links_by_source
+                .entry(note.path.clone())
+                .or_default()
+                .push(link.clone());
         }
     }
 
-    edges
+    GraphEdges {
+        edges,
+        outgoing_links_by_source,
+        overflowed,
+    }
 }
 
 fn note_title(note: &lago_knowledge::Note) -> String {
@@ -337,6 +367,7 @@ mod tests {
         assert_eq!(graph.edges.len(), 2);
         assert_eq!(graph.nodes[0].node_type, "decision");
         assert_eq!(graph.nodes[0].source_ref, "/decision.md");
+        assert_eq!(graph.nodes[0].outgoing_links, vec!["Evidence"]);
     }
 
     #[test]
@@ -376,6 +407,29 @@ mod tests {
         assert_eq!(graph.nodes.len(), 2);
         assert_eq!(graph.edges.len(), 1);
         assert!(graph.truncated);
+        assert_eq!(graph.nodes[0].outgoing_links, vec!["B"]);
+    }
+
+    #[test]
+    fn graph_does_not_report_truncated_when_result_exactly_matches_limits() {
+        let (_tmp, index) =
+            build_index(&[("/a.md", "# A\n\nSee [[B]]."), ("/b.md", "# B\n\nEnd.")]);
+
+        let graph = memory_graph_from_index(
+            &index,
+            MemoryGraphQuery {
+                start: "A".into(),
+                depth: 1,
+                max_nodes: 2,
+                max_edges: 1,
+                edge_types: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(graph.nodes.len(), 2);
+        assert_eq!(graph.edges.len(), 1);
+        assert!(!graph.truncated);
     }
 
     #[test]
