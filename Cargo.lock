@@ -1116,8 +1116,11 @@ dependencies = [
  "aios-protocol",
  "autonomic-core",
  "chrono",
+ "lago-core",
+ "lago-knowledge",
  "serde",
  "serde_json",
+ "tempfile",
  "tracing",
 ]
 

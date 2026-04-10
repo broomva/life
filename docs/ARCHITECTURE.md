@@ -142,6 +142,10 @@ Lago substrate provides:
   `KnowledgeQualityEvaluator`, and a `KnowledgeTrialExecutor` that applies a
   candidate artifact to the local benchmark/search plant and produces
   evaluator-compatible metrics plus outcome metadata.
+- `KnowledgeCalibrationCampaign` wires those lower-level primitives into the
+  bounded proposer → trial runner → evaluator feedback loop. The runner is a
+  trait seam, so deterministic mock campaigns and future Arcan-backed trial
+  sessions can share the same immutable artifact/evaluator/promotion contract.
 - The same calibration contract includes the promotion persistence seam:
   `promote_to_lago_toml()` validates an approved threshold artifact, writes the
   versioned `lago.toml` `[knowledge]` section, records rollback metadata, and
