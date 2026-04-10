@@ -65,20 +65,47 @@ pub enum CircuitState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmRequestEnvelope {
     // ── Block 1: Identity ──────────────────────────────────────────
+    /// Stable request ID for this provider call.
+    #[serde(default)]
+    pub request_id: String,
     /// Agent OS session ID.
     pub session_id: String,
+    /// Agent OS branch ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_id: Option<String>,
     /// Run ID within the session.
     pub run_id: String,
     /// Agent name (e.g. "arcan").
     pub agent_name: String,
     /// Step index within the current run (0-based).
     pub step_index: u32,
+    /// Tenant identifier for multi-tenant attribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
+    /// Caller identifier for actor-level attribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caller_id: Option<String>,
+    /// Task identifier for task-level attribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
 
     // ── Block 2: Model Selection ───────────────────────────────────
     /// Provider name (e.g. "anthropic", "openai").
     pub provider: String,
+    /// Provider requested before routing.
+    #[serde(default)]
+    pub provider_requested: String,
+    /// Provider selected after routing.
+    #[serde(default)]
+    pub provider_selected: String,
     /// Model identifier (e.g. "claude-sonnet-4-20250514").
     pub model: String,
+    /// Model tier used by routing and policy decisions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_tier: Option<String>,
+    /// Routing decision that selected the provider/model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub routing_decision: Option<String>,
     /// Maximum tokens for model response.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
@@ -102,6 +129,15 @@ pub struct LlmRequestEnvelope {
     /// Estimated total cost in USD (pre-call, input + output).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimated_total_cost_usd: Option<f64>,
+    /// Estimated pre-call input tokens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_in: Option<u32>,
+    /// Estimated pre-call output tokens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_out: Option<u32>,
+    /// Alias for estimated total cost used by downstream dashboards.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_cost_usd: Option<f64>,
     /// Remaining token budget before this call.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_tokens_remaining: Option<u64>,
@@ -119,6 +155,12 @@ pub struct LlmRequestEnvelope {
     /// Circuit breaker state at time of call.
     #[serde(default)]
     pub circuit_state: CircuitState,
+    /// Provider call latency in milliseconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    /// Time to first streamed token in milliseconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_to_first_token_ms: Option<u64>,
     /// Request timeout (if set).
     #[serde(
         default,
@@ -134,6 +176,18 @@ pub struct LlmRequestEnvelope {
     /// Whether human approval is required for this call.
     #[serde(default)]
     pub approval_required: bool,
+    /// Provider policy decision applied at the request boundary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_decision: Option<String>,
+    /// Policy mode active for the request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_mode: Option<String>,
+    /// Whether PII was detected before sending content to the provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pii_detected: Option<bool>,
+    /// Whether provider-bound content was redacted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redaction_applied: Option<bool>,
 
     // ── Block 6: Cache / Eval ──────────────────────────────────────
     /// Cache key for prompt deduplication.
@@ -156,13 +210,29 @@ impl LlmRequestEnvelope {
         provider: impl Into<String>,
         model: impl Into<String>,
     ) -> Self {
+        let session_id = session_id.into();
+        let run_id = run_id.into();
+        let agent_name = agent_name.into();
+        let provider = provider.into();
+        let model = model.into();
+        let request_id = format!("{session_id}:{run_id}:{step_index}");
+
         Self {
-            session_id: session_id.into(),
-            run_id: run_id.into(),
-            agent_name: agent_name.into(),
+            request_id,
+            session_id,
+            branch_id: None,
+            run_id,
+            agent_name,
             step_index,
-            provider: provider.into(),
-            model: model.into(),
+            tenant_id: None,
+            caller_id: None,
+            task_id: None,
+            provider: provider.clone(),
+            provider_requested: provider.clone(),
+            provider_selected: provider,
+            model,
+            model_tier: None,
+            routing_decision: None,
             max_tokens: None,
             temperature: None,
             top_p: None,
@@ -170,14 +240,23 @@ impl LlmRequestEnvelope {
             estimated_input_cost_usd: None,
             estimated_output_cost_usd: None,
             estimated_total_cost_usd: None,
+            tokens_in: None,
+            tokens_out: None,
+            estimated_cost_usd: None,
             budget_tokens_remaining: None,
             budget_cost_remaining_usd: None,
             retry_count: 0,
             fallback_triggered: false,
             circuit_state: CircuitState::default(),
+            latency_ms: None,
+            time_to_first_token_ms: None,
             timeout: None,
             allowed_tools: None,
             approval_required: false,
+            policy_decision: None,
+            policy_mode: None,
+            pii_detected: None,
+            redaction_applied: None,
             cache_key: None,
             eval_run_id: None,
         }
@@ -188,17 +267,101 @@ impl LlmRequestEnvelope {
     /// Records identity, model selection, and economics attributes.
     /// Reliability and governance are emitted only when non-default.
     pub fn record_on_span(&self, span: &tracing::Span) {
+        if !self.request_id.is_empty() {
+            span.record(semconv::VIGIL_LLM_REQUEST_ID, self.request_id.as_str());
+        }
         span.record(semconv::LIFE_SESSION_ID, self.session_id.as_str());
+        if let Some(ref branch_id) = self.branch_id {
+            span.record(semconv::LIFE_BRANCH_ID, branch_id.as_str());
+        }
         span.record(semconv::LIFE_RUN_ID, self.run_id.as_str());
         span.record(semconv::GEN_AI_AGENT_NAME, self.agent_name.as_str());
         span.record(semconv::GEN_AI_SYSTEM, self.provider.as_str());
+        if let Some(ref tenant_id) = self.tenant_id {
+            span.record(semconv::VIGIL_LLM_TENANT_ID, tenant_id.as_str());
+        }
+        if let Some(ref caller_id) = self.caller_id {
+            span.record(semconv::VIGIL_LLM_CALLER_ID, caller_id.as_str());
+        }
+        if let Some(ref task_id) = self.task_id {
+            span.record(semconv::VIGIL_LLM_TASK_ID, task_id.as_str());
+        }
+        if !self.provider_requested.is_empty() {
+            span.record(
+                semconv::VIGIL_LLM_PROVIDER_REQUESTED,
+                self.provider_requested.as_str(),
+            );
+        }
+        if !self.provider_selected.is_empty() {
+            span.record(
+                semconv::VIGIL_LLM_PROVIDER_SELECTED,
+                self.provider_selected.as_str(),
+            );
+        }
         span.record(semconv::GEN_AI_REQUEST_MODEL, self.model.as_str());
+        if let Some(ref model_tier) = self.model_tier {
+            span.record(semconv::VIGIL_LLM_MODEL_TIER, model_tier.as_str());
+        }
+        if let Some(ref routing_decision) = self.routing_decision {
+            span.record(
+                semconv::VIGIL_LLM_ROUTING_DECISION,
+                routing_decision.as_str(),
+            );
+        }
+        if let Some(max_tokens) = self.max_tokens {
+            span.record(semconv::GEN_AI_REQUEST_MAX_TOKENS, max_tokens);
+        }
+        if let Some(temperature) = self.temperature {
+            span.record(semconv::GEN_AI_REQUEST_TEMPERATURE, temperature);
+        }
+        if let Some(top_p) = self.top_p {
+            span.record(semconv::GEN_AI_REQUEST_TOP_P, top_p);
+        }
+        if let Some(tokens_in) = self.tokens_in {
+            span.record(semconv::VIGIL_LLM_TOKENS_IN, tokens_in);
+        }
+        if let Some(tokens_out) = self.tokens_out {
+            span.record(semconv::VIGIL_LLM_TOKENS_OUT, tokens_out);
+        }
+        if let Some(cost_source) = self.cost_source {
+            span.record(
+                semconv::VIGIL_LLM_COST_SOURCE,
+                serde_cost_source(cost_source),
+            );
+        }
+        if let Some(estimated_cost) = self.estimated_cost_usd.or(self.estimated_total_cost_usd) {
+            span.record(semconv::VIGIL_LLM_ESTIMATED_COST_USD, estimated_cost);
+        }
 
         if let Some(budget_tokens) = self.budget_tokens_remaining {
             span.record(semconv::LIFE_BUDGET_TOKENS, budget_tokens);
         }
         if let Some(budget_cost) = self.budget_cost_remaining_usd {
             span.record(semconv::LIFE_BUDGET_COST, budget_cost);
+        }
+        span.record(semconv::LIFE_RETRY_COUNT, self.retry_count);
+        span.record(semconv::LIFE_FALLBACK_TRIGGERED, self.fallback_triggered);
+        span.record(
+            semconv::LIFE_CIRCUIT_STATE,
+            serde_circuit_state(self.circuit_state),
+        );
+        if let Some(latency_ms) = self.latency_ms {
+            span.record(semconv::VIGIL_LLM_LATENCY_MS, latency_ms);
+        }
+        if let Some(ttft_ms) = self.time_to_first_token_ms {
+            span.record(semconv::VIGIL_LLM_TTFT_MS, ttft_ms);
+        }
+        if let Some(ref policy_decision) = self.policy_decision {
+            span.record(semconv::VIGIL_LLM_POLICY_DECISION, policy_decision.as_str());
+        }
+        if let Some(ref policy_mode) = self.policy_mode {
+            span.record(semconv::VIGIL_LLM_POLICY_MODE, policy_mode.as_str());
+        }
+        if let Some(pii_detected) = self.pii_detected {
+            span.record(semconv::VIGIL_LLM_PII_DETECTED, pii_detected);
+        }
+        if let Some(redaction_applied) = self.redaction_applied {
+            span.record(semconv::VIGIL_LLM_REDACTION_APPLIED, redaction_applied);
         }
     }
 }
@@ -236,6 +399,39 @@ pub struct LlmResponseEconomics {
     /// Wall-clock duration of the provider call.
     #[serde(with = "duration_secs")]
     pub duration: Duration,
+}
+
+impl LlmResponseEconomics {
+    /// Emit response-side economics on the given span.
+    pub fn record_on_span(&self, span: &tracing::Span) {
+        span.record(semconv::GEN_AI_USAGE_INPUT_TOKENS, self.input_tokens);
+        span.record(semconv::GEN_AI_USAGE_OUTPUT_TOKENS, self.output_tokens);
+        span.record(
+            semconv::VIGIL_LLM_COST_SOURCE,
+            serde_cost_source(self.cost_source),
+        );
+        if let Some(total_cost) = self.total_cost_usd {
+            span.record(semconv::VIGIL_LLM_ESTIMATED_COST_USD, total_cost);
+        }
+        let latency_ms = self.duration.as_millis().min(u128::from(u64::MAX)) as u64;
+        span.record(semconv::VIGIL_LLM_LATENCY_MS, latency_ms);
+    }
+}
+
+fn serde_cost_source(source: CostSource) -> &'static str {
+    match source {
+        CostSource::EstimatedLocalSnapshot => "estimated_local_snapshot",
+        CostSource::EstimatedProviderApi => "estimated_provider_api",
+        CostSource::Actual => "actual",
+    }
+}
+
+fn serde_circuit_state(state: CircuitState) -> &'static str {
+    match state {
+        CircuitState::Closed => "closed",
+        CircuitState::Open => "open",
+        CircuitState::HalfOpen => "half_open",
+    }
 }
 
 // ─── Duration serde helpers ────────────────────────────────────────────────

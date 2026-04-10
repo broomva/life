@@ -61,6 +61,11 @@ Life is a contract-first architecture for building artificial life from computat
    knowledge bootstrap and knowledge tool completions emit typed
    `Knowledge*` events, Nous consumes knowledge-aware `EvalContext`, and
    Autonomic folds the same typed events into cognitive regulation.
+7. LLM cost observability uses the same contract-first path:
+   Arcan provider adapters build Vigil `LlmRequestEnvelope` records, attach
+   them to GenAI chat spans and optional JSONL artifacts, return the serialized
+   call record through `ModelCompletion`, and `aios-runtime` persists it as a
+   `vigil.llm_call` custom event for Lago replay and later regulation.
 
 ## 2) Canonical Boundaries
 
@@ -181,6 +186,11 @@ Lago substrate provides:
   - memory adapter
 
 Adapters isolate implementation details from canonical runtime contract.
+The model provider adapter is also the active LLM cost-envelope seam: it
+infers provider/model routing metadata from the selected provider handle,
+records response-side token/cost economics through Vigil, and returns a
+serialized call record on `ModelCompletion` without making `aios-protocol`
+depend on `life-vigil`.
 
 ## External Integration Adapters
 
@@ -215,6 +225,20 @@ The reasoning/knowledge path now follows the same canonical event route as the r
 8. The async observer handoff runs under `run_observer.notify`, and both derived `Knowledge*` events plus `nous-lago` eval publications preserve the active trace context, so post-run judge scores and EGRI outcome events stay attached to the originating trace.
 
 This keeps knowledge observability aligned with the contract-first architecture: tools stay pure, the kernel event spine remains authoritative, and downstream regulation/evaluation consume the same typed substrate.
+
+### LLM Cost Envelope Spine
+
+Provider economics now follows the same canonical event route:
+
+1. `arcan-aios-adapters` creates a Vigil `LlmRequestEnvelope` before each provider call using session, branch, run, step, provider/model, allowed-tools, and Autonomic economic mode where available.
+2. The envelope is recorded on the `chat` span under `vigil.llm.*` attributes alongside standard `gen_ai.*` token fields.
+3. Provider responses are enriched with `LlmResponseEconomics` from the local pricing snapshot when token usage is available.
+4. When `VIGIL_JSONL_PATH` is set, the full `LlmCallRecord` is written as local JSONL without blocking the agent loop.
+5. The same record is serialized into `ModelCompletion.llm_call_record`; `aios-runtime` persists it as `EventKind::Custom { event_type: "vigil.llm_call", ... }`, allowing Lago consumers to replay cost and reliability data with the rest of the run.
+
+This avoids a reverse dependency from the kernel contract to Vigil while still
+making provider economics durable, trace-correlated, and available for future
+Autonomic budget rules.
 
 Branch flow:
 
@@ -290,6 +314,9 @@ Conformance and integration gates are exercised by:
 - Cross-cutting: depends on `aios-protocol`, consumed by Arcan/Lago/Autonomic/Praxis
 - Contract-derived spans map EventKind → OTel spans with GenAI semantic conventions
 - Dual-write: trace context written into EventEnvelope for persisted event correlation
+- LLM call envelope: `LlmRequestEnvelope` + `LlmResponseEconomics` capture
+  identity, routing, cost, reliability, and governance metadata; Arcan provider
+  adapters record this on spans, optional JSONL, and canonical runtime events.
 
 ## Spaces
 
@@ -300,7 +327,9 @@ Conformance and integration gates are exercised by:
 
 ## 10) Current Constraints
 
-1. Vigil provides the observability foundation (tracing, metrics, GenAI conventions); integration into runtime projects is the next step.
+1. Vigil is wired into the Arcan provider path for GenAI spans, token/cost
+   economics, optional JSONL, and persisted `vigil.llm_call` events; deeper
+   retry/fallback/circuit-breaker signal population remains a follow-up.
 2. OS-level sandbox hardening remains an active follow-up area.
 3. Cross-project golden fixture breadth can still be expanded.
 4. Autonomic is active but advisory-only — Arcan does not yet query it during agent runs.
