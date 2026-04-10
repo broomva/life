@@ -11,7 +11,7 @@ created: 2026-03-17
 
 # Broomva Life: Implementation Status
 
-**Date**: 2026-03-04**Version**: 0.2.0 (canonical baseline)**Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)**Tests**: 1046 passing (+5 ignored) across 30 crates + Spaces (32 crates total)
+**Date**: 2026-03-04**Version**: 0.2.0 (canonical baseline)**Rust**: edition 2024, MSRV 1.85+ (Spaces backend: edition 2021)**Tests**: 1049 passing (+5 ignored) across 30 crates + Spaces (32 crates total)
 
 This document is the canonical implementation-state record for `/Users/broomva/broomva.tech/life`.If another status document conflicts with this one, treat this file as source of truth.
 
@@ -142,13 +142,20 @@ The baseline unification is active and enforced in production paths:
   semantic similarity, importance, recency, and edge weight. Missing embeddings
   or vector-search failures degrade to lexical graph ranking or the original
   graph-only BFS fallback; bounds and provenance remain enforced.
+- 2026-04-10: `memory_graph` validation and evaluation coverage is active.
+  `MemoryGraphResponse` now carries first-class retrieval metrics for returned
+  node/edge counts, depth reached, backend, fallback path, and provenance
+  preservation. Focused regression fixtures cover causal chains, cycle
+  handling, bounds, semantic fallback paths, and missing starts; an Arcan shell
+  smoke test proves the tool works through the real `ToolRegistry` +
+  `PraxisToolBridge` path.
 
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Build | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Tests | PASS (96) | PASS (478+16 w/ spacetimedb) | PASS (336) | PASS (219 targeted) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
+| Tests | PASS (96) | PASS (481+16 w/ spacetimedb) | PASS (336) | PASS (219 targeted) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
 | Clippy (-D warnings) | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | CROSS-CUTTING | BRIDGED (arcan-spaces) |
 | Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | OBSERVABILITY | NETWORKING |

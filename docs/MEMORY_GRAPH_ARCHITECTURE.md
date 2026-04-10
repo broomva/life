@@ -1,7 +1,7 @@
 # Memory Graph Architecture
 
 > **Date**: 2026-04-03
-> **Status**: Phase 3 implemented (`BRO-446`)
+> **Status**: Phase 4 implemented (`BRO-447`)
 > **Linear**: `BRO-444`, `BRO-445`, `BRO-446`, `BRO-447`
 > **Scope**: Lago graph projection + Arcan retrieval tool over the cognitive substrate
 
@@ -290,6 +290,17 @@ pub struct MemoryGraphResponse {
     pub edge_filter: Vec<String>,
     pub query: Option<String>,
     pub ranking_backend: String,
+    pub metrics: MemoryGraphMetrics,
+}
+
+pub struct MemoryGraphMetrics {
+    pub operation: String,
+    pub returned_node_count: usize,
+    pub returned_edge_count: usize,
+    pub depth_reached: usize,
+    pub ranking_backend: String,
+    pub fallback_path: Option<String>,
+    pub provenance_preserved: bool,
 }
 ```
 
@@ -337,6 +348,8 @@ The tool should return:
 - provenance for every node and edge
 - `found`, `truncated`, count, bound, and edge-filter metadata
 - `query`, `ranking_backend`, `score`, and `rank_signals` when ranking is active
+- `metrics` for returned node/edge counts, depth reached, ranking backend,
+  semantic fallback path, and provenance preservation
 
 The tool should not return an unbounded adjacency dump.
 
@@ -462,10 +475,25 @@ Implementation notes:
 
 Ship validation and evaluation:
 
-- shell E2E
-- regression fixtures
-- retrieval metrics
-- provenance checks
+- [x] shell E2E smoke through the real Arcan `ToolRegistry` +
+  `PraxisToolBridge` path
+- [x] regression fixtures for causal chains, cycle handling, bounds, ambiguous
+  start-node resolution, and missing starts
+- [x] retrieval metrics in every successful and missing-start response
+- [x] provenance checks surfaced as `metrics.provenance_preserved`
+
+Implementation notes:
+
+- `MemoryGraphMetrics` is serialized inside `MemoryGraphResponse`, giving
+  agents and evaluators a compact quality signal without scraping logs.
+- Arcan records metrics through `tracing::info!` whenever `memory_graph`
+  returns successfully.
+- `MemoryGraphRankingHints::fallback_path` records why a semantic path degraded
+  to lexical ranking, using values such as `semantic_unavailable`,
+  `embedding_failed`, `vector_search_failed`, `semantic_empty`, and
+  `semantic_metadata_missing`.
+- Missing starts keep the same schema shape and include zero-count metrics with
+  `provenance_preserved = true`.
 
 ## Testing Strategy
 

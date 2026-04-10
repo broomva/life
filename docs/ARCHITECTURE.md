@@ -169,10 +169,10 @@ Lago substrate provides:
 - Memory graph retrieval is a derived projection over existing markdown memory
   artifacts, not a second source of truth. `lago-knowledge` owns start-node
   resolution and bounded wikilink traversal; `arcan-lago` shapes traversal into
-  compact `MemoryGraphResponse` nodes/edges with provenance; Arcan shell exposes
-  this through a read-only `memory_graph` tool. V1 supports only `references`
-  edges and hard caps depth/nodes/edges so graph retrieval remains safe for
-  prompt consumption.
+  compact `MemoryGraphResponse` nodes/edges with provenance and retrieval
+  metrics; Arcan shell exposes this through a read-only `memory_graph` tool. V1
+  supports only `references` edges and hard caps depth/nodes/edges so graph
+  retrieval remains safe for prompt consumption.
 
 ## 5) Adapter Architecture
 
@@ -256,7 +256,9 @@ evidence-chain questions:
    labels the path as `graph_bfs`, `hybrid_lexical_graph`, or
    `hybrid_vector_graph`.
 7. `arcan-lago` returns compact nodes and `references` edges with source paths
-   as provenance. Missing starts return a clear empty result at the tool layer.
+   as provenance plus metrics for returned counts, depth reached, backend,
+   fallback path, and provenance preservation. Missing starts return a clear
+   empty result at the tool layer with zero-count metrics.
 
 The authoritative memory model is unchanged: markdown memory artifacts and Lago
 events remain source-of-truth, and Lance only contributes optional ranking
