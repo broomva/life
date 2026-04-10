@@ -192,7 +192,7 @@ impl GenAiMetrics {
         route: &str,
         cost_usd: f64,
     ) {
-        if cost_usd <= 0.0 {
+        if !cost_usd.is_finite() || cost_usd <= 0.0 {
             return;
         }
 
