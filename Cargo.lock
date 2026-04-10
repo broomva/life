@@ -487,6 +487,8 @@ name = "arcan-lago"
 version = "0.3.0"
 dependencies = [
  "aios-protocol",
+ "aios-runtime",
+ "anyhow",
  "arcan-core",
  "arcan-sandbox",
  "arcan-store",
@@ -500,6 +502,7 @@ dependencies = [
  "lago-knowledge",
  "lago-policy",
  "lago-store",
+ "life-vigil",
  "praxis-core",
  "reqwest",
  "reqwest-eventsource",
@@ -5917,6 +5920,7 @@ dependencies = [
  "aios-protocol",
  "lago-core",
  "lago-journal",
+ "life-vigil",
  "nous-core",
  "serde",
  "serde_json",
@@ -5930,10 +5934,14 @@ name = "nous-middleware"
 version = "0.3.0"
 dependencies = [
  "arcan-core",
+ "lago-core",
+ "lago-knowledge",
+ "lago-store",
  "life-vigil",
  "nous-core",
  "nous-heuristics",
  "serde_json",
+ "tempfile",
  "tracing",
 ]
 

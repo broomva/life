@@ -17,6 +17,7 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+life-vigil.workspace = true
 
 [dev-dependencies]
 lago-journal = { workspace = true }

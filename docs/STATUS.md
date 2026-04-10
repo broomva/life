@@ -24,6 +24,49 @@ The baseline unification is active and enforced in production paths:
 - Lago is the persistence backend through canonical port adapters.
 - Arcan hosts the canonical runtime and provides integration adapters.
 - Public runtime API surface is the canonical session API family.
+- 2026-04-08: Reasoning observability Phase 1 landed in shared contracts.
+  `aios-protocol` now defines typed `KnowledgeSearched`,
+  `KnowledgeRetrieved`, and `KnowledgeEvaluated` events, and `nous-core`
+  `EvalContext` now carries optional knowledge metrics for later middleware
+  population and evaluator correlation.
+- 2026-04-09: Reasoning observability Phase 2 landed on the active runtime path.
+  Arcan now emits typed knowledge events from two production seams:
+  wake-up knowledge bootstrap (`KnowledgeRetrieved`) and kernel turn
+  middleware derived from canonical `ToolCallCompleted` events
+  (`KnowledgeSearched`, `KnowledgeRetrieved`, `KnowledgeEvaluated`).
+  Autonomic folds the typed knowledge variants directly, and
+  `nous-middleware` now populates `EvalContext` with live knowledge
+  coverage, freshness, retrieval count, relevance, and query metadata.
+- 2026-04-09: Reasoning observability Phase 3 judge substrate landed in
+  `nous-judge`. Async `ReasoningCoherence` and `KnowledgeUtilization`
+  evaluators now exist, plus `registry_with_reasoning()` for the
+  five-evaluator async judge set.
+- 2026-04-09: Reasoning observability Phase 4 registry integration is now
+  active on the canonical host path. `ToolHarnessObserver` run completion now
+  flows through a typed `RunCompletionContext`, `arcand` reconstructs
+  assistant output + executed tool summaries + knowledge evidence from the
+  canonical event spine, and `NousToolObserver` now executes the shared
+  `registry_with_reasoning()` async judge set instead of a hand-built trio.
+  The async observer notification path is instrumented under
+  `run_observer.notify`, preserving trace lineage for post-run evaluation and
+  score publication.
+- 2026-04-09: Reasoning observability trace completion is now active across the
+  knowledge path. Vigil emits dedicated `knowledge.context_build`,
+  `knowledge.search`, and `knowledge.lint` spans; derived `Knowledge*` events
+  inherit the source event trace/span IDs; `nous-lago` publishes eval events
+  with the current trace context serialized into Lago metadata; and
+  `arcan-lago` has an integration test proving wake-up retrieval, search,
+  eval, and lint events can be reconstructed as one reasoning trace by
+  `trace_id`.
+- 2026-04-09: EGRI calibration Phase 5 substrate landed in `lago-knowledge`.
+  The crate now exposes a typed `KnowledgeThresholdArtifact` with hard bounds,
+  parameterized BM25/search config so threshold mutation affects the live plant,
+  and a benchmark schema/runner for Recall@1 and Recall@5 across dev/holdout
+  splits. A 50-question seed benchmark file now lives under
+  `crates/lago/lago-knowledge/benchmarks/knowledge-benchmark.json`; because the
+  entity-page corpus referenced by the approved design was not present in the
+  workspace, that file is a bootstrap seed that should be regenerated from the
+  canonical entity corpus once mounted.
 
 ## Health Summary
 
@@ -99,6 +142,13 @@ Validation gates currently pass:
 - `arcan` binary hosts `aios-runtime` as production runtime path.
 - `arcan-aios-adapters` implements canonical provider/tool/policy/approval/memory ports.
 - `arcand` serves the canonical session API router.
+- Reasoning observability is active on the canonical host path:
+  knowledge bootstrap emits typed retrieval events at session spawn, and
+  a kernel turn middleware derives typed knowledge observability events from
+  `wiki_search` / `wiki_lint` tool completions without coupling persistence
+  into the tool trait itself. Run completion now also moves through a typed
+  observer payload so post-run evaluators consume canonical assistant/tool/
+  knowledge context instead of re-deriving ad hoc metadata.
 
 ### Runtime Surface
 
@@ -137,6 +187,9 @@ Validation gates currently pass:
 
 - 12 crates total (was 10): added `lago-knowledge` (34 tests) and `lago-auth` (5 tests).
 - `lago-knowledge`: YAML frontmatter parsing, `[[wikilink]]` extraction, in-memory knowledge index, scored search (+2 name, +1 body, +1 tag), BFS graph traversal.
+- `lago-knowledge`: also now includes EGRI calibration substrate —
+  typed benchmark schema/runner, a seed benchmark corpus, parameterized BM25
+  tuning surface, and `KnowledgeThresholdArtifact` bounds/validation.
 - `lago-auth`: JWT validation (HS256 shared secret), axum auth middleware, user→session mapping (`vault:{user_id}`).
 - `lago-api`: Auth-protected `/v1/memory/*` routes (manifest, file CRUD, search, traverse, note resolution).
 - `lagod`: `LAGO_JWT_SECRET` env var or `[auth]` TOML section. Session map rebuilt on startup. Backward-compatible when no secret set.
@@ -182,6 +235,10 @@ Current suite validates:
   - **Remote** (opt-in via `--autonomic-url`): Consults standalone daemon via HTTP GET `/gating/{session_id}`; failures are non-fatal.
 - Economic gate handle wired to provider layer: Hibernate blocks model calls, Hustle caps tokens.
 - Token usage flows through RunFinished events → event mapping → Autonomic fold.
+- Typed knowledge observability now flows through the same fold:
+  `KnowledgeSearched` increments search volume,
+  `KnowledgeRetrieved` accounts for injected context-token cost, and
+  `KnowledgeEvaluated` updates knowledge health and indexed-note count.
 - Lago journal integration via `--lago-data-dir` flag; on-demand session bootstrapping.
 
 ### Integration Points
@@ -237,7 +294,7 @@ Current suite validates:
 ### Observability Foundation
 
 - OpenTelemetry-native tracing and GenAI metrics for the Agent OS.
-- 1 crate: `vigil` (26 tests + 2 ignored).
+- 1 crate: `vigil` (56 tests + 2 ignored).
 - Depends only on `aios-protocol` — no dependency on Arcan, Lago, Autonomic, or Praxis.
 - Implements contract-derived spans (EventKind → OTel spans), GenAI semantic conventions (`gen_ai.*` attributes), and dual-write architecture (OTel spans + EventEnvelope trace context).
 
@@ -245,7 +302,7 @@ Current suite validates:
 
 - **config**: `VigConfig` with env var overrides (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `VIGIL_LOG_FORMAT`, `VIGIL_CAPTURE_CONTENT`, `VIGIL_SAMPLING_RATIO`).
 - **semconv**: GenAI semantic conventions (`gen_ai.*`), Life attributes (`life.*`), Autonomic attributes (`autonomic.*`), Lago attributes (`lago.*`).
-- **spans**: Contract-derived span builders (`agent_span`, `phase_span`, `chat_span`, `tool_span`), trace context dual-write (`write_trace_context` / `extract_trace_context`).
+- **spans**: Contract-derived span builders (`agent_span`, `phase_span`, `chat_span`, `tool_span`), knowledge-operation spans (`knowledge.context_build`, `knowledge.search`, `knowledge.lint`), and trace context helpers (`current_trace_context`, `write_trace_context`, `extract_trace_context`).
 - **metrics**: `GenAiMetrics` — OTel instruments for token usage, operation duration, tool executions, budget gauges, mode transitions.
 
 ### Integration Points

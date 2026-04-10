@@ -6,38 +6,66 @@
 use crate::error::NousResult;
 use crate::score::EvalScore;
 use crate::taxonomy::{EvalLayer, EvalTiming};
+use serde::{Deserialize, Serialize};
 
 /// Context provided to evaluators for scoring.
 ///
 /// Carries the information an evaluator needs without requiring
 /// it to depend on Arcan types directly.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvalContext {
     /// Session ID.
     pub session_id: String,
     /// Run ID within the session.
+    #[serde(default)]
     pub run_id: Option<String>,
     /// Current iteration within the run.
+    #[serde(default)]
     pub iteration: Option<u32>,
     /// Input token count for the current model call.
+    #[serde(default)]
     pub input_tokens: Option<u64>,
     /// Output token count for the current model call.
+    #[serde(default)]
     pub output_tokens: Option<u64>,
     /// Remaining token budget.
+    #[serde(default)]
     pub tokens_remaining: Option<u64>,
     /// Total tokens used so far in the session.
+    #[serde(default)]
     pub total_tokens_used: Option<u64>,
     /// Number of tool calls in this run.
+    #[serde(default)]
     pub tool_call_count: Option<u32>,
     /// Number of tool errors in this run.
+    #[serde(default)]
     pub tool_error_count: Option<u32>,
     /// Tool name (for tool-specific evaluators).
+    #[serde(default)]
     pub tool_name: Option<String>,
     /// Whether the tool call resulted in an error.
+    #[serde(default)]
     pub tool_errored: Option<bool>,
     /// Maximum iterations configured.
+    #[serde(default)]
     pub max_iterations: Option<u32>,
+    /// Knowledge coverage at evaluation time (0.0-1.0). None if unavailable.
+    #[serde(default)]
+    pub knowledge_coverage: Option<f64>,
+    /// Knowledge freshness at evaluation time (0.0-1.0). None if unavailable.
+    #[serde(default)]
+    pub knowledge_freshness: Option<f64>,
+    /// Number of knowledge notes retrieved during this run.
+    #[serde(default)]
+    pub knowledge_retrieved_count: Option<u32>,
+    /// Top relevance score from the most recent knowledge search.
+    #[serde(default)]
+    pub knowledge_top_relevance: Option<f64>,
+    /// Most recent knowledge search query for correlation.
+    #[serde(default)]
+    pub knowledge_query: Option<String>,
     /// Arbitrary key-value metadata.
+    #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
 }
 
@@ -57,6 +85,11 @@ impl EvalContext {
             tool_name: None,
             tool_errored: None,
             max_iterations: None,
+            knowledge_coverage: None,
+            knowledge_freshness: None,
+            knowledge_retrieved_count: None,
+            knowledge_top_relevance: None,
+            knowledge_query: None,
             metadata: std::collections::HashMap::new(),
         }
     }
@@ -158,6 +191,20 @@ mod tests {
         assert_eq!(ctx.session_id, "test");
         assert!(ctx.run_id.is_none());
         assert!(ctx.input_tokens.is_none());
+        assert!(ctx.knowledge_coverage.is_none());
+        assert!(ctx.knowledge_query.is_none());
+    }
+
+    #[test]
+    fn eval_context_serde_defaults_new_knowledge_fields() {
+        let json = r#"{"session_id":"sess-1","metadata":{}}"#;
+        let ctx: EvalContext = serde_json::from_str(json).unwrap();
+        assert_eq!(ctx.session_id, "sess-1");
+        assert!(ctx.knowledge_coverage.is_none());
+        assert!(ctx.knowledge_freshness.is_none());
+        assert!(ctx.knowledge_retrieved_count.is_none());
+        assert!(ctx.knowledge_top_relevance.is_none());
+        assert!(ctx.knowledge_query.is_none());
     }
 
     #[test]
