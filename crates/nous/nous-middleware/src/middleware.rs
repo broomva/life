@@ -359,6 +359,7 @@ mod tests {
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
             }),
+            telemetry: None,
         };
 
         let result = mw.after_model_call(&request, &response);
@@ -531,6 +532,7 @@ mod tests {
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
             }),
+            telemetry: None,
         };
 
         mw.after_model_call(&request, &response).unwrap();

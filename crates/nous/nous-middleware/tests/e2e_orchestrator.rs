@@ -123,6 +123,7 @@ fn e2e_simple_chat_produces_scores() {
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
             }),
+            telemetry: None,
         }],
         cursor: Mutex::new(0),
     };
@@ -203,6 +204,7 @@ fn e2e_tool_use_produces_scores() {
                     cache_read_tokens: 0,
                     cache_creation_tokens: 0,
                 }),
+                telemetry: None,
             },
             // Turn 2: final answer.
             ModelTurn {
@@ -216,6 +218,7 @@ fn e2e_tool_use_produces_scores() {
                     cache_read_tokens: 0,
                     cache_creation_tokens: 0,
                 }),
+                telemetry: None,
             },
         ],
         cursor: Mutex::new(0),
@@ -324,6 +327,7 @@ fn e2e_tool_errors_degrade_scores() {
                     cache_read_tokens: 0,
                     cache_creation_tokens: 0,
                 }),
+                telemetry: None,
             },
             // Turn 2: call echo tool (succeeds).
             ModelTurn {
@@ -341,6 +345,7 @@ fn e2e_tool_errors_degrade_scores() {
                     cache_read_tokens: 0,
                     cache_creation_tokens: 0,
                 }),
+                telemetry: None,
             },
             // Turn 3: done.
             ModelTurn {
@@ -354,6 +359,7 @@ fn e2e_tool_errors_degrade_scores() {
                     cache_read_tokens: 0,
                     cache_creation_tokens: 0,
                 }),
+                telemetry: None,
             },
         ],
         cursor: Mutex::new(0),
@@ -438,6 +444,7 @@ fn e2e_verbose_output_degrades_token_efficiency() {
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
             }),
+            telemetry: None,
         }],
         cursor: Mutex::new(0),
     };
