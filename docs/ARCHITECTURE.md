@@ -150,6 +150,13 @@ Lago substrate provides:
   allowing future Arcan/Nous runtime collectors to attach reasoning, health,
   token, speed, and safety signals without mutating the evaluator or crossing
   the contract-first layering boundary.
+- Autonomic closes the feedback side of that seam without taking ownership of
+  config mutation: its projection folds `egri.knowledge.promoted` into active
+  promotion state, `KnowledgeRegressionRule` detects sustained health
+  regression after promotion, and `autonomic-api` persists a structured
+  `autonomic.RollbackRequested` advisory event to Lago when a journal is
+  configured. EGRI remains responsible for consuming that signal and restoring
+  the prior artifact.
 
 ## 5) Adapter Architecture
 

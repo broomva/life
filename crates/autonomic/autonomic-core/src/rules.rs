@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::economic::{EconomicMode, ModelTier};
+use crate::events::AutonomicEvent;
 use crate::gating::HomeostaticState;
 
 /// A decision produced by a homeostatic rule.
@@ -28,6 +29,9 @@ pub struct GatingDecision {
     pub max_tool_calls_per_tick: Option<u32>,
     /// Human-readable rationale.
     pub rationale: String,
+    /// Advisory events that a controller may persist after evaluation.
+    #[serde(default)]
+    pub advisory_events: Vec<AutonomicEvent>,
 }
 
 impl GatingDecision {
@@ -42,6 +46,7 @@ impl GatingDecision {
             restrict_side_effects: None,
             max_tool_calls_per_tick: None,
             rationale: String::new(),
+            advisory_events: Vec::new(),
         }
     }
 }
@@ -157,5 +162,22 @@ mod tests {
         assert_eq!(decision.rule_id, "test");
         assert!(decision.economic_mode.is_none());
         assert!(decision.max_tokens_next_turn.is_none());
+    }
+
+    #[test]
+    fn gating_decision_deserializes_missing_advisory_events_as_empty() {
+        let json = serde_json::json!({
+            "rule_id": "legacy",
+            "economic_mode": null,
+            "max_tokens_next_turn": null,
+            "preferred_model": null,
+            "restrict_expensive_tools": null,
+            "restrict_side_effects": null,
+            "max_tool_calls_per_tick": null,
+            "rationale": "legacy payload"
+        });
+
+        let decision: GatingDecision = serde_json::from_value(json).unwrap();
+        assert!(decision.advisory_events.is_empty());
     }
 }
