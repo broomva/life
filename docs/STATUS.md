@@ -90,8 +90,11 @@ The baseline unification is active and enforced in production paths:
   `lago-knowledge`. `promote_to_lago_toml()` validates approved threshold
   artifacts, writes the promoted parameters into the `lago.toml` `[knowledge]`
   section with version/rollback metadata, preserves unrelated TOML sections,
-  and produces an `egri.knowledge.promoted` Lago event payload for audit and
-  future Autonomic regression monitoring.
+  uses a path-scoped writer lock plus atomic rename, tolerates unversioned
+  hand-authored knowledge baselines, and produces an
+  `egri.knowledge.promoted` Lago event payload for audit and future Autonomic
+  regression monitoring. Local `cargo test -p lago-knowledge` passes with 138
+  tests.
 
 ## Health Summary
 
@@ -210,7 +213,7 @@ Validation gates currently pass:
 
 ### Context Engine (2026-03-19)
 
-- 12 crates total (was 10): added `lago-knowledge` (137 tests) and `lago-auth` (5 tests).
+- 12 crates total (was 10): added `lago-knowledge` (138 tests) and `lago-auth` (5 tests).
 - `lago-knowledge`: YAML frontmatter parsing, `[[wikilink]]` extraction, in-memory knowledge index, scored search (+2 name, +1 body, +1 tag), BFS graph traversal.
 - `lago-knowledge`: also now includes EGRI calibration substrate —
   typed benchmark schema/runner, a seed benchmark corpus, parameterized BM25
