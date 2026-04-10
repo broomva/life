@@ -19,6 +19,12 @@ pub struct GenAiMetrics {
     /// `gen_ai.client.operation.duration` — histogram of LLM call duration in seconds.
     pub operation_duration: Histogram<f64>,
 
+    /// `vigil.estimated_cost_usd` — cumulative estimated LLM cost in USD.
+    pub estimated_cost_usd: Counter<f64>,
+
+    /// `vigil.requests` — counter of LLM requests by provider/model/status.
+    pub requests: Counter<u64>,
+
     /// `life.tool.executions` — counter of tool executions by name and status.
     pub tool_executions: Counter<u64>,
 
@@ -60,6 +66,17 @@ impl GenAiMetrics {
             .with_boundaries(vec![0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0])
             .build();
 
+        let estimated_cost_usd = meter
+            .f64_counter("vigil.estimated_cost_usd")
+            .with_description("Cumulative estimated LLM cost")
+            .with_unit("USD")
+            .build();
+
+        let requests = meter
+            .u64_counter("vigil.requests")
+            .with_description("Number of LLM provider requests")
+            .build();
+
         let tool_executions = meter
             .u64_counter("life.tool.executions")
             .with_description("Number of tool executions")
@@ -96,6 +113,8 @@ impl GenAiMetrics {
         Self {
             token_usage,
             operation_duration,
+            estimated_cost_usd,
+            requests,
             tool_executions,
             budget_tokens_remaining,
             budget_cost_remaining,
@@ -108,12 +127,14 @@ impl GenAiMetrics {
     /// Record token usage for a GenAI operation.
     pub fn record_token_usage(
         &self,
+        system: &str,
         model: &str,
         operation: &str,
         input_tokens: u64,
         output_tokens: u64,
     ) {
         let base_attrs = [
+            KeyValue::new(semconv::GEN_AI_SYSTEM, system.to_string()),
             KeyValue::new(semconv::GEN_AI_REQUEST_MODEL, model.to_string()),
             KeyValue::new(semconv::GEN_AI_OPERATION_NAME, operation.to_string()),
         ];
@@ -130,12 +151,58 @@ impl GenAiMetrics {
     }
 
     /// Record the duration of a GenAI operation.
-    pub fn record_operation_duration(&self, model: &str, operation: &str, duration: Duration) {
+    pub fn record_operation_duration(
+        &self,
+        system: &str,
+        model: &str,
+        operation: &str,
+        status: &str,
+        duration: Duration,
+    ) {
         self.operation_duration.record(
             duration.as_secs_f64(),
             &[
+                KeyValue::new(semconv::GEN_AI_SYSTEM, system.to_string()),
                 KeyValue::new(semconv::GEN_AI_REQUEST_MODEL, model.to_string()),
                 KeyValue::new(semconv::GEN_AI_OPERATION_NAME, operation.to_string()),
+                KeyValue::new(semconv::VIGIL_STATUS, status.to_string()),
+            ],
+        );
+    }
+
+    /// Record an LLM request outcome.
+    pub fn record_llm_request(&self, system: &str, model: &str, operation: &str, status: &str) {
+        self.requests.add(
+            1,
+            &[
+                KeyValue::new(semconv::GEN_AI_SYSTEM, system.to_string()),
+                KeyValue::new(semconv::GEN_AI_REQUEST_MODEL, model.to_string()),
+                KeyValue::new(semconv::GEN_AI_OPERATION_NAME, operation.to_string()),
+                KeyValue::new(semconv::VIGIL_STATUS, status.to_string()),
+            ],
+        );
+    }
+
+    /// Record estimated LLM cost in USD.
+    pub fn record_estimated_cost_usd(
+        &self,
+        system: &str,
+        model: &str,
+        operation: &str,
+        route: &str,
+        cost_usd: f64,
+    ) {
+        if !cost_usd.is_finite() || cost_usd <= 0.0 {
+            return;
+        }
+
+        self.estimated_cost_usd.add(
+            cost_usd,
+            &[
+                KeyValue::new(semconv::GEN_AI_SYSTEM, system.to_string()),
+                KeyValue::new(semconv::GEN_AI_REQUEST_MODEL, model.to_string()),
+                KeyValue::new(semconv::GEN_AI_OPERATION_NAME, operation.to_string()),
+                KeyValue::new(semconv::VIGIL_ROUTE, route.to_string()),
             ],
         );
     }
@@ -189,8 +256,16 @@ mod tests {
         let metrics = GenAiMetrics::new("test-service");
 
         // All instruments should be usable without panicking
-        metrics.record_token_usage("test-model", "chat", 100, 50);
-        metrics.record_operation_duration("test-model", "chat", Duration::from_millis(1500));
+        metrics.record_token_usage("anthropic", "test-model", "chat", 100, 50);
+        metrics.record_operation_duration(
+            "anthropic",
+            "test-model",
+            "chat",
+            "success",
+            Duration::from_millis(1500),
+        );
+        metrics.record_llm_request("anthropic", "test-model", "chat", "success");
+        metrics.record_estimated_cost_usd("anthropic", "test-model", "chat", "direct", 0.01);
         metrics.record_tool_execution("read_file", "ok");
         metrics.record_budget(10000, 4.50);
         metrics.record_mode_transition("explore", "execute");
@@ -200,6 +275,6 @@ mod tests {
     fn create_metrics_from_meter() {
         let meter = global::meter("test");
         let metrics = GenAiMetrics::from_meter(&meter);
-        metrics.record_token_usage("claude", "chat", 200, 100);
+        metrics.record_token_usage("anthropic", "claude", "chat", 200, 100);
     }
 }
