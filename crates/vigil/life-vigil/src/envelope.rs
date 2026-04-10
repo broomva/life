@@ -155,6 +155,9 @@ pub struct LlmRequestEnvelope {
     /// Whether a fallback provider was used.
     #[serde(default)]
     pub fallback_triggered: bool,
+    /// Why fallback occurred, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
     /// Circuit breaker state at time of call.
     #[serde(default)]
     pub circuit_state: CircuitState,
@@ -164,6 +167,9 @@ pub struct LlmRequestEnvelope {
     /// Time to first streamed token in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_to_first_token_ms: Option<u64>,
+    /// Provider-native finish reason, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
     /// Request timeout (if set).
     #[serde(
         default,
@@ -252,9 +258,11 @@ impl LlmRequestEnvelope {
             budget_cost_remaining_usd: None,
             retry_count: 0,
             fallback_triggered: false,
+            fallback_reason: None,
             circuit_state: CircuitState::default(),
             latency_ms: None,
             time_to_first_token_ms: None,
+            finish_reason: None,
             timeout: None,
             allowed_tools: None,
             approval_required: false,
@@ -350,11 +358,26 @@ impl LlmRequestEnvelope {
             semconv::LIFE_CIRCUIT_STATE,
             serde_circuit_state(self.circuit_state),
         );
+        span.record(semconv::VIGIL_LLM_RETRY_COUNT, self.retry_count);
+        span.record(
+            semconv::VIGIL_LLM_FALLBACK_TRIGGERED,
+            self.fallback_triggered,
+        );
+        if let Some(ref fallback_reason) = self.fallback_reason {
+            span.record(semconv::VIGIL_LLM_FALLBACK_REASON, fallback_reason.as_str());
+        }
+        span.record(
+            semconv::VIGIL_LLM_CIRCUIT_STATE,
+            serde_circuit_state(self.circuit_state),
+        );
         if let Some(latency_ms) = self.latency_ms {
             span.record(semconv::VIGIL_LLM_LATENCY_MS, latency_ms);
         }
         if let Some(ttft_ms) = self.time_to_first_token_ms {
             span.record(semconv::VIGIL_LLM_TTFT_MS, ttft_ms);
+        }
+        if let Some(ref finish_reason) = self.finish_reason {
+            span.record(semconv::VIGIL_LLM_FINISH_REASON, finish_reason.as_str());
         }
         if let Some(ref policy_decision) = self.policy_decision {
             span.record(semconv::VIGIL_LLM_POLICY_DECISION, policy_decision.as_str());
@@ -588,14 +611,23 @@ mod tests {
         let mut env = LlmRequestEnvelope::new("s1", "r1", "arcan", 0, "openai", "gpt-4o");
         env.retry_count = 2;
         env.fallback_triggered = true;
+        env.fallback_reason = Some("primary_timeout".to_owned());
         env.circuit_state = CircuitState::HalfOpen;
+        env.time_to_first_token_ms = Some(123);
+        env.finish_reason = Some("stop".to_owned());
         env.timeout = Some(Duration::from_secs(30));
 
         let json = serde_json::to_string(&env).unwrap();
         let deserialized: LlmRequestEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.retry_count, 2);
         assert!(deserialized.fallback_triggered);
+        assert_eq!(
+            deserialized.fallback_reason.as_deref(),
+            Some("primary_timeout")
+        );
         assert_eq!(deserialized.circuit_state, CircuitState::HalfOpen);
+        assert_eq!(deserialized.time_to_first_token_ms, Some(123));
+        assert_eq!(deserialized.finish_reason.as_deref(), Some("stop"));
         assert_eq!(deserialized.timeout, Some(Duration::from_secs(30)));
     }
 }

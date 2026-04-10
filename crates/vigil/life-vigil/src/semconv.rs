@@ -166,6 +166,21 @@ pub const VIGIL_LLM_LATENCY_MS: &str = "vigil.llm.latency_ms";
 /// Time to first streamed token in milliseconds, when available.
 pub const VIGIL_LLM_TTFT_MS: &str = "vigil.llm.time_to_first_token_ms";
 
+/// Number of provider retries before the request completed.
+pub const VIGIL_LLM_RETRY_COUNT: &str = "vigil.llm.retry_count";
+
+/// Whether a fallback provider was used.
+pub const VIGIL_LLM_FALLBACK_TRIGGERED: &str = "vigil.llm.fallback_triggered";
+
+/// Why fallback occurred, when known.
+pub const VIGIL_LLM_FALLBACK_REASON: &str = "vigil.llm.fallback_reason";
+
+/// Provider circuit breaker state at request time.
+pub const VIGIL_LLM_CIRCUIT_STATE: &str = "vigil.llm.circuit_state";
+
+/// Provider-native finish reason, when available.
+pub const VIGIL_LLM_FINISH_REASON: &str = "vigil.llm.finish_reason";
+
 /// Provider policy decision applied at the request boundary.
 pub const VIGIL_LLM_POLICY_DECISION: &str = "vigil.llm.policy_decision";
 
@@ -277,6 +292,12 @@ mod tests {
         assert!(VIGIL_LLM_REQUEST_ID.starts_with("vigil.llm."));
         assert!(VIGIL_LLM_PROVIDER_REQUESTED.starts_with("vigil.llm."));
         assert!(VIGIL_LLM_ESTIMATED_COST_USD.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_RETRY_COUNT.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_FALLBACK_TRIGGERED.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_FALLBACK_REASON.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_CIRCUIT_STATE.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_TTFT_MS.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_FINISH_REASON.starts_with("vigil.llm."));
         assert!(VIGIL_LLM_POLICY_DECISION.starts_with("vigil.llm."));
         assert!(VIGIL_STATUS.starts_with("vigil."));
         assert!(VIGIL_ROUTE.starts_with("vigil."));

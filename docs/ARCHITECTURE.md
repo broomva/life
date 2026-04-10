@@ -233,8 +233,9 @@ Provider economics now follows the same canonical event route:
 1. `arcan-aios-adapters` creates a Vigil `LlmRequestEnvelope` before each provider call using session, branch, run, step, provider/model, allowed-tools, and the active policy mode where available.
 2. The envelope is recorded on the `chat` span under `vigil.llm.*` attributes alongside standard `gen_ai.*` token fields.
 3. Provider responses are enriched with `LlmResponseEconomics` from the local pricing snapshot when token usage is available.
-4. When `VIGIL_JSONL_PATH` is set, the full `LlmCallRecord` is written as local JSONL without blocking the agent loop.
-5. The same record is serialized into `ModelCompletion.llm_call_record`; `aios-runtime` persists it as `EventKind::Custom { event_type: "vigil.llm_call", ... }`, allowing Lago consumers to replay cost and reliability data with the rest of the run.
+4. `ModelTurn.telemetry` carries provider-owned reliability observations back across the core/provider boundary without introducing a Vigil dependency into `arcan-core`: retry count, fallback state, circuit state, time-to-first-token, and raw finish reason.
+5. When `VIGIL_JSONL_PATH` is set, the full `LlmCallRecord` is written as local JSONL without blocking the agent loop.
+6. The same record is serialized into `ModelCompletion.llm_call_record`; `aios-runtime` persists it as `EventKind::Custom { event_type: "vigil.llm_call", ... }`, allowing Lago consumers to replay cost and reliability data with the rest of the run.
 
 This avoids a reverse dependency from the kernel contract to Vigil while still
 making provider economics durable, trace-correlated, and available for future
@@ -317,6 +318,10 @@ Conformance and integration gates are exercised by:
 - LLM call envelope: `LlmRequestEnvelope` + `LlmResponseEconomics` capture
   identity, routing, cost, reliability, and governance metadata; Arcan provider
   adapters record this on spans, optional JSONL, and canonical runtime events.
+- Provider reliability: Arcan adapters translate provider-neutral `ModelTurn.telemetry`
+  into `vigil.llm.retry_count`, `vigil.llm.time_to_first_token_ms`,
+  `vigil.llm.finish_reason`, fallback, and circuit-state attributes on the same
+  chat span and persisted envelope.
 
 ## Spaces
 
@@ -328,8 +333,9 @@ Conformance and integration gates are exercised by:
 ## 10) Current Constraints
 
 1. Vigil is wired into the Arcan provider path for GenAI spans, token/cost
-   economics, optional JSONL, and persisted `vigil.llm_call` events; deeper
-   retry/fallback/circuit-breaker signal population remains a follow-up.
+   economics, provider reliability telemetry, optional JSONL, and persisted
+   `vigil.llm_call` events. Fallback and circuit-breaker fields remain defaulted
+   until the routing/circuit subsystem owns those decisions.
 2. OS-level sandbox hardening remains an active follow-up area.
 3. Cross-project golden fixture breadth can still be expanded.
 4. Autonomic is active but advisory-only — Arcan does not yet query it during agent runs.

@@ -387,7 +387,7 @@ Current suite validates:
 ### Known Gaps
 
 - No OTLP smoke test in CI.
-- Time-to-first-token, retries, fallback, circuit breaker, PII, and redaction fields are present in the envelope but only populated when the corresponding runtime subsystem exposes those signals.
+- OpenAI-compatible and Anthropic provider paths populate finish reason, and populate time-to-first-token where streaming exposes a first content/tool delta. OpenAI-compatible non-streaming calls also populate retry counts from the provider retry loop. Fallback and circuit-breaker fields remain present but defaulted until a routing/circuit subsystem owns those decisions. PII and redaction fields remain schema-ready but are not yet populated by a sanitizer.
 
 ## Spaces
 
