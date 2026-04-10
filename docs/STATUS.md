@@ -67,6 +67,12 @@ The baseline unification is active and enforced in production paths:
   entity-page corpus referenced by the approved design was not present in the
   workspace, that file is a bootstrap seed that should be regenerated from the
   canonical entity corpus once mounted.
+- 2026-04-10: EGRI calibration Phase 6 proposer substrate is active in
+  `lago-knowledge`. `KnowledgeThresholdProposer` now emits deterministic,
+  bounded `KnowledgeThresholdProposal`s over the threshold artifact, supports
+  single-parameter and correlated mutations, expands after five non-improving
+  trials, and filters repeated failed regions plus inherited cross-run
+  insights before handing candidates to the future executor/evaluator loop.
 
 ## Health Summary
 
@@ -185,11 +191,13 @@ Validation gates currently pass:
 
 ### Context Engine (2026-03-19)
 
-- 12 crates total (was 10): added `lago-knowledge` (34 tests) and `lago-auth` (5 tests).
+- 12 crates total (was 10): added `lago-knowledge` (120 tests) and `lago-auth` (5 tests).
 - `lago-knowledge`: YAML frontmatter parsing, `[[wikilink]]` extraction, in-memory knowledge index, scored search (+2 name, +1 body, +1 tag), BFS graph traversal.
 - `lago-knowledge`: also now includes EGRI calibration substrate —
   typed benchmark schema/runner, a seed benchmark corpus, parameterized BM25
-  tuning surface, and `KnowledgeThresholdArtifact` bounds/validation.
+  tuning surface, `KnowledgeThresholdArtifact` bounds/validation, and a
+  deterministic `KnowledgeThresholdProposer` for bounded calibration
+  candidates.
 - `lago-auth`: JWT validation (HS256 shared secret), axum auth middleware, user→session mapping (`vault:{user_id}`).
 - `lago-api`: Auth-protected `/v1/memory/*` routes (manifest, file CRUD, search, traverse, note resolution).
 - `lagod`: `LAGO_JWT_SECRET` env var or `[auth]` TOML section. Session map rebuilt on startup. Backward-compatible when no secret set.
