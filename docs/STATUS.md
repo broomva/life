@@ -102,15 +102,18 @@ The baseline unification is active and enforced in production paths:
   `autonomic.RollbackRequested` acknowledgements. `KnowledgeRegressionRule`
   requests rollback after more than three consecutive regressions by attaching
   a structured advisory event to the gating profile; `autonomic-api` persists
-  that advisory event to Lago when a journal is configured and updates the
-  in-memory projection to prevent duplicate rollback requests.
+  that advisory event to Lago when a journal is configured, returns the fresh
+  published watermark in the gating response, and updates the in-memory
+  projection to prevent duplicate rollback requests. Embedded Arcan gating
+  acknowledges the same advisory events locally so rollback requests remain
+  once-only even without the standalone Autonomic API.
 
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Build | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Tests | PASS (96) | PASS (465+16 w/ spacetimedb) | PASS (332) | PASS (212 targeted) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
+| Tests | PASS (96) | PASS (466+16 w/ spacetimedb) | PASS (332) | PASS (218 targeted) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
 | Clippy (-D warnings) | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | CROSS-CUTTING | BRIDGED (arcan-spaces) |
 | Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | OBSERVABILITY | NETWORKING |
@@ -273,7 +276,7 @@ Current suite validates:
 ### Homeostasis Controller
 
 - Three-pillar regulation: operational, cognitive, economic homeostasis.
-- 5 crates: `autonomic-core` (24 tests), `autonomic-controller` (31 tests), `autonomic-lago` (8 tests), `autonomic-api` (4 tests), `autonomicd` (2 tests).
+- 5 crates: `autonomic-core` (51 tests), `autonomic-controller` (139 tests), `autonomic-lago` (8 tests), `autonomic-api` (18 tests), `autonomicd` (2 tests).
 - Pure rule engine with deterministic projection fold over events.
 - Economic modes: Sovereign, Conserving, Hustle, Hibernate — with hysteresis-gated transitions.
 - Dual-mode advisory architecture:
