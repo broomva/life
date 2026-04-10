@@ -4616,6 +4616,7 @@ dependencies = [
 name = "lago-knowledge"
 version = "0.3.0"
 dependencies = [
+ "chrono",
  "lago-core",
  "lago-store",
  "regex",
@@ -4625,6 +4626,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "toml",
  "tracing",
 ]
 
