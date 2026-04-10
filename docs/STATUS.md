@@ -95,13 +95,22 @@ The baseline unification is active and enforced in production paths:
   `egri.knowledge.promoted` Lago event payload for audit and future Autonomic
   regression monitoring. Local `cargo test -p lago-knowledge` passes with 139
   tests.
+- 2026-04-10: EGRI calibration rollback monitoring is active in Autonomic.
+  The projection reducer now folds `egri.knowledge.promoted` into typed
+  promotion state, counts consecutive post-promotion knowledge-health
+  regressions against the promoted `health_threshold`, and folds
+  `autonomic.RollbackRequested` acknowledgements. `KnowledgeRegressionRule`
+  requests rollback after more than three consecutive regressions by attaching
+  a structured advisory event to the gating profile; `autonomic-api` persists
+  that advisory event to Lago when a journal is configured and updates the
+  in-memory projection to prevent duplicate rollback requests.
 
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Build | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Tests | PASS (96) | PASS (465+16 w/ spacetimedb) | PASS (332) | PASS (69) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
+| Tests | PASS (96) | PASS (465+16 w/ spacetimedb) | PASS (332) | PASS (212 targeted) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
 | Clippy (-D warnings) | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | CROSS-CUTTING | BRIDGED (arcan-spaces) |
 | Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | OBSERVABILITY | NETWORKING |
@@ -223,6 +232,10 @@ Validation gates currently pass:
   composite scoring, evaluator-ready trial execution, and governed promotion to
   the `lago.toml` `[knowledge]` section with versioned rollback metadata plus
   `egri.knowledge.promoted` audit events.
+- Autonomic: EGRI rollback monitoring folds promoted knowledge threshold
+  versions and regression counters, emits durable `autonomic.RollbackRequested`
+  advisories after sustained post-promotion health regression, and marks the
+  active promotion as handled once the rollback request is folded.
 - `lago-auth`: JWT validation (HS256 shared secret), axum auth middleware, user→session mapping (`vault:{user_id}`).
 - `lago-api`: Auth-protected `/v1/memory/*` routes (manifest, file CRUD, search, traverse, note resolution).
 - `lagod`: `LAGO_JWT_SECRET` env var or `[auth]` TOML section. Session map rebuilt on startup. Backward-compatible when no secret set.
