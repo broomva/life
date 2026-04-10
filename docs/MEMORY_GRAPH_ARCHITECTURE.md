@@ -1,7 +1,7 @@
 # Memory Graph Architecture
 
 > **Date**: 2026-04-03
-> **Status**: Phase 2 implemented (`BRO-445`)
+> **Status**: Phase 3 implemented (`BRO-446`)
 > **Linear**: `BRO-444`, `BRO-445`, `BRO-446`, `BRO-447`
 > **Scope**: Lago graph projection + Arcan retrieval tool over the cognitive substrate
 
@@ -242,11 +242,23 @@ pub struct MemoryGraphNode {
     pub source_ref: String,
     pub depth: usize,
     pub outgoing_links: Vec<String>,
+    pub score: f32,
+    pub rank_signals: MemoryGraphRankSignals,
+}
+
+pub struct MemoryGraphRankSignals {
+    pub depth: f32,
+    pub query: f32,
+    pub semantic: f32,
+    pub importance: f32,
+    pub recency: f32,
+    pub edge_weight: f32,
 }
 ```
 
 `outgoing_links` is derived from the actual returned, capped edge set. It is not
-the raw note link list.
+the raw note link list. `score` and `rank_signals` are advisory ranking metadata
+for prompt shaping and evaluation; provenance remains `source_ref`.
 
 ### Edge Contract
 
@@ -276,6 +288,8 @@ pub struct MemoryGraphResponse {
     pub max_nodes: usize,
     pub max_edges: usize,
     pub edge_filter: Vec<String>,
+    pub query: Option<String>,
+    pub ranking_backend: String,
 }
 ```
 
@@ -305,6 +319,7 @@ This keeps the tool ergonomic while staying deterministic by default.
 ```json
 {
   "start": "auth-middleware-regression",
+  "query": "why did auth middleware regress?",
   "depth": 2,
   "max_nodes": 12,
   "max_edges": 16,
@@ -321,6 +336,7 @@ The tool should return:
 - capped `references` edges
 - provenance for every node and edge
 - `found`, `truncated`, count, bound, and edge-filter metadata
+- `query`, `ranking_backend`, `score`, and `rank_signals` when ranking is active
 
 The tool should not return an unbounded adjacency dump.
 
@@ -343,25 +359,35 @@ Defaults:
 
 ### V2
 
-Add hybrid ranking:
+Hybrid ranking now preserves BFS as the no-query fallback and switches to
+ranked candidate selection when `query` or semantic score hints are present.
+The adapter overfetches bounded graph candidates, scores them, keeps the root
+first, then truncates back to `max_nodes`.
 
-- depth penalty
-- node importance
-- recency
-- semantic similarity
-- edge weight
+Current signals:
+
+- depth proximity
+- lexical query relevance over title, summary, body, and tags
+- optional semantic similarity from Arcan-provided Lance score hints
+- frontmatter importance
+- frontmatter recency
+- graph edge weight inside the candidate set
 
 Conceptually:
 
 ```text
-score = semantic_similarity
+score = depth
+      + query_relevance
+      + semantic_similarity
       + importance
-      + recency_bonus
+      + recency
       + edge_weight
-      - depth_penalty
 ```
 
-The exact coefficients can evolve after evaluation.
+The exact coefficients can evolve after evaluation, but they live in
+`arcan-lago` so prompt-facing behavior stays deterministic and testable.
+Arcan owns the Lance call and passes normalized score hints into the adapter;
+`arcan-lago` does not depend on Lance or embedding providers.
 
 ## Scope Model
 
@@ -413,9 +439,24 @@ Implementation notes:
 
 Ship hybrid ranking:
 
-- Lance-assisted node ranking
-- optional query-conditioned expansion
-- graph-only fallback
+- [x] Lance-assisted node ranking via optional score hints
+- [x] optional query-conditioned expansion
+- [x] graph-only fallback
+
+Implementation notes:
+
+- `MemoryGraphQuery::query` activates ranked candidate selection without making
+  embeddings mandatory.
+- `MemoryGraphRankingHints` accepts optional semantic scores keyed by memory
+  title/path/name. Arcan populates those hints from `workspace.lance` when an
+  embedding provider is configured.
+- `ranking_backend` is one of `graph_bfs`, `hybrid_lexical_graph`, or
+  `hybrid_vector_graph`.
+- Query-conditioned retrieval overfetches bounded candidates, promotes relevant
+  non-root nodes above plain BFS neighbors, then re-applies `max_nodes` and
+  `max_edges`.
+- Missing embeddings, missing Lance datasets, or vector-search errors degrade
+  to lexical graph ranking or BFS rather than failing the tool.
 
 ### Phase 4 — `BRO-447`
 
@@ -446,6 +487,7 @@ Ship validation and evaluation:
 - edge filtering
 - deterministic result ordering
 - scope-preserving output
+- lexical and semantic ranking promotion while preserving bounds
 
 ### Tool Tests
 
@@ -455,6 +497,8 @@ Ship validation and evaluation:
 - bounded result size
 - readable summary formatting
 - fallback behavior when graph unavailable
+- query-conditioned ranking
+- Lance-backed semantic hints when available
 
 ### E2E
 
