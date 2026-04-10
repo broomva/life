@@ -80,6 +80,12 @@ The baseline unification is active and enforced in production paths:
   outcome-compatible metadata; and enforces hard safety plus holdout
   anti-gaming constraints before future trial execution can promote threshold
   candidates.
+- 2026-04-10: EGRI calibration trial execution substrate is active in
+  `lago-knowledge`. `KnowledgeTrialExecutor` now applies a
+  `KnowledgeThresholdArtifact` to the benchmark/search plant, emits
+  evaluator-compatible JSON metrics, carries explicit Arcan/Nous runtime signal
+  inputs, and returns immutable `KnowledgeQualityOutcome`s for proposer
+  feedback and future promotion decisions.
 
 ## Health Summary
 
@@ -198,13 +204,14 @@ Validation gates currently pass:
 
 ### Context Engine (2026-03-19)
 
-- 12 crates total (was 10): added `lago-knowledge` (127 tests) and `lago-auth` (5 tests).
+- 12 crates total (was 10): added `lago-knowledge` (131 tests) and `lago-auth` (5 tests).
 - `lago-knowledge`: YAML frontmatter parsing, `[[wikilink]]` extraction, in-memory knowledge index, scored search (+2 name, +1 body, +1 tag), BFS graph traversal.
 - `lago-knowledge`: also now includes EGRI calibration substrate —
   typed benchmark schema/runner, a seed benchmark corpus, parameterized BM25
   tuning surface, `KnowledgeThresholdArtifact` bounds/validation, and a
-  deterministic `KnowledgeThresholdProposer` plus `KnowledgeQualityEvaluator`
-  for bounded calibration candidates and immutable composite scoring.
+  deterministic `KnowledgeThresholdProposer`, `KnowledgeQualityEvaluator`, and
+  `KnowledgeTrialExecutor` for bounded calibration candidates, immutable
+  composite scoring, and evaluator-ready trial execution.
 - `lago-auth`: JWT validation (HS256 shared secret), axum auth middleware, user→session mapping (`vault:{user_id}`).
 - `lago-api`: Auth-protected `/v1/memory/*` routes (manifest, file CRUD, search, traverse, note resolution).
 - `lagod`: `LAGO_JWT_SECRET` env var or `[auth]` TOML section. Session map rebuilt on startup. Backward-compatible when no secret set.
