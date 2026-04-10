@@ -1,7 +1,7 @@
 # Memory Graph Architecture
 
 > **Date**: 2026-04-03
-> **Status**: Design specification
+> **Status**: Phase 2 implemented (`BRO-445`)
 > **Linear**: `BRO-444`, `BRO-445`, `BRO-446`, `BRO-447`
 > **Scope**: Lago graph projection + Arcan retrieval tool over the cognitive substrate
 
@@ -227,71 +227,61 @@ The first stable schema should be narrow.
 
 ### Edge Types
 
-- `references`
-- `derived_from`
-- `supports`
-- `contradicts`
-- `led_to`
-- `caused_by`
+- `references` is the only shipped v1 edge type.
+- `derived_from`, `supports`, `contradicts`, `led_to`, and `caused_by` are planned
+  semantic edge types for a future typed-memory phase.
 
 ### Node Contract
 
 ```rust
-pub enum MemoryGraphNodeType {
-    Memory,
-    Decision,
-    Evidence,
-    Outcome,
-    Pattern,
-    Artifact,
-    SessionSummary,
-}
-
 pub struct MemoryGraphNode {
     pub node_id: String,
-    pub node_type: MemoryGraphNodeType,
+    pub node_type: String,
     pub title: String,
     pub summary: String,
     pub source_ref: String,
-    pub importance: Option<f32>,
-    pub created_at: Option<i64>,
-    pub updated_at: Option<i64>,
+    pub depth: usize,
+    pub outgoing_links: Vec<String>,
 }
 ```
+
+`outgoing_links` is derived from the actual returned, capped edge set. It is not
+the raw note link list.
 
 ### Edge Contract
 
 ```rust
-pub enum MemoryGraphEdgeType {
-    References,
-    DerivedFrom,
-    Supports,
-    Contradicts,
-    LedTo,
-    CausedBy,
-}
-
 pub struct MemoryGraphEdge {
-    pub from: String,
-    pub to: String,
-    pub edge_type: MemoryGraphEdgeType,
-    pub weight: Option<f32>,
-    pub provenance: String,
+    pub source: String,
+    pub target: String,
+    pub edge_type: String,
+    pub label: String,
+    pub source_ref: String,
 }
 ```
 
 ### Retrieval Result Contract
 
 ```rust
-pub struct MemoryGraphResult {
-    pub root: MemoryGraphNode,
+pub struct MemoryGraphResponse {
+    pub found: bool,
+    pub start: String,
+    pub root: Option<String>,
     pub nodes: Vec<MemoryGraphNode>,
     pub edges: Vec<MemoryGraphEdge>,
-    pub summary: String,
+    pub total_nodes: usize,
+    pub total_edges: usize,
+    pub truncated: bool,
+    pub depth: usize,
+    pub max_nodes: usize,
+    pub max_edges: usize,
+    pub edge_filter: Vec<String>,
 }
 ```
 
-The LLM-facing tool output should include compact prose plus the structured payload.
+The LLM-facing v1 tool output is structured JSON only. `truncated` is set from
+explicit node/edge overflow detection, not from result size equaling the
+configured limits.
 
 ## Start-Node Resolution
 
@@ -299,12 +289,12 @@ The tool must not require opaque internal IDs only.
 
 Resolution order:
 
-1. direct graph node id
-2. exact note path
-3. exact note name
-4. wikilink resolution
-5. semantic narrowing if a query is present
-6. fail with candidate suggestions
+1. exact manifest path, for example `/notes/foo.md`
+2. relative path, for example `notes/foo.md`
+3. path stem, for example `notes/foo`
+4. plain wikilink target, for example `Foo`
+5. bracketed wikilink target, for example `[[Foo#heading]]`
+6. non-error empty JSON from the Arcan tool boundary when no start node resolves
 
 This keeps the tool ergonomic while staying deterministic by default.
 
@@ -316,9 +306,9 @@ This keeps the tool ergonomic while staying deterministic by default.
 {
   "start": "auth-middleware-regression",
   "depth": 2,
-  "limit": 12,
-  "edge_types": ["caused_by", "supports", "led_to"],
-  "query": "what led to the auth regression?"
+  "max_nodes": 12,
+  "max_edges": 16,
+  "edge_types": ["references"]
 }
 ```
 
@@ -326,13 +316,18 @@ This keeps the tool ergonomic while staying deterministic by default.
 
 The tool should return:
 
-- one root node
+- `root` as the resolved note path
 - a bounded set of related nodes
-- labeled edges
-- a compact natural-language summary
+- capped `references` edges
 - provenance for every node and edge
+- `found`, `truncated`, count, bound, and edge-filter metadata
 
 The tool should not return an unbounded adjacency dump.
+
+When the start node is missing, `arcan::memory_tools::MemoryGraphTool` returns
+the same top-level response shape with `found = false`, `root = null`, empty
+`nodes`/`edges`, zero counts, and the bounded request metadata. This lets
+clients recover without special-casing transport errors.
 
 ## Traversal Strategy
 
@@ -396,10 +391,23 @@ Ship the contract:
 
 Ship v1:
 
-- bounded graph retrieval over `lago-knowledge`
-- `memory_graph` tool in Arcan
-- deterministic tests
-- no mandatory new Lago route
+- [x] bounded graph retrieval over `lago-knowledge`
+- [x] `memory_graph` tool in Arcan shell
+- [x] deterministic tests for chain, cycle, bounds, missing start, and edge filtering
+- [x] no mandatory new Lago route
+
+Implementation notes:
+
+- `lago-knowledge::KnowledgeIndex::resolve_note_ref()` accepts exact manifest
+  paths, relative paths, path stems, plain wikilink targets, and bracketed
+  wikilinks.
+- `arcan-lago::memory_graph` owns bounded response shaping with
+  `MemoryGraphQuery`, `MemoryGraphResponse`, compact nodes, `references` edges,
+  provenance paths, capped `outgoing_links`, explicit truncation flags, and hard
+  caps.
+- `arcan::memory_tools::MemoryGraphTool` maps missing start nodes to a clear
+  schema-stable, non-error empty JSON result so agents can recover by trying
+  `memory_search`, `memory_browse`, or `memory_similar`.
 
 ### Phase 3 — `BRO-446`
 
