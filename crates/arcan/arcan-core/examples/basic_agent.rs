@@ -99,7 +99,14 @@ fn main() {
 
     println!("Life Agent OS - Basic Example");
     println!("Provider: {}", provider.name());
-    println!("Tools: {:?}", registry.definitions().iter().map(|d| &d.name).collect::<Vec<_>>());
+    println!(
+        "Tools: {:?}",
+        registry
+            .definitions()
+            .iter()
+            .map(|d| &d.name)
+            .collect::<Vec<_>>()
+    );
     println!();
 
     // Step 4: Send a message and get a response

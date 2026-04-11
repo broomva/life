@@ -685,15 +685,10 @@ fn check_rust() -> (bool, String) {
         Ok(out) if out.status.success() => {
             let version_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
             // Extract version number (e.g., "rustc 1.93.0 (..." -> "1.93.0")
-            let version = version_str
-                .split_whitespace()
-                .nth(1)
-                .unwrap_or("unknown");
-            let parts: Vec<u32> = version
-                .split('.')
-                .filter_map(|p| p.parse().ok())
-                .collect();
-            let meets_msrv = parts.len() >= 2 && (parts[0] > 1 || (parts[0] == 1 && parts[1] >= 93));
+            let version = version_str.split_whitespace().nth(1).unwrap_or("unknown");
+            let parts: Vec<u32> = version.split('.').filter_map(|p| p.parse().ok()).collect();
+            let meets_msrv =
+                parts.len() >= 2 && (parts[0] > 1 || (parts[0] == 1 && parts[1] >= 93));
             (meets_msrv, format!("rustc {version}"))
         }
         _ => (false, "not found".to_string()),
