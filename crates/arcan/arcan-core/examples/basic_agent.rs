@@ -41,6 +41,7 @@ impl Provider for EchoProvider {
                 }],
                 stop_reason: ModelStopReason::ToolUse,
                 usage: None,
+                telemetry: None,
             });
         }
 
@@ -51,6 +52,7 @@ impl Provider for EchoProvider {
             }],
             stop_reason: ModelStopReason::EndTurn,
             usage: None,
+            telemetry: None,
         })
     }
 }
@@ -122,6 +124,7 @@ fn main() {
         iteration: 0,
         messages: messages.clone(),
         tools: tool_defs,
+        max_tokens: None,
         state: Default::default(),
     };
 
