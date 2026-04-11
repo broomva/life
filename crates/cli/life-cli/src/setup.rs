@@ -674,11 +674,162 @@ fn print_success(provider: &Provider, api_key: &Option<String>) {
     eprintln!();
 }
 
+// ── Prerequisites check ───────────────────────────────────────────────────
+
+/// Check whether Rust is installed and meets MSRV.
+fn check_rust() -> (bool, String) {
+    let output = std::process::Command::new("rustc")
+        .arg("--version")
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            let version_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            // Extract version number (e.g., "rustc 1.93.0 (..." -> "1.93.0")
+            let version = version_str
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or("unknown");
+            let parts: Vec<u32> = version
+                .split('.')
+                .filter_map(|p| p.parse().ok())
+                .collect();
+            let meets_msrv = parts.len() >= 2 && (parts[0] > 1 || (parts[0] == 1 && parts[1] >= 93));
+            (meets_msrv, format!("rustc {version}"))
+        }
+        _ => (false, "not found".to_string()),
+    }
+}
+
+/// Check whether protoc (protobuf compiler) is installed.
+fn check_protoc() -> (bool, String) {
+    let output = std::process::Command::new("protoc")
+        .arg("--version")
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            let version_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            (true, version_str)
+        }
+        _ => (false, "not found".to_string()),
+    }
+}
+
+/// Run prerequisites check and print results. Returns true if all pass.
+fn check_prerequisites() -> bool {
+    eprintln!("  {}", bold("Prerequisites"));
+    eprintln!();
+
+    let (rust_ok, rust_ver) = check_rust();
+    if rust_ok {
+        eprintln!("    {} Rust: {}", c(GREEN, "ok"), dim(&rust_ver));
+    } else if rust_ver == "not found" {
+        eprintln!(
+            "    {} Rust: not found. Install from {}",
+            c(RED, "!!"),
+            c(CYAN, "https://rustup.rs/")
+        );
+    } else {
+        eprintln!(
+            "    {} Rust: {} (need 1.93+, run {})",
+            c(YELLOW, "!!"),
+            rust_ver,
+            c(CYAN, "rustup update")
+        );
+    }
+
+    let (protoc_ok, protoc_ver) = check_protoc();
+    if protoc_ok {
+        eprintln!("    {} protoc: {}", c(GREEN, "ok"), dim(&protoc_ver));
+    } else {
+        let install_hint = if cfg!(target_os = "macos") {
+            "brew install protobuf"
+        } else if cfg!(target_os = "linux") {
+            "sudo apt install protobuf-compiler"
+        } else {
+            "choco install protoc"
+        };
+        eprintln!(
+            "    {} protoc: not found (run {})",
+            c(YELLOW, "!!"),
+            c(CYAN, install_hint)
+        );
+    }
+
+    eprintln!();
+    rust_ok && protoc_ok
+}
+
+// ── Test shell session ────────────────────────────────────────────────────
+
+fn launch_test_shell() {
+    eprintln!();
+    eprintln!("  {}", bold("Test session"));
+    eprintln!();
+
+    let arcan_path = which_arcan();
+    if arcan_path.is_none() {
+        eprintln!(
+            "  {} arcan not found in PATH. Run {} to install.",
+            c(YELLOW, "!"),
+            c(CYAN, "cargo install arcan")
+        );
+        eprintln!();
+        return;
+    }
+
+    let answer = prompt(&format!(
+        "  Launch a test shell session? {}: ",
+        dim("[Y/n]")
+    ));
+    match answer {
+        Ok(a) if a.to_lowercase() == "n" || a.to_lowercase() == "no" => {
+            eprintln!();
+            eprintln!(
+                "  Skipped. Run {} when ready.",
+                c(CYAN, "arcan shell --provider mock")
+            );
+            eprintln!();
+        }
+        _ => {
+            eprintln!();
+            eprintln!("  Launching {} ...", c(CYAN, "arcan shell --provider mock"));
+            eprintln!();
+            let _ = std::process::Command::new(arcan_path.unwrap())
+                .args(["shell", "--provider", "mock"])
+                .status();
+        }
+    }
+}
+
+/// Find arcan binary in PATH.
+fn which_arcan() -> Option<std::path::PathBuf> {
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).find_map(|dir| {
+            let candidate = dir.join("arcan");
+            if candidate.is_file() {
+                Some(candidate)
+            } else {
+                None
+            }
+        })
+    })
+}
+
 // ── Main entry point ───────────────────────────────────────────────────────
 
 pub async fn run() -> Result<()> {
     print_banner();
     print_system_info();
+
+    // Step 0: Prerequisites check
+    let prereqs_ok = check_prerequisites();
+    if !prereqs_ok {
+        eprintln!(
+            "  {} Some prerequisites are missing. Setup will continue, but builds may fail.",
+            c(YELLOW, "!")
+        );
+        eprintln!();
+    }
 
     // Check for existing config
     if config_exists() {
@@ -717,6 +868,9 @@ pub async fn run() -> Result<()> {
 
     // Step 7: Success
     print_success(&provider, &api_key);
+
+    // Step 8: Offer to launch a test shell session
+    launch_test_shell();
 
     Ok(())
 }
