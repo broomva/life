@@ -73,7 +73,11 @@ life/
 
 ## Prerequisites
 
-- [**Rust**](https://rustup.rs/) 2024 Edition (MSRV 1.93)
+- [**Rust 1.93+**](https://rustup.rs/) (2024 Edition)
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  rustup update   # if already installed
+  ```
 - **Protobuf compiler** -- required for gRPC codegen (lago, haima)
   ```bash
   # macOS
@@ -81,7 +85,12 @@ life/
 
   # Ubuntu/Debian
   sudo apt-get install -y protobuf-compiler
+
+  # Windows
+  choco install protoc
+  # or download from https://github.com/protocolbuffers/protobuf/releases
   ```
+- **Build time**: ~5-15 min initial compile, ~1 min incremental
 
 ## Quick Start
 
@@ -112,6 +121,33 @@ OPENAI_API_KEY=... OPENAI_BASE_URL=https://api.together.xyz arcan shell --provid
 ```
 
 See [`.env.example`](.env.example) for all configuration options.
+
+### Example Session (mock provider)
+
+```
+$ arcan shell --provider mock
+
++-------------------------------------------+
+|        Life Agent OS (Arcan)               |
+|  Running with mock provider               |
+|  Type '/help' for commands                 |
++-------------------------------------------+
+
+arcan> What files are in this directory?
+I'll list the files in the current directory.
+
+[tool: list_directory] path="."
+Cargo.toml  README.md  crates/  docs/  examples/
+
+arcan> Read the README and summarize it in one line.
+[tool: read_file] path="README.md"
+
+This is a Rust monorepo implementing an Agent Operating System with
+13 modules covering cognition, persistence, tools, and identity.
+
+arcan> /quit
+Goodbye. Next: read docs/QUICKSTART.md
+```
 
 ### Build from source
 
@@ -235,6 +271,8 @@ Each module is also available as a read-only mirror for standalone use:
 
 ## Documentation
 
+- [Quickstart](docs/QUICKSTART.md) -- 30-second start + decision tree
+- [Module Guide](docs/MODULE_GUIDE.md) -- All 76 crates categorized by tier
 - [Architecture](docs/ARCHITECTURE.md) -- System design
 - [Status](docs/STATUS.md) -- Implementation health dashboard
 - [Roadmap](docs/ROADMAP.md) -- Development phases
