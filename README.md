@@ -122,6 +122,33 @@ OPENAI_API_KEY=... OPENAI_BASE_URL=https://api.together.xyz arcan shell --provid
 
 See [`.env.example`](.env.example) for all configuration options.
 
+### Example Session (mock provider)
+
+```
+$ arcan shell --provider mock
+
++-------------------------------------------+
+|        Life Agent OS (Arcan)               |
+|  Running with mock provider               |
+|  Type '/help' for commands                 |
++-------------------------------------------+
+
+arcan> What files are in this directory?
+I'll list the files in the current directory.
+
+[tool: list_directory] path="."
+Cargo.toml  README.md  crates/  docs/  examples/
+
+arcan> Read the README and summarize it in one line.
+[tool: read_file] path="README.md"
+
+This is a Rust monorepo implementing an Agent Operating System with
+13 modules covering cognition, persistence, tools, and identity.
+
+arcan> /quit
+Goodbye. Next: read docs/QUICKSTART.md
+```
+
 ### Build from source
 
 ```bash
