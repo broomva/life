@@ -122,6 +122,83 @@ pub const LIFE_TOOL_STATUS: &str = "life.tool.status";
 /// Tool execution output (when content capture is enabled).
 pub const LIFE_TOOL_OUTPUT: &str = "life.tool.output";
 
+// ─── Vigil LLM Cost Envelope Attributes ─────────────────────────────────────
+
+/// Stable request identifier for one LLM provider call.
+pub const VIGIL_LLM_REQUEST_ID: &str = "vigil.llm.request_id";
+
+/// Tenant identifier used for multi-tenant cost attribution.
+pub const VIGIL_LLM_TENANT_ID: &str = "vigil.llm.tenant_id";
+
+/// Caller identifier used for actor-level attribution.
+pub const VIGIL_LLM_CALLER_ID: &str = "vigil.llm.caller_id";
+
+/// Task identifier used for task-level cost attribution.
+pub const VIGIL_LLM_TASK_ID: &str = "vigil.llm.task_id";
+
+/// Provider requested before routing.
+pub const VIGIL_LLM_PROVIDER_REQUESTED: &str = "vigil.llm.provider_requested";
+
+/// Provider selected after routing.
+pub const VIGIL_LLM_PROVIDER_SELECTED: &str = "vigil.llm.provider_selected";
+
+/// Model tier classification used for policy and budget analysis.
+pub const VIGIL_LLM_MODEL_TIER: &str = "vigil.llm.model_tier";
+
+/// Routing decision or policy that selected the model/provider.
+pub const VIGIL_LLM_ROUTING_DECISION: &str = "vigil.llm.routing_decision";
+
+/// Estimated pre-call input tokens.
+pub const VIGIL_LLM_TOKENS_IN: &str = "vigil.llm.tokens_in";
+
+/// Estimated pre-call output tokens.
+pub const VIGIL_LLM_TOKENS_OUT: &str = "vigil.llm.tokens_out";
+
+/// Estimated or actual total call cost in USD.
+pub const VIGIL_LLM_ESTIMATED_COST_USD: &str = "vigil.llm.estimated_cost_usd";
+
+/// Provenance for the cost figure.
+pub const VIGIL_LLM_COST_SOURCE: &str = "vigil.llm.cost_source";
+
+/// Provider call latency in milliseconds.
+pub const VIGIL_LLM_LATENCY_MS: &str = "vigil.llm.latency_ms";
+
+/// Time to first streamed token in milliseconds, when available.
+pub const VIGIL_LLM_TTFT_MS: &str = "vigil.llm.time_to_first_token_ms";
+
+/// Number of provider retries before the request completed.
+pub const VIGIL_LLM_RETRY_COUNT: &str = "vigil.llm.retry_count";
+
+/// Whether a fallback provider was used.
+pub const VIGIL_LLM_FALLBACK_TRIGGERED: &str = "vigil.llm.fallback_triggered";
+
+/// Why fallback occurred, when known.
+pub const VIGIL_LLM_FALLBACK_REASON: &str = "vigil.llm.fallback_reason";
+
+/// Provider circuit breaker state at request time.
+pub const VIGIL_LLM_CIRCUIT_STATE: &str = "vigil.llm.circuit_state";
+
+/// Provider-native finish reason, when available.
+pub const VIGIL_LLM_FINISH_REASON: &str = "vigil.llm.finish_reason";
+
+/// Provider policy decision applied at the request boundary.
+pub const VIGIL_LLM_POLICY_DECISION: &str = "vigil.llm.policy_decision";
+
+/// Policy mode active for the request.
+pub const VIGIL_LLM_POLICY_MODE: &str = "vigil.llm.policy_mode";
+
+/// Whether PII was detected before the provider call.
+pub const VIGIL_LLM_PII_DETECTED: &str = "vigil.llm.pii_detected";
+
+/// Whether provider-bound content was redacted.
+pub const VIGIL_LLM_REDACTION_APPLIED: &str = "vigil.llm.redaction_applied";
+
+/// Low-cardinality operation status used for Vigil metrics (success, error).
+pub const VIGIL_STATUS: &str = "vigil.status";
+
+/// Low-cardinality route or policy label used for cost attribution metrics.
+pub const VIGIL_ROUTE: &str = "vigil.route";
+
 // ─── Reliability Attributes ─────────────────────────────────────────────────
 
 /// Number of retries before the request succeeded (0 = first attempt).
@@ -208,6 +285,22 @@ mod tests {
         assert!(LIFE_OPERATING_MODE.starts_with("life."));
         assert!(LIFE_BUDGET_TOKENS.starts_with("life."));
         assert!(LIFE_STATE_PROGRESS.starts_with("life."));
+    }
+
+    #[test]
+    fn vigil_llm_constants_use_correct_prefix() {
+        assert!(VIGIL_LLM_REQUEST_ID.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_PROVIDER_REQUESTED.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_ESTIMATED_COST_USD.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_RETRY_COUNT.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_FALLBACK_TRIGGERED.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_FALLBACK_REASON.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_CIRCUIT_STATE.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_TTFT_MS.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_FINISH_REASON.starts_with("vigil.llm."));
+        assert!(VIGIL_LLM_POLICY_DECISION.starts_with("vigil.llm."));
+        assert!(VIGIL_STATUS.starts_with("vigil."));
+        assert!(VIGIL_ROUTE.starts_with("vigil."));
     }
 
     #[test]

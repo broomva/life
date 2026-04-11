@@ -158,10 +158,29 @@ invoke_agent (session)
 |--------|------|-------------|
 | `gen_ai.client.token.usage` | Histogram | Token counts per request (input/output) |
 | `gen_ai.client.operation.duration` | Histogram | LLM call duration (seconds) |
+| `vigil.requests` | Counter | LLM requests by provider, model, operation, and status |
+| `vigil.estimated_cost_usd` | Counter | Cumulative estimated LLM cost by provider, model, operation, and route |
 | `life.tool.executions` | Counter | Tool executions by name and status |
 | `life.budget.tokens_remaining` | Gauge | Remaining token budget |
 | `life.budget.cost_remaining_usd` | Gauge | Remaining cost budget (USD) |
 | `life.mode.transitions` | Counter | Operating mode transitions |
+
+LLM metrics intentionally use only low-cardinality dimensions: `gen_ai.system`, `gen_ai.request.model`, `gen_ai.operation.name`, `vigil.status`, and `vigil.route`. Per-call identifiers remain in spans, JSONL artifacts, and Lago events.
+
+### LLM Reliability Signals
+
+Provider adapters attach reliability observations to the `chat` span and the persisted `vigil.llm_call` envelope:
+
+| Attribute | Source | Notes |
+|-----------|--------|-------|
+| `vigil.llm.retry_count` | Provider retry loop | Populated for OpenAI-compatible non-streaming calls. |
+| `vigil.llm.time_to_first_token_ms` | Streaming provider parser | Populated when a streamed first content/tool delta is observable. |
+| `vigil.llm.finish_reason` | Provider response | Preserves the raw provider finish/stop reason. |
+| `vigil.llm.fallback_triggered` | Provider/routing telemetry | Defaults to `false` until router fallback is implemented. |
+| `vigil.llm.fallback_reason` | Provider/routing telemetry | Optional reason for fallback decisions. |
+| `vigil.llm.circuit_state` | Provider/routing telemetry | Defaults to `closed` until circuit-breaker state is implemented. |
+
+These remain span/envelope attributes rather than metric dimensions to avoid high-cardinality cost and reliability metrics.
 
 ### Configuration
 

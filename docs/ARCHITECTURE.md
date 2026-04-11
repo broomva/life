@@ -61,6 +61,11 @@ Life is a contract-first architecture for building artificial life from computat
    knowledge bootstrap and knowledge tool completions emit typed
    `Knowledge*` events, Nous consumes knowledge-aware `EvalContext`, and
    Autonomic folds the same typed events into cognitive regulation.
+7. LLM cost observability uses the same contract-first path:
+   Arcan provider adapters build Vigil `LlmRequestEnvelope` records, attach
+   them to GenAI chat spans and optional JSONL artifacts, return the serialized
+   call record through `ModelCompletion`, and `aios-runtime` persists it as a
+   `vigil.llm_call` custom event for Lago replay and later regulation.
 
 ## 2) Canonical Boundaries
 
@@ -137,9 +142,37 @@ Lago substrate provides:
 - policy engine support
 - API and stream formatting utilities used by integration layers
 - `lago-knowledge` now also carries the EGRI-facing calibration contract:
-  a typed benchmark schema/runner plus a bounded `KnowledgeThresholdArtifact`
-  that parameterizes BM25 and hybrid-search behavior without breaking the
-  contract-first layering.
+  a typed benchmark schema/runner, a bounded `KnowledgeThresholdArtifact`, a
+  deterministic `KnowledgeThresholdProposer`, an immutable
+  `KnowledgeQualityEvaluator`, and a `KnowledgeTrialExecutor` that applies a
+  candidate artifact to the local benchmark/search plant and produces
+  evaluator-compatible metrics plus outcome metadata.
+- `KnowledgeCalibrationCampaign` wires those lower-level primitives into the
+  bounded proposer → trial runner → evaluator feedback loop. The runner is a
+  trait seam, so deterministic mock campaigns and future Arcan-backed trial
+  sessions can share the same immutable artifact/evaluator/promotion contract.
+- The same calibration contract includes the promotion persistence seam:
+  `promote_to_lago_toml()` validates an approved threshold artifact, writes the
+  versioned `lago.toml` `[knowledge]` section, records rollback metadata, and
+  can publish the corresponding `egri.knowledge.promoted` Lago event payload.
+  This keeps the mutable calibration artifact local to Lago knowledge while
+  allowing future Arcan/Nous runtime collectors to attach reasoning, health,
+  token, speed, and safety signals without mutating the evaluator or crossing
+  the contract-first layering boundary.
+- Autonomic closes the feedback side of that seam without taking ownership of
+  config mutation: its projection folds `egri.knowledge.promoted` into active
+  promotion state, `KnowledgeRegressionRule` detects sustained health
+  regression after promotion, and `autonomic-api` persists a structured
+  `autonomic.RollbackRequested` advisory event to Lago when a journal is
+  configured. EGRI remains responsible for consuming that signal and restoring
+  the prior artifact.
+- Memory graph retrieval is a derived projection over existing markdown memory
+  artifacts, not a second source of truth. `lago-knowledge` owns start-node
+  resolution and bounded wikilink traversal; `arcan-lago` shapes traversal into
+  compact `MemoryGraphResponse` nodes/edges with provenance and retrieval
+  metrics; Arcan shell exposes this through a read-only `memory_graph` tool. V1
+  supports only `references` edges and hard caps depth/nodes/edges so graph
+  retrieval remains safe for prompt consumption.
 
 ## 5) Adapter Architecture
 
@@ -160,6 +193,11 @@ Lago substrate provides:
   - memory adapter
 
 Adapters isolate implementation details from canonical runtime contract.
+The model provider adapter is also the active LLM cost-envelope seam: it
+infers provider/model routing metadata from the selected provider handle,
+records response-side token/cost economics through Vigil, and returns a
+serialized call record on `ModelCompletion` without making `aios-protocol`
+depend on `life-vigil`.
 
 ## External Integration Adapters
 
@@ -194,6 +232,52 @@ The reasoning/knowledge path now follows the same canonical event route as the r
 8. The async observer handoff runs under `run_observer.notify`, and both derived `Knowledge*` events plus `nous-lago` eval publications preserve the active trace context, so post-run judge scores and EGRI outcome events stay attached to the originating trace.
 
 This keeps knowledge observability aligned with the contract-first architecture: tools stay pure, the kernel event spine remains authoritative, and downstream regulation/evaluation consume the same typed substrate.
+
+### Memory Graph Retrieval
+
+The agent-driven memory path now includes graph-shaped retrieval for causal and
+evidence-chain questions:
+
+1. Arcan shell registers `memory_graph` as a read-only, idempotent memory tool.
+2. The tool parses `start`, optional `query`, `depth`, `max_nodes`,
+   `max_edges`, and `edge_types` arguments, then delegates to `arcan-lago`.
+3. `arcan-lago` builds a transient `KnowledgeIndex` from `.arcan/memory` via the
+   existing blob-backed `build_index_from_dir()` helper.
+4. `lago-knowledge` resolves the start node by exact path, relative path, path
+   stem, or wikilink target and traverses outgoing wikilinks with BFS, visited
+   set, and node bounds.
+5. If `query` is present, Arcan optionally embeds the query and asks the shared
+   workspace Lance journal for vector neighbors, then passes normalized semantic
+   score hints into `arcan-lago`. If embeddings or Lance are unavailable, this
+   step is skipped.
+6. `arcan-lago` ranks bounded graph candidates by depth, lexical query
+   relevance, optional semantic score, frontmatter importance/recency, and edge
+   weight. It keeps the root first, reapplies `max_nodes`/`max_edges`, and
+   labels the path as `graph_bfs`, `hybrid_lexical_graph`, or
+   `hybrid_vector_graph`.
+7. `arcan-lago` returns compact nodes and `references` edges with source paths
+   as provenance plus metrics for returned counts, depth reached, backend,
+   fallback path, and provenance preservation. Missing starts return a clear
+   empty result at the tool layer with zero-count metrics.
+
+The authoritative memory model is unchanged: markdown memory artifacts and Lago
+events remain source-of-truth, and Lance only contributes optional ranking
+hints.
+
+### LLM Cost Envelope Spine
+
+Provider economics now follows the same canonical event route:
+
+1. `arcan-aios-adapters` creates a Vigil `LlmRequestEnvelope` before each provider call using session, branch, run, step, provider/model, allowed-tools, and the active policy mode where available.
+2. The envelope is recorded on the `chat` span under `vigil.llm.*` attributes alongside standard `gen_ai.*` token fields.
+3. Provider responses are enriched with `LlmResponseEconomics` from the local pricing snapshot when token usage is available.
+4. `ModelTurn.telemetry` carries provider-owned reliability observations back across the core/provider boundary without introducing a Vigil dependency into `arcan-core`: retry count, fallback state, circuit state, time-to-first-token, and raw finish reason.
+5. When `VIGIL_JSONL_PATH` is set, the full `LlmCallRecord` is written as local JSONL without blocking the agent loop.
+6. The same record is serialized into `ModelCompletion.llm_call_record`; `aios-runtime` persists it as `EventKind::Custom { event_type: "vigil.llm_call", ... }`, allowing Lago consumers to replay cost and reliability data with the rest of the run.
+
+This avoids a reverse dependency from the kernel contract to Vigil while still
+making provider economics durable, trace-correlated, and available for future
+Autonomic budget rules.
 
 Branch flow:
 
@@ -269,6 +353,13 @@ Conformance and integration gates are exercised by:
 - Cross-cutting: depends on `aios-protocol`, consumed by Arcan/Lago/Autonomic/Praxis
 - Contract-derived spans map EventKind → OTel spans with GenAI semantic conventions
 - Dual-write: trace context written into EventEnvelope for persisted event correlation
+- LLM call envelope: `LlmRequestEnvelope` + `LlmResponseEconomics` capture
+  identity, routing, cost, reliability, and governance metadata; Arcan provider
+  adapters record this on spans, optional JSONL, and canonical runtime events.
+- Provider reliability: Arcan adapters translate provider-neutral `ModelTurn.telemetry`
+  into `vigil.llm.retry_count`, `vigil.llm.time_to_first_token_ms`,
+  `vigil.llm.finish_reason`, fallback, and circuit-state attributes on the same
+  chat span and persisted envelope.
 
 ## Spaces
 
@@ -279,7 +370,10 @@ Conformance and integration gates are exercised by:
 
 ## 10) Current Constraints
 
-1. Vigil provides the observability foundation (tracing, metrics, GenAI conventions); integration into runtime projects is the next step.
+1. Vigil is wired into the Arcan provider path for GenAI spans, token/cost
+   economics, provider reliability telemetry, optional JSONL, and persisted
+   `vigil.llm_call` events. Fallback and circuit-breaker fields remain defaulted
+   until the routing/circuit subsystem owns those decisions.
 2. OS-level sandbox hardening remains an active follow-up area.
 3. Cross-project golden fixture breadth can still be expanded.
 4. Autonomic is active but advisory-only — Arcan does not yet query it during agent runs.

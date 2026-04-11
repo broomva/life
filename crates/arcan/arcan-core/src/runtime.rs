@@ -57,6 +57,8 @@ pub struct ProviderRequest {
     pub iteration: u32,
     pub messages: Vec<ChatMessage>,
     pub tools: Vec<ToolDefinition>,
+    /// Optional request-scoped output token cap supplied by policy/gating layers.
+    pub max_tokens: Option<u32>,
     pub state: AppState,
 }
 
@@ -457,6 +459,7 @@ impl Orchestrator {
                 iteration,
                 messages: messages.clone(),
                 tools: self.tools.definitions(),
+                max_tokens: None,
                 state: state.clone(),
             };
 
@@ -945,6 +948,7 @@ mod tests {
                     }],
                     stop_reason: ModelStopReason::ToolUse,
                     usage: None,
+                    telemetry: None,
                 },
                 ModelTurn {
                     directives: vec![ModelDirective::FinalAnswer {
@@ -952,6 +956,7 @@ mod tests {
                     }],
                     stop_reason: ModelStopReason::EndTurn,
                     usage: None,
+                    telemetry: None,
                 },
             ],
             cursor: Mutex::new(0),
@@ -1058,6 +1063,7 @@ mod tests {
                 }],
                 stop_reason: ModelStopReason::ToolUse,
                 usage: None,
+                telemetry: None,
             }],
             cursor: Mutex::new(0),
         };
@@ -1109,6 +1115,7 @@ mod tests {
                 }],
                 stop_reason: ModelStopReason::EndTurn,
                 usage: None,
+                telemetry: None,
             }],
             cursor: Mutex::new(0),
         };
@@ -1178,6 +1185,7 @@ mod tests {
                     }],
                     stop_reason: ModelStopReason::ToolUse,
                     usage: None,
+                    telemetry: None,
                 },
                 ModelTurn {
                     directives: vec![ModelDirective::FinalAnswer {
@@ -1185,6 +1193,7 @@ mod tests {
                     }],
                     stop_reason: ModelStopReason::EndTurn,
                     usage: None,
+                    telemetry: None,
                 },
             ],
             cursor: Mutex::new(0),
@@ -1237,6 +1246,7 @@ mod tests {
                     }],
                     stop_reason: ModelStopReason::ToolUse,
                     usage: None,
+                    telemetry: None,
                 },
                 ModelTurn {
                     directives: vec![ModelDirective::ToolCall {
@@ -1248,6 +1258,7 @@ mod tests {
                     }],
                     stop_reason: ModelStopReason::ToolUse,
                     usage: None,
+                    telemetry: None,
                 },
                 // Only 2 turns, but max_iterations = 2, so it exhausts budget
                 // 3rd iteration will fail because no more scripted turns
@@ -1292,6 +1303,7 @@ mod tests {
                 }],
                 stop_reason: ModelStopReason::EndTurn,
                 usage: None,
+                telemetry: None,
             }],
             cursor: Mutex::new(0),
         };
@@ -1331,6 +1343,7 @@ mod tests {
                 }],
                 stop_reason: ModelStopReason::EndTurn,
                 usage: None,
+                telemetry: None,
             }],
             cursor: Mutex::new(0),
         };
@@ -1385,6 +1398,7 @@ mod tests {
                     }],
                     stop_reason: ModelStopReason::ToolUse,
                     usage: None,
+                    telemetry: None,
                 },
                 ModelTurn {
                     directives: vec![ModelDirective::FinalAnswer {
@@ -1392,6 +1406,7 @@ mod tests {
                     }],
                     stop_reason: ModelStopReason::EndTurn,
                     usage: None,
+                    telemetry: None,
                 },
             ],
             cursor: Mutex::new(0),
@@ -1445,6 +1460,7 @@ mod tests {
                     }],
                     stop_reason: ModelStopReason::ToolUse,
                     usage: None,
+                    telemetry: None,
                 },
                 ModelTurn {
                     directives: vec![ModelDirective::FinalAnswer {
@@ -1452,6 +1468,7 @@ mod tests {
                     }],
                     stop_reason: ModelStopReason::EndTurn,
                     usage: None,
+                    telemetry: None,
                 },
             ],
             cursor: Mutex::new(0),
@@ -1559,6 +1576,7 @@ mod tests {
                         cache_read_tokens: 0,
                         cache_creation_tokens: 0,
                     }),
+                    telemetry: None,
                 },
                 ModelTurn {
                     directives: vec![ModelDirective::FinalAnswer {
@@ -1571,6 +1589,7 @@ mod tests {
                         cache_read_tokens: 0,
                         cache_creation_tokens: 0,
                     }),
+                    telemetry: None,
                 },
             ],
             cursor: Mutex::new(0),
@@ -1667,6 +1686,7 @@ mod tests {
                     }],
                     stop_reason: ModelStopReason::ToolUse,
                     usage: None,
+                    telemetry: None,
                 },
                 ModelTurn {
                     directives: vec![ModelDirective::FinalAnswer {
@@ -1674,6 +1694,7 @@ mod tests {
                     }],
                     stop_reason: ModelStopReason::EndTurn,
                     usage: None,
+                    telemetry: None,
                 },
             ],
             cursor: Mutex::new(0),

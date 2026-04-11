@@ -23,10 +23,14 @@
 
 pub mod benchmark;
 pub mod bm25;
+pub mod calibration;
+pub mod evaluation;
+pub mod execution;
 mod frontmatter;
 mod index;
 pub mod ingest;
 pub mod lint;
+pub mod promotion;
 mod search;
 mod thresholds;
 mod traversal;
@@ -37,13 +41,34 @@ pub use benchmark::{
     QuestionResult, SplitMetrics,
 };
 pub use bm25::Bm25Index;
+pub use calibration::{
+    KnowledgeCalibrationCampaign, KnowledgeCalibrationConfig, KnowledgeCalibrationError,
+    KnowledgeCalibrationReport, KnowledgeCalibrationTrialRecord, KnowledgeTrialRunner,
+};
+pub use evaluation::{
+    ConstraintSeverity, KnowledgeConstraintViolation, KnowledgeQualityError,
+    KnowledgeQualityEvaluator, KnowledgeQualityMetrics, KnowledgeQualityOutcome,
+    KnowledgeQualityWeights,
+};
+pub use execution::{
+    KnowledgeRuntimeSignals, KnowledgeTrialConfig, KnowledgeTrialError, KnowledgeTrialExecution,
+    KnowledgeTrialExecutor,
+};
 pub use frontmatter::parse_frontmatter;
 pub use index::{KnowledgeError, KnowledgeIndex, Note};
 pub use ingest::{ChunkStrategy, IngestConfig, SourceFormat, detect_format, ingest_file};
 pub use lint::{Contradiction, LintReport};
+pub use promotion::{
+    KNOWLEDGE_PROMOTED_EVENT_TYPE, KnowledgePromotionError, KnowledgePromotionRecord,
+    KnowledgePromotionRequest, PromotedKnowledgeConfig, load_promoted_knowledge_config,
+    promote_to_lago_toml, publish_promotion_event,
+};
 pub use search::{HybridSearchConfig, SearchResult};
 pub use thresholds::{
-    KnowledgeThresholdArtifact, KnowledgeThresholdBounds, NumericBound, ThresholdValidationError,
+    KnowledgeThresholdArtifact, KnowledgeThresholdBounds, KnowledgeThresholdProposal,
+    KnowledgeThresholdProposer, NumericBound, ProposalStrategy, ThresholdChange, ThresholdInsight,
+    ThresholdParameter, ThresholdProposalConfig, ThresholdProposalContext, ThresholdProposalError,
+    ThresholdTrialOutcome, ThresholdValidationError, ThresholdValue,
 };
 pub use traversal::TraversalResult;
 pub use wikilink::extract_wikilinks;

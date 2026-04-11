@@ -15,7 +15,9 @@ cargo build --release --workspace
 
 ## Test Coverage
 
-**295 tests** across all 10 crates, all passing:
+`docs/STATUS.md` is the authoritative source for current test counts. The Lago
+workspace currently tracks 12 crates, including `lago-knowledge` and
+`lago-auth`; keep this table synchronized when updating status accounting.
 
 | Crate | Tests | Coverage |
 |-------|-------|----------|
@@ -26,6 +28,8 @@ cargo build --release --workspace
 | `lago-journal` | 24 | Key encoding, redb CRUD, sessions, snapshots, notifications |
 | `lago-store` | 17 | Blob put/get, SHA-256 hashing, zstd compression |
 | `lago-ingest` | 10 | Proto codec roundtrips, ack/heartbeat construction |
+| `lago-knowledge` | 142 | Knowledge indexing, search, lint, benchmark, calibration campaign, promotion |
+| `lago-auth` | 5 | JWT validation, auth middleware, user/session mapping |
 | `lago-aios-eventstore-adapter` | 0 | Canonical adapter is covered through cross-project conformance and integration paths |
 | `lago-cli` | 0 | Primarily validated via integration flows and manual CLI verification |
 | `lagod` | 0 | Primarily validated via API/integration and daemon smoke paths |
@@ -203,6 +207,41 @@ interval = 10000
 | `snapshot.interval` | `10000` | Events between snapshots |
 
 CLI flags override config file values.
+
+### Knowledge Calibration
+
+EGRI-approved knowledge threshold artifacts are promoted into the optional
+`[knowledge]` section of `lago.toml` by `lago-knowledge`'s promotion pipeline.
+`KnowledgeCalibrationCampaign` runs the bounded proposer → trial runner →
+evaluator loop and can hand the best qualifying artifact to that promotion
+pipeline. The trial runner is a trait seam, so local benchmark execution and
+future Arcan-backed mock/live campaign executors use the same contract.
+The writer validates the artifact, preserves unrelated TOML sections, increments
+the promotion `version`, records `rollback_target`, and emits an
+`egri.knowledge.promoted` event payload for audit/replay.
+Autonomic consumes that promotion event, monitors consecutive post-promotion
+knowledge-health regressions, and writes an `autonomic.RollbackRequested`
+advisory event when EGRI should restore the prior threshold artifact.
+See `/Users/broomva/broomva/core/life/docs/STATUS.md` for canonical crate and
+test accounting tied to this capability.
+
+```toml
+[knowledge]
+bm25_k1 = 1.2
+bm25_b = 0.75
+hybrid_keyword_boost = 0.3
+hybrid_graph_boost = 0.15
+health_threshold = 0.7
+max_obs_before_compact = 50
+stale_index_ms = 3600000
+freshness_stale_secs = 3600
+wakeup_token_budget = 600
+version = "v1"
+promoted_at = "2026-04-10T00:00:00Z"
+trial_id = "trial-042"
+baseline_score = 0.72
+promoted_score = 0.85
+```
 
 ## Workspace Dependencies
 

@@ -69,7 +69,7 @@ domain = "Weather"
     #[test]
     fn load_empty_feeds() {
         let mut f = NamedTempFile::new().unwrap();
-        writeln!(f, "").unwrap();
+        writeln!(f).unwrap();
         let config = load_feeds_config(f.path()).unwrap();
         assert!(config.feeds.is_empty());
     }

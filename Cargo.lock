@@ -508,6 +508,7 @@ dependencies = [
  "reqwest-eventsource",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sqlx",
  "tempfile",
  "thiserror 2.0.18",
@@ -1116,8 +1117,11 @@ dependencies = [
  "aios-protocol",
  "autonomic-core",
  "chrono",
+ "lago-core",
+ "lago-knowledge",
  "serde",
  "serde_json",
+ "tempfile",
  "tracing",
 ]
 
@@ -4616,6 +4620,7 @@ dependencies = [
 name = "lago-knowledge"
 version = "0.3.0"
 dependencies = [
+ "chrono",
  "lago-core",
  "lago-store",
  "regex",
@@ -4625,6 +4630,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "toml",
  "tracing",
 ]
 

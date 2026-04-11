@@ -347,6 +347,7 @@ mod tests {
             iteration: 1,
             messages: vec![],
             tools: vec![],
+            max_tokens: None,
             state: AppState::default(),
         };
         let response = ModelTurn {
@@ -358,6 +359,7 @@ mod tests {
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
             }),
+            telemetry: None,
         };
 
         let result = mw.after_model_call(&request, &response);
@@ -518,6 +520,7 @@ mod tests {
             iteration: 1,
             messages: vec![],
             tools: vec![],
+            max_tokens: None,
             state: AppState::default(),
         };
         let response = ModelTurn {
@@ -529,6 +532,7 @@ mod tests {
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
             }),
+            telemetry: None,
         };
 
         mw.after_model_call(&request, &response).unwrap();

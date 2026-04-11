@@ -1,7 +1,7 @@
 # Memory Graph Architecture
 
 > **Date**: 2026-04-03
-> **Status**: Design specification
+> **Status**: Phase 4 implemented (`BRO-447`)
 > **Linear**: `BRO-444`, `BRO-445`, `BRO-446`, `BRO-447`
 > **Scope**: Lago graph projection + Arcan retrieval tool over the cognitive substrate
 
@@ -227,71 +227,86 @@ The first stable schema should be narrow.
 
 ### Edge Types
 
-- `references`
-- `derived_from`
-- `supports`
-- `contradicts`
-- `led_to`
-- `caused_by`
+- `references` is the only shipped v1 edge type.
+- `derived_from`, `supports`, `contradicts`, `led_to`, and `caused_by` are planned
+  semantic edge types for a future typed-memory phase.
 
 ### Node Contract
 
 ```rust
-pub enum MemoryGraphNodeType {
-    Memory,
-    Decision,
-    Evidence,
-    Outcome,
-    Pattern,
-    Artifact,
-    SessionSummary,
-}
-
 pub struct MemoryGraphNode {
     pub node_id: String,
-    pub node_type: MemoryGraphNodeType,
+    pub node_type: String,
     pub title: String,
     pub summary: String,
     pub source_ref: String,
-    pub importance: Option<f32>,
-    pub created_at: Option<i64>,
-    pub updated_at: Option<i64>,
+    pub depth: usize,
+    pub outgoing_links: Vec<String>,
+    pub score: f32,
+    pub rank_signals: MemoryGraphRankSignals,
+}
+
+pub struct MemoryGraphRankSignals {
+    pub depth: f32,
+    pub query: f32,
+    pub semantic: f32,
+    pub importance: f32,
+    pub recency: f32,
+    pub edge_weight: f32,
 }
 ```
+
+`outgoing_links` is derived from the actual returned, capped edge set. It is not
+the raw note link list. `score` and `rank_signals` are advisory ranking metadata
+for prompt shaping and evaluation; provenance remains `source_ref`.
 
 ### Edge Contract
 
 ```rust
-pub enum MemoryGraphEdgeType {
-    References,
-    DerivedFrom,
-    Supports,
-    Contradicts,
-    LedTo,
-    CausedBy,
-}
-
 pub struct MemoryGraphEdge {
-    pub from: String,
-    pub to: String,
-    pub edge_type: MemoryGraphEdgeType,
-    pub weight: Option<f32>,
-    pub provenance: String,
+    pub source: String,
+    pub target: String,
+    pub edge_type: String,
+    pub label: String,
+    pub source_ref: String,
 }
 ```
 
 ### Retrieval Result Contract
 
 ```rust
-pub struct MemoryGraphResult {
-    pub root: MemoryGraphNode,
+pub struct MemoryGraphResponse {
+    pub found: bool,
+    pub start: String,
+    pub root: Option<String>,
     pub nodes: Vec<MemoryGraphNode>,
     pub edges: Vec<MemoryGraphEdge>,
-    pub summary: String,
+    pub total_nodes: usize,
+    pub total_edges: usize,
+    pub truncated: bool,
+    pub depth: usize,
+    pub max_nodes: usize,
+    pub max_edges: usize,
+    pub edge_filter: Vec<String>,
+    pub query: Option<String>,
+    pub ranking_backend: String,
+    pub metrics: MemoryGraphMetrics,
+}
+
+pub struct MemoryGraphMetrics {
+    pub operation: String,
+    pub returned_node_count: usize,
+    pub returned_edge_count: usize,
+    pub depth_reached: usize,
+    pub ranking_backend: String,
+    pub fallback_path: Option<String>,
+    pub provenance_preserved: bool,
 }
 ```
 
-The LLM-facing tool output should include compact prose plus the structured payload.
+The LLM-facing v1 tool output is structured JSON only. `truncated` is set from
+explicit node/edge overflow detection, not from result size equaling the
+configured limits.
 
 ## Start-Node Resolution
 
@@ -299,12 +314,12 @@ The tool must not require opaque internal IDs only.
 
 Resolution order:
 
-1. direct graph node id
-2. exact note path
-3. exact note name
-4. wikilink resolution
-5. semantic narrowing if a query is present
-6. fail with candidate suggestions
+1. exact manifest path, for example `/notes/foo.md`
+2. relative path, for example `notes/foo.md`
+3. path stem, for example `notes/foo`
+4. plain wikilink target, for example `Foo`
+5. bracketed wikilink target, for example `[[Foo#heading]]`
+6. non-error empty JSON from the Arcan tool boundary when no start node resolves
 
 This keeps the tool ergonomic while staying deterministic by default.
 
@@ -315,10 +330,11 @@ This keeps the tool ergonomic while staying deterministic by default.
 ```json
 {
   "start": "auth-middleware-regression",
+  "query": "why did auth middleware regress?",
   "depth": 2,
-  "limit": 12,
-  "edge_types": ["caused_by", "supports", "led_to"],
-  "query": "what led to the auth regression?"
+  "max_nodes": 12,
+  "max_edges": 16,
+  "edge_types": ["references"]
 }
 ```
 
@@ -326,13 +342,21 @@ This keeps the tool ergonomic while staying deterministic by default.
 
 The tool should return:
 
-- one root node
+- `root` as the resolved note path
 - a bounded set of related nodes
-- labeled edges
-- a compact natural-language summary
+- capped `references` edges
 - provenance for every node and edge
+- `found`, `truncated`, count, bound, and edge-filter metadata
+- `query`, `ranking_backend`, `score`, and `rank_signals` when ranking is active
+- `metrics` for returned node/edge counts, depth reached, ranking backend,
+  semantic fallback path, and provenance preservation
 
 The tool should not return an unbounded adjacency dump.
+
+When the start node is missing, `arcan::memory_tools::MemoryGraphTool` returns
+the same top-level response shape with `found = false`, `root = null`, empty
+`nodes`/`edges`, zero counts, and the bounded request metadata. This lets
+clients recover without special-casing transport errors.
 
 ## Traversal Strategy
 
@@ -348,25 +372,35 @@ Defaults:
 
 ### V2
 
-Add hybrid ranking:
+Hybrid ranking now preserves BFS as the no-query fallback and switches to
+ranked candidate selection when `query` or semantic score hints are present.
+The adapter overfetches bounded graph candidates, scores them, keeps the root
+first, then truncates back to `max_nodes`.
 
-- depth penalty
-- node importance
-- recency
-- semantic similarity
-- edge weight
+Current signals:
+
+- depth proximity
+- lexical query relevance over title, summary, body, and tags
+- optional semantic similarity from Arcan-provided Lance score hints
+- frontmatter importance
+- frontmatter recency
+- graph edge weight inside the candidate set
 
 Conceptually:
 
 ```text
-score = semantic_similarity
+score = depth
+      + query_relevance
+      + semantic_similarity
       + importance
-      + recency_bonus
+      + recency
       + edge_weight
-      - depth_penalty
 ```
 
-The exact coefficients can evolve after evaluation.
+The exact coefficients can evolve after evaluation, but they live in
+`arcan-lago` so prompt-facing behavior stays deterministic and testable.
+Arcan owns the Lance call and passes normalized score hints into the adapter;
+`arcan-lago` does not depend on Lance or embedding providers.
 
 ## Scope Model
 
@@ -396,27 +430,70 @@ Ship the contract:
 
 Ship v1:
 
-- bounded graph retrieval over `lago-knowledge`
-- `memory_graph` tool in Arcan
-- deterministic tests
-- no mandatory new Lago route
+- [x] bounded graph retrieval over `lago-knowledge`
+- [x] `memory_graph` tool in Arcan shell
+- [x] deterministic tests for chain, cycle, bounds, missing start, and edge filtering
+- [x] no mandatory new Lago route
+
+Implementation notes:
+
+- `lago-knowledge::KnowledgeIndex::resolve_note_ref()` accepts exact manifest
+  paths, relative paths, path stems, plain wikilink targets, and bracketed
+  wikilinks.
+- `arcan-lago::memory_graph` owns bounded response shaping with
+  `MemoryGraphQuery`, `MemoryGraphResponse`, compact nodes, `references` edges,
+  provenance paths, capped `outgoing_links`, explicit truncation flags, and hard
+  caps.
+- `arcan::memory_tools::MemoryGraphTool` maps missing start nodes to a clear
+  schema-stable, non-error empty JSON result so agents can recover by trying
+  `memory_search`, `memory_browse`, or `memory_similar`.
 
 ### Phase 3 — `BRO-446`
 
 Ship hybrid ranking:
 
-- Lance-assisted node ranking
-- optional query-conditioned expansion
-- graph-only fallback
+- [x] Lance-assisted node ranking via optional score hints
+- [x] optional query-conditioned expansion
+- [x] graph-only fallback
+
+Implementation notes:
+
+- `MemoryGraphQuery::query` activates ranked candidate selection without making
+  embeddings mandatory.
+- `MemoryGraphRankingHints` accepts optional semantic scores keyed by memory
+  title/path/name. Arcan populates those hints from `workspace.lance` when an
+  embedding provider is configured.
+- `ranking_backend` is one of `graph_bfs`, `hybrid_lexical_graph`, or
+  `hybrid_vector_graph`.
+- Query-conditioned retrieval overfetches bounded candidates, promotes relevant
+  non-root nodes above plain BFS neighbors, then re-applies `max_nodes` and
+  `max_edges`.
+- Missing embeddings, missing Lance datasets, or vector-search errors degrade
+  to lexical graph ranking or BFS rather than failing the tool.
 
 ### Phase 4 — `BRO-447`
 
 Ship validation and evaluation:
 
-- shell E2E
-- regression fixtures
-- retrieval metrics
-- provenance checks
+- [x] shell E2E smoke through the real Arcan `ToolRegistry` +
+  `PraxisToolBridge` path
+- [x] regression fixtures for causal chains, cycle handling, bounds, ambiguous
+  start-node resolution, and missing starts
+- [x] retrieval metrics in every successful and missing-start response
+- [x] provenance checks surfaced as `metrics.provenance_preserved`
+
+Implementation notes:
+
+- `MemoryGraphMetrics` is serialized inside `MemoryGraphResponse`, giving
+  agents and evaluators a compact quality signal without scraping logs.
+- Arcan records metrics through `tracing::info!` whenever `memory_graph`
+  returns successfully.
+- `MemoryGraphRankingHints::fallback_path` records why a semantic path degraded
+  to lexical ranking, using values such as `semantic_unavailable`,
+  `embedding_failed`, `vector_search_failed`, `semantic_empty`, and
+  `semantic_metadata_missing`.
+- Missing starts keep the same schema shape and include zero-count metrics with
+  `provenance_preserved = true`.
 
 ## Testing Strategy
 
@@ -438,6 +515,7 @@ Ship validation and evaluation:
 - edge filtering
 - deterministic result ordering
 - scope-preserving output
+- lexical and semantic ranking promotion while preserving bounds
 
 ### Tool Tests
 
@@ -447,6 +525,8 @@ Ship validation and evaluation:
 - bounded result size
 - readable summary formatting
 - fallback behavior when graph unavailable
+- query-conditioned ranking
+- Lance-backed semantic hints when available
 
 ### E2E
 
