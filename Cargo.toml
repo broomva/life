@@ -222,7 +222,7 @@ jsonwebtoken = "9"
 k256 = { version = "0.13", features = ["ecdsa", "sha256"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
-opentelemetry = "0.29"
+opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.29", features = ["trace", "metrics", "grpc-tonic"] }
 opentelemetry_sdk = { version = "0.29", features = ["trace", "metrics"] }
 parking_lot = "0.12"
