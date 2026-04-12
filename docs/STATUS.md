@@ -158,13 +158,22 @@ The baseline unification is active and enforced in production paths:
   journal via fire-and-forget async publish (non-fatal, never blocks REPL).
   `CommandContext.nous_scores` carries full `NousScoreDetail` (name, value,
   layer, label) instead of `(String, f64)` tuples.
+- 2026-04-12: Cross-session full-text search is active in lago-knowledge and
+  the daemon runtime. `EventSearchIndex` provides BM25-ranked full-text
+  search over Lago event payloads (messages, tool results, decisions, errors).
+  `EventSearchTool` (`knowledge_search`) is registered as a canonical agent
+  tool in the daemon's `ToolRegistry`, enabling agents to search their own
+  history across sessions. The index is built lazily from the journal on
+  first invocation, caches for repeated queries, and excludes the current
+  session (already in conversation context). Internal eval/autonomic/vigil
+  events are skipped.
 
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Build | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Tests | PASS (96) | PASS (487+16 w/ spacetimedb) | PASS (336) | PASS (219 targeted) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
+| Tests | PASS (96) | PASS (492+16 w/ spacetimedb) | PASS (349) | PASS (219 targeted) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
 | Clippy (-D warnings) | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | CROSS-CUTTING | BRIDGED (arcan-spaces) |
 | Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | OBSERVABILITY | NETWORKING |
