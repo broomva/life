@@ -149,13 +149,22 @@ The baseline unification is active and enforced in production paths:
   handling, bounds, semantic fallback paths, and missing starts; an Arcan shell
   smoke test proves the tool works through the real `ToolRegistry` +
   `PraxisToolBridge` path.
+- 2026-04-12: Nous eval score display and Lago persistence is active on the
+  shell path. `/status` now groups Nous scores by evaluation layer
+  (safety/execution/action/reasoning/cost) with categorical indicators.
+  `/safety` is a new dedicated command showing cumulative safety evaluation
+  scores with aggregate stats (min, avg, overall label). Eval scores are
+  now persisted as `eval.InlineCompleted` events to the per-session Lago
+  journal via fire-and-forget async publish (non-fatal, never blocks REPL).
+  `CommandContext.nous_scores` carries full `NousScoreDetail` (name, value,
+  layer, label) instead of `(String, f64)` tuples.
 
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Build | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Tests | PASS (96) | PASS (481+16 w/ spacetimedb) | PASS (336) | PASS (219 targeted) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
+| Tests | PASS (96) | PASS (487+16 w/ spacetimedb) | PASS (336) | PASS (219 targeted) | PASS (90) | PASS (26+2 ignored) | N/A (0 tests) |
 | Clippy (-D warnings) | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | Canonical Port Usage | ACTIVE | CONSUMED | CONSUMED | CONSUMED | CONSUMED | CROSS-CUTTING | BRIDGED (arcan-spaces) |
 | Production Runtime Path | CANONICAL | CANONICAL HOST | CANONICAL STORE | ADVISORY | TOOL ENGINE | OBSERVABILITY | NETWORKING |
