@@ -14,7 +14,7 @@ rust-version.workspace = true
 lago-core.workspace = true
 lance = "0.24"
 arrow = { version = "54", features = ["json"] }
-arrow-schema = "54"
+arrow-schema = "58"
 arrow-array = "54"
 tokio.workspace = true
 serde.workspace = true
