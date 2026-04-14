@@ -93,6 +93,42 @@ interval_secs = 30
 schema = "aisstream.position.v1"
 domain = "Ocean"
 
+# ── NASA FIRMS (Active Fires) ──────────────────────────────────────
+# 800+ fire hotspots worldwide from VIIRS satellite. CSV → custom feed.
+# Requires FIRMS_MAP_KEY env var (free registration at FIRMS website).
+# Gracefully skips if key not set.
+
+[[feeds]]
+name = "nasa-firms"
+connector = "poll"
+url = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
+interval_secs = 600
+schema = "nasa.firms.v1"
+domain = "Emergency"
+
+# ── IODA (Internet Outages) ───────────────────────────────────────
+# Country-level internet connectivity alerts. Free, no auth.
+# Correlates with conflict, disasters, political events.
+
+[[feeds]]
+name = "ioda-outages"
+connector = "poll"
+url = "https://api.ioda.inetintel.cc.gatech.edu/v2/outages/alerts"
+interval_secs = 300
+schema = "ioda.outages.v1"
+domain = "Infrastructure"
+
+# ── Polymarket (Prediction Markets) ───────────────────────────────
+# Real-money forecasting of geopolitical events. Free, no auth.
+# Events geo-pinned by parsing country from question text.
+
+[[feeds]]
+name = "polymarket"
+connector = "poll"
+url = "https://gamma-api.polymarket.com/markets"
+interval_secs = 300
+schema = "polymarket.markets.v1"
+
 # ── NASA EONET (Earth Observatory Natural Events) ──────────────────
 # Real-time natural events: wildfires, storms, volcanoes, icebergs.
 # Free, no auth, returns GeoJSON-like with coordinates + magnitude.

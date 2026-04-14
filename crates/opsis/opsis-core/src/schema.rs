@@ -103,6 +103,30 @@ pub fn builtin_schemas() -> Vec<SchemaDefinition> {
             event_kind_hint: OpsisEventKindHint::WorldObservation,
             domain_hint: Some(StateDomain::Ocean),
         },
+        SchemaDefinition {
+            key: SchemaKey::new("nasa.firms.v1"),
+            version: 1,
+            description: "NASA FIRMS active fire hotspots (VIIRS satellite)".into(),
+            producer: SchemaProducer::Feed,
+            event_kind_hint: OpsisEventKindHint::WorldObservation,
+            domain_hint: Some(StateDomain::Emergency),
+        },
+        SchemaDefinition {
+            key: SchemaKey::new("ioda.outages.v1"),
+            version: 1,
+            description: "IODA internet outage alerts (country-level connectivity)".into(),
+            producer: SchemaProducer::Feed,
+            event_kind_hint: OpsisEventKindHint::WorldObservation,
+            domain_hint: Some(StateDomain::Infrastructure),
+        },
+        SchemaDefinition {
+            key: SchemaKey::new("polymarket.markets.v1"),
+            version: 1,
+            description: "Polymarket prediction markets (real-money forecasts)".into(),
+            producer: SchemaProducer::Feed,
+            event_kind_hint: OpsisEventKindHint::WorldObservation,
+            domain_hint: None, // Domain inferred per-market
+        },
     ]
 }
 
@@ -139,8 +163,8 @@ mod tests {
     }
 
     #[test]
-    fn eight_builtin_schemas() {
-        assert_eq!(builtin_schemas().len(), 8);
+    fn eleven_builtin_schemas() {
+        assert_eq!(builtin_schemas().len(), 11);
     }
 
     #[test]
