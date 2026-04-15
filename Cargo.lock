@@ -524,6 +524,7 @@ version = "0.3.0"
 dependencies = [
  "arcan-core",
  "chrono",
+ "futures-util",
  "opsis-core",
  "reqwest",
  "serde",
