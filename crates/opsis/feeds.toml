@@ -70,13 +70,13 @@ tags = ["iss", "space", "orbit"]
 
 # ── OpenSky Network (Flight Tracking) ──────────────────────────────
 # Live aircraft state vectors. Custom feed (array-of-arrays format).
-# Free, no auth, 10s rate limit. ~6000 aircraft over North America.
+# Free, no auth, 10s rate limit. Bbox reduces payload size for Railway.
 
 [[feeds]]
 name = "opensky-flights"
 connector = "poll"
-url = "https://opensky-network.org/api/states/all"
-interval_secs = 15
+url = "https://opensky-network.org/api/states/all?lamin=10&lomin=-140&lamax=72&lomax=60"
+interval_secs = 30
 schema = "opensky.states.v1"
 domain = "Infrastructure"
 
