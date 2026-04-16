@@ -1,0 +1,18 @@
+[package]
+name = "physics-engine"
+description = "2D rigid body physics simulation engine — broadphase, SAT collision, impulse solver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+physics-core.workspace = true
+
+[lints.rust]
+unused_must_use = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"
+too_many_arguments = "allow"

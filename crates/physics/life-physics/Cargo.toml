@@ -1,0 +1,17 @@
+[package]
+name = "life-physics"
+description = "Physics engine facade for the Life Agent OS — re-exports physics-core and physics-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+physics-core = { path = "../physics-core", version = "0.3.0" }
+physics-engine = { path = "../physics-engine", version = "0.3.0" }
+
+[lints]
+workspace = true

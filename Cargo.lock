@@ -5343,6 +5343,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "life-physics"
+version = "0.3.0"
+dependencies = [
+ "physics-core",
+ "physics-engine",
+]
+
+[[package]]
 name = "life-praxis"
 version = "0.3.0"
 dependencies = [
@@ -6646,6 +6654,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
 dependencies = [
  "siphasher",
+]
+
+[[package]]
+name = "physics-core"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "physics-engine"
+version = "0.3.0"
+dependencies = [
+ "physics-core",
 ]
 
 [[package]]
