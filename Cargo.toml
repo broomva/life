@@ -109,6 +109,10 @@ members = [
     "crates/opsis/opsis-engine",
     "crates/opsis/opsis-lago",
     "crates/opsis/opsisd",
+    # Physics — 2D rigid body physics engine
+    "crates/physics/physics-core",
+    "crates/physics/physics-engine",
+    "crates/physics/life-physics",
 ]
 exclude = ["crates/spaces/life-spaces/spacetimedb"]
 
@@ -171,6 +175,10 @@ nous-middleware = { path = "crates/nous/nous-middleware", version = "0.3.0" }
 opsis-core = { path = "crates/opsis/opsis-core", version = "0.3.0" }
 opsis-engine = { path = "crates/opsis/opsis-engine", version = "0.3.0" }
 opsis-lago = { path = "crates/opsis/opsis-lago", version = "0.3.0" }
+# Physics
+physics-core = { path = "crates/physics/physics-core", version = "0.3.0" }
+physics-engine = { path = "crates/physics/physics-engine", version = "0.3.0" }
+life-physics = { path = "crates/physics/life-physics", version = "0.3.0" }
 # Relay
 life-relay-api = { path = "crates/relay/life-relay-api", version = "0.3.0" }
 life-relay-core = { path = "crates/relay/life-relay-core", version = "0.3.0" }
