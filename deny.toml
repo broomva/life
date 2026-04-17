@@ -14,7 +14,6 @@ ignore = [
     "RUSTSEC-2024-0436",  # paste unmaintained — widely used, no security issue
     "RUSTSEC-2025-0134",  # rustls-pemfile unmaintained — transitive, migration to rustls-pki-types planned
     "RUSTSEC-2017-0008",  # serial unmaintained — transitive dep, no impact on agent runtime
-    "RUSTSEC-2026-0097",  # new advisory — transitive dep, awaiting upstream fix
 ]
 
 [licenses]

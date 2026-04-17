@@ -790,7 +790,7 @@ fn cmd_list_dms(ctx: &DbConnection) {
         .iter()
         .filter(|c| c.participant_a == my_identity || c.participant_b == my_identity)
         .collect();
-    convs.sort_by(|a, b| b.last_message_at.cmp(&a.last_message_at));
+    convs.sort_by_key(|c| std::cmp::Reverse(c.last_message_at));
 
     if convs.is_empty() {
         println!("No direct conversations.");
