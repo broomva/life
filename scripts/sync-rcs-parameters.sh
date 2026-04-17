@@ -12,7 +12,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LIFE_ROOT="$(cd "${HERE}/.." && pwd)"
-PAPER_SRC="${HOME}/broomva/research/rcs/latex/parameters.toml"
+PAPER_SRC="${HOME}/broomva/research/rcs/data/parameters.toml"
 MIRROR_DST="${LIFE_ROOT}/crates/autonomic/autonomic-core/data/rcs-parameters.toml"
 
 if [[ ! -f "${PAPER_SRC}" ]]; then
@@ -28,7 +28,7 @@ HEADER="# ======================================================================
 # =============================================================================
 #
 # THIS FILE IS A MIRROR. The authoritative source lives in the paper repo at:
-#   ~/broomva/research/rcs/latex/parameters.toml
+#   ~/broomva/research/rcs/data/parameters.toml
 # Keep the two in sync via \`scripts/sync-rcs-parameters.sh\` (or manual copy).
 # The mirror is required because the paper repo is a separate git root and
 # this crate needs compile-time access via \`include_str!\`.
