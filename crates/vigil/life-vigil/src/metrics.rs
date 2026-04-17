@@ -42,6 +42,15 @@ pub struct GenAiMetrics {
 
     /// `life.eval.score` — histogram of evaluation scores by evaluator.
     pub eval_score: Histogram<f64>,
+
+    /// `life.control_margin_l0` — RCS stability margin at Level 0 (plant).
+    pub control_margin_l0: Gauge<f64>,
+
+    /// `life.control_margin_l1` — RCS stability margin at Level 1 (autonomic).
+    pub control_margin_l1: Gauge<f64>,
+
+    /// `life.control_margin_l2` — RCS stability margin at Level 2 (EGRI).
+    pub control_margin_l2: Gauge<f64>,
 }
 
 impl GenAiMetrics {
@@ -110,6 +119,24 @@ impl GenAiMetrics {
             .with_boundaries(vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
             .build();
 
+        // RCS stability margins (Gauges, not Histograms — margin is a level,
+        // not a distribution). One gauge per hierarchy level L0, L1, L2.
+        // See `research/rcs/latex/rcs-definitions.tex` Theorem 1.
+        let control_margin_l0 = meter
+            .f64_gauge("life.control_margin_l0")
+            .with_description("RCS stability margin at Level 0 — plant")
+            .build();
+
+        let control_margin_l1 = meter
+            .f64_gauge("life.control_margin_l1")
+            .with_description("RCS stability margin at Level 1 — autonomic")
+            .build();
+
+        let control_margin_l2 = meter
+            .f64_gauge("life.control_margin_l2")
+            .with_description("RCS stability margin at Level 2 — EGRI")
+            .build();
+
         Self {
             token_usage,
             operation_duration,
@@ -121,6 +148,9 @@ impl GenAiMetrics {
             mode_transitions,
             eval_executions,
             eval_score,
+            control_margin_l0,
+            control_margin_l1,
+            control_margin_l2,
         }
     }
 
@@ -244,6 +274,31 @@ impl GenAiMetrics {
             ],
         );
     }
+
+    /// Record the current RCS stability margin for a given level.
+    ///
+    /// `level` must be one of `"L0"`, `"L1"`, `"L2"` (case-insensitive).
+    /// Unknown level ids are ignored silently so callers can forward strings
+    /// from configuration without defensive matching at every site.
+    ///
+    /// The value is the level's stability margin as defined in the RCS paper:
+    /// `lambda = gamma - L_theta*rho - L_d*eta - beta*tau_bar - ln(nu)/tau_a`.
+    /// A margin strictly greater than zero indicates the level is individually
+    /// stable (Theorem 1, `research/rcs/latex/rcs-definitions.tex`).
+    pub fn record_control_margin(&self, level: &str, value: f64) {
+        if !value.is_finite() {
+            return;
+        }
+        let attrs = [KeyValue::new("life.rcs.level", level.to_uppercase())];
+        match level.to_ascii_uppercase().as_str() {
+            "L0" => self.control_margin_l0.record(value, &attrs),
+            "L1" => self.control_margin_l1.record(value, &attrs),
+            "L2" => self.control_margin_l2.record(value, &attrs),
+            _ => {
+                // Unknown level — ignore silently.
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -269,6 +324,12 @@ mod tests {
         metrics.record_tool_execution("read_file", "ok");
         metrics.record_budget(10000, 4.50);
         metrics.record_mode_transition("explore", "execute");
+        metrics.record_control_margin("L0", 1.455);
+        metrics.record_control_margin("L1", 0.411);
+        metrics.record_control_margin("L2", 0.069);
+        metrics.record_control_margin("l1", 0.5); // case-insensitive
+        metrics.record_control_margin("L9", 0.0); // unknown — ignored
+        metrics.record_control_margin("L1", f64::NAN); // non-finite — ignored
     }
 
     #[test]
