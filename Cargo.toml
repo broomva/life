@@ -235,7 +235,7 @@ redb = "2"
 regex = "1"
 reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
 reqwest-eventsource = "0.6"
-rig-core = "0.30"
+rig-core = "0.34"
 rmcp = { version = "0.15", features = ["client", "server", "macros", "transport-child-process", "transport-io", "transport-streamable-http-server"] }
 rstar = "0.12"
 schemars = { version = "0.8", features = ["chrono"] }
