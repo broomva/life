@@ -357,6 +357,7 @@ This architecture overview is complemented by four deeper specs produced in para
 - **Trait surface (full Rust):** `core/life/docs/specs/pneuma-trait-surface.md` — 1,106-line complete `aios-protocol::pneuma` module spec, ready for direct port to Rust. Associated types over generics, zero-sized boundary markers with `Boundary::A: Axis` pinning, synchronous trait with dyn-compatibility verified, `MockPneuma` testing impl, 13 unit tests.
 - **Vertical retrofits (per-crate plans):** `core/life/docs/specs/pneuma-vertical-retrofits.md` — detailed additive-only plans for four crates. **Surfaces important corrections from code audit** (see below).
 - **Plexus implementation:** `core/life/docs/specs/life-plexus-implementation.md` — full crate spec with field physics primitives, three transport backends (NATS / in-process / mock), P6-compliance by construction.
+- **Sensorium architecture (2026-04-19):** `core/life/docs/specs/sensorium-architecture.md` — sibling to Plexus. Implements `Pneuma<B = ExternalToL0>` for arbitrary external perception (consumer media, industrial protocols, wearables). Typed pub/sub fabric with QoS, schema registry, Sparkplug-inspired lifecycle. Reserves `ExternalToL1/L2/L3` markers for future homeostatic/eval/governance feed crates.
 - **P6 proof sketch:** `research/rcs/papers/p6-horizontal-composition/proof-sketch.md` — horizontal stability theorem with Lyapunov composition, four-step proof outline, worked numerical example showing floor inheritance.
 
 ## Corrections from retrofit audit (important)
