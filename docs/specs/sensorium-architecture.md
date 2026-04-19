@@ -84,6 +84,21 @@ impl Boundary for ExternalToL0 {
 **Reserved boundary names** (documented, not implemented, to claim the namespace and communicate architectural intent):
 
 ```rust
+/// Reserved: direct external feeds into L1 homeostatic state (battery level,
+/// CPU temperature, exchange rate, token cost feeds — things that update
+/// regulation without passing through the plant).
+pub struct ExternalToL1;
+
+/// Reserved: external feeds into L2 meta-control (eval/benchmark scores,
+/// A/B test results, performance feeds — things that inform which
+/// controller to deploy).
+pub struct ExternalToL2;
+
+/// Reserved: external feeds into L3 governance (regulatory updates,
+/// compliance feeds, policy mandates — things that update governance
+/// without passing through plant, controller, or meta-control).
+pub struct ExternalToL3;
+
 /// Reserved: shared perception within a formation (multi-agent sensor fusion).
 /// Implementation deferred until multi-agent perception needs emerge.
 pub struct PerceptToField;
@@ -98,6 +113,16 @@ pub struct FieldToPercept;
 ```
 
 No `impl Boundary` for reserved names until their owning crate exists.
+
+### 1a. Why pinned to `ExternalToL0`, not parametric over level
+
+Sensorium is deliberately specific to `ExternalToL0` rather than a family generic over RCS level. The rationale:
+
+- Semantic divergence. A screen frame, a battery percentage, an eval score, and a compliance policy update are all "external inputs," but their `Signal`/`Aggregate`/`Directive` types share almost no structure. Collapsing them under one generic trait would either force a lowest-common-denominator payload or push discrimination into runtime tags — both regressions on the type-safe design.
+- Sensor data specifically is *plant-level*. It describes the world the agent operates in. Regulatory state (L1), meta-control state (L2), and governance state (L3) are not plant observations — they are properties of the agent's regulation stack, which happens to receive external updates.
+- Four distinct Pneuma impls (one per external level) stay simpler to test, document, and reason about than one parametric impl with four associated-type bundles.
+
+**Reusability at the substrate layer, not the trait layer.** The machinery inside `sensorium-fabric` — typed pub/sub, QoS negotiation, Sparkplug-style lifecycle, tag catalogs — is generic in the Signal type. Future crates implementing `Pneuma<B = ExternalToL1>` (homeostatic feeds), `ExternalToL2` (eval feeds), or `ExternalToL3` (governance feeds) should depend on a shared `typed-fabric` substrate crate and layer their own Signal/Aggregate/Directive on top. The reuse lives below Pneuma, not inside it. A follow-up refactor can extract `typed-fabric` once a second external-boundary crate exists (YAGNI until then).
 
 ### 2. Sensorium associated types
 
