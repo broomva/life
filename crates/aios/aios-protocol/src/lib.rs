@@ -57,6 +57,9 @@ pub use budget::{BudgetDecision, BudgetGatePort, ResourceBudget, ResourceUsage, 
 pub use error::{KernelError, KernelResult};
 pub use event::{
     ActorType, ApprovalDecision, EventActor, EventEnvelope, EventKind, EventRecord, EventSchema,
+    KernelDispatchCompleted, KernelDispatchDenied, KernelDispatchStarted, KernelEgressRecorded,
+    KernelForkDenied, KernelPolicyViolated, KernelUsageRecorded, KernelVmCreated,
+    KernelVmDestroyed, KernelVmForked, KernelVmHibernated, KernelVmResumed, KernelVmSnapshotted,
     LoopPhase, PolicyDecisionKind, RiskLevel, SnapshotType, SpanStatus, SteeringMode, TokenUsage,
 };
 pub use hypervisor::{
