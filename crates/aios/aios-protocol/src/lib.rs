@@ -21,7 +21,9 @@
 //! - [`ports`] — Runtime boundary ports (event store, provider, tools, policy, approvals, memory)
 //! - [`rcs`] — Recursive Controlled Systems traits (Level, RecursiveControlledSystem, StabilityBudget)
 //! - [`error`] — KernelError, KernelResult
+//! - [`budget`] — ResourceBudget, ResourceUsage, UsageConfidence (kernel-tier metering)
 
+pub mod budget;
 pub mod error;
 pub mod event;
 pub mod identity;
@@ -38,6 +40,7 @@ pub mod state;
 pub mod tool;
 
 // Re-export the most commonly used types at the crate root.
+pub use budget::{ResourceBudget, ResourceUsage, UsageConfidence};
 pub use error::{KernelError, KernelResult};
 pub use event::{
     ActorType, ApprovalDecision, EventActor, EventEnvelope, EventKind, EventRecord, EventSchema,
