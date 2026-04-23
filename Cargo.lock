@@ -313,6 +313,7 @@ dependencies = [
  "arcan-lago",
  "arcan-opsis",
  "arcan-praxis",
+ "arcan-prosopon",
  "arcan-provider",
  "arcan-provider-bubblewrap",
  "arcan-provider-local",
@@ -356,6 +357,8 @@ dependencies = [
  "praxis-mcp-bridge",
  "praxis-skills",
  "praxis-tools",
+ "prosopon-compositor-glass",
+ "prosopon-daemon",
  "reqwest",
  "reqwest-eventsource",
  "serde",
@@ -551,6 +554,24 @@ dependencies = [
  "praxis-tools",
  "serde_json",
  "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "arcan-prosopon"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "anyhow",
+ "chrono",
+ "prosopon-core",
+ "prosopon-daemon",
+ "prosopon-protocol",
+ "prosopon-runtime",
+ "prosopon-sdk",
+ "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
@@ -1573,6 +1594,7 @@ checksum = "8b52af3cb4058c895d37317bb27508dccc8e5f2d39454016b297bf4a400597b8"
 dependencies = [
  "axum-core 0.5.6",
  "axum-macros",
+ "base64",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -1591,8 +1613,10 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
+ "sha1",
  "sync_wrapper",
  "tokio",
+ "tokio-tungstenite 0.28.0",
  "tower 0.5.3",
  "tower-layer",
  "tower-service",
@@ -1967,6 +1991,7 @@ dependencies = [
  "anstyle",
  "clap_lex",
  "strsim",
+ "terminal_size",
 ]
 
 [[package]]
@@ -4191,6 +4216,25 @@ checksum = "3acae9609540aa318d1bc588455225fb2085b9ed0c4f6bd0d9d5bcd86f1a0344"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
+]
+
+[[package]]
+name = "include_dir"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "923d117408f1e49d914f1a379a309cffe4f18c05cf4e3d12e613a15fc81bd0dd"
+dependencies = [
+ "include_dir_macros",
+]
+
+[[package]]
+name = "include_dir_macros"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cab85a7ed0bd5f0e76d93846e0147172bed2e2d3f859bcc33a8d9699cad1a75"
+dependencies = [
+ "proc-macro2",
+ "quote",
 ]
 
 [[package]]
@@ -6420,7 +6464,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.26.2",
  "toml",
  "tower-http",
  "tracing",
@@ -7028,6 +7072,113 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
+]
+
+[[package]]
+name = "prosopon-compositor-glass"
+version = "0.2.0"
+source = "git+https://github.com/broomva/prosopon.git?tag=v0.2.0-alpha.2#e669d2f794ddef49a603178d05827efdfafc25a9"
+dependencies = [
+ "anyhow",
+ "clap",
+ "include_dir",
+ "prosopon-core",
+ "prosopon-daemon",
+ "prosopon-protocol",
+ "prosopon-runtime",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "prosopon-core"
+version = "0.1.0"
+source = "git+https://github.com/broomva/prosopon.git?tag=v0.2.0-alpha.2#e669d2f794ddef49a603178d05827efdfafc25a9"
+dependencies = [
+ "chrono",
+ "indexmap 2.13.1",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "prosopon-daemon"
+version = "0.2.0"
+source = "git+https://github.com/broomva/prosopon.git?tag=v0.2.0-alpha.2#e669d2f794ddef49a603178d05827efdfafc25a9"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "axum 0.8.8",
+ "clap",
+ "futures",
+ "include_dir",
+ "mime_guess",
+ "prosopon-core",
+ "prosopon-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tower 0.5.3",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "prosopon-protocol"
+version = "0.1.0"
+source = "git+https://github.com/broomva/prosopon.git?tag=v0.2.0-alpha.2#e669d2f794ddef49a603178d05827efdfafc25a9"
+dependencies = [
+ "chrono",
+ "prosopon-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "prosopon-runtime"
+version = "0.1.0"
+source = "git+https://github.com/broomva/prosopon.git?tag=v0.2.0-alpha.2#e669d2f794ddef49a603178d05827efdfafc25a9"
+dependencies = [
+ "chrono",
+ "futures",
+ "indexmap 2.13.1",
+ "prosopon-core",
+ "prosopon-protocol",
+ "serde",
+ "smallvec",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "prosopon-sdk"
+version = "0.1.0"
+source = "git+https://github.com/broomva/prosopon.git?tag=v0.2.0-alpha.2#e669d2f794ddef49a603178d05827efdfafc25a9"
+dependencies = [
+ "chrono",
+ "prosopon-core",
+ "prosopon-protocol",
+ "prosopon-runtime",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
@@ -7986,9 +8137,11 @@ checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
 dependencies = [
  "chrono",
  "dyn-clone",
+ "indexmap 2.13.1",
  "schemars_derive 0.8.22",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -9072,6 +9225,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "terminal_size"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
+dependencies = [
+ "rustix 1.1.4",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "terminfo"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9336,7 +9499,19 @@ dependencies = [
  "native-tls",
  "tokio",
  "tokio-native-tls",
- "tungstenite",
+ "tungstenite 0.26.2",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.28.0",
 ]
 
 [[package]]
@@ -9704,6 +9879,23 @@ dependencies = [
  "httparse",
  "log",
  "native-tls",
+ "rand 0.9.4",
+ "sha1",
+ "thiserror 2.0.18",
+ "utf-8",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8628dcc84e5a09eb3d8423d6cb682965dea9133204e8fb3efee74c2a0c259442"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http 1.4.0",
+ "httparse",
+ "log",
  "rand 0.9.4",
  "sha1",
  "thiserror 2.0.18",

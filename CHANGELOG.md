@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `arcan-prosopon` — Pneuma<L0ToExternal> bridge. Subscribes to KernelRuntime
+  events, translates to ProsoponEvents, publishes to prosopon-daemon fanout.
+  Opt-in via `cargo run -p arcan --features prosopon --prosopon-port <addr>`.
+  (BRO-773)
+
 ## 0.2.0
 
 - 1077/1077 tests passing, 37 crates, ~43K LOC
