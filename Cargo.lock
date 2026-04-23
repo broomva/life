@@ -580,6 +580,7 @@ dependencies = [
 name = "arcan-provider-bubblewrap"
 version = "0.3.0"
 dependencies = [
+ "aios-protocol",
  "anyhow",
  "arcan-sandbox",
  "async-trait",
