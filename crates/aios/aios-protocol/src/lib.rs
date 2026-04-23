@@ -18,7 +18,8 @@
 //! - [`memory`] — SoulProfile, Observation, Provenance, MemoryScope
 //! - [`session`] — SessionManifest, BranchInfo, CheckpointManifest
 //! - [`payment`] — PaymentPort for agent financial operations (x402, MPP)
-//! - [`ports`] — Runtime boundary ports (event store, provider, tools, policy, approvals, memory)
+//! - [`ports`] — Runtime boundary ports (event store, provider, tools, policy, approvals,
+//!   memory, KernelPort for high-level Tool-ABI dispatch)
 //! - [`rcs`] — Recursive Controlled Systems traits (Level, RecursiveControlledSystem, StabilityBudget)
 //! - [`error`] — KernelError, KernelResult (legacy kernel-tier error; see [`kernel`] for the
 //!   richer replacement landing alongside the hypervisor substrate)
@@ -83,9 +84,9 @@ pub use payment::{
 pub use policy::{Capability, PolicyEvaluation, PolicySet, SubscriptionTier};
 pub use ports::{
     ApprovalPort, ApprovalRequest, ApprovalResolution, ApprovalTicket, ConversationTurn,
-    EventRecordStream, EventStorePort, ModelCompletion, ModelCompletionRequest, ModelDirective,
-    ModelProviderPort, ModelStopReason, PolicyGateDecision, PolicyGatePort, ToolExecutionReport,
-    ToolExecutionRequest, ToolHarnessPort,
+    EventRecordStream, EventStorePort, KernelPort, ModelCompletion, ModelCompletionRequest,
+    ModelDirective, ModelProviderPort, ModelStopReason, PolicyGateDecision, PolicyGatePort,
+    ToolExecutionReport, ToolExecutionRequest, ToolHarnessPort,
 };
 pub use rcs::{
     L0, L1, L2, L3, Level, LyapunovCandidate, RecursiveControlledSystem, StabilityBreakdown,
