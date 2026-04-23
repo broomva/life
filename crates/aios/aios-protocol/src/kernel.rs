@@ -19,7 +19,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::budget::ResourceBudget;
-use crate::hypervisor::{BackendId, VmId, VmSnapshotId};
+use crate::hypervisor::{BackendError, BackendId, VmId, VmSnapshotId};
 use crate::ids::{AgentId, SessionId};
 
 /// Identifies a wallet for on-chain attribution of kernel-emitted events.
@@ -114,10 +114,8 @@ pub enum GateKind {
 ///
 /// Prefer this over the legacy [`crate::error::KernelError`] for new code —
 /// it carries typed backend / gate / VM identifiers instead of flattening
-/// everything into a string. The `From<BackendError>` impl lands alongside
-/// `BackendError` itself in BRO-848.
-///
-/// NOTE: BackendError wiring lands in BRO-848; re-enable the From impl there.
+/// everything into a string. Bridges [`BackendError`] via `#[from]` so
+/// backend failures propagate into kernel-tier results with no boilerplate.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum KernelError {
@@ -133,6 +131,8 @@ pub enum KernelError {
     GateDenied { gate: GateKind, reason: String },
     #[error("dispatch timeout after {duration_ms} ms")]
     Timeout { duration_ms: u64 },
+    #[error("backend error: {0}")]
+    Backend(#[from] BackendError),
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -291,5 +291,13 @@ mod tests {
         assert_eq!(good().unwrap(), 42);
     }
 
-    // BackendError wiring lands in BRO-848; the From impl + its test live there.
+    // ── BackendError bridge ──
+
+    #[test]
+    fn kernel_error_from_backend_error() {
+        let k: KernelError = BackendError::Internal("oops".into()).into();
+        assert!(matches!(k, KernelError::Backend(_)));
+        assert!(k.to_string().contains("backend error"));
+        assert!(k.to_string().contains("oops"));
+    }
 }
