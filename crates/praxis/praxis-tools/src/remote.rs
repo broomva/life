@@ -1,3 +1,8 @@
+// Phase 0 transitional: invokes `arcan_sandbox::SandboxProvider` methods via
+// the blanket `impl<T: HypervisorBackend> SandboxProvider for T`. Migration
+// to direct `HypervisorBackend` is deferred to a follow-up phase.
+#![allow(deprecated)]
+
 //! Remote command execution via [`arcan_sandbox::SandboxProvider`].
 //!
 //! [`RemoteCommandRunner`] bridges the synchronous [`CommandRunner`] trait
