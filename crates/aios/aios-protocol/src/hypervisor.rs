@@ -6,12 +6,13 @@
 //! (`arcan-provider-local`, `arcan-provider-vercel`, `arcan-provider-cube`,
 //! …), and surfaced to callers through the (future) `KernelPort` trait.
 //!
-//! BRO-847 seeds the type vocabulary only — the traits, `BackendError`, and
-//! capability flags arrive in BRO-848.
+//! BRO-847 seeded the type vocabulary; BRO-848 adds [`BackendError`],
+//! [`BackendCapabilitySet`], and the [`HypervisorBackend`] trait family on top.
 
 use std::collections::HashMap;
 use std::fmt;
 
+use bitflags::bitflags;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -306,6 +307,78 @@ pub struct FileWrite {
     pub mode: u32,
 }
 
+// ── Capabilities & errors ────────────────────────────────────────────────────
+
+bitflags! {
+    /// Capability bits advertised by a hypervisor backend.
+    ///
+    /// Callers inspect these bits to decide whether a backend can honour a
+    /// given operation before dispatching; the kernel also uses them for
+    /// backend selection when [`BackendSelector::Auto`] is requested.
+    ///
+    /// The bit layout is stable across minor versions — new capabilities
+    /// occupy the next free bit, existing bits are never repurposed.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+    pub struct BackendCapabilitySet: u32 {
+        /// Backend can read files from VM guests.
+        const FILESYSTEM_READ  = 1 << 0;
+        /// Backend can write files to VM guests.
+        const FILESYSTEM_WRITE = 1 << 1;
+        /// Backend implements the filesystem extension trait.
+        const FILESYSTEM_EXT   = 1 << 2;
+        /// Backend permits egress networking per [`crate::sandbox::NetworkPolicy`].
+        const NETWORK_EGRESS   = 1 << 3;
+        /// Backend permits ingress networking per [`crate::sandbox::NetworkPolicy`].
+        const NETWORK_INGRESS  = 1 << 4;
+        /// Backend supports `snapshot` / `restore`.
+        const PERSISTENCE      = 1 << 5;
+        /// Backend supports forking from a snapshot.
+        const FORK             = 1 << 6;
+        /// Backend supports `hibernate` / `resume`.
+        const HIBERNATE        = 1 << 7;
+        /// Backend can materialise a custom [`RuntimeHint::Custom`] image.
+        const CUSTOM_IMAGE     = 1 << 8;
+        /// Backend preserves user-supplied [`VmSpec::labels`] (tags).
+        const TAGS             = 1 << 9;
+        /// Backend exposes GPU devices to guests.
+        const GPU              = 1 << 10;
+    }
+}
+
+/// Backend-reported error.
+///
+/// Emitted by the `HypervisorBackend` trait family (BRO-848). The kernel
+/// converts these variants into [`crate::kernel::KernelError`] via the
+/// `#[from]` bridge added in the same ticket.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum BackendError {
+    /// The referenced VM does not exist on this backend.
+    #[error("vm not found: {0}")]
+    VmNotFound(VmId),
+    /// The referenced snapshot does not exist on this backend.
+    #[error("snapshot not found: {0}")]
+    SnapshotNotFound(VmSnapshotId),
+    /// The backend does not support the requested operation.
+    #[error("operation not supported by backend {backend}: {reason}")]
+    NotSupported {
+        backend: &'static str,
+        reason: &'static str,
+    },
+    /// The operation requires capabilities this backend does not advertise.
+    #[error("capability denied: {0:?}")]
+    CapabilityDenied(BackendCapabilitySet),
+    /// The operation exceeded its time budget.
+    #[error("timeout after {duration_ms} ms")]
+    Timeout { duration_ms: u64 },
+    /// Transport-level failure (HTTP, RPC, local IPC, …).
+    #[error("transport: {0}")]
+    Transport(String),
+    /// Catch-all for backend-internal failures.
+    #[error("internal: {0}")]
+    Internal(String),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -513,5 +586,44 @@ mod tests {
         };
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    // ── Capabilities ──
+
+    #[test]
+    fn capability_set_bit_combinations() {
+        let cs = BackendCapabilitySet::FILESYSTEM_READ | BackendCapabilitySet::FORK;
+        assert!(cs.contains(BackendCapabilitySet::FILESYSTEM_READ));
+        assert!(cs.contains(BackendCapabilitySet::FORK));
+        assert!(!cs.contains(BackendCapabilitySet::GPU));
+    }
+
+    #[test]
+    fn backend_capability_set_serde_roundtrip() {
+        let cs = BackendCapabilitySet::FILESYSTEM_READ | BackendCapabilitySet::FILESYSTEM_EXT;
+        let json = serde_json::to_string(&cs).unwrap();
+        let back: BackendCapabilitySet = serde_json::from_str(&json).unwrap();
+        assert_eq!(cs, back);
+        assert!(back.contains(BackendCapabilitySet::FILESYSTEM_READ));
+        assert!(back.contains(BackendCapabilitySet::FILESYSTEM_EXT));
+        assert!(!back.contains(BackendCapabilitySet::NETWORK_EGRESS));
+    }
+
+    // ── BackendError ──
+
+    #[test]
+    fn backend_error_display_includes_context() {
+        let e = BackendError::NotSupported {
+            backend: "test",
+            reason: "hibernate",
+        };
+        assert!(e.to_string().contains("hibernate"));
+        assert!(e.to_string().contains("test"));
+    }
+
+    #[test]
+    fn backend_error_timeout_display() {
+        let e = BackendError::Timeout { duration_ms: 1_500 };
+        assert!(e.to_string().contains("1500"));
     }
 }
