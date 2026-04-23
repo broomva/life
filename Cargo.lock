@@ -312,6 +312,7 @@ dependencies = [
  "arcan-lago",
  "arcan-opsis",
  "arcan-praxis",
+ "arcan-prosopon",
  "arcan-provider",
  "arcan-provider-bubblewrap",
  "arcan-provider-local",
@@ -355,6 +356,8 @@ dependencies = [
  "praxis-mcp-bridge",
  "praxis-skills",
  "praxis-tools",
+ "prosopon-compositor-glass",
+ "prosopon-daemon",
  "reqwest",
  "reqwest-eventsource",
  "serde",
@@ -6965,6 +6968,25 @@ dependencies = [
  "tokio",
  "tracing",
  "windows",
+]
+
+[[package]]
+name = "prosopon-compositor-glass"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "include_dir",
+ "prosopon-core",
+ "prosopon-daemon",
+ "prosopon-protocol",
+ "prosopon-runtime",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
