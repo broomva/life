@@ -26,6 +26,8 @@ pub mod network;
 #[cfg(feature = "gate-policy-static")]
 pub mod policy;
 
-// Concrete types are re-exported from each module once they land in
-// Tasks 12 and 13. Placeholder modules in this scaffold commit keep the
-// crate compiling without dangling `pub use` imports.
+#[cfg(feature = "gate-budget-noop")]
+pub use budget::NoOpBudgetGate;
+
+#[cfg(feature = "gate-net-noop")]
+pub use network::NoOpNetworkIsolation;
