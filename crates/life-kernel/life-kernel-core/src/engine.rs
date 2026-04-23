@@ -24,15 +24,17 @@
 //! arbitrarily many concurrent dispatches. The engine itself is
 //! shared-ref only: every [`KernelPort`] method takes `&self`.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use aios_protocol::budget::BudgetGatePort;
+use aios_protocol::budget::{BudgetGatePort, ResourceUsage, UsageConfidence};
 use aios_protocol::event::{
     EventKind, KernelDispatchDenied, KernelForkDenied, KernelVmCreated, KernelVmDestroyed,
     KernelVmForked, KernelVmHibernated, KernelVmResumed, KernelVmSnapshotted,
 };
 use aios_protocol::hypervisor::{
-    BackendSelector, ForkSpec, HypervisorBackend, RuntimeHint, VmHandle, VmSnapshotHandle, VmSpec,
+    BackendId, BackendSelector, ForkSpec, HypervisorBackend, RuntimeHint, VmHandle, VmId,
+    VmSnapshotHandle, VmSnapshotId, VmSpec,
 };
 use aios_protocol::ids::{AgentId, BranchId, SessionId};
 use aios_protocol::kernel::{GateKind, KernelContext, KernelError, KernelResult};
@@ -73,6 +75,209 @@ impl KernelEngine {
     /// when absent at [`KernelEngineBuilder::build`] time.
     pub fn builder() -> KernelEngineBuilder {
         KernelEngineBuilder::new()
+    }
+
+    /// Pure deterministic fold over a Lago `kernel.*` event stream.
+    ///
+    /// Given the events emitted during a session, reconstruct the engine's
+    /// observable state: live VM handles, snapshot inventory, and
+    /// per-session resource totals. This is the test oracle that proves
+    /// the engine is a deterministic fold over the event journal — the
+    /// foundation of the Phase 1 replay-determinism invariant (BRO-876).
+    ///
+    /// Accepts any iterator over `&EventKind`, so callers can replay from
+    /// a `Vec<EventRecord>` (via `iter().map(|r| &r.kind)`), a Lago
+    /// `read()`, or any other buffer.
+    ///
+    /// The fold is total: only variants that change observable state are
+    /// applied; every other [`EventKind`] is counted in
+    /// [`ReplayedState::events_applied`] but leaves the rest of the
+    /// state untouched. Replaying the same stream twice produces
+    /// byte-identical [`ReplayedState`] values (verified by the
+    /// `replay_determinism` integration test).
+    pub fn replay<'a, I>(events: I) -> ReplayedState
+    where
+        I: IntoIterator<Item = &'a EventKind>,
+    {
+        let mut state = ReplayedState::default();
+        for kind in events {
+            state.events_applied = state.events_applied.saturating_add(1);
+            match kind {
+                EventKind::KernelVmCreated(p) => {
+                    state.live_vms.insert(
+                        p.vm_id.to_string(),
+                        ReplayedVm {
+                            vm_id: p.vm_id.clone(),
+                            backend: p.backend.clone(),
+                            session_id: p.session_id.clone(),
+                            agent_id: p.agent_id.clone(),
+                        },
+                    );
+                }
+                EventKind::KernelVmForked(p) => {
+                    // A fork produces a child VM whose identity lives in
+                    // this event. The parent's backend / session / agent
+                    // is inherited when the parent is still live in the
+                    // reconstructed state; otherwise the child is
+                    // recorded with best-effort defaults. Real kernels
+                    // emit a `KernelVmCreated` for the child in tandem
+                    // with the fork (that's what populates the primary
+                    // fields); this arm is a safety-net so the fork
+                    // event alone still leaves the child visible.
+                    let key = p.child_vm_id.to_string();
+                    if !state.live_vms.contains_key(&key) {
+                        let parent_key = p.parent_vm_id.to_string();
+                        let (backend, session_id, agent_id) = match state.live_vms.get(&parent_key)
+                        {
+                            Some(parent) => (
+                                parent.backend.clone(),
+                                parent.session_id.clone(),
+                                parent.agent_id.clone(),
+                            ),
+                            None => (
+                                BackendId::from("unknown"),
+                                SessionId::from_string(""),
+                                AgentId::from_string(""),
+                            ),
+                        };
+                        state.live_vms.insert(
+                            key,
+                            ReplayedVm {
+                                vm_id: p.child_vm_id.clone(),
+                                backend,
+                                session_id,
+                                agent_id,
+                            },
+                        );
+                    }
+                }
+                EventKind::KernelVmSnapshotted(p) => {
+                    state.snapshots.insert(
+                        p.snapshot_id.to_string(),
+                        ReplayedSnapshot {
+                            snapshot_id: p.snapshot_id.clone(),
+                            vm_id: p.vm_id.clone(),
+                            name: p.name.clone(),
+                            size_bytes: p.size_bytes,
+                        },
+                    );
+                }
+                EventKind::KernelVmDestroyed(p) => {
+                    state.live_vms.remove(&p.vm_id.to_string());
+                }
+                EventKind::KernelUsageRecorded(p) => {
+                    let entry = state
+                        .session_usage
+                        .entry(p.session_id.to_string())
+                        .or_default();
+                    entry.cpu_ms = entry.cpu_ms.saturating_add(p.usage.cpu_ms);
+                    entry.mem_peak_kb = entry.mem_peak_kb.max(p.usage.mem_peak_kb);
+                    entry.egress_bytes = entry.egress_bytes.saturating_add(p.usage.egress_bytes);
+                    entry.duration_ms = entry.duration_ms.saturating_add(p.usage.duration_ms);
+                    entry.syscall_count = entry.syscall_count.saturating_add(p.usage.syscall_count);
+                    entry.confidence = min_confidence(entry.confidence, p.usage.confidence);
+                }
+                // Hibernate / Resume do not change observable live-vm
+                // membership — the handle stays alive, only its status
+                // flips. Dispatch events are accounted for via the
+                // paired `KernelUsageRecorded`. Denied / ForkDenied are
+                // audit-only and leave state untouched. Other
+                // non-kernel variants are ignored.
+                _ => {}
+            }
+        }
+        state
+    }
+}
+
+/// Observable state reconstructed by folding a `kernel.*` event stream.
+///
+/// Produced by [`KernelEngine::replay`]. Two replays of the same event
+/// sequence produce byte-identical values (deterministic fold
+/// invariant).
+///
+/// Field choice mirrors the engine's externally-visible state:
+///
+/// - `live_vms` — VMs that were created and not subsequently
+///   [`EventKind::KernelVmDestroyed`]. `Hibernated` / `Resumed` do not
+///   affect membership.
+/// - `snapshots` — every snapshot ever captured in the stream. There
+///   is no kernel event for snapshot deletion in Phase 1.
+/// - `session_usage` — per-session cumulative [`ResourceUsage`] with
+///   `cpu_ms`, `egress_bytes`, `duration_ms`, `syscall_count` summed
+///   across every [`EventKind::KernelUsageRecorded`] and
+///   `mem_peak_kb` taking the maximum. Confidence degrades via
+///   [`min_confidence`]: a single `Unknown` downgrades the aggregate
+///   to `Unknown`; any `Estimated` degrades from `Measured`.
+/// - `events_applied` — total event count including ignored variants,
+///   so the counter always matches the input stream's length.
+///
+/// Keyed by the stringified identifier to keep iteration deterministic
+/// across platforms without requiring `Ord` derives on the upstream ID
+/// types (which are `#[serde(transparent)]` `String` wrappers).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReplayedState {
+    /// Currently-live VMs, keyed by the stringified [`VmId`].
+    pub live_vms: BTreeMap<String, ReplayedVm>,
+    /// Snapshots captured during the session, keyed by the
+    /// stringified [`VmSnapshotId`].
+    pub snapshots: BTreeMap<String, ReplayedSnapshot>,
+    /// Per-session cumulative resource usage, keyed by the
+    /// stringified [`SessionId`].
+    pub session_usage: BTreeMap<String, ResourceUsage>,
+    /// Number of events folded so far — monotonically increasing, one
+    /// per event regardless of whether the event changed observable
+    /// state.
+    pub events_applied: u64,
+}
+
+/// Reconstructed live-VM record held in [`ReplayedState::live_vms`].
+///
+/// Captures the identity of the VM plus the attribution fields carried
+/// on the originating [`EventKind::KernelVmCreated`] (or inherited
+/// from the parent on [`EventKind::KernelVmForked`] when the fork
+/// event arrives without a matching create).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayedVm {
+    /// Identifier of the VM.
+    pub vm_id: VmId,
+    /// Backend that hosts the VM.
+    pub backend: BackendId,
+    /// Session the VM was created under.
+    pub session_id: SessionId,
+    /// Agent the VM was created on behalf of.
+    pub agent_id: AgentId,
+}
+
+/// Reconstructed snapshot record held in [`ReplayedState::snapshots`].
+///
+/// Captures the snapshot identity plus metadata (parent VM, human
+/// name, size) as reported on [`EventKind::KernelVmSnapshotted`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayedSnapshot {
+    /// Identifier of the snapshot.
+    pub snapshot_id: VmSnapshotId,
+    /// VM the snapshot was captured from.
+    pub vm_id: VmId,
+    /// Human-readable snapshot name.
+    pub name: String,
+    /// Size of the snapshot on disk, in bytes.
+    pub size_bytes: u64,
+}
+
+/// Degrade two [`UsageConfidence`] values to the weaker of the pair.
+///
+/// Used when folding multiple [`EventKind::KernelUsageRecorded`]
+/// events for a single session: the aggregate confidence can never
+/// exceed the weakest contribution. `Unknown` is strictly weaker than
+/// `Estimated`, which is strictly weaker than `Measured`.
+fn min_confidence(a: UsageConfidence, b: UsageConfidence) -> UsageConfidence {
+    match (a, b) {
+        (UsageConfidence::Unknown, _) | (_, UsageConfidence::Unknown) => UsageConfidence::Unknown,
+        (UsageConfidence::Estimated, _) | (_, UsageConfidence::Estimated) => {
+            UsageConfidence::Estimated
+        }
+        _ => UsageConfidence::Measured,
     }
 }
 
