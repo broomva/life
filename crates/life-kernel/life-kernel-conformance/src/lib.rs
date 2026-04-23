@@ -42,7 +42,9 @@ use async_trait::async_trait;
 use life_kernel_core::KernelEngine;
 
 pub mod errors;
+pub mod events;
 pub mod lifecycle;
+pub mod metering;
 
 /// Extension on [`EventStorePort`] that lets scenarios read back the
 /// events the engine wrote.
@@ -132,14 +134,13 @@ impl ConformanceError {
 ///
 /// The function short-circuits at the first failure — the returned
 /// error names the battery and scenario that tripped.
-///
-/// Later commits in this task stack add the `errors`, `metering`, and
-/// `events` modules; this top-level runner is updated in lockstep.
 pub async fn run_all_conformance_tests(
     harness: &dyn ConformanceHarness,
 ) -> Result<(), ConformanceError> {
     lifecycle::run(harness).await?;
     errors::run(harness).await?;
+    metering::run(harness).await?;
+    events::run(harness).await?;
     Ok(())
 }
 
