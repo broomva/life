@@ -1,0 +1,28 @@
+[package]
+name = "life-kernel-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "In-process KernelPort engine: gate chain + metering over a HypervisorBackend"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+aios-protocol.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "rt"] }
+tracing.workspace = true
+
+[dev-dependencies]
+arcan-provider-local.workspace = true
+arcan-sandbox.workspace = true
+proptest.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
