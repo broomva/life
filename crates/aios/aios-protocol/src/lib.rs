@@ -23,8 +23,8 @@
 //! - [`error`] — KernelError, KernelResult (legacy kernel-tier error; see [`kernel`] for the
 //!   richer replacement landing alongside the hypervisor substrate)
 //! - [`budget`] — ResourceBudget, ResourceUsage, UsageConfidence (kernel-tier metering)
-//! - [`kernel`] — WalletAttribution, ChainId (attribution types; richer context + error land
-//!   with the hypervisor substrate)
+//! - [`kernel`] — WalletAttribution, ChainId, KernelContext, TraceContext, GateKind, and the
+//!   richer kernel-tier KernelError (reachable as `aios_protocol::kernel::KernelError`)
 //! - [`hypervisor`] — VM substrate types (VmHandle, VmSpec, VmSnapshotHandle, ForkSpec,
 //!   ExecRequest, …) consumed by the (future) HypervisorBackend trait
 
@@ -67,7 +67,7 @@ pub use ids::{
 // re-exported at the crate root to avoid shadowing the legacy `error::KernelError`
 // above; downstream crates should use `aios_protocol::kernel::KernelError` until the
 // migration sweep in BRO-856.
-pub use kernel::{ChainId, WalletAttribution};
+pub use kernel::{ChainId, GateKind, KernelContext, TraceContext, WalletAttribution};
 pub use memory::{FileProvenance, MemoryScope, Observation, Provenance, SoulProfile};
 pub use mode::{GatingProfile, OperatingMode};
 pub use payment::{
