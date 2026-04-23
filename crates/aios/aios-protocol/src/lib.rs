@@ -29,8 +29,8 @@
 //! - [`hypervisor`] — VM substrate types (VmHandle, VmSpec, VmSnapshotHandle, ForkSpec,
 //!   ExecRequest, …) plus the HypervisorBackend + HypervisorFilesystemExt traits and
 //!   the BackendError / BackendCapabilitySet surface implemented by `arcan-provider-*`
-//! - [`network_isolation`] — EgressTarget, EgressProtocol (egress metering surface for the
-//!   future NetworkIsolationPort)
+//! - [`network_isolation`] — EgressTarget, EgressProtocol, NetworkIsolationPort
+//!   (egress metering + per-VM enforcement)
 
 pub mod budget;
 pub mod error;
@@ -75,7 +75,7 @@ pub use ids::{
 pub use kernel::{ChainId, GateKind, KernelContext, TraceContext, WalletAttribution};
 pub use memory::{FileProvenance, MemoryScope, Observation, Provenance, SoulProfile};
 pub use mode::{GatingProfile, OperatingMode};
-pub use network_isolation::{EgressProtocol, EgressTarget};
+pub use network_isolation::{EgressProtocol, EgressTarget, NetworkIsolationPort};
 pub use payment::{
     PaymentAuthorizationDecision, PaymentAuthorizationRequest, PaymentPort,
     PaymentSettlementReceipt, WalletBalanceInfo,

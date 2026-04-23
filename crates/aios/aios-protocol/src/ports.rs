@@ -221,3 +221,4 @@ pub trait ApprovalPort: Send + Sync {
 // other runtime-boundary traits.
 pub use crate::budget::{BudgetDecision, BudgetGatePort};
 pub use crate::hypervisor::{HypervisorBackend, HypervisorFilesystemExt};
+pub use crate::network_isolation::NetworkIsolationPort;
