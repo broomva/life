@@ -82,3 +82,4 @@ crates/opsis/web/.turbo/
 crates/opsis/web/docs/conversations/
 crates/opsis/web/scripts/conversation-history.py
 crates/opsis/web/scripts/conversation-bridge-hook.sh
+.worktrees/
