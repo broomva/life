@@ -5319,7 +5319,15 @@ name = "life-kernel-conformance"
 version = "0.3.0"
 dependencies = [
  "aios-protocol",
+ "arcan-provider-local",
+ "arcan-sandbox",
  "async-trait",
+ "chrono",
+ "life-kernel-core",
+ "life-kernel-gate",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

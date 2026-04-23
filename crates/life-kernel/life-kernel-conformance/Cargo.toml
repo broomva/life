@@ -3,7 +3,7 @@ name = "life-kernel-conformance"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Conformance test harness for HypervisorBackend implementations (Phase 0 scaffold)"
+description = "Backend-agnostic conformance test battery for KernelPort implementations"
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -11,6 +11,17 @@ repository.workspace = true
 [dependencies]
 aios-protocol.workspace = true
 async-trait.workspace = true
+life-kernel-core.workspace = true
+life-kernel-gate.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "rt", "time"] }
+
+[dev-dependencies]
+arcan-provider-local.workspace = true
+arcan-sandbox.workspace = true
+chrono.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true
