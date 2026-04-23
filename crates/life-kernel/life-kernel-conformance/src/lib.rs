@@ -41,6 +41,7 @@ use aios_protocol::ports::EventStorePort;
 use async_trait::async_trait;
 use life_kernel_core::KernelEngine;
 
+pub mod errors;
 pub mod lifecycle;
 
 /// Extension on [`EventStorePort`] that lets scenarios read back the
@@ -138,6 +139,7 @@ pub async fn run_all_conformance_tests(
     harness: &dyn ConformanceHarness,
 ) -> Result<(), ConformanceError> {
     lifecycle::run(harness).await?;
+    errors::run(harness).await?;
     Ok(())
 }
 
