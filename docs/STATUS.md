@@ -168,6 +168,28 @@ The baseline unification is active and enforced in production paths:
   session (already in conversation context). Internal eval/autonomic/vigil
   events are skipped.
 
+### lifed Phase 0 — ABI Foundation (2026-04-23 → 2026-04-23)
+
+- ✅ aios-protocol extended: `KernelPort`, `BudgetGatePort`,
+  `NetworkIsolationPort`, `HypervisorBackend`, `HypervisorFilesystemExt`
+- ✅ 13 new `Kernel*` `EventKind` variants (all additive, `#[non_exhaustive]`)
+- ✅ `SandboxTier::MicroVM` variant added
+- ✅ `ToolContext` / `ToolResult` gained `wallet`, `cost_hint`,
+  `kernel_ctx`, `usage` (all `Option<T>`, fully backward compatible)
+- ✅ `SandboxProvider` deprecated-aliased via blanket impl over
+  `HypervisorBackend`; `BackendError → SandboxError` conversion wired
+- ✅ `arcan-provider-{local,vercel,bubblewrap}` migrated to
+  `HypervisorBackend` (+ `HypervisorFilesystemExt` where applicable)
+- ✅ `life-kernel-conformance` scaffold crate created (Phase 1 fills it)
+- ✅ `scripts/verify_dependencies_lifed.sh` enforces life-kernel-* rules
+- Tests: 3184 baseline → 3210 passing (+26 new; 0 regressions)
+- 21 commits; 10 Linear tickets (BRO-847..BRO-856) closed in the
+  "Phase 0 — ABI Foundation" milestone
+- Deprecation warnings from legacy `SandboxProvider` callers in
+  `arcan-aios-adapters`, `arcan-lago`, `arcan-praxis`, `praxis-tools`,
+  and the `arcan` binary are expected and will be cleaned up in a
+  follow-up Phase; the blanket impl keeps all call sites working
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
