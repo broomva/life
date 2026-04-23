@@ -1,17 +1,27 @@
 //! Low-level hypervisor substrate types — shared vocabulary for VM-backed
 //! execution across the Agent OS.
 //!
-//! These types are consumed by the (future) `HypervisorBackend` trait
-//! (lands in BRO-848), implemented by backend adapter crates
-//! (`arcan-provider-local`, `arcan-provider-vercel`, `arcan-provider-cube`,
-//! …), and surfaced to callers through the (future) `KernelPort` trait.
+//! These types are consumed by the [`HypervisorBackend`] trait, implemented by
+//! backend adapter crates (`arcan-provider-local`, `arcan-provider-vercel`,
+//! `arcan-provider-cube`, …), and surfaced to callers through the (future)
+//! `KernelPort` trait.
 //!
-//! BRO-847 seeded the type vocabulary; BRO-848 adds [`BackendError`],
-//! [`BackendCapabilitySet`], and the [`HypervisorBackend`] trait family on top.
+//! ## Trait contract
+//!
+//! [`HypervisorBackend`] is the minimum contract every backend must honour
+//! (create / exec / snapshot / restore / destroy). `hibernate` and `resume`
+//! have default impls that return [`BackendError::NotSupported`] so backends
+//! that cannot pause VMs are not forced to implement them.
+//!
+//! [`HypervisorFilesystemExt`] is an optional extension trait — backends that
+//! expose filesystem reads/writes implement it and advertise
+//! [`BackendCapabilitySet::FILESYSTEM_EXT`] from
+//! [`HypervisorBackend::capabilities`].
 
 use std::collections::HashMap;
 use std::fmt;
 
+use async_trait::async_trait;
 use bitflags::bitflags;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -298,8 +308,8 @@ pub struct ExecResult {
     pub duration_ms: u64,
 }
 
-/// A single file to write into a VM filesystem via the (future)
-/// `HypervisorFilesystemExt` trait (BRO-848).
+/// A single file to write into a VM filesystem via the
+/// [`HypervisorFilesystemExt`] trait.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileWrite {
     pub path: String,
@@ -377,6 +387,75 @@ pub enum BackendError {
     /// Catch-all for backend-internal failures.
     #[error("internal: {0}")]
     Internal(String),
+}
+
+// ── Traits ───────────────────────────────────────────────────────────────────
+
+/// Low-level hypervisor substrate — implemented by `arcan-provider-*` crates.
+///
+/// Uses `#[async_trait]` so the trait is dyn-compatible; callers typically
+/// hold `Arc<dyn HypervisorBackend>` inside the kernel backend registry.
+#[async_trait]
+pub trait HypervisorBackend: Send + Sync + 'static {
+    /// Stable name used for routing + observability. Examples: `"local"`, `"cube"`, `"vercel"`.
+    fn name(&self) -> &'static str;
+
+    /// Capability bits this backend honours.
+    fn capabilities(&self) -> BackendCapabilitySet;
+
+    /// Provision a new VM from the spec. May return before the VM is ready
+    /// (status [`VmStatus::Starting`]).
+    async fn create(&self, spec: VmSpec) -> Result<VmHandle, BackendError>;
+
+    /// Execute a shell-level request inside a running VM.
+    async fn exec(&self, vm: &VmHandle, req: ExecRequest) -> Result<ExecResult, BackendError>;
+
+    /// Snapshot the current VM state. Returns an opaque snapshot id.
+    async fn snapshot(&self, vm: &VmHandle) -> Result<VmSnapshotId, BackendError>;
+
+    /// Restore a VM from a snapshot, returning a handle for the new instance.
+    async fn restore(&self, snapshot: &VmSnapshotId) -> Result<VmHandle, BackendError>;
+
+    /// Destroy the VM. MUST succeed even if the VM is already stopped.
+    async fn destroy(&self, vm: &VmHandle) -> Result<(), BackendError>;
+
+    /// Hibernate the VM (pause + snapshot). Default impl returns
+    /// [`BackendError::NotSupported`].
+    async fn hibernate(&self, _vm: &VmHandle) -> Result<(), BackendError> {
+        Err(BackendError::NotSupported {
+            backend: self.name(),
+            reason: "hibernate",
+        })
+    }
+
+    /// Resume a hibernated VM. Default impl returns
+    /// [`BackendError::NotSupported`].
+    async fn resume(&self, _vm: &VmHandle) -> Result<(), BackendError> {
+        Err(BackendError::NotSupported {
+            backend: self.name(),
+            reason: "resume",
+        })
+    }
+}
+
+/// Optional extension for backends that expose filesystem operations.
+///
+/// Backends that don't implement this trait (for example, a future aiOS-native
+/// guest) will cause `KernelPort::dispatch` to return
+/// [`crate::kernel::KernelError::CapabilityUnavailable`] when a tool tries to
+/// invoke a filesystem-dependent operation. Implementors MUST also advertise
+/// [`BackendCapabilitySet::FILESYSTEM_EXT`] from
+/// [`HypervisorBackend::capabilities`].
+#[async_trait]
+pub trait HypervisorFilesystemExt: HypervisorBackend {
+    /// Write a batch of files into the VM's guest filesystem.
+    async fn write_files(&self, vm: &VmHandle, files: Vec<FileWrite>) -> Result<(), BackendError>;
+
+    /// Read a single file from the VM's guest filesystem.
+    async fn read_file(&self, vm: &VmHandle, path: &str) -> Result<Vec<u8>, BackendError>;
+
+    /// List VMs managed by this backend (used for diagnostics + GC).
+    async fn list(&self) -> Result<Vec<VmInfo>, BackendError>;
 }
 
 #[cfg(test)]
@@ -625,5 +704,26 @@ mod tests {
     fn backend_error_timeout_display() {
         let e = BackendError::Timeout { duration_ms: 1_500 };
         assert!(e.to_string().contains("1500"));
+    }
+}
+
+#[cfg(test)]
+mod trait_tests {
+    use super::*;
+
+    // Compile-time assertion that `HypervisorBackend` is dyn-compatible —
+    // the whole reason we use `#[async_trait]` instead of native async fn.
+    // The function is never called; its mere existence forces the compiler
+    // to confirm `&dyn HypervisorBackend` is a well-formed type.
+    #[allow(dead_code)]
+    fn _assert_dyn_safe(_: &dyn HypervisorBackend) {}
+
+    #[test]
+    fn hypervisor_backend_is_dyn_compatible() {
+        // If this test compiles, the trait is dyn-compatible.
+        #[allow(dead_code)]
+        fn _use_it(b: &dyn HypervisorBackend) -> &'static str {
+            b.name()
+        }
     }
 }

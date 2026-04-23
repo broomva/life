@@ -214,3 +214,9 @@ pub trait ApprovalPort: Send + Sync {
         actor: String,
     ) -> KernelResult<ApprovalResolution>;
 }
+
+// Re-export the hypervisor trait family for consistency with the other ports.
+// Traits are *defined* in [`crate::hypervisor`]; this block only re-exports so
+// callers can reach `aios_protocol::ports::HypervisorBackend` alongside the
+// other runtime-boundary traits.
+pub use crate::hypervisor::{HypervisorBackend, HypervisorFilesystemExt};

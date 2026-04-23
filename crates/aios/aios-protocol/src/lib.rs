@@ -26,7 +26,8 @@
 //! - [`kernel`] — WalletAttribution, ChainId, KernelContext, TraceContext, GateKind, and the
 //!   richer kernel-tier KernelError (reachable as `aios_protocol::kernel::KernelError`)
 //! - [`hypervisor`] — VM substrate types (VmHandle, VmSpec, VmSnapshotHandle, ForkSpec,
-//!   ExecRequest, …) consumed by the (future) HypervisorBackend trait
+//!   ExecRequest, …) plus the HypervisorBackend + HypervisorFilesystemExt traits and
+//!   the BackendError / BackendCapabilitySet surface implemented by `arcan-provider-*`
 //! - [`network_isolation`] — EgressTarget, EgressProtocol (egress metering surface for the
 //!   future NetworkIsolationPort)
 
@@ -57,9 +58,9 @@ pub use event::{
     LoopPhase, PolicyDecisionKind, RiskLevel, SnapshotType, SpanStatus, SteeringMode, TokenUsage,
 };
 pub use hypervisor::{
-    BackendId, BackendSelector, ExecRequest, ExecResult, FileWrite, ForkSpec, Mount, RuntimeHint,
-    VmHandle, VmId, VmInfo, VmResources, VmSnapshotHandle, VmSnapshotId, VmSpec, VmSpecOverrides,
-    VmStatus,
+    BackendCapabilitySet, BackendError, BackendId, BackendSelector, ExecRequest, ExecResult,
+    FileWrite, ForkSpec, HypervisorBackend, HypervisorFilesystemExt, Mount, RuntimeHint, VmHandle,
+    VmId, VmInfo, VmResources, VmSnapshotHandle, VmSnapshotId, VmSpec, VmSpecOverrides, VmStatus,
 };
 pub use identity::{AgentIdentityProvider, BasicIdentity};
 pub use ids::{
