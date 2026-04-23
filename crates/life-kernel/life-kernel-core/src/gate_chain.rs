@@ -21,8 +21,8 @@
 //! Denials from the fork-λ gate carry [`GateKind::ForkLambda`].
 //!
 //! `apply_network` is separate from dispatch/fork — it is called once at
-//! [`crate::engine::KernelEngine::create_vm`] time to materialise the
-//! VM's network policy through the injected
+//! [`crate::engine::KernelEngine`]-managed VM creation time to
+//! materialise the VM's network policy through the injected
 //! [`NetworkIsolationPort`]. Per-dispatch egress recording is performed
 //! by [`crate::metering::MeteringWrapper`] and not by this chain.
 //!
@@ -103,6 +103,33 @@ impl GateChain {
     ///
     /// Use the resulting [`GateChainBuilder`] to wire collaborators and
     /// call [`GateChainBuilder::build`] to finalise the chain.
+    ///
+    /// # Example
+    ///
+    /// Wire policy + budget + network-isolation collaborators into a
+    /// chain; `Arc<dyn …>` is how concrete gate implementations (e.g.
+    /// `StaticPolicyGate`, `NoOpBudgetGate`) are supplied.
+    ///
+    /// ```no_run
+    /// use std::sync::Arc;
+    /// use aios_protocol::budget::BudgetGatePort;
+    /// use aios_protocol::network_isolation::NetworkIsolationPort;
+    /// use life_kernel_core::GateChain;
+    ///
+    /// # fn demo(
+    /// #     policy: Arc<dyn BudgetGatePort>,
+    /// #     budget: Arc<dyn BudgetGatePort>,
+    /// #     network: Arc<dyn NetworkIsolationPort>,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// let chain = GateChain::builder()
+    ///     .policy(policy)
+    ///     .budget(budget)
+    ///     .network_isolation(network)
+    ///     .build()?;
+    /// # let _ = chain;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn builder() -> GateChainBuilder {
         GateChainBuilder::default()
     }
@@ -140,7 +167,7 @@ impl GateChain {
     /// Run the fork chain: **policy → budget → fork-λ**.
     ///
     /// The fork-λ stage runs only when a fork-λ gate was configured.
-    /// Semantics match [`check_dispatch`] otherwise.
+    /// Semantics match [`Self::check_dispatch`] otherwise.
     pub async fn check_fork(
         &self,
         parent: &VmHandle,
@@ -180,8 +207,8 @@ impl GateChain {
     ///
     /// Called once at VM start, after the backend returns its handle.
     /// A failure aborts bring-up — the engine is expected to propagate
-    /// the error back to the originating [`crate::engine::KernelEngine::create_vm`]
-    /// call.
+    /// the error back to the originating
+    /// [`crate::engine::KernelEngine`]-managed VM creation call.
     pub async fn apply_network(&self, vm: &VmHandle) -> KernelResult<()> {
         self.network.apply(vm, &self.network_policy).await
     }

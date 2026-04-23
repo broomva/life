@@ -70,6 +70,22 @@ where
 {
     /// Construct a gate that queries `policy` and, on an approval
     /// requirement, enqueues onto `approvals`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::sync::Arc;
+    /// use aios_protocol::ports::{ApprovalPort, PolicyGatePort};
+    /// use life_kernel_gate::StaticPolicyGate;
+    ///
+    /// # fn demo(
+    /// #     policy_port: Arc<dyn PolicyGatePort>,
+    /// #     approvals_port: Arc<dyn ApprovalPort>,
+    /// # ) {
+    /// let gate = StaticPolicyGate::new(policy_port, approvals_port);
+    /// # let _ = gate;
+    /// # }
+    /// ```
     pub fn new(policy: Arc<P>, approvals: Arc<A>) -> Self {
         Self { policy, approvals }
     }

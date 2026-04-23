@@ -168,12 +168,11 @@ pub async fn timeout_enforced_on_long_dispatch(
 /// Capability matching at dispatch time.
 ///
 /// The Phase 1 engine does not yet reject a dispatch when the backend
-/// lacks [`BackendCapabilitySet::FILESYSTEM_EXT`] — the Tool-ABI layer
-/// (Phase 3) will grow that enforcement once tools carry typed
-/// capability requirements. We exercise the current behaviour and
-/// document it by logging a skip when the dispatch succeeds.
-///
-/// [`BackendCapabilitySet`]: aios_protocol::hypervisor::BackendCapabilitySet
+/// lacks [`aios_protocol::hypervisor::BackendCapabilitySet::FILESYSTEM_EXT`]
+/// — the Tool-ABI layer (Phase 3) will grow that enforcement once tools
+/// carry typed capability requirements. We exercise the current
+/// behaviour and document it by logging a skip when the dispatch
+/// succeeds.
 pub async fn capability_unavailable_when_backend_missing_filesystem_ext(
     harness: &dyn ConformanceHarness,
 ) -> Result<(), ConformanceError> {

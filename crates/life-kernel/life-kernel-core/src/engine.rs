@@ -73,6 +73,47 @@ impl KernelEngine {
     ///
     /// All required fields surface as [`KernelEngineError::BuilderMissing`]
     /// when absent at [`KernelEngineBuilder::build`] time.
+    ///
+    /// # Example
+    ///
+    /// A minimal wiring sketch — `backend`, `policy`, `budget`, `network`,
+    /// and `store` are all `Arc<dyn Trait>` collaborators the caller
+    /// provides. The snippet is marked `no_run` because the concrete
+    /// types are supplied at the call site.
+    ///
+    /// ```no_run
+    /// use std::sync::Arc;
+    /// use aios_protocol::budget::BudgetGatePort;
+    /// use aios_protocol::hypervisor::HypervisorBackend;
+    /// use aios_protocol::ids::{AgentId, SessionId};
+    /// use aios_protocol::network_isolation::NetworkIsolationPort;
+    /// use aios_protocol::ports::EventStorePort;
+    /// use life_kernel_core::KernelEngine;
+    ///
+    /// # async fn demo(
+    /// #     backend: Arc<dyn HypervisorBackend>,
+    /// #     policy: Arc<dyn BudgetGatePort>,
+    /// #     budget: Arc<dyn BudgetGatePort>,
+    /// #     network: Arc<dyn NetworkIsolationPort>,
+    /// #     store: Arc<dyn EventStorePort>,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// let engine = KernelEngine::builder()
+    ///     .register_backend(backend)
+    ///     .await
+    ///     .policy_gate(policy)
+    ///     .budget_gate(budget)
+    ///     .network_isolation(network)
+    ///     .event_store(store)
+    ///     .session(
+    ///         SessionId::from_string("sess-1"),
+    ///         AgentId::from_string("agent-1"),
+    ///     )
+    ///     .build()
+    ///     .await?;
+    /// # let _ = engine;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn builder() -> KernelEngineBuilder {
         KernelEngineBuilder::new()
     }
@@ -207,8 +248,9 @@ impl KernelEngine {
 ///   `cpu_ms`, `egress_bytes`, `duration_ms`, `syscall_count` summed
 ///   across every [`EventKind::KernelUsageRecorded`] and
 ///   `mem_peak_kb` taking the maximum. Confidence degrades via
-///   [`min_confidence`]: a single `Unknown` downgrades the aggregate
-///   to `Unknown`; any `Estimated` degrades from `Measured`.
+///   a private `min_confidence` helper: a single `Unknown` downgrades
+///   the aggregate to `Unknown`; any `Estimated` degrades from
+///   `Measured`.
 /// - `events_applied` — total event count including ignored variants,
 ///   so the counter always matches the input stream's length.
 ///

@@ -24,15 +24,16 @@
 //! # Capability-gated scenarios
 //!
 //! Some scenarios require backend capabilities that not every backend
-//! advertises (e.g. [`BackendCapabilitySet::PERSISTENCE`] for
+//! advertises (e.g.
+//! [`aios_protocol::hypervisor::BackendCapabilitySet::PERSISTENCE`] for
 //! snapshot/fork). Those scenarios detect the missing capability and
 //! return `Ok(())` after a single `eprintln!` note; they never fail a
 //! backend for a gap it legitimately does not cover.
 //!
 //! [`KernelEngine`]: life_kernel_core::KernelEngine
-//! [`BackendCapabilitySet`]: aios_protocol::hypervisor::BackendCapabilitySet
 
 #![deny(unsafe_code)]
+#![warn(missing_docs)]
 
 use std::sync::Arc;
 
@@ -58,7 +59,7 @@ pub trait CapturingEventStore: EventStorePort {
 }
 
 /// Harness a backend integrator implements so their
-/// [`KernelEngine`](life_kernel_core::KernelEngine) can be driven by the
+/// [`KernelEngine`] can be driven by the
 /// conformance scenarios.
 ///
 /// The harness owns the event store so scenarios can inspect the event
@@ -134,6 +135,39 @@ impl ConformanceError {
 ///
 /// The function short-circuits at the first failure — the returned
 /// error names the battery and scenario that tripped.
+///
+/// # Example
+///
+/// A backend integrator implements [`ConformanceHarness`] to build a
+/// fresh engine + capturing event store, then calls this fn from a
+/// `#[tokio::test]` to drive the four Phase 1 batteries.
+///
+/// ```no_run
+/// use std::sync::Arc;
+/// use async_trait::async_trait;
+/// use life_kernel_conformance::{
+///     CapturingEventStore, ConformanceHarness, run_all_conformance_tests,
+/// };
+/// use life_kernel_core::KernelEngine;
+///
+/// struct MyHarness;
+///
+/// #[async_trait]
+/// impl ConformanceHarness for MyHarness {
+///     async fn build_engine(
+///         &self,
+///     ) -> (KernelEngine, Arc<dyn CapturingEventStore>) {
+///         // Construct KernelEngine + CapturingEventStore here.
+///         unimplemented!("wire up your backend + gates + store")
+///     }
+/// }
+///
+/// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+/// let harness = MyHarness;
+/// run_all_conformance_tests(&harness).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub async fn run_all_conformance_tests(
     harness: &dyn ConformanceHarness,
 ) -> Result<(), ConformanceError> {

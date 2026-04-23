@@ -11,9 +11,9 @@
 //!
 //! ## Resolution semantics
 //!
-//! * [`BackendSelector::Explicit`](aios_protocol::hypervisor::BackendSelector::Explicit)
+//! * [`aios_protocol::hypervisor::BackendSelector::Explicit`]
 //!   — look up by name; miss returns [`RegistryError::BackendNotFound`].
-//! * [`BackendSelector::Auto`](aios_protocol::hypervisor::BackendSelector::Auto)
+//! * [`aios_protocol::hypervisor::BackendSelector::Auto`]
 //!   — return the first registered backend whose
 //!   [`capabilities`](aios_protocol::hypervisor::HypervisorBackend::capabilities)
 //!   set is non-empty; empty registry or all-empty-capabilities surface
@@ -61,7 +61,7 @@ pub enum RegistryError {
 /// [`HypervisorBackend`] implementations.
 ///
 /// Cheap to clone — the internal state sits behind an
-/// [`Arc`][std::sync::Arc] so clones share the same registration table.
+/// [`Arc`] so clones share the same registration table.
 #[derive(Clone, Default)]
 pub struct BackendRegistry {
     inner: Arc<RwLock<State>>,

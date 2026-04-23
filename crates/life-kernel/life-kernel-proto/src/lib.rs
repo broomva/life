@@ -1,9 +1,10 @@
 //! Wire contract for the lifed kernel daemon.
 //!
 //! The [`pb`] module holds the prost-generated message types and the
-//! tonic-generated `KernelService` server/client stubs. The [`convert`]
-//! module bridges those generated types to the canonical
-//! `aios_protocol` types consumed elsewhere in the workspace.
+//! tonic-generated `KernelService` server/client stubs. A private
+//! `convert` module bridges those generated types to the canonical
+//! `aios_protocol` types consumed elsewhere in the workspace; its
+//! public error type surfaces as [`ConvertError`].
 //!
 //! ## Transport choice (tonic over ttrpc)
 //!
@@ -21,7 +22,8 @@
 /// because it intentionally ignores our workspace-level style lints
 /// (clippy pedantic groups, missing-docs, etc.). Treat everything in
 /// this module as an opaque wire contract — interact with it through
-/// the bridges in [`crate::convert`] rather than reaching in directly.
+/// the private `convert` bridges (surfaced as `impl TryFrom<…>` on the
+/// canonical `aios_protocol` types) rather than reaching in directly.
 #[allow(unused_qualifications, clippy::all, missing_docs)]
 pub mod pb {
     tonic::include_proto!("broomva.life.kernel.v1");

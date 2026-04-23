@@ -1,4 +1,4 @@
-//! MVS gate implementations for [`life-kernel-core`].
+//! MVS gate implementations for `life-kernel-core`.
 //!
 //! Phase 1 ships three permissive-by-default gates that wire the kernel
 //! engine end-to-end without enforcing anything substantive:
@@ -16,6 +16,7 @@
 //! Phase 4 / Phase 6 work.
 
 #![deny(unsafe_code)]
+#![warn(missing_docs)]
 
 #[cfg(feature = "gate-budget-noop")]
 pub mod budget;

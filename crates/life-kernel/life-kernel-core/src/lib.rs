@@ -40,6 +40,7 @@
 //!   a `KernelPort` implementation.
 
 #![deny(unsafe_code)]
+#![warn(missing_docs)]
 
 pub mod backend_registry;
 pub mod dispatch;

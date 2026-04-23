@@ -22,7 +22,7 @@ use async_trait::async_trait;
 ///
 /// [`record_egress`](NetworkIsolationPort::record_egress) accumulates
 /// the `bytes` argument into an internal
-/// [`AtomicU64`][std::sync::atomic::AtomicU64] so conformance suites can
+/// [`AtomicU64`] so conformance suites can
 /// call [`egress_bytes_total`](NoOpNetworkIsolation::egress_bytes_total)
 /// to assert that the engine wired the recording call correctly.
 #[derive(Debug, Default)]

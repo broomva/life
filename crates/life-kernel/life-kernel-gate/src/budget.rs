@@ -19,6 +19,19 @@ use async_trait::async_trait;
 /// dispatches.
 ///
 /// Intended as the MVS default. Real budget enforcement is Phase 4.
+///
+/// # Example
+///
+/// ```
+/// use std::sync::Arc;
+/// use aios_protocol::budget::BudgetGatePort;
+/// use life_kernel_gate::NoOpBudgetGate;
+///
+/// // Share the same permissive gate across every KernelEngine wiring
+/// // slot (policy, budget, fork-λ) until the real gates ship.
+/// let gate: Arc<dyn BudgetGatePort> = Arc::new(NoOpBudgetGate::default());
+/// # let _ = gate;
+/// ```
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoOpBudgetGate;
 
