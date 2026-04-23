@@ -6973,6 +6973,7 @@ dependencies = [
 [[package]]
 name = "prosopon-compositor-glass"
 version = "0.2.0"
+source = "git+https://github.com/broomva/prosopon.git?tag=v0.2.0-alpha.2#e669d2f794ddef49a603178d05827efdfafc25a9"
 dependencies = [
  "anyhow",
  "clap",
@@ -6992,6 +6993,7 @@ dependencies = [
 [[package]]
 name = "prosopon-core"
 version = "0.1.0"
+source = "git+https://github.com/broomva/prosopon.git?tag=v0.2.0-alpha.2#e669d2f794ddef49a603178d05827efdfafc25a9"
 dependencies = [
  "chrono",
  "indexmap 2.13.1",
@@ -7006,6 +7008,7 @@ dependencies = [
 [[package]]
 name = "prosopon-daemon"
 version = "0.2.0"
+source = "git+https://github.com/broomva/prosopon.git?tag=v0.2.0-alpha.2#e669d2f794ddef49a603178d05827efdfafc25a9"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -7030,6 +7033,7 @@ dependencies = [
 [[package]]
 name = "prosopon-protocol"
 version = "0.1.0"
+source = "git+https://github.com/broomva/prosopon.git?tag=v0.2.0-alpha.2#e669d2f794ddef49a603178d05827efdfafc25a9"
 dependencies = [
  "chrono",
  "prosopon-core",
@@ -7042,6 +7046,7 @@ dependencies = [
 [[package]]
 name = "prosopon-runtime"
 version = "0.1.0"
+source = "git+https://github.com/broomva/prosopon.git?tag=v0.2.0-alpha.2#e669d2f794ddef49a603178d05827efdfafc25a9"
 dependencies = [
  "chrono",
  "futures",
@@ -7060,6 +7065,7 @@ dependencies = [
 [[package]]
 name = "prosopon-sdk"
 version = "0.1.0"
+source = "git+https://github.com/broomva/prosopon.git?tag=v0.2.0-alpha.2#e669d2f794ddef49a603178d05827efdfafc25a9"
 dependencies = [
  "chrono",
  "prosopon-core",
