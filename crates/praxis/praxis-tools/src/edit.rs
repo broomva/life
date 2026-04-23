@@ -261,6 +261,7 @@ impl Tool for EditFileTool {
             output: json!({ "success": true, "content": hashed_content, "path": path }),
             content: None,
             is_error: false,
+            usage: None,
         })
     }
 }

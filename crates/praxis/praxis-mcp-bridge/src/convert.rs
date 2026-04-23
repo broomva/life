@@ -188,6 +188,7 @@ mod tests {
                 text: "hello".into(),
             }]),
             is_error: false,
+            usage: None,
         };
 
         let mcp = tool_result_to_call_result(&result);
@@ -213,6 +214,7 @@ mod tests {
             output: json!("plain text output"),
             content: None,
             is_error: false,
+            usage: None,
         };
 
         let mcp = tool_result_to_call_result(&result);

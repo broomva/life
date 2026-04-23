@@ -50,6 +50,7 @@ fn call_tool(
         run_id: "test-run".to_string(),
         session_id: "test-session".to_string(),
         iteration: 0,
+        ..Default::default()
     };
 
     let registry_tool = server.registry().get(tool_name).unwrap();
