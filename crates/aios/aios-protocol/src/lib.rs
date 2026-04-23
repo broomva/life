@@ -20,14 +20,18 @@
 //! - [`payment`] — PaymentPort for agent financial operations (x402, MPP)
 //! - [`ports`] — Runtime boundary ports (event store, provider, tools, policy, approvals, memory)
 //! - [`rcs`] — Recursive Controlled Systems traits (Level, RecursiveControlledSystem, StabilityBudget)
-//! - [`error`] — KernelError, KernelResult
+//! - [`error`] — KernelError, KernelResult (legacy kernel-tier error; see [`kernel`] for the
+//!   richer replacement landing alongside the hypervisor substrate)
 //! - [`budget`] — ResourceBudget, ResourceUsage, UsageConfidence (kernel-tier metering)
+//! - [`kernel`] — WalletAttribution, ChainId (attribution types; richer context + error land
+//!   with the hypervisor substrate)
 
 pub mod budget;
 pub mod error;
 pub mod event;
 pub mod identity;
 pub mod ids;
+pub mod kernel;
 pub mod memory;
 pub mod mode;
 pub mod payment;
@@ -42,6 +46,11 @@ pub mod tool;
 // Re-export the most commonly used types at the crate root.
 pub use budget::{ResourceBudget, ResourceUsage, UsageConfidence};
 pub use error::{KernelError, KernelResult};
+// Note: richer kernel-tier `kernel::KernelError` / `kernel::KernelResult` are NOT
+// re-exported at the crate root to avoid shadowing the legacy `error::KernelError`
+// above; downstream crates should use `aios_protocol::kernel::KernelError` until the
+// migration sweep in BRO-856.
+pub use kernel::{ChainId, WalletAttribution};
 pub use event::{
     ActorType, ApprovalDecision, EventActor, EventEnvelope, EventKind, EventRecord, EventSchema,
     LoopPhase, PolicyDecisionKind, RiskLevel, SnapshotType, SpanStatus, SteeringMode, TokenUsage,
