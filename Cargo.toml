@@ -22,6 +22,7 @@ members = [
     "crates/arcan/arcan-lago",
     "crates/arcan/arcan-opsis",
     "crates/arcan/arcan-praxis",
+    "crates/arcan/arcan-prosopon",
     "crates/arcan/arcan-provider",
     "crates/arcan/arcan-provider-bubblewrap",
     "crates/arcan/arcan-provider-local",
