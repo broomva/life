@@ -52,12 +52,12 @@ use crate::event_emitter::EventEmitter;
 /// an owned value or any type that implements the trait. The engine
 /// wires one wrapper per backend registration.
 #[derive(Clone)]
-pub struct MeteringWrapper<B: HypervisorBackend> {
+pub struct MeteringWrapper<B: HypervisorBackend + ?Sized> {
     inner: Arc<B>,
     emitter: Arc<EventEmitter>,
 }
 
-impl<B: HypervisorBackend> MeteringWrapper<B> {
+impl<B: HypervisorBackend + ?Sized> MeteringWrapper<B> {
     /// Wrap `inner` so that every dispatch emits the canonical event
     /// trio through `emitter`.
     pub fn new(inner: Arc<B>, emitter: Arc<EventEmitter>) -> Self {

@@ -5331,6 +5331,7 @@ dependencies = [
  "arcan-sandbox",
  "async-trait",
  "chrono",
+ "life-kernel-gate",
  "proptest",
  "serde",
  "serde_json",

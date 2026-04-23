@@ -165,6 +165,8 @@ lago-journal = { path = "crates/lago/lago-journal", version = "0.3.0" }
 lago-lance = { path = "crates/lago/lago-lance", version = "0.3.0" }
 lago-policy = { path = "crates/lago/lago-policy", version = "0.3.0" }
 lago-store = { path = "crates/lago/lago-store", version = "0.3.0" }
+life-kernel-core = { path = "crates/life-kernel/life-kernel-core", version = "0.3.0" }
+life-kernel-gate = { path = "crates/life-kernel/life-kernel-gate", version = "0.3.0" }
 life-vigil = { path = "crates/vigil/life-vigil", version = "0.3.0" }
 nous-api = { path = "crates/nous/nous-api", version = "0.3.0" }
 nous-core = { path = "crates/nous/nous-core", version = "0.3.0" }

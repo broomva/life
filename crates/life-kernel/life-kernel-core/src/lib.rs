@@ -49,6 +49,7 @@ pub mod gate_chain;
 pub mod metering;
 
 pub use backend_registry::{BackendRegistry, RegistryError};
+pub use engine::{KernelEngine, KernelEngineBuilder, KernelEngineError};
 pub use event_emitter::{EventEmitter, EventEmitterBuilder};
 pub use gate_chain::{GateChain, GateChainBuildError, GateChainBuilder, GateDecision};
 pub use metering::MeteringWrapper;
