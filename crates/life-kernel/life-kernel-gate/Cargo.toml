@@ -1,0 +1,31 @@
+[package]
+name = "life-kernel-gate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "MVS gate implementations for life-kernel — NoOp budget, NoOp network, static policy"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["gate-budget-noop", "gate-net-noop", "gate-policy-static"]
+gate-budget-noop = []
+gate-net-noop = []
+gate-policy-static = []
+
+[dependencies]
+aios-protocol.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

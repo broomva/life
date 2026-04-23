@@ -105,8 +105,11 @@ members = [
     "crates/life",
     # Paths — shared path resolution
     "crates/life-paths",
-    # life-kernel — kernel daemon (Phase 0 scaffold only; see spec 2026-04-23-lifed-kernel-daemon-design.md)
+    # life-kernel — kernel daemon (Phase 1 in progress; see spec 2026-04-23-lifed-kernel-daemon-design.md)
     "crates/life-kernel/life-kernel-conformance",
+    "crates/life-kernel/life-kernel-core",
+    "crates/life-kernel/life-kernel-gate",
+    "crates/life-kernel/life-kernel-proto",
     # Opsis — world state engine
     "crates/opsis/opsis-core",
     "crates/opsis/opsis-engine",
@@ -163,6 +166,8 @@ lago-journal = { path = "crates/lago/lago-journal", version = "0.3.0" }
 lago-lance = { path = "crates/lago/lago-lance", version = "0.3.0" }
 lago-policy = { path = "crates/lago/lago-policy", version = "0.3.0" }
 lago-store = { path = "crates/lago/lago-store", version = "0.3.0" }
+life-kernel-core = { path = "crates/life-kernel/life-kernel-core", version = "0.3.0" }
+life-kernel-gate = { path = "crates/life-kernel/life-kernel-gate", version = "0.3.0" }
 life-vigil = { path = "crates/vigil/life-vigil", version = "0.3.0" }
 nous-api = { path = "crates/nous/nous-api", version = "0.3.0" }
 nous-core = { path = "crates/nous/nous-core", version = "0.3.0" }
@@ -231,6 +236,7 @@ opentelemetry_sdk = { version = "0.29", features = ["trace", "metrics"] }
 parking_lot = "0.12"
 parquet = { version = "53", features = ["async"] }
 portable-pty = "0.8"
+proptest = "1.6"
 prost = "0.14"
 prost-types = "0.14"
 rand = "0.8"

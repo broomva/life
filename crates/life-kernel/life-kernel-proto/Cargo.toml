@@ -1,0 +1,33 @@
+[package]
+name = "life-kernel-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Wire contract for the lifed kernel daemon — generated Rust stubs for KernelPort"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["client"]
+server = []
+client = []
+
+[dependencies]
+aios-protocol.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+prost.workspace = true
+prost-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "rt"] }
+tonic.workspace = true
+tonic-prost.workspace = true
+
+[build-dependencies]
+tonic-prost-build.workspace = true
+
+[lints]
+workspace = true
