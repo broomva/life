@@ -1,0 +1,26 @@
+[package]
+name = "life-kernel-proto-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.93"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# NOTE: fuzz is its own workspace (see `[workspace]` below), so we cannot use
+# `prost.workspace = true`. Pin the same version as the root workspace.
+prost = "0.14"
+life-kernel-proto = { path = ".." }
+
+[[bin]]
+name = "parse_vm_spec"
+path = "fuzz_targets/parse_vm_spec.rs"
+test = false
+doc = false
+bench = false
+
+# IMPORTANT: fuzz is not part of the workspace — exclude it.
+[workspace]
