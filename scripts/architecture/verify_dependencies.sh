@@ -127,3 +127,9 @@ if failures:
 
 print("architecture dependency audit passed")
 PY
+
+# life-kernel rules (added 2026-04-23 for lifed Phase 0).
+# Monorepo-aware: runs `cargo tree` inside the active workspace root.
+if [ -x "$(dirname "$0")/../verify_dependencies_lifed.sh" ]; then
+    "$(dirname "$0")/../verify_dependencies_lifed.sh"
+fi
