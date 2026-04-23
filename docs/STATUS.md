@@ -190,6 +190,31 @@ The baseline unification is active and enforced in production paths:
   and the `arcan` binary are expected and will be cleaned up in a
   follow-up Phase; the blanket impl keeps all call sites working
 
+### lifed Phase 1 — Kernel Proto + Core Library (2026-04-23 → 2026-04-23)
+
+- ✅ `life-kernel-proto`: ttrpc/tonic wire contract for `KernelService`
+  (7 RPCs), generated via prost + tonic-prost-build, bridged to
+  `aios-protocol` types (10 round-trip tests)
+- ✅ `life-kernel-core`: `KernelEngine` implementing `KernelPort` via
+  `BackendRegistry` + `GateChain` + `MeteringWrapper`; pure deterministic
+  fold over `EventStorePort` (36 tests including replay determinism +
+  proptest state machine)
+- ✅ `life-kernel-gate`: `NoOpBudgetGate`, `NoOpNetworkIsolation`,
+  `StaticPolicyGate` wrapping `aios-policy::PolicyGatePort` (15 tests)
+- ✅ `life-kernel-conformance`: lifecycle + errors + metering + events
+  batteries, 15 scenarios total, runs against `arcan-provider-local`
+  end-to-end
+- ✅ proptest state machine on `GateChain` (3 invariants × 256+ cases each)
+- ✅ `cargo fuzz` target on `VmSpec` decoder (manual-run instructions
+  documented)
+- ✅ Every public API has rustdoc + 5 hot-path doctests
+- ✅ Event-replay determinism proven via dedicated integration test
+- ✅ `scripts/verify_dependencies_lifed.sh` extended to cover all four
+  new crates against the forbidden-dep list
+- Tests: 3210 → 3313 passing (+103 new; 0 regressions)
+- 20 commits; 10 Linear tickets (BRO-857, BRO-869..877) under the
+  "Phase 1 — Kernel Proto + Core Library" milestone
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |

@@ -28,7 +28,7 @@ check_no_dep() {
 }
 
 echo "=== life-kernel dependency rules ==="
-for crate in life-kernel-conformance; do
+for crate in life-kernel-proto life-kernel-core life-kernel-gate life-kernel-conformance; do
     check_no_dep "$crate" "arcand"
     check_no_dep "$crate" "arcan-core"
     check_no_dep "$crate" "arcan-harness"
