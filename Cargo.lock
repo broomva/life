@@ -87,6 +87,7 @@ name = "aios-protocol"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "bitflags 2.11.0",
  "chrono",
  "futures-util",
  "indexmap 2.13.1",
@@ -579,6 +580,7 @@ dependencies = [
 name = "arcan-provider-bubblewrap"
 version = "0.3.0"
 dependencies = [
+ "aios-protocol",
  "anyhow",
  "arcan-sandbox",
  "async-trait",
@@ -596,6 +598,7 @@ dependencies = [
 name = "arcan-provider-local"
 version = "0.3.0"
 dependencies = [
+ "aios-protocol",
  "anyhow",
  "arcan-sandbox",
  "async-trait",
@@ -613,6 +616,7 @@ dependencies = [
 name = "arcan-provider-vercel"
 version = "0.3.0"
 dependencies = [
+ "aios-protocol",
  "anyhow",
  "arcan-sandbox",
  "async-trait",
@@ -5293,6 +5297,14 @@ dependencies = [
  "haima-core",
  "haima-wallet",
  "haima-x402",
+]
+
+[[package]]
+name = "life-kernel-conformance"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "async-trait",
 ]
 
 [[package]]

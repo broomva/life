@@ -109,6 +109,7 @@ impl Tool for BashTool {
             }),
             content: None,
             is_error: false,
+            usage: None,
         })
     }
 }
@@ -139,6 +140,7 @@ mod tests {
             run_id: "test-run".into(),
             session_id: "test".into(),
             iteration: 0,
+            ..Default::default()
         }
     }
 

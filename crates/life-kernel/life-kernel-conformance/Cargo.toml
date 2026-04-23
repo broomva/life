@@ -1,0 +1,16 @@
+[package]
+name = "life-kernel-conformance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Conformance test harness for HypervisorBackend implementations (Phase 0 scaffold)"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+aios-protocol.workspace = true
+async-trait.workspace = true
+
+[lints]
+workspace = true

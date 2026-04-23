@@ -144,6 +144,7 @@ impl ServerHandler for PraxisMcpServer {
                     run_id: "mcp".to_string(),
                     session_id: "mcp-session".to_string(),
                     iteration: 0,
+                    ..Default::default()
                 };
 
                 match tool.execute(&call, &ctx) {
@@ -324,6 +325,7 @@ mod tests {
             run_id: "test".into(),
             session_id: "test".into(),
             iteration: 0,
+            ..Default::default()
         };
         let result = tool.execute(&call, &ctx).unwrap();
         assert!(!result.is_error);
@@ -343,6 +345,7 @@ mod tests {
             run_id: "test".into(),
             session_id: "test".into(),
             iteration: 0,
+            ..Default::default()
         };
         let err = tool.execute(&call, &ctx).unwrap_err();
         assert!(err.to_string().contains("intentional failure"));

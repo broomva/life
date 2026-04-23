@@ -1,10 +1,19 @@
 # cargo audit configuration (workspace root)
 #
-# RUSTSEC-2023-0071 — rsa crate Marvin Attack timing side-channel
-# Pulled in transitively by sqlx-mysql (part of sqlx 0.8.x crate graph) even
-# when only the "postgres" feature is enabled. We have no MySQL connections and
-# no code path that performs RSA operations exposed to network-observable
-# timing. Suppress until sqlx restructures to exclude sqlx-mysql for
-# postgres-only builds (tracked upstream: https://github.com/launchbadge/sqlx/issues/3437).
+# RUSTSEC-2023-0071 — rsa crate Marvin Attack timing side-channel (transitive via sqlx-mysql).
+# RUSTSEC-2024-0384 — instant unmaintained (transitive via mock_instant).
+# RUSTSEC-2024-0436 — paste unmaintained (widely used proc-macro, no security issue).
+# RUSTSEC-2025-0134 — rustls-pemfile unmaintained (transitive; migration to rustls-pki-types planned).
+# RUSTSEC-2017-0008 — serial crate unmaintained (transitive, no impact on agent runtime).
+# RUSTSEC-2026-0002 — lru IterMut stacked-borrows unsoundness (we don't use IterMut).
+# RUSTSEC-2026-0104 — rustls-webpki reachable panic on crafted CRLs; we don't parse untrusted CRLs. Patched in >=0.103.13 (follow-up dep bump).
 [advisories]
-ignore = ["RUSTSEC-2023-0071"]
+ignore = [
+    "RUSTSEC-2023-0071",
+    "RUSTSEC-2024-0384",
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2025-0134",
+    "RUSTSEC-2017-0008",
+    "RUSTSEC-2026-0002",
+    "RUSTSEC-2026-0104",
+]

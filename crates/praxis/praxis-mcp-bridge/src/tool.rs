@@ -120,6 +120,7 @@ impl Tool for McpTool {
                 Some(content)
             },
             is_error,
+            usage: None,
         })
     }
 }

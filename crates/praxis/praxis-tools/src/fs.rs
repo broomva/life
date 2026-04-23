@@ -94,6 +94,7 @@ impl Tool for ReadFileTool {
             output: json!({ "content": hashed_content, "path": path }),
             content: None,
             is_error: false,
+            usage: None,
         })
     }
 }
@@ -183,6 +184,7 @@ impl Tool for WriteFileTool {
             output: json!({ "success": true, "path": path }),
             content: None,
             is_error: false,
+            usage: None,
         })
     }
 }
@@ -271,6 +273,7 @@ impl Tool for ListDirTool {
             output: json!({ "entries": entries, "path": path }),
             content: None,
             is_error: false,
+            usage: None,
         })
     }
 }
@@ -370,6 +373,7 @@ impl Tool for GlobTool {
             output: json!({ "matches": matches, "count": count }),
             content: None,
             is_error: false,
+            usage: None,
         })
     }
 }
@@ -531,6 +535,7 @@ impl Tool for GrepTool {
             output: json!({ "matches": matches, "count": count }),
             content: None,
             is_error: false,
+            usage: None,
         })
     }
 }
@@ -548,6 +553,7 @@ mod tests {
             run_id: "test-run".into(),
             session_id: "test".into(),
             iteration: 0,
+            ..Default::default()
         }
     }
 

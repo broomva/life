@@ -27,7 +27,8 @@ Life is a contract-first architecture for building artificial life from computat
 | Networking | Social/swarm behavior | Spaces | ACTIVE |
 | Contract / DNA | Genome | aiOS | ACTIVE |
 | Homeostasis | Autonomic nervous system | Autonomic | ACTIVE |
-| Observability | Sensory feedback / proprioception | Vigil | ACTIVE |
+| Observability | Proprioception (internal sensing) | Vigil | ACTIVE |
+| Perception | Exteroception (external sensing) | Sensorium | DESIGN (2026-04-19) |
 | Temporality | Circadian rhythm | Chronos | PLANNED |
 | Security | Immune system | Aegis | PLANNED |
 | World Model | Prefrontal cortex | Nous | PLANNED |
@@ -45,6 +46,7 @@ Life is a contract-first architecture for building artificial life from computat
 
 ### Planned Projects
 
+- **Sensorium**: perception substrate implementing `Pneuma<B = ExternalToL0>` — typed pub/sub for arbitrary external input (consumer media, industrial protocols, wearables, feeds). Design approved 2026-04-19; foundation plan landing against BRO-732..BRO-748. See `docs/specs/sensorium-architecture.md`.
 - **Chronos**: temporal scheduler and time-awareness engine
 - **Aegis**: OS-level sandbox, capability attestation, secret management
 - **Nous**: world model and causal reasoning engine

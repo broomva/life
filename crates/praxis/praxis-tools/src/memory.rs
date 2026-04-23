@@ -81,6 +81,7 @@ impl Tool for ReadMemoryTool {
                 output: json!({ "content": content, "exists": true, "path": file_path }),
                 content: None,
                 is_error: false,
+                usage: None,
             })
         } else {
             debug!(exists = false, "memory key not found");
@@ -91,6 +92,7 @@ impl Tool for ReadMemoryTool {
                 output: json!({ "content": null, "exists": false, "path": file_path }),
                 content: None,
                 is_error: false,
+                usage: None,
             })
         }
     }
@@ -181,6 +183,7 @@ impl Tool for WriteMemoryTool {
             output: json!({ "success": true, "path": file_path }),
             content: None,
             is_error: false,
+            usage: None,
         })
     }
 }
@@ -218,6 +221,7 @@ mod tests {
             run_id: "test-run".into(),
             session_id: "test".into(),
             iteration: 0,
+            ..Default::default()
         }
     }
 
