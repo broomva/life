@@ -1,11 +1,17 @@
 //! Resource budgets and usage accounting for kernel-tier metering.
 //!
-//! This module holds the type surface consumed by the (future) `BudgetGatePort`
-//! trait (lands in BRO-849) and emitted as payload on `kernel.dispatch.completed`
-//! events. Types are additive-only: consumers that do not care about budgets
-//! treat every field as optional and ignore any variant they do not recognize.
+//! This module holds the type surface plus the [`BudgetGatePort`] trait
+//! consulted before every [`crate::ports::KernelPort`] dispatch or fork, and
+//! emitted as payload on `kernel.dispatch.completed` events. Types are
+//! additive-only: consumers that do not care about budgets treat every field
+//! as optional and ignore any variant they do not recognize.
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+
+use crate::hypervisor::{ForkSpec, VmHandle};
+use crate::kernel::KernelContext;
+use crate::ports::ApprovalTicket;
 
 /// Resource limits that can constrain a single dispatch or fork.
 ///
@@ -53,6 +59,74 @@ pub enum UsageConfidence {
     Estimated,
     /// Backend did not report this field.
     Unknown,
+}
+
+// ── Gate ─────────────────────────────────────────────────────────────────────
+
+/// Decision returned by a [`BudgetGatePort`] check.
+///
+/// Serialized with `#[serde(tag = "decision", rename_all = "snake_case")]` so
+/// the wire form is a tagged object — e.g. `{"decision":"allow"}`,
+/// `{"decision":"deny","reason":"…","gate_id":"…"}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum BudgetDecision {
+    /// Proceed with the dispatch / fork. No budget action needed.
+    Allow,
+    /// Reject the dispatch / fork outright. `gate_id` identifies which
+    /// concrete gate implementation raised the denial (e.g.
+    /// `"session-budget"`, `"rcs-lambda"`), and `reason` is a human-readable
+    /// explanation suitable for inclusion in `kernel.gate.*` audit events.
+    Deny {
+        /// Human-readable reason for the denial.
+        reason: String,
+        /// Stable identifier of the gate that issued the denial.
+        gate_id: String,
+    },
+    /// Defer to a human / governance approver. The enclosed
+    /// [`ApprovalTicket`] is routed through the standard
+    /// [`crate::ports::ApprovalPort`] queue; the caller MUST NOT dispatch
+    /// until the ticket resolves positively.
+    RequireApproval {
+        /// Ticket already enqueued on the approval queue.
+        ticket: ApprovalTicket,
+    },
+}
+
+/// Cost- and budget-aware gate consulted before every
+/// [`crate::ports::KernelPort`] dispatch and fork.
+///
+/// The gate is advisory from the caller's perspective but authoritative from
+/// the kernel's: `lifed` will translate a [`BudgetDecision::Deny`] into
+/// [`crate::kernel::KernelError::GateDenied`] with
+/// [`crate::kernel::GateKind::Budget`], and
+/// [`BudgetDecision::RequireApproval`] into an approval-pending stall.
+///
+/// Implementations are expected to be cheap and pure (no I/O on the hot
+/// path). MVS default impl is `NoOpBudgetGate` (Phase 1, permits everything).
+/// `SessionBudgetGate` lands in Phase 4. `RcsLambdaBudgetGate` is Phase 6.
+#[async_trait]
+pub trait BudgetGatePort: Send + Sync {
+    /// Check whether a dispatch should proceed under `ctx` with the given
+    /// `cost_hint`. Called on the hot path of every
+    /// [`crate::ports::KernelPort::dispatch`] call.
+    async fn check_dispatch(
+        &self,
+        ctx: &KernelContext,
+        cost_hint: &ResourceBudget,
+    ) -> BudgetDecision;
+
+    /// Check whether forking `parent` with `spec` should proceed under `ctx`.
+    /// Called on every [`crate::ports::KernelPort::fork`] call; fork gating
+    /// is typically stricter than dispatch gating because forks can amplify
+    /// cost exponentially.
+    async fn check_fork(
+        &self,
+        parent: &VmHandle,
+        spec: &ForkSpec,
+        ctx: &KernelContext,
+    ) -> BudgetDecision;
 }
 
 #[cfg(test)]
@@ -117,4 +191,75 @@ mod tests {
         let back: UsageConfidence = serde_json::from_str("\"unknown\"").unwrap();
         assert_eq!(back, UsageConfidence::Unknown);
     }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    #[test]
+    fn budget_decision_allow_roundtrip() {
+        let d = BudgetDecision::Allow;
+        let json = serde_json::to_string(&d).unwrap();
+        let back: BudgetDecision = serde_json::from_str(&json).unwrap();
+        assert_eq!(d, back);
+    }
+
+    #[test]
+    fn budget_decision_deny_roundtrip() {
+        let d = BudgetDecision::Deny {
+            reason: "over budget".into(),
+            gate_id: "session-budget".into(),
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        let back: BudgetDecision = serde_json::from_str(&json).unwrap();
+        assert_eq!(d, back);
+    }
+
+    #[test]
+    fn budget_decision_serde_tag_is_snake_case() {
+        // The tag field is literally named "decision" and variant names are
+        // snake-cased. Assert both on the serialized wire form to lock the
+        // contract down; downstream event consumers depend on it.
+        let allow = serde_json::to_string(&BudgetDecision::Allow).unwrap();
+        assert_eq!(allow, r#"{"decision":"allow"}"#);
+
+        let deny = serde_json::to_string(&BudgetDecision::Deny {
+            reason: "r".into(),
+            gate_id: "g".into(),
+        })
+        .unwrap();
+        assert!(deny.starts_with(r#"{"decision":"deny","#));
+    }
+
+    #[test]
+    fn budget_decision_require_approval_roundtrip() {
+        // Verifies that BudgetDecision::RequireApproval serializes cleanly —
+        // requires ApprovalTicket to already derive Serialize + Deserialize,
+        // which it does (see ports.rs).
+        use crate::ids::{ApprovalId, SessionId};
+        use crate::policy::Capability;
+        use chrono::{DateTime, Utc};
+
+        // Fixed timestamp so the assertion is deterministic.
+        let created_at: DateTime<Utc> = "2026-04-23T00:00:00Z".parse().unwrap();
+        let ticket = ApprovalTicket {
+            approval_id: ApprovalId::from_string("app-1"),
+            session_id: SessionId::from_string("sess-1"),
+            call_id: "call-1".into(),
+            tool_name: "shell".into(),
+            capability: Capability::new("exec:cmd:echo"),
+            reason: "high-risk".into(),
+            created_at,
+        };
+        let d = BudgetDecision::RequireApproval { ticket };
+        let json = serde_json::to_string(&d).unwrap();
+        let back: BudgetDecision = serde_json::from_str(&json).unwrap();
+        assert_eq!(d, back);
+    }
+
+    // Compile-time assertion that `BudgetGatePort` is dyn-compatible — the
+    // whole reason we use `#[async_trait]` instead of native async fn.
+    #[allow(dead_code)]
+    fn _assert_dyn(_: &dyn BudgetGatePort) {}
 }

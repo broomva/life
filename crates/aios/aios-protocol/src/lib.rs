@@ -22,7 +22,8 @@
 //! - [`rcs`] — Recursive Controlled Systems traits (Level, RecursiveControlledSystem, StabilityBudget)
 //! - [`error`] — KernelError, KernelResult (legacy kernel-tier error; see [`kernel`] for the
 //!   richer replacement landing alongside the hypervisor substrate)
-//! - [`budget`] — ResourceBudget, ResourceUsage, UsageConfidence (kernel-tier metering)
+//! - [`budget`] — ResourceBudget, ResourceUsage, UsageConfidence, BudgetDecision,
+//!   BudgetGatePort (kernel-tier metering + cost gate trait)
 //! - [`kernel`] — WalletAttribution, ChainId, KernelContext, TraceContext, GateKind, and the
 //!   richer kernel-tier KernelError (reachable as `aios_protocol::kernel::KernelError`)
 //! - [`hypervisor`] — VM substrate types (VmHandle, VmSpec, VmSnapshotHandle, ForkSpec,
@@ -51,7 +52,7 @@ pub mod state;
 pub mod tool;
 
 // Re-export the most commonly used types at the crate root.
-pub use budget::{ResourceBudget, ResourceUsage, UsageConfidence};
+pub use budget::{BudgetDecision, BudgetGatePort, ResourceBudget, ResourceUsage, UsageConfidence};
 pub use error::{KernelError, KernelResult};
 pub use event::{
     ActorType, ApprovalDecision, EventActor, EventEnvelope, EventKind, EventRecord, EventSchema,

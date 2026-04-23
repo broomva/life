@@ -138,7 +138,7 @@ pub struct ApprovalRequest {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApprovalTicket {
     pub approval_id: ApprovalId,
     pub session_id: SessionId,
@@ -219,4 +219,5 @@ pub trait ApprovalPort: Send + Sync {
 // Traits are *defined* in [`crate::hypervisor`]; this block only re-exports so
 // callers can reach `aios_protocol::ports::HypervisorBackend` alongside the
 // other runtime-boundary traits.
+pub use crate::budget::{BudgetDecision, BudgetGatePort};
 pub use crate::hypervisor::{HypervisorBackend, HypervisorFilesystemExt};
