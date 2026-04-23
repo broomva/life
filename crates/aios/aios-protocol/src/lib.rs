@@ -25,10 +25,13 @@
 //! - [`budget`] — ResourceBudget, ResourceUsage, UsageConfidence (kernel-tier metering)
 //! - [`kernel`] — WalletAttribution, ChainId (attribution types; richer context + error land
 //!   with the hypervisor substrate)
+//! - [`hypervisor`] — VM substrate types (VmHandle, VmSpec, VmSnapshotHandle, ForkSpec,
+//!   ExecRequest, …) consumed by the (future) HypervisorBackend trait
 
 pub mod budget;
 pub mod error;
 pub mod event;
+pub mod hypervisor;
 pub mod identity;
 pub mod ids;
 pub mod kernel;
@@ -46,20 +49,25 @@ pub mod tool;
 // Re-export the most commonly used types at the crate root.
 pub use budget::{ResourceBudget, ResourceUsage, UsageConfidence};
 pub use error::{KernelError, KernelResult};
-// Note: richer kernel-tier `kernel::KernelError` / `kernel::KernelResult` are NOT
-// re-exported at the crate root to avoid shadowing the legacy `error::KernelError`
-// above; downstream crates should use `aios_protocol::kernel::KernelError` until the
-// migration sweep in BRO-856.
-pub use kernel::{ChainId, WalletAttribution};
 pub use event::{
     ActorType, ApprovalDecision, EventActor, EventEnvelope, EventKind, EventRecord, EventSchema,
     LoopPhase, PolicyDecisionKind, RiskLevel, SnapshotType, SpanStatus, SteeringMode, TokenUsage,
+};
+pub use hypervisor::{
+    BackendId, BackendSelector, ExecRequest, ExecResult, FileWrite, ForkSpec, Mount, RuntimeHint,
+    VmHandle, VmId, VmInfo, VmResources, VmSnapshotHandle, VmSnapshotId, VmSpec, VmSpecOverrides,
+    VmStatus,
 };
 pub use identity::{AgentIdentityProvider, BasicIdentity};
 pub use ids::{
     AgentId, ApprovalId, BlobHash, BranchId, CheckpointId, EventId, HiveTaskId, MemoryId, RunId,
     SeqNo, SessionId, SnapshotId, ToolRunId,
 };
+// Note: richer kernel-tier `kernel::KernelError` / `kernel::KernelResult` are NOT
+// re-exported at the crate root to avoid shadowing the legacy `error::KernelError`
+// above; downstream crates should use `aios_protocol::kernel::KernelError` until the
+// migration sweep in BRO-856.
+pub use kernel::{ChainId, WalletAttribution};
 pub use memory::{FileProvenance, MemoryScope, Observation, Provenance, SoulProfile};
 pub use mode::{GatingProfile, OperatingMode};
 pub use payment::{
