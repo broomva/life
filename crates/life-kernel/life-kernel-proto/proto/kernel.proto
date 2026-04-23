@@ -1,0 +1,7 @@
+syntax = "proto3";
+package broomva.life.kernel.v1;
+
+// Full KernelService body lands in Commit 2 of BRO-857.
+message Ping {
+    string pong = 1;
+}

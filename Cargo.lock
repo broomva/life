@@ -5308,6 +5308,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "life-kernel-proto"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "async-trait",
+ "chrono",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tonic-prost-build",
+]
+
+[[package]]
 name = "life-lago"
 version = "0.3.0"
 dependencies = [

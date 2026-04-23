@@ -104,8 +104,9 @@ members = [
     "crates/life",
     # Paths — shared path resolution
     "crates/life-paths",
-    # life-kernel — kernel daemon (Phase 0 scaffold only; see spec 2026-04-23-lifed-kernel-daemon-design.md)
+    # life-kernel — kernel daemon (Phase 1 in progress; see spec 2026-04-23-lifed-kernel-daemon-design.md)
     "crates/life-kernel/life-kernel-conformance",
+    "crates/life-kernel/life-kernel-proto",
     # Opsis — world state engine
     "crates/opsis/opsis-core",
     "crates/opsis/opsis-engine",
