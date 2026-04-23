@@ -31,3 +31,6 @@ pub use budget::NoOpBudgetGate;
 
 #[cfg(feature = "gate-net-noop")]
 pub use network::NoOpNetworkIsolation;
+
+#[cfg(feature = "gate-policy-static")]
+pub use policy::StaticPolicyGate;
