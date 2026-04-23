@@ -27,6 +27,8 @@
 //!   richer kernel-tier KernelError (reachable as `aios_protocol::kernel::KernelError`)
 //! - [`hypervisor`] — VM substrate types (VmHandle, VmSpec, VmSnapshotHandle, ForkSpec,
 //!   ExecRequest, …) consumed by the (future) HypervisorBackend trait
+//! - [`network_isolation`] — EgressTarget, EgressProtocol (egress metering surface for the
+//!   future NetworkIsolationPort)
 
 pub mod budget;
 pub mod error;
@@ -37,6 +39,7 @@ pub mod ids;
 pub mod kernel;
 pub mod memory;
 pub mod mode;
+pub mod network_isolation;
 pub mod payment;
 pub mod policy;
 pub mod ports;
@@ -70,6 +73,7 @@ pub use ids::{
 pub use kernel::{ChainId, GateKind, KernelContext, TraceContext, WalletAttribution};
 pub use memory::{FileProvenance, MemoryScope, Observation, Provenance, SoulProfile};
 pub use mode::{GatingProfile, OperatingMode};
+pub use network_isolation::{EgressProtocol, EgressTarget};
 pub use payment::{
     PaymentAuthorizationDecision, PaymentAuthorizationRequest, PaymentPort,
     PaymentSettlementReceipt, WalletBalanceInfo,
