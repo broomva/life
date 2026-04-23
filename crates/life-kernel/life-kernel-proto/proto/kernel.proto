@@ -1,7 +1,192 @@
 syntax = "proto3";
 package broomva.life.kernel.v1;
 
-// Full KernelService body lands in Commit 2 of BRO-857.
-message Ping {
-    string pong = 1;
+import "google/protobuf/timestamp.proto";
+
+// ── Identity ─────────────────────────────────────────────────────────
+
+message VmId { string value = 1; }
+message VmSnapshotId { string value = 1; }
+message BackendId { string value = 1; }
+message SessionId { string value = 1; }
+message AgentId { string value = 1; }
+
+// ── Resources / spec ────────────────────────────────────────────────
+
+message VmResources {
+    uint32 vcpus = 1;
+    uint64 memory_kb = 2;
+    uint64 disk_kb = 3;
+    uint64 timeout_secs = 4;
+}
+
+message Mount {
+    string source = 1;
+    string target = 2;
+    bool read_only = 3;
+}
+
+enum RuntimeHintKind {
+    RUNTIME_HINT_SHELL = 0;
+    RUNTIME_HINT_NODE = 1;
+    RUNTIME_HINT_PYTHON = 2;
+    RUNTIME_HINT_CUSTOM = 3;
+}
+
+message RuntimeHint {
+    RuntimeHintKind kind = 1;
+    // Node/Python version, or custom image reference. Empty for
+    // RUNTIME_HINT_SHELL.
+    string version_or_image = 2;
+}
+
+message BackendSelector {
+    oneof kind {
+        BackendId explicit = 1;
+        Empty auto = 2;
+    }
+}
+
+message VmSpec {
+    BackendSelector backend_selector = 1;
+    VmResources resources = 2;
+    // Opaque — serialized `aios_protocol::sandbox::NetworkPolicy` JSON.
+    bytes network_policy_json = 3;
+    repeated Mount mounts = 4;
+    map<string, string> env = 5;
+    RuntimeHint runtime_hint = 6;
+    map<string, string> labels = 7;
+}
+
+message ForkSpec {
+    VmSnapshotId parent_snapshot = 1;
+    VmResources resources_override = 2;
+    map<string, string> env_override = 3;
+    map<string, string> label_override = 4;
+}
+
+message VmStatus {
+    // starting | running | hibernated | snapshotted | stopping | stopped | failed
+    string state = 1;
+    // Populated when state == "failed".
+    string reason = 2;
+}
+
+message VmHandle {
+    VmId vm_id = 1;
+    BackendId backend = 2;
+    SessionId session_id = 3;
+    AgentId agent_id = 4;
+    VmStatus status = 5;
+    google.protobuf.Timestamp created_at = 6;
+    // Opaque — serialized `aios_protocol::hypervisor::VmHandle.metadata` JSON.
+    bytes metadata_json = 7;
+}
+
+message VmSnapshotHandle {
+    VmSnapshotId snapshot_id = 1;
+    VmId vm_id = 2;
+    string name = 3;
+    google.protobuf.Timestamp created_at = 4;
+    uint64 size_bytes = 5;
+}
+
+message VmInfo {
+    VmId vm_id = 1;
+    BackendId backend = 2;
+    VmStatus status = 3;
+    google.protobuf.Timestamp created_at = 4;
+}
+
+// ── Kernel context ───────────────────────────────────────────────────
+
+message WalletAttribution {
+    string address = 1;
+    string chain_caip2 = 2;
+}
+
+message ResourceBudget {
+    optional uint64 max_cpu_ms = 1;
+    optional uint64 max_mem_kb = 2;
+    optional uint64 max_egress_bytes = 3;
+    optional uint64 max_duration_ms = 4;
+    optional uint64 max_syscalls = 5;
+}
+
+message TraceContext {
+    string traceparent = 1;
+    optional string tracestate = 2;
+}
+
+message KernelContext {
+    SessionId session_id = 1;
+    AgentId agent_id = 2;
+    WalletAttribution wallet = 3;
+    optional ResourceBudget cost_hint = 4;
+    optional TraceContext trace_ctx = 5;
+}
+
+// ── Tool dispatch ────────────────────────────────────────────────────
+
+message ToolCall {
+    string call_id = 1;
+    string tool_name = 2;
+    // Opaque — serialized `aios_protocol::tool::ToolCall.input` JSON.
+    bytes input_json = 3;
+    repeated string requested_capabilities = 4;
+}
+
+message ImagePayload {
+    // Base64-encoded image data.
+    string data = 1;
+    string mime_type = 2;
+}
+
+message ToolContent {
+    oneof content {
+        string text = 1;
+        bytes json_value = 2;
+        ImagePayload image = 3;
+    }
+}
+
+message ResourceUsage {
+    uint64 cpu_ms = 1;
+    uint64 mem_peak_kb = 2;
+    uint64 egress_bytes = 3;
+    uint64 duration_ms = 4;
+    uint64 syscall_count = 5;
+    // "measured" | "estimated" | "unknown"
+    string confidence = 6;
+}
+
+message ToolResult {
+    string call_id = 1;
+    string tool_name = 2;
+    // Opaque — serialized `aios_protocol::tool::ToolResult.output` JSON.
+    bytes output_json = 3;
+    repeated ToolContent content = 4;
+    bool is_error = 5;
+    optional ResourceUsage usage = 6;
+}
+
+// ── Service ──────────────────────────────────────────────────────────
+
+message CreateVmRequest { VmSpec spec = 1; KernelContext ctx = 2; }
+message DispatchRequest { VmHandle vm = 1; ToolCall call = 2; KernelContext ctx = 3; }
+message SnapshotRequest { VmHandle vm = 1; string name = 2; }
+message ForkRequest { VmSnapshotHandle snapshot = 1; ForkSpec spec = 2; KernelContext ctx = 3; }
+message LifecycleRequest { VmHandle vm = 1; }
+message DestroyRequest { VmHandle vm = 1; }
+
+message Empty {}
+
+service KernelService {
+    rpc CreateVm(CreateVmRequest) returns (VmHandle);
+    rpc Dispatch(DispatchRequest) returns (ToolResult);
+    rpc Snapshot(SnapshotRequest) returns (VmSnapshotHandle);
+    rpc Fork(ForkRequest) returns (VmHandle);
+    rpc Hibernate(LifecycleRequest) returns (Empty);
+    rpc Resume(LifecycleRequest) returns (VmHandle);
+    rpc Destroy(DestroyRequest) returns (Empty);
 }
