@@ -5298,6 +5298,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "life-kernel-conformance"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "async-trait",
+]
+
+[[package]]
 name = "life-lago"
 version = "0.3.0"
 dependencies = [
