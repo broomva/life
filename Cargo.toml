@@ -222,6 +222,7 @@ base64 = "0.22"
 bitflags = { version = "2", features = ["serde"] }
 blake3 = "1"
 bs58 = "0.5"
+bytes = "1"
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
