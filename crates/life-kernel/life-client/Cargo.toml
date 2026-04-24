@@ -26,6 +26,7 @@ tokio-stream.workspace = true
 tokio-vsock = { workspace = true, optional = true }
 tonic.workspace = true
 tower = { workspace = true, features = ["util"] }
+hyper-util.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
