@@ -8,10 +8,16 @@ repository.workspace = true
 homepage.workspace = true
 description = "Identity and beliefs facade for the Life Agent OS — re-exports anima-core, anima-identity, and anima-lago"
 
+[features]
+default = ["runtime"]
+runtime = []
+schema = ["dep:aios-protocol"]
+
 [dependencies]
 anima-core = { path = "../anima-core", version = "0.3.0" }
 anima-identity = { path = "../anima-identity", version = "0.3.0" }
 anima-lago = { path = "../anima-lago", version = "0.3.0" }
+aios-protocol = { workspace = true, optional = true }
 
 [lints]
 workspace = true
