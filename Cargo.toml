@@ -110,6 +110,7 @@ members = [
     "crates/life-kernel/life-kernel-core",
     "crates/life-kernel/life-kernel-gate",
     "crates/life-kernel/life-kernel-proto",
+    "crates/life-kernel/lifed",
     # Opsis — world state engine
     "crates/opsis/opsis-core",
     "crates/opsis/opsis-engine",
@@ -166,8 +167,10 @@ lago-journal = { path = "crates/lago/lago-journal", version = "0.3.0" }
 lago-lance = { path = "crates/lago/lago-lance", version = "0.3.0" }
 lago-policy = { path = "crates/lago/lago-policy", version = "0.3.0" }
 lago-store = { path = "crates/lago/lago-store", version = "0.3.0" }
+life-kernel-conformance = { path = "crates/life-kernel/life-kernel-conformance", version = "0.3.0" }
 life-kernel-core = { path = "crates/life-kernel/life-kernel-core", version = "0.3.0" }
 life-kernel-gate = { path = "crates/life-kernel/life-kernel-gate", version = "0.3.0" }
+life-kernel-proto = { path = "crates/life-kernel/life-kernel-proto", version = "0.3.0" }
 life-vigil = { path = "crates/vigil/life-vigil", version = "0.3.0" }
 nous-api = { path = "crates/nous/nous-api", version = "0.3.0" }
 nous-core = { path = "crates/nous/nous-core", version = "0.3.0" }
@@ -210,7 +213,7 @@ blake3 = "1"
 bs58 = "0.5"
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 dashmap = "6"
 datafusion = "43"
 dirs = "6"
