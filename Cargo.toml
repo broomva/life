@@ -111,6 +111,7 @@ members = [
     "crates/life-kernel/life-kernel-gate",
     "crates/life-kernel/life-kernel-proto",
     "crates/life-kernel/lifed",
+    "crates/life-kernel/lifectl",
     # Opsis — world state engine
     "crates/opsis/opsis-core",
     "crates/opsis/opsis-engine",

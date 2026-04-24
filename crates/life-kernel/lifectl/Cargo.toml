@@ -1,0 +1,32 @@
+[package]
+name = "lifectl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Operator CLI for the lifed kernel daemon"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "lifectl"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap = { workspace = true, features = ["derive", "env"] }
+life-kernel-proto = { workspace = true, features = ["client"] }
+prost.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-stream.workspace = true
+tonic.workspace = true
+tower.workspace = true
+tracing.workspace = true
+hyper-util = { version = "0.1", features = ["tokio"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
