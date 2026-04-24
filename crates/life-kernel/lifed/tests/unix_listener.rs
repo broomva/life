@@ -87,10 +87,9 @@ async fn listener_accepts_connection_and_shuts_down() {
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     let server_cfg = cfg.clone();
-    let server_task =
-        tokio::spawn(
-            async move { lifed::listener::serve(&server_cfg, stub_engine, shutdown_rx).await },
-        );
+    let server_task = tokio::spawn(async move {
+        lifed::listener::serve(&server_cfg, stub_engine, shutdown_rx, Vec::new()).await
+    });
 
     // Wait up to 2 s for the socket to appear and permissions to land.
     let mut tries = 0;
