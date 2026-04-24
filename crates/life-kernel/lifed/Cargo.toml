@@ -8,6 +8,10 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+name = "lifed"
+path = "src/lib.rs"
+
 [[bin]]
 name = "lifed"
 path = "src/main.rs"
@@ -50,6 +54,7 @@ arcan-provider-local.workspace = true
 tokio-vsock = { version = "0.5", default-features = false }
 
 [dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
