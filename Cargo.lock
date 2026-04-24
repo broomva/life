@@ -87,6 +87,7 @@ name = "aios-protocol"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "base64",
  "bitflags 2.11.0",
  "bytes",
  "chrono",
@@ -1023,6 +1024,12 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "assert_matches"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 
 [[package]]
 name = "async-lock"
@@ -5343,6 +5350,7 @@ dependencies = [
 name = "life-anima"
 version = "0.3.0"
 dependencies = [
+ "aios-protocol",
  "anima-core",
  "anima-identity",
  "anima-lago",
@@ -5353,6 +5361,7 @@ name = "life-arcan"
 version = "0.3.0"
 dependencies = [
  "arcan-aios-adapters",
+ "arcan-api-schema",
  "arcan-core",
  "arcan-harness",
  "arcan-provider",
@@ -5365,6 +5374,7 @@ name = "life-autonomic"
 version = "0.3.0"
 dependencies = [
  "autonomic-api",
+ "autonomic-api-schema",
  "autonomic-controller",
  "autonomic-core",
 ]
@@ -5394,10 +5404,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "life-client"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "assert_matches",
+ "async-trait",
+ "chrono",
+ "futures",
+ "hyper-util",
+ "life-kernel-proto",
+ "prost 0.14.3",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tokio-vsock",
+ "tonic 0.14.5",
+ "tower 0.5.3",
+ "tracing",
+]
+
+[[package]]
 name = "life-haima"
 version = "0.3.0"
 dependencies = [
  "haima-api",
+ "haima-api-schema",
  "haima-core",
  "haima-wallet",
  "haima-x402",
@@ -5438,6 +5473,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "life-kernel-facade"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "anyhow",
+ "assert_matches",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "eventsource-stream",
+ "futures",
+ "life-arcan",
+ "life-client",
+ "life-kernel-proto",
+ "life-lago",
+ "life-vigil",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tracing",
+ "wiremock",
+]
+
+[[package]]
 name = "life-kernel-gate"
 version = "0.3.0"
 dependencies = [
@@ -5474,6 +5541,7 @@ name = "life-lago"
 version = "0.3.0"
 dependencies = [
  "lago-api",
+ "lago-api-schema",
  "lago-core",
  "lago-fs",
  "lago-journal",
@@ -5486,9 +5554,20 @@ name = "life-nous"
 version = "0.3.0"
 dependencies = [
  "nous-api",
+ "nous-api-schema",
  "nous-core",
  "nous-heuristics",
  "nous-judge",
+]
+
+[[package]]
+name = "life-opsis"
+version = "0.3.0"
+dependencies = [
+ "opsis-api-schema",
+ "opsis-core",
+ "opsis-engine",
+ "opsis-lago",
 ]
 
 [[package]]
@@ -5534,6 +5613,7 @@ name = "life-relay"
 version = "0.3.0"
 dependencies = [
  "life-relay-api",
+ "life-relay-api-schema",
  "life-relay-core",
 ]
 
@@ -6020,6 +6100,18 @@ dependencies = [
  "libc",
  "memoffset 0.6.5",
  "pin-utils",
+]
+
+[[package]]
+name = "nix"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
+dependencies = [
+ "bitflags 2.11.0",
+ "cfg-if",
+ "libc",
+ "memoffset 0.9.1",
 ]
 
 [[package]]
@@ -9607,6 +9699,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-vsock"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e336ac4b36df625d5429a735dd5847732fe5f62010e3ce0c50f3705d44730f8"
+dependencies = [
+ "bytes",
+ "futures",
+ "libc",
+ "tokio",
+ "vsock",
+]
+
+[[package]]
 name = "toml"
 version = "0.9.12+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10220,6 +10325,16 @@ name = "vsimd"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64"
+
+[[package]]
+name = "vsock"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2dfb6e7a74830912f1f4a7655227c9ded1ea4e9136676311fedf54bedb412f35"
+dependencies = [
+ "libc",
+ "nix 0.27.1",
+]
 
 [[package]]
 name = "vtparse"

@@ -49,7 +49,10 @@ async fn head_maps_5xx_to_backend_error() {
         .await
         .unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("503") || msg.contains("backend") || msg.contains("lagod"), "got {msg}");
+    assert!(
+        msg.contains("503") || msg.contains("backend") || msg.contains("lagod"),
+        "got {msg}"
+    );
 }
 
 #[tokio::test]

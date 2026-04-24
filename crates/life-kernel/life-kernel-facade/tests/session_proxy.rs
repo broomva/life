@@ -33,9 +33,7 @@ async fn create_returns_manifest() {
 
     Mock::given(method("POST"))
         .and(path("/sessions"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(make_manifest_json("s-123")),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(make_manifest_json("s-123")))
         .mount(&server)
         .await;
 
@@ -67,10 +65,7 @@ async fn list_returns_empty_vec() {
         ArcanClient::new(&DaemonEndpoints::new(server.uri(), "http://lagod.invalid")).unwrap();
     let proxy = SessionProxy::new(client);
 
-    let result = proxy
-        .list(Default::default())
-        .await
-        .unwrap();
+    let result = proxy.list(Default::default()).await.unwrap();
     assert!(result.is_empty());
 }
 
@@ -129,11 +124,7 @@ async fn stream_events_decodes_one_frame() {
 
     use futures::StreamExt;
     let mut stream = proxy
-        .stream_events(
-            SessionId::from("s-1"),
-            BranchId::from("main"),
-            0,
-        )
+        .stream_events(SessionId::from("s-1"), BranchId::from("main"), 0)
         .await
         .unwrap();
     let next = stream.next().await.expect("frame").expect("ok");

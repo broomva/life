@@ -20,6 +20,10 @@ pub struct DaemonEndpoints {
 impl DaemonEndpoints {
     /// Builder used in tests — caller supplies both URLs explicitly.
     pub fn new(arcand: impl Into<String>, lagod: impl Into<String>) -> Self {
-        Self { arcand: arcand.into(), lagod: lagod.into(), bearer_token: None }
+        Self {
+            arcand: arcand.into(),
+            lagod: lagod.into(),
+            bearer_token: None,
+        }
     }
 }

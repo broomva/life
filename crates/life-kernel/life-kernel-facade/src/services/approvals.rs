@@ -31,10 +31,13 @@ impl<P: ApprovalPort + Send + Sync + 'static> TonicApprovals for ApprovalsServic
         req: Request<pb::EnqueueRequest>,
     ) -> Result<Response<pb::ApprovalTicket>, Status> {
         let r = req.into_inner();
-        let request: ApprovalRequest =
-            serde_json::from_slice(&r.request_json)
-                .map_err(|e| Status::invalid_argument(format!("request_json: {e}")))?;
-        let ticket = self.port.enqueue(request).await.map_err(kernel_err_to_status)?;
+        let request: ApprovalRequest = serde_json::from_slice(&r.request_json)
+            .map_err(|e| Status::invalid_argument(format!("request_json: {e}")))?;
+        let ticket = self
+            .port
+            .enqueue(request)
+            .await
+            .map_err(kernel_err_to_status)?;
         Ok(Response::new(pb::ApprovalTicket {
             ticket_json: to_json(&ticket, "ticket")?,
         }))
@@ -45,11 +48,17 @@ impl<P: ApprovalPort + Send + Sync + 'static> TonicApprovals for ApprovalsServic
         req: Request<pb::ListPendingRequest>,
     ) -> Result<Response<pb::ListPendingResponse>, Status> {
         let sid = SessionId::from(req.into_inner().session.unwrap_or_default().value);
-        let tickets = self.port.list_pending(sid).await.map_err(kernel_err_to_status)?;
+        let tickets = self
+            .port
+            .list_pending(sid)
+            .await
+            .map_err(kernel_err_to_status)?;
         let wire = tickets
             .iter()
             .map(|t| {
-                Ok(pb::ApprovalTicket { ticket_json: to_json(t, "ticket")? })
+                Ok(pb::ApprovalTicket {
+                    ticket_json: to_json(t, "ticket")?,
+                })
             })
             .collect::<Result<Vec<_>, Status>>()?;
         Ok(Response::new(pb::ListPendingResponse { tickets: wire }))

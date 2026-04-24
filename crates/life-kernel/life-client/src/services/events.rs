@@ -122,7 +122,7 @@ fn decode_event_record(w: pb::EventRecord) -> LifeResult<EventRecord> {
     let causation_id = w
         .causation_json
         .as_deref()
-        .map(|b| serde_json::from_slice(b))
+        .map(serde_json::from_slice)
         .transpose()
         .map_err(|e| LifeClientError::Rpc(format!("causation: {e}")))?;
     Ok(EventRecord {

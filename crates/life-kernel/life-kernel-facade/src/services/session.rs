@@ -36,7 +36,11 @@ impl<P: SessionPort + Send + Sync + 'static> TonicSession for SessionService<P> 
     ) -> Result<Response<pb::SessionManifest>, Status> {
         let r = req.into_inner();
         let canonical: CreateSessionRequest = from_json(&r.request_json, "request_json")?;
-        let manifest = self.port.create(canonical).await.map_err(kernel_err_to_status)?;
+        let manifest = self
+            .port
+            .create(canonical)
+            .await
+            .map_err(kernel_err_to_status)?;
         Ok(Response::new(pb::SessionManifest {
             manifest_json: to_json(&manifest, "manifest")?,
         }))
@@ -67,7 +71,9 @@ impl<P: SessionPort + Send + Sync + 'static> TonicSession for SessionService<P> 
         let wire = manifests
             .iter()
             .map(|m| {
-                Ok(pb::SessionManifest { manifest_json: to_json(m, "manifest")? })
+                Ok(pb::SessionManifest {
+                    manifest_json: to_json(m, "manifest")?,
+                })
             })
             .collect::<Result<Vec<_>, Status>>()?;
         Ok(Response::new(pb::ListResponse { manifests: wire }))
@@ -80,7 +86,11 @@ impl<P: SessionPort + Send + Sync + 'static> TonicSession for SessionService<P> 
         let r = req.into_inner();
         let sid = SessionId::from(r.session.unwrap_or_default().value);
         let input: TickInput = from_json(&r.input_json, "input_json")?;
-        let output = self.port.tick(sid, input).await.map_err(kernel_err_to_status)?;
+        let output = self
+            .port
+            .tick(sid, input)
+            .await
+            .map_err(kernel_err_to_status)?;
         Ok(Response::new(pb::TickResponse {
             output_json: to_json(&output, "output")?,
         }))
@@ -131,7 +141,10 @@ impl<P: SessionPort + Send + Sync + 'static> TonicSession for SessionService<P> 
     ) -> Result<Response<pb::CloseResponse>, Status> {
         let r = req.into_inner();
         let sid = SessionId::from(r.session.unwrap_or_default().value);
-        self.port.close(sid, r.reason).await.map_err(kernel_err_to_status)?;
+        self.port
+            .close(sid, r.reason)
+            .await
+            .map_err(kernel_err_to_status)?;
         Ok(Response::new(pb::CloseResponse {}))
     }
 }

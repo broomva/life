@@ -63,17 +63,15 @@ impl LifeClient {
                     .map_err(|e| LifeClientError::Transport(e.to_string()))?
             }
             #[cfg(feature = "vsock")]
-            LifeTransport::Vsock { cid, port } => {
-                Endpoint::try_from("http://[::]:0")
-                    .map_err(|e| LifeClientError::Transport(e.to_string()))?
-                    .connect_with_connector(service_fn(move |_: Uri| async move {
-                        tokio_vsock::VsockStream::connect(tokio_vsock::VsockAddr::new(cid, port))
-                            .await
-                            .map(hyper_util::rt::TokioIo::new)
-                    }))
-                    .await
-                    .map_err(|e| LifeClientError::Transport(e.to_string()))?
-            }
+            LifeTransport::Vsock { cid, port } => Endpoint::try_from("http://[::]:0")
+                .map_err(|e| LifeClientError::Transport(e.to_string()))?
+                .connect_with_connector(service_fn(move |_: Uri| async move {
+                    tokio_vsock::VsockStream::connect(tokio_vsock::VsockAddr::new(cid, port))
+                        .await
+                        .map(hyper_util::rt::TokioIo::new)
+                }))
+                .await
+                .map_err(|e| LifeClientError::Transport(e.to_string()))?,
             #[cfg(feature = "tcp")]
             LifeTransport::Tcp(addr) => Endpoint::try_from(format!("http://{addr}"))
                 .map_err(|e| LifeClientError::Transport(e.to_string()))?

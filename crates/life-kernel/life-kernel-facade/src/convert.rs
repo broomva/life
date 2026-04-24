@@ -9,17 +9,12 @@ pub fn from_json<T: serde::de::DeserializeOwned>(
     bytes: &[u8],
     field: &'static str,
 ) -> Result<T, Status> {
-    serde_json::from_slice(bytes)
-        .map_err(|e| Status::invalid_argument(format!("{field}: {e}")))
+    serde_json::from_slice(bytes).map_err(|e| Status::invalid_argument(format!("{field}: {e}")))
 }
 
 /// Serialise a canonical DTO into a `Vec<u8>` suitable for a proto `bytes` field.
-pub fn to_json<T: serde::Serialize>(
-    value: &T,
-    field: &'static str,
-) -> Result<Vec<u8>, Status> {
-    serde_json::to_vec(value)
-        .map_err(|e| Status::internal(format!("{field}: {e}")))
+pub fn to_json<T: serde::Serialize>(value: &T, field: &'static str) -> Result<Vec<u8>, Status> {
+    serde_json::to_vec(value).map_err(|e| Status::internal(format!("{field}: {e}")))
 }
 
 /// Map a `KernelError` (legacy `aios_protocol::error::KernelError`) to a
@@ -35,9 +30,9 @@ pub fn kernel_err_to_status(err: aios_protocol::error::KernelError) -> Status {
         KernelError::InvalidState(m) => Status::invalid_argument(m),
         KernelError::Runtime(m) => Status::internal(m),
         KernelError::BudgetExceeded(m) => Status::resource_exhausted(m),
-        KernelError::SequenceConflict { expected, actual } => {
-            Status::aborted(format!("sequence conflict: expected {expected}, got {actual}"))
-        }
+        KernelError::SequenceConflict { expected, actual } => Status::aborted(format!(
+            "sequence conflict: expected {expected}, got {actual}"
+        )),
         // Non-exhaustive — handle future variants defensively.
         #[allow(unreachable_patterns)]
         other => Status::internal(format!("{other:?}")),

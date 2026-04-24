@@ -45,9 +45,7 @@ async fn v0_events_head_roundtrip_via_unix_socket() {
     let lagod = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path_regex(r"^/v1/sessions/[^/]+/events/head$"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "seq": 42u64 })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "seq": 42u64 })))
         .mount(&lagod)
         .await;
 

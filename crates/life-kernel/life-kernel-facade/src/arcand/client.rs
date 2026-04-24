@@ -32,15 +32,18 @@ impl ArcanClient {
                 daemon: "arcand",
                 source: e.into(),
             })?;
-        Ok(Self { inner, base, bearer: endpoints.bearer_token.clone() })
+        Ok(Self {
+            inner,
+            base,
+            bearer: endpoints.bearer_token.clone(),
+        })
     }
 
-    pub(crate) fn request(
-        &self,
-        method: reqwest::Method,
-        path: &str,
-    ) -> reqwest::RequestBuilder {
-        let url = self.base.join(path.trim_start_matches('/')).expect("valid join");
+    pub(crate) fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+        let url = self
+            .base
+            .join(path.trim_start_matches('/'))
+            .expect("valid join");
         let mut req = self.inner.request(method, url);
         if let Some(ref token) = self.bearer {
             req = req.bearer_auth(token);

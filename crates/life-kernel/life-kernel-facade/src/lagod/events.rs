@@ -96,11 +96,18 @@ impl EventsProxy {
             .query(&[("branch", branch.as_str())])
             .send()
             .await
-            .map_err(|e| FacadeError::BackendUnavailable { daemon: "lagod", source: e.into() })?;
+            .map_err(|e| FacadeError::BackendUnavailable {
+                daemon: "lagod",
+                source: e.into(),
+            })?;
         if !res.status().is_success() {
             let status = res.status().as_u16();
             let message = res.text().await.unwrap_or_default();
-            return Err(FacadeError::BackendRejected { daemon: "lagod", status, message });
+            return Err(FacadeError::BackendRejected {
+                daemon: "lagod",
+                status,
+                message,
+            });
         }
         let body: HeadSeqResponse = res.json().await.map_err(|e| FacadeError::BackendProtocol {
             daemon: "lagod",
@@ -117,21 +124,28 @@ impl EventsProxy {
         limit: Option<usize>,
     ) -> FacadeResult<Vec<EventRecord>> {
         let path = format!("/v1/sessions/{}/events/read", session);
-        let mut req = self
-            .client
-            .request(reqwest::Method::GET, &path)
-            .query(&[("branch", branch.as_str()), ("after_seq", &after.to_string())]);
+        let mut req = self.client.request(reqwest::Method::GET, &path).query(&[
+            ("branch", branch.as_str()),
+            ("after_seq", &after.to_string()),
+        ]);
         if let Some(n) = limit {
             req = req.query(&[("limit", n.to_string())]);
         }
-        let res = req.send().await.map_err(|e| FacadeError::BackendUnavailable {
-            daemon: "lagod",
-            source: e.into(),
-        })?;
+        let res = req
+            .send()
+            .await
+            .map_err(|e| FacadeError::BackendUnavailable {
+                daemon: "lagod",
+                source: e.into(),
+            })?;
         if !res.status().is_success() {
             let status = res.status().as_u16();
             let message = res.text().await.unwrap_or_default();
-            return Err(FacadeError::BackendRejected { daemon: "lagod", status, message });
+            return Err(FacadeError::BackendRejected {
+                daemon: "lagod",
+                status,
+                message,
+            });
         }
         let envelopes: Vec<EventEnvelope> =
             res.json().await.map_err(|e| FacadeError::BackendProtocol {
@@ -151,11 +165,18 @@ impl EventsProxy {
             .json(&body)
             .send()
             .await
-            .map_err(|e| FacadeError::BackendUnavailable { daemon: "lagod", source: e.into() })?;
+            .map_err(|e| FacadeError::BackendUnavailable {
+                daemon: "lagod",
+                source: e.into(),
+            })?;
         if !res.status().is_success() {
             let status = res.status().as_u16();
             let message = res.text().await.unwrap_or_default();
-            return Err(FacadeError::BackendRejected { daemon: "lagod", status, message });
+            return Err(FacadeError::BackendRejected {
+                daemon: "lagod",
+                status,
+                message,
+            });
         }
         let resp: AppendEventResponse =
             res.json().await.map_err(|e| FacadeError::BackendProtocol {
@@ -163,7 +184,10 @@ impl EventsProxy {
                 reason: e.to_string(),
             })?;
         // Return the record with the sequence assigned by lagod.
-        Ok(EventRecord { sequence: resp.seq, ..event })
+        Ok(EventRecord {
+            sequence: resp.seq,
+            ..event
+        })
     }
 
     async fn do_subscribe(
@@ -183,11 +207,12 @@ impl EventsProxy {
             .header(reqwest::header::ACCEPT, "text/event-stream")
             .send()
             .await
-            .map_err(|e| FacadeError::BackendUnavailable { daemon: "lagod", source: e.into() })?;
+            .map_err(|e| FacadeError::BackendUnavailable {
+                daemon: "lagod",
+                source: e.into(),
+            })?;
 
-        let bytes_stream = res
-            .bytes_stream()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+        let bytes_stream = res.bytes_stream().map_err(std::io::Error::other);
 
         let events = bytes_stream.eventsource();
 
@@ -196,22 +221,19 @@ impl EventsProxy {
             let mut events = events;
             while let Some(next) = events.next().await {
                 match next {
-                    Ok(ev) => {
-                        match serde_json::from_str::<EventEnvelope>(&ev.data) {
-                            Ok(envelope) => {
-                                if tx.send(Ok(envelope_to_record(envelope))).is_err() {
-                                    return;
-                                }
-                            }
-                            Err(e) => {
-                                warn!(error = %e, "lagod SSE frame parse failed");
-                                let _ = tx.send(Err(KernelError::Runtime(format!(
-                                    "lagod SSE parse: {e}"
-                                ))));
+                    Ok(ev) => match serde_json::from_str::<EventEnvelope>(&ev.data) {
+                        Ok(envelope) => {
+                            if tx.send(Ok(envelope_to_record(envelope))).is_err() {
                                 return;
                             }
                         }
-                    }
+                        Err(e) => {
+                            warn!(error = %e, "lagod SSE frame parse failed");
+                            let _ =
+                                tx.send(Err(KernelError::Runtime(format!("lagod SSE parse: {e}"))));
+                            return;
+                        }
+                    },
                     Err(e) => {
                         let _ = tx.send(Err(KernelError::Runtime(format!(
                             "lagod SSE stream broke: {e}"
@@ -245,7 +267,9 @@ impl EventStorePort for EventsProxy {
     }
 
     async fn head(&self, session_id: SessionId, branch_id: BranchId) -> KernelResult<u64> {
-        self.do_head(&session_id, &branch_id).await.map_err(Into::into)
+        self.do_head(&session_id, &branch_id)
+            .await
+            .map_err(Into::into)
     }
 
     async fn subscribe(

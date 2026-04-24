@@ -11,7 +11,9 @@ pub enum FacadeError {
     /// timeout, 5xx), including the daemon name for attribution.
     #[error("backend unavailable ({daemon}): {source}")]
     BackendUnavailable {
+        /// Name of the unreachable daemon (e.g. `"lagod"`).
         daemon: &'static str,
+        /// Underlying transport / connection failure.
         #[source]
         source: anyhow::Error,
     },
@@ -19,22 +21,29 @@ pub enum FacadeError {
     /// Downstream daemon returned a 4xx response.
     #[error("backend rejected ({daemon}): status {status}: {message}")]
     BackendRejected {
+        /// Name of the rejecting daemon.
         daemon: &'static str,
+        /// HTTP status code returned by the daemon.
         status: u16,
+        /// Response body (or best-effort decoded text) for diagnostics.
         message: String,
     },
 
     /// Downstream daemon produced a malformed payload.
     #[error("backend protocol violation ({daemon}): {reason}")]
     BackendProtocol {
+        /// Name of the daemon that violated the protocol.
         daemon: &'static str,
+        /// One-line description of the decoding failure.
         reason: String,
     },
 
     /// SSE / streaming body broke mid-flight.
     #[error("backend stream broken ({daemon}): {reason}")]
     BackendStreamBroken {
+        /// Name of the daemon whose stream closed unexpectedly.
         daemon: &'static str,
+        /// One-line description of the stream interruption.
         reason: String,
     },
 
@@ -54,7 +63,11 @@ impl From<FacadeError> for KernelError {
                 // KernelError has no Internal/Unavailable variant — map to Runtime.
                 KernelError::Runtime(format!("{daemon}: {source}"))
             }
-            FacadeError::BackendRejected { daemon, status, message } => {
+            FacadeError::BackendRejected {
+                daemon,
+                status,
+                message,
+            } => {
                 // 4xx from daemon maps to InvalidState (closest to bad-request).
                 KernelError::InvalidState(format!("{daemon} {status}: {message}"))
             }

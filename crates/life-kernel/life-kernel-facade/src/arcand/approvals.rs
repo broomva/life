@@ -55,11 +55,18 @@ impl ApprovalsProxy {
             .json(&body)
             .send()
             .await
-            .map_err(|e| FacadeError::BackendUnavailable { daemon: "arcand", source: e.into() })?;
+            .map_err(|e| FacadeError::BackendUnavailable {
+                daemon: "arcand",
+                source: e.into(),
+            })?;
         if !res.status().is_success() && res.status().as_u16() != 204 {
             let status = res.status().as_u16();
             let message = res.text().await.unwrap_or_default();
-            return Err(FacadeError::BackendRejected { daemon: "arcand", status, message });
+            return Err(FacadeError::BackendRejected {
+                daemon: "arcand",
+                status,
+                message,
+            });
         }
         Ok(())
     }

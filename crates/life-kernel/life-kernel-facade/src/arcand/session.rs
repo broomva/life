@@ -43,9 +43,9 @@ struct ArcanRunRequest<'a> {
 
 /// arcand's `POST /sessions/{id}/runs` response.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // Fields reserved for richer TickOutput mapping in a later phase.
 struct ArcanRunResponse {
     session_id: String,
-    // last_sequence and events_emitted available but unused in TickOutput mapping.
     #[serde(default)]
     events_emitted: u64,
     #[serde(default)]
@@ -123,19 +123,28 @@ impl SessionProxy {
         if let Some(b) = body {
             req = req.json(b);
         }
-        let res = req.send().await.map_err(|e| FacadeError::BackendUnavailable {
-            daemon: "arcand",
-            source: e.into(),
-        })?;
+        let res = req
+            .send()
+            .await
+            .map_err(|e| FacadeError::BackendUnavailable {
+                daemon: "arcand",
+                source: e.into(),
+            })?;
         if !res.status().is_success() {
             let status = res.status().as_u16();
             let message = res.text().await.unwrap_or_default();
-            return Err(FacadeError::BackendRejected { daemon: "arcand", status, message });
+            return Err(FacadeError::BackendRejected {
+                daemon: "arcand",
+                status,
+                message,
+            });
         }
-        res.json::<T>().await.map_err(|e| FacadeError::BackendProtocol {
-            daemon: "arcand",
-            reason: e.to_string(),
-        })
+        res.json::<T>()
+            .await
+            .map_err(|e| FacadeError::BackendProtocol {
+                daemon: "arcand",
+                reason: e.to_string(),
+            })
     }
 
     async fn do_stream(
@@ -152,11 +161,12 @@ impl SessionProxy {
             .header(reqwest::header::ACCEPT, "text/event-stream")
             .send()
             .await
-            .map_err(|e| FacadeError::BackendUnavailable { daemon: "arcand", source: e.into() })?;
+            .map_err(|e| FacadeError::BackendUnavailable {
+                daemon: "arcand",
+                source: e.into(),
+            })?;
 
-        let bytes = res
-            .bytes_stream()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+        let bytes = res.bytes_stream().map_err(std::io::Error::other);
         let events = bytes.eventsource();
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<KernelResult<EventRecord>>();
@@ -172,9 +182,8 @@ impl SessionProxy {
                         }
                         Err(e) => {
                             warn!(error=%e, "arcand SSE parse fail");
-                            let _ = tx.send(Err(KernelError::Runtime(format!(
-                                "arcand SSE parse: {e}"
-                            ))));
+                            let _ = tx
+                                .send(Err(KernelError::Runtime(format!("arcand SSE parse: {e}"))));
                             return;
                         }
                     },
@@ -227,7 +236,9 @@ impl SessionPort for SessionProxy {
 
     async fn tick(&self, id: SessionId, input: TickInput) -> KernelResult<TickOutput> {
         let path = format!("/sessions/{}/runs", id);
-        let body = ArcanRunRequest { objective: input.objective.as_str() };
+        let body = ArcanRunRequest {
+            objective: input.objective.as_str(),
+        };
         let resp: ArcanRunResponse = self
             .http_json(reqwest::Method::POST, &path, Some(&body))
             .await
@@ -240,9 +251,8 @@ impl SessionPort for SessionProxy {
             "final_answer": null,
             "usage": null
         });
-        serde_json::from_value(json).map_err(|e| {
-            KernelError::Serialization(format!("TickOutput: {e}"))
-        })
+        serde_json::from_value(json)
+            .map_err(|e| KernelError::Serialization(format!("TickOutput: {e}")))
     }
 
     async fn stream_events(
@@ -251,7 +261,9 @@ impl SessionPort for SessionProxy {
         branch: BranchId,
         after_sequence: u64,
     ) -> KernelResult<EventRecordStream> {
-        self.do_stream(id, branch, after_sequence).await.map_err(Into::into)
+        self.do_stream(id, branch, after_sequence)
+            .await
+            .map_err(Into::into)
     }
 
     async fn close(&self, _id: SessionId, _reason: String) -> KernelResult<()> {

@@ -32,18 +32,20 @@ impl LagoClient {
                 daemon: "lagod",
                 source: e.into(),
             })?;
-        Ok(Self { inner, base, bearer: endpoints.bearer_token.clone() })
+        Ok(Self {
+            inner,
+            base,
+            bearer: endpoints.bearer_token.clone(),
+        })
     }
 
     pub(crate) fn url(&self, path: &str) -> Url {
-        self.base.join(path.trim_start_matches('/')).expect("valid join")
+        self.base
+            .join(path.trim_start_matches('/'))
+            .expect("valid join")
     }
 
-    pub(crate) fn request(
-        &self,
-        method: reqwest::Method,
-        path: &str,
-    ) -> reqwest::RequestBuilder {
+    pub(crate) fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
         let mut req = self.inner.request(method, self.url(path));
         if let Some(ref token) = self.bearer {
             req = req.bearer_auth(token);
@@ -52,6 +54,7 @@ impl LagoClient {
     }
 
     /// Expose the inner reqwest client for stream-body consumers (SSE).
+    #[allow(dead_code)] // Reserved for direct-stream consumers added in Phase 2.
     pub(crate) fn raw(&self) -> &Client {
         &self.inner
     }

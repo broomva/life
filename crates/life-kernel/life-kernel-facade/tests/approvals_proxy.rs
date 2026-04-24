@@ -65,5 +65,8 @@ async fn enqueue_returns_unsupported_error() {
     .unwrap();
     let err = proxy.enqueue(req).await.unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("arcand") || msg.contains("enqueue") || msg.contains("direct"), "got: {msg}");
+    assert!(
+        msg.contains("arcand") || msg.contains("enqueue") || msg.contains("direct"),
+        "got: {msg}"
+    );
 }

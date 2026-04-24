@@ -98,10 +98,18 @@ impl<P: EventStorePort + Send + Sync + 'static> TonicEvents for EventsService<P>
         req: Request<pb::AppendRequest>,
     ) -> Result<Response<pb::AppendResponse>, Status> {
         let r = req.into_inner();
-        let rec = r.record.ok_or_else(|| Status::invalid_argument("record required"))?;
+        let rec = r
+            .record
+            .ok_or_else(|| Status::invalid_argument("record required"))?;
         let canonical = wire_to_record(rec)?;
-        let stored = self.port.append(canonical).await.map_err(kernel_err_to_status)?;
-        Ok(Response::new(pb::AppendResponse { record: Some(record_to_wire(&stored)?) }))
+        let stored = self
+            .port
+            .append(canonical)
+            .await
+            .map_err(kernel_err_to_status)?;
+        Ok(Response::new(pb::AppendResponse {
+            record: Some(record_to_wire(&stored)?),
+        }))
     }
 
     async fn read(
@@ -117,7 +125,10 @@ impl<P: EventStorePort + Send + Sync + 'static> TonicEvents for EventsService<P>
             .read(session, branch, r.after_sequence, limit)
             .await
             .map_err(kernel_err_to_status)?;
-        let wire = records.iter().map(record_to_wire).collect::<Result<Vec<_>, _>>()?;
+        let wire = records
+            .iter()
+            .map(record_to_wire)
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Response::new(pb::ReadResponse { records: wire }))
     }
 
@@ -128,7 +139,11 @@ impl<P: EventStorePort + Send + Sync + 'static> TonicEvents for EventsService<P>
         let r = req.into_inner();
         let session = SessionId::from(r.session.unwrap_or_default().value);
         let branch = BranchId::from(r.branch.unwrap_or_default().value);
-        let head = self.port.head(session, branch).await.map_err(kernel_err_to_status)?;
+        let head = self
+            .port
+            .head(session, branch)
+            .await
+            .map_err(kernel_err_to_status)?;
         Ok(Response::new(pb::HeadResponse {
             head: Some(life_kernel_proto::common::SequenceNumber { value: head }),
         }))
