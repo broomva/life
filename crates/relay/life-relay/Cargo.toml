@@ -8,9 +8,15 @@ repository.workspace = true
 homepage.workspace = true
 description = "Remote agent sessions facade for the Life Agent OS — re-exports life-relay-core and life-relay-api"
 
+[features]
+default = ["runtime"]
+runtime = []
+schema = ["dep:life-relay-api-schema"]
+
 [dependencies]
 life-relay-core = { path = "../life-relay-core", version = "0.3.0" }
 life-relay-api = { path = "../life-relay-api", version = "0.3.0" }
+life-relay-api-schema = { workspace = true, optional = true }
 
 [lints]
 workspace = true

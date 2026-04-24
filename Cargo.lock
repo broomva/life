@@ -88,6 +88,7 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "bitflags 2.11.0",
+ "bytes",
  "chrono",
  "futures-util",
  "indexmap 2.13.1",
@@ -421,6 +422,17 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "arcan-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1134,6 +1146,17 @@ dependencies = [
  "tokio-util",
  "tower 0.5.3",
  "tracing",
+]
+
+[[package]]
+name = "autonomic-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3652,6 +3675,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "haima-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "haima-core"
 version = "0.3.0"
 dependencies = [
@@ -4574,6 +4608,17 @@ dependencies = [
  "tower-http",
  "tracing",
  "ulid",
+]
+
+[[package]]
+name = "lago-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -5507,6 +5552,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "life-relay-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "life-relay-core"
 version = "0.3.0"
 dependencies = [
@@ -6017,6 +6073,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nous-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "nous-core"
 version = "0.3.0"
 dependencies = [
@@ -6433,6 +6500,17 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "opsis-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
