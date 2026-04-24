@@ -334,4 +334,29 @@ mod tests {
             assert!(matches!(cfg.validate().unwrap_err(), LifedError::Config(_)));
         }
     }
+
+    #[test]
+    fn lago_store_kind_roundtrips() {
+        // Verify that LagoStoreKind serialises and deserialises symmetrically.
+        let toml_str = "[lago]\nnamespace = \"test\"\n\n[lago.store]\nkind = \"in_memory\"\n";
+        let cfg: LifedConfig = toml::from_str(toml_str).unwrap();
+        assert!(matches!(cfg.lago.store, LagoStoreKind::InMemory));
+
+        let redb_str =
+            "[lago]\nnamespace = \"prod\"\n\n[lago.store]\nkind = \"redb\"\npath = \"/tmp/e.redb\"\n";
+        let cfg2: LifedConfig = toml::from_str(redb_str).unwrap();
+        assert!(matches!(cfg2.lago.store, LagoStoreKind::Redb { .. }));
+    }
+
+    #[test]
+    fn vigil_exporter_roundtrips() {
+        let console = "[vigil]\nlevel = \"debug\"\n\n[vigil.exporter]\nkind = \"console\"\n";
+        let cfg: LifedConfig = toml::from_str(console).unwrap();
+        assert!(matches!(cfg.vigil.exporter, VigilExporter::Console));
+
+        let otlp =
+            "[vigil]\nlevel = \"trace\"\n\n[vigil.exporter]\nkind = \"otlp\"\nendpoint = \"http://localhost:4317\"\n";
+        let cfg2: LifedConfig = toml::from_str(otlp).unwrap();
+        assert!(matches!(cfg2.vigil.exporter, VigilExporter::Otlp { .. }));
+    }
 }
