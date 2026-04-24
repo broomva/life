@@ -54,7 +54,8 @@ arcan-provider-local.workspace = true
 tokio-vsock = { version = "0.5", default-features = false }
 
 [dev-dependencies]
-tempfile.workspace = true
+# tempfile is declared in [dependencies] for production use
+# (Bootstrap._lago_tempdir); no extra dev-only tempfile needed.
 
 [lints]
 workspace = true
