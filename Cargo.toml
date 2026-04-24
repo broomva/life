@@ -11,6 +11,7 @@ members = [
     "crates/aios/aios-sandbox",
     "crates/aios/aios-tools",
     # Arcan — agent runtime
+    "crates/arcan/arcan-api-schema",
     "crates/arcan/arcan",
     "crates/arcan/arcan-aios-adapters",
     "crates/arcan/arcan-anima",
@@ -33,6 +34,7 @@ members = [
     "crates/arcan/arcan-tui",
     "crates/arcan/arcand",
     # Lago — persistence
+    "crates/lago/lago-api-schema",
     "crates/lago/lago-aios-eventstore-adapter",
     "crates/lago/lago-api",
     "crates/lago/lago-auth",
@@ -49,6 +51,7 @@ members = [
     "crates/lago/lago-store",
     "crates/lago/lagod",
     # Autonomic — homeostasis
+    "crates/autonomic/autonomic-api-schema",
     "crates/autonomic/autonomic-api",
     "crates/autonomic/autonomic-controller",
     "crates/autonomic/autonomic-core",
@@ -60,6 +63,7 @@ members = [
     "crates/praxis/praxis-skills",
     "crates/praxis/praxis-tools",
     # Haima — finance
+    "crates/haima/haima-api-schema",
     "crates/haima/haima-api",
     "crates/haima/haima-core",
     "crates/haima/haima-insurance",
@@ -69,6 +73,7 @@ members = [
     "crates/haima/haima-x402",
     "crates/haima/haimad",
     # Nous — evaluation
+    "crates/nous/nous-api-schema",
     "crates/nous/nous-api",
     "crates/nous/nous-core",
     "crates/nous/nous-heuristics",
@@ -85,6 +90,7 @@ members = [
     # Spaces — networking (excluded: needs spacetime generate to update bindings)
     # "crates/spaces/life-spaces",
     # Relay — remote sessions
+    "crates/relay/life-relay-api-schema",
     "crates/relay/life-relay-api",
     "crates/relay/life-relay-core",
     "crates/relay/life-relayd",
@@ -111,6 +117,7 @@ members = [
     "crates/life-kernel/life-kernel-gate",
     "crates/life-kernel/life-kernel-proto",
     # Opsis — world state engine
+    "crates/opsis/opsis-api-schema",
     "crates/opsis/opsis-core",
     "crates/opsis/opsis-engine",
     "crates/opsis/opsis-lago",
@@ -132,6 +139,13 @@ categories = ["command-line-utilities"]
 [workspace.dependencies]
 # ── Internal crates ──
 aios-events = { path = "crates/aios/aios-events", version = "0.3.0" }
+arcan-api-schema       = { path = "crates/arcan/arcan-api-schema",         version = "0.1.0" }
+autonomic-api-schema   = { path = "crates/autonomic/autonomic-api-schema", version = "0.1.0" }
+haima-api-schema       = { path = "crates/haima/haima-api-schema",         version = "0.1.0" }
+lago-api-schema        = { path = "crates/lago/lago-api-schema",           version = "0.1.0" }
+life-relay-api-schema  = { path = "crates/relay/life-relay-api-schema",    version = "0.1.0" }
+nous-api-schema        = { path = "crates/nous/nous-api-schema",           version = "0.1.0" }
+opsis-api-schema       = { path = "crates/opsis/opsis-api-schema",         version = "0.1.0" }
 aios-policy = { path = "crates/aios/aios-policy", version = "0.3.0" }
 aios-protocol = { path = "crates/aios/aios-protocol", version = "0.3.0" }
 aios-runtime = { path = "crates/aios/aios-runtime", version = "0.3.0" }
