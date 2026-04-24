@@ -1,1 +1,4 @@
-//! Placeholder — populated in subsequent tasks.
+//! Arcand proxy implementations — Session, Approvals.
+
+pub mod client;
+pub mod session;

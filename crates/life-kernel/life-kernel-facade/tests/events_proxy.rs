@@ -6,7 +6,7 @@ use life_kernel_facade::{
     config::DaemonEndpoints,
     lagod::{client::LagoClient, events::EventsProxy},
 };
-use wiremock::matchers::{method, path, path_regex};
+use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test]
