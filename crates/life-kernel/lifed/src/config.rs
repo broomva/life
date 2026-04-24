@@ -19,14 +19,19 @@ use crate::error::{LifedError, LifedResult};
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct LifedConfig {
+    /// Transport configuration (Unix socket path, optional vsock listener, shutdown drain).
     #[serde(default)]
     pub server: ServerConfig,
+    /// Backend wiring — selects which hypervisor providers the daemon exposes.
     #[serde(default)]
     pub backends: BackendsConfig,
+    /// Gate-chain wiring — policy, budget, and network isolation implementations.
     #[serde(default)]
     pub gates: GatesConfig,
+    /// Lago event store wiring for the canonical `kernel.*` event stream.
     #[serde(default)]
     pub lago: LagoConfig,
+    /// Vigil OpenTelemetry exporter wiring for daemon-level tracing.
     #[serde(default)]
     pub vigil: VigilConfig,
 }

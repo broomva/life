@@ -3,12 +3,13 @@
 //! Phase 2 scaffold. Real entrypoint logic lands in BRO-900.
 
 #![deny(unsafe_code)]
+// `config` and `error` define the types the real entrypoint (BRO-900) will
+// consume — exercised only by `config::tests` today.  Suppress dead-code
+// warnings until the entrypoint lands; BRO-900 removes this allow.
+#![allow(dead_code)]
 
 mod config;
 mod error;
-
-pub use config::LifedConfig;
-pub use error::{LifedError, LifedResult};
 
 fn main() {
     eprintln!("lifed: scaffold — entrypoint wired in BRO-900");
