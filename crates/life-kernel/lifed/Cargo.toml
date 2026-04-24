@@ -48,7 +48,6 @@ tokio-vsock = { version = "0.5", default-features = false }
 
 [dev-dependencies]
 tempfile.workspace = true
-tonic-prost.workspace = true
 
 [lints]
 workspace = true
