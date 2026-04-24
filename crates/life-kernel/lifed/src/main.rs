@@ -34,14 +34,10 @@ async fn main() -> LifedResult<()> {
     let cli = Cli::parse();
     let cfg = LifedConfig::load(cli.config.as_deref())?;
 
-    // Vigil init lands in BRO-899.  For now use tracing_subscriber directly so
-    // we have structured logs during bring-up.
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&cfg.vigil.level)),
-        )
-        .init();
+    // Initialise Vigil telemetry (tracing subscriber + optional OTLP export).
+    // The guard must live for the full process lifetime — when dropped it
+    // flushes pending spans and metrics to the collector.
+    let _vigil_guard = lifed::observability::init(&cfg.vigil)?;
 
     tracing::info!(
         socket = %cfg.server.unix_socket.display(),
