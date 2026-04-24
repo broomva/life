@@ -1,8 +1,70 @@
-//! `lifed` — privileged daemon hosting the `KernelEngine`.
+//! `lifed` — daemon entrypoint.
 //!
-//! Phase 2 scaffold. Real entrypoint logic lands in BRO-900.
+//! Parses CLI flags, loads configuration, replays the event journal to
+//! reconstruct live-VM state, installs signal handlers, and then runs the
+//! tonic server until SIGINT / SIGTERM fires and all in-flight dispatches
+//! drain.
 
-fn main() {
-    eprintln!("lifed: scaffold — entrypoint wired in BRO-900");
-    std::process::exit(0);
+#![deny(unsafe_code)]
+
+use std::path::PathBuf;
+
+use clap::Parser;
+use lifed::{LifedConfig, LifedResult};
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "lifed",
+    version,
+    about = "Life Agent OS kernel daemon",
+    long_about = "Privileged daemon implementing the aiOS kernel contract for the µVM isolation tier.\n\
+                  Listens on a Unix socket and exposes the KernelService gRPC API."
+)]
+struct Cli {
+    /// Path to config.toml.
+    ///
+    /// Defaults to the built-in defaults (equivalent to an empty file) when
+    /// absent.  The `LIFED_CONFIG` environment variable is also accepted.
+    #[arg(long, env = "LIFED_CONFIG")]
+    config: Option<PathBuf>,
+}
+
+#[tokio::main]
+async fn main() -> LifedResult<()> {
+    let cli = Cli::parse();
+    let cfg = LifedConfig::load(cli.config.as_deref())?;
+
+    // Vigil init lands in BRO-899.  For now use tracing_subscriber directly so
+    // we have structured logs during bring-up.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&cfg.vigil.level)),
+        )
+        .init();
+
+    tracing::info!(
+        socket = %cfg.server.unix_socket.display(),
+        namespace = %cfg.lago.namespace,
+        "lifed starting",
+    );
+
+    let bootstrap = lifed::bootstrap::build_engine(&cfg).await?;
+    tracing::info!(
+        vms_replayed = bootstrap.replayed.live_vms.len(),
+        events_applied = bootstrap.replayed.events_applied,
+        "replay complete",
+    );
+
+    let seed = bootstrap.replayed.snapshot_vm_handles();
+    let shutdown_rx = lifed::shutdown::install_signal_handler();
+
+    // Hold `_tempdir` until the end of `main` so the in-memory journal's
+    // backing file is not deleted while the daemon is running.
+    let _tempdir = bootstrap._lago_tempdir;
+
+    lifed::listener::serve(&cfg, bootstrap.engine, shutdown_rx, seed).await?;
+
+    tracing::info!("lifed stopped");
+    Ok(())
 }
