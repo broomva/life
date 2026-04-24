@@ -96,7 +96,11 @@ pub struct BackendsConfig {
 
 impl Default for BackendsConfig {
     fn default() -> Self {
-        Self { local: defaults::enable_local(), cube: None, vercel: None }
+        Self {
+            local: defaults::enable_local(),
+            cube: None,
+            vercel: None,
+        }
     }
 }
 
@@ -168,7 +172,10 @@ pub struct LagoConfig {
 
 impl Default for LagoConfig {
     fn default() -> Self {
-        Self { namespace: defaults::lago_namespace(), store: LagoStoreKind::default() }
+        Self {
+            namespace: defaults::lago_namespace(),
+            store: LagoStoreKind::default(),
+        }
     }
 }
 
@@ -202,7 +209,10 @@ pub struct VigilConfig {
 
 impl Default for VigilConfig {
     fn default() -> Self {
-        Self { exporter: VigilExporter::default(), level: defaults::vigil_level() }
+        Self {
+            exporter: VigilExporter::default(),
+            level: defaults::vigil_level(),
+        }
     }
 }
 
@@ -222,13 +232,27 @@ pub enum VigilExporter {
 }
 
 mod defaults {
-    pub(super) fn drain_secs() -> u64 { 30 }
-    pub(super) fn enable_local() -> bool { true }
-    pub(super) fn gate_policy() -> String { "static".into() }
-    pub(super) fn gate_budget() -> String { "noop".into() }
-    pub(super) fn gate_network() -> String { "noop".into() }
-    pub(super) fn lago_namespace() -> String { "lifed".into() }
-    pub(super) fn vigil_level() -> String { "info".into() }
+    pub(super) fn drain_secs() -> u64 {
+        30
+    }
+    pub(super) fn enable_local() -> bool {
+        true
+    }
+    pub(super) fn gate_policy() -> String {
+        "static".into()
+    }
+    pub(super) fn gate_budget() -> String {
+        "noop".into()
+    }
+    pub(super) fn gate_network() -> String {
+        "noop".into()
+    }
+    pub(super) fn lago_namespace() -> String {
+        "lifed".into()
+    }
+    pub(super) fn vigil_level() -> String {
+        "info".into()
+    }
 }
 
 impl LifedConfig {
@@ -254,10 +278,7 @@ impl LifedConfig {
 
     /// Validate the loaded configuration for semantic correctness.
     pub(crate) fn validate(&self) -> LifedResult<()> {
-        if !self.backends.local
-            && self.backends.cube.is_none()
-            && self.backends.vercel.is_none()
-        {
+        if !self.backends.local && self.backends.cube.is_none() && self.backends.vercel.is_none() {
             return Err(LifedError::Config(
                 "at least one backend must be enabled ([backends] section)".into(),
             ));
@@ -342,8 +363,7 @@ mod tests {
         let cfg: LifedConfig = toml::from_str(toml_str).unwrap();
         assert!(matches!(cfg.lago.store, LagoStoreKind::InMemory));
 
-        let redb_str =
-            "[lago]\nnamespace = \"prod\"\n\n[lago.store]\nkind = \"redb\"\npath = \"/tmp/e.redb\"\n";
+        let redb_str = "[lago]\nnamespace = \"prod\"\n\n[lago.store]\nkind = \"redb\"\npath = \"/tmp/e.redb\"\n";
         let cfg2: LifedConfig = toml::from_str(redb_str).unwrap();
         assert!(matches!(cfg2.lago.store, LagoStoreKind::Redb { .. }));
     }
@@ -354,8 +374,7 @@ mod tests {
         let cfg: LifedConfig = toml::from_str(console).unwrap();
         assert!(matches!(cfg.vigil.exporter, VigilExporter::Console));
 
-        let otlp =
-            "[vigil]\nlevel = \"trace\"\n\n[vigil.exporter]\nkind = \"otlp\"\nendpoint = \"http://localhost:4317\"\n";
+        let otlp = "[vigil]\nlevel = \"trace\"\n\n[vigil.exporter]\nkind = \"otlp\"\nendpoint = \"http://localhost:4317\"\n";
         let cfg2: LifedConfig = toml::from_str(otlp).unwrap();
         assert!(matches!(cfg2.vigil.exporter, VigilExporter::Otlp { .. }));
     }
