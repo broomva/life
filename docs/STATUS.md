@@ -227,7 +227,8 @@ The baseline unification is active and enforced in production paths:
   - `lifectl` — operator CLI: `create-vm`, `dispatch`, `list-vms` over the same
     tonic contract.
   Tests: lifed 44 (+2 ignored), lifectl 15. Critical-path unblocks Phase 5
-  (arcand cutover / MVS ship). See `docs/superpowers/plans/2026-04-24-lifed-phase-2-daemon.md`.
+  (arcand cutover / MVS ship). PR #1014.
+  See `docs/superpowers/plans/2026-04-24-lifed-phase-2-daemon.md`.
 
 - ✅ `lifed` binary: tonic `KernelService` over Unix socket + optional vsock
 - ✅ `lifed` binary: Lago `EventStorePort` adapter for `kernel.*` events

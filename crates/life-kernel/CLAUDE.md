@@ -17,7 +17,7 @@ Spec: `../../../../docs/superpowers/specs/2026-04-23-lifed-kernel-daemon-design.
 
 - **Phase 0** — ABI Foundation: shipped (#963). `aios-protocol` additive extensions, `HypervisorBackend` promotion, conformance scaffold.
 - **Phase 1** — Kernel Proto + Core Library: shipped (#974). Four library-tier crates live; engine proven as a deterministic fold over the event journal.
-- **Phase 2** — lifed Daemon + Observability: **SHIPPED** (see PR). Boxes the Phase 1 library inside a systemd-managed binary; Lago + Vigil wiring; `lifectl` CLI; end-to-end tests. Plan: `docs/superpowers/plans/2026-04-24-lifed-phase-2-daemon.md`.
+- **Phase 2** — lifed Daemon + Observability: **SHIPPED** (#1014). Boxes the Phase 1 library inside a systemd-managed binary; Lago + Vigil wiring; `lifectl` CLI; end-to-end tests. Plan: `docs/superpowers/plans/2026-04-24-lifed-phase-2-daemon.md`.
 - **Phases 3–5** — `arcan-provider-cube`, real gates, arcand cutover. Parallelisable after Phase 2.
 
 ## Dependency rules
