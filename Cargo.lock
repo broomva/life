@@ -5575,6 +5575,7 @@ dependencies = [
  "life-kernel-gate",
  "life-kernel-proto",
  "life-vigil",
+ "opentelemetry",
  "prost 0.14.3",
  "serde",
  "serde_json",
@@ -5586,7 +5587,6 @@ dependencies = [
  "toml",
  "tonic 0.14.5",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
