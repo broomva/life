@@ -2,12 +2,14 @@
 //!
 //! Each RPC is a thin adapter: convert the proto request to canonical
 //! `aios_protocol` types, call the engine, convert the result back.
-//! `KernelError → tonic::Status` mapping lives here; tracing + metrics
-//! instrumentation is added in a follow-up ticket (BRO-899).
+//! `KernelError → tonic::Status` mapping lives here. Every handler is
+//! decorated with `#[tracing::instrument]` and emits `kernel.*` metrics
+//! via `KernelMetrics` (BRO-899).
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 
 use aios_protocol::hypervisor::{VmHandle, VmInfo};
 use aios_protocol::ports::KernelPort;
@@ -19,6 +21,8 @@ use std::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
+
+use crate::observability::KernelMetrics;
 
 /// Production `KernelService` impl backed by any `KernelPort` implementation.
 ///
@@ -38,6 +42,9 @@ pub struct LifeKernelService<E: KernelPort> {
     /// returns) via [`InFlightGuard`].  Exposed to the drain logic through
     /// [`Self::in_flight`].
     in_flight: Arc<AtomicUsize>,
+    /// Canonical `kernel.*` metric handles. Cheap to clone — backed by
+    /// `Arc`-wrapped OTel instrument handles internally.
+    metrics: KernelMetrics,
 }
 
 // Hand-written `Clone` so the bound is `E: KernelPort` and NOT
@@ -52,6 +59,7 @@ impl<E: KernelPort> Clone for LifeKernelService<E> {
             engine: Arc::clone(&self.engine),
             live_vms: Arc::clone(&self.live_vms),
             in_flight: Arc::clone(&self.in_flight),
+            metrics: self.metrics.clone(),
         }
     }
 }
@@ -67,6 +75,9 @@ impl<E: KernelPort + 'static> LifeKernelService<E> {
     /// Callers pass `bootstrap.replayed.snapshot_vm_handles()` to restore
     /// the VM index after a daemon restart without replaying from scratch at
     /// the RPC layer.
+    ///
+    /// `KernelMetrics::register()` is called internally; callers do not need
+    /// to construct metrics separately.
     pub fn with_seed(engine: Arc<E>, seed: Vec<VmHandle>) -> Self {
         let mut map = HashMap::new();
         for handle in seed {
@@ -76,6 +87,7 @@ impl<E: KernelPort + 'static> LifeKernelService<E> {
             engine,
             live_vms: Arc::new(RwLock::new(map)),
             in_flight: Arc::new(AtomicUsize::new(0)),
+            metrics: KernelMetrics::register(),
         }
     }
 
@@ -140,6 +152,13 @@ fn convert_error_to_status(err: life_kernel_proto::ConvertError) -> Status {
 
 #[tonic::async_trait]
 impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
+    #[tracing::instrument(
+        skip(self, request),
+        fields(
+            life.session_id = tracing::field::Empty,
+            kernel.vm_id = tracing::field::Empty,
+        )
+    )]
     async fn create_vm(
         &self,
         request: Request<pb::CreateVmRequest>,
@@ -150,16 +169,22 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
             .ok_or_else(|| Status::invalid_argument("missing spec"))?
             .try_into()
             .map_err(convert_error_to_status)?;
-        let ctx = inner
+        let ctx: aios_protocol::kernel::KernelContext = inner
             .ctx
             .ok_or_else(|| Status::invalid_argument("missing ctx"))?
             .try_into()
             .map_err(convert_error_to_status)?;
+
+        // Populate span fields now that we have a typed context.
+        tracing::Span::current().record("life.session_id", ctx.session_id.as_str());
+
         let handle = self
             .engine
             .create_vm(spec, ctx)
             .await
             .map_err(kernel_error_to_status)?;
+
+        tracing::Span::current().record("kernel.vm_id", handle.vm_id.0.as_str());
 
         // Insert into the live-VM index.
         {
@@ -170,12 +195,22 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
             map.insert(handle.vm_id.to_string(), handle.clone());
         }
 
+        self.metrics.record_lifecycle("create");
+
         let pb_handle: pb::VmHandle = handle
             .try_into()
             .map_err(|e: life_kernel_proto::ConvertError| Status::internal(e.to_string()))?;
         Ok(Response::new(pb_handle))
     }
 
+    #[tracing::instrument(
+        skip(self, request),
+        fields(
+            life.session_id = tracing::field::Empty,
+            kernel.vm_id = tracing::field::Empty,
+            kernel.tool_name = tracing::field::Empty,
+        )
+    )]
     async fn dispatch(
         &self,
         request: Request<pb::DispatchRequest>,
@@ -188,8 +223,8 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
         let pb_vm = inner
             .vm
             .ok_or_else(|| Status::invalid_argument("missing vm"))?;
-        let vm = pb_vm.try_into().map_err(convert_error_to_status)?;
-        let call = inner
+        let vm: VmHandle = pb_vm.try_into().map_err(convert_error_to_status)?;
+        let call: aios_protocol::tool::ToolCall = inner
             .call
             .ok_or_else(|| Status::invalid_argument("missing call"))?
             .try_into()
@@ -199,17 +234,33 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
             .ok_or_else(|| Status::invalid_argument("missing ctx"))?
             .try_into()
             .map_err(convert_error_to_status)?;
-        let result = self
-            .engine
-            .dispatch(&vm, call, &ctx)
-            .await
-            .map_err(kernel_error_to_status)?;
+
+        // Populate span fields before the await point.
+        tracing::Span::current().record("life.session_id", ctx.session_id.as_str());
+        tracing::Span::current().record("kernel.vm_id", vm.vm_id.0.as_str());
+        tracing::Span::current().record("kernel.tool_name", call.tool_name.as_str());
+
+        let tool_name = call.tool_name.clone();
+        let started = Instant::now();
+        let result = self.engine.dispatch(&vm, call, &ctx).await;
+        let elapsed = started.elapsed();
+
+        // Record dispatch duration regardless of success/failure.
+        self.metrics.observe_dispatch(elapsed, tool_name);
+
+        let result = result.map_err(kernel_error_to_status)?;
         let pb_result: pb::ToolResult = result
             .try_into()
             .map_err(|e: life_kernel_proto::ConvertError| Status::internal(e.to_string()))?;
         Ok(Response::new(pb_result))
     }
 
+    #[tracing::instrument(
+        skip(self, request),
+        fields(
+            kernel.vm_id = tracing::field::Empty,
+        )
+    )]
     async fn snapshot(
         &self,
         request: Request<pb::SnapshotRequest>,
@@ -218,18 +269,31 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
         let pb_vm = inner
             .vm
             .ok_or_else(|| Status::invalid_argument("missing vm"))?;
-        let vm = pb_vm.try_into().map_err(convert_error_to_status)?;
+        let vm: VmHandle = pb_vm.try_into().map_err(convert_error_to_status)?;
+
+        tracing::Span::current().record("kernel.vm_id", vm.vm_id.0.as_str());
+
         let handle = self
             .engine
             .snapshot(&vm, &inner.name)
             .await
             .map_err(kernel_error_to_status)?;
+
+        self.metrics.record_lifecycle("snapshot");
+
         // Infallible by design — see life-kernel-proto::convert line 548.
         // Promote to TryFrom + map_err if that ever changes.
         let pb_handle: pb::VmSnapshotHandle = handle.into();
         Ok(Response::new(pb_handle))
     }
 
+    #[tracing::instrument(
+        skip(self, request),
+        fields(
+            life.session_id = tracing::field::Empty,
+            kernel.vm_id = tracing::field::Empty,
+        )
+    )]
     async fn fork(
         &self,
         request: Request<pb::ForkRequest>,
@@ -245,22 +309,36 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
             .ok_or_else(|| Status::invalid_argument("missing spec"))?
             .try_into()
             .map_err(convert_error_to_status)?;
-        let ctx = inner
+        let ctx: aios_protocol::kernel::KernelContext = inner
             .ctx
             .ok_or_else(|| Status::invalid_argument("missing ctx"))?
             .try_into()
             .map_err(convert_error_to_status)?;
+
+        tracing::Span::current().record("life.session_id", ctx.session_id.as_str());
+
         let handle = self
             .engine
             .fork(&snapshot, spec, ctx)
             .await
             .map_err(kernel_error_to_status)?;
+
+        tracing::Span::current().record("kernel.vm_id", handle.vm_id.0.as_str());
+
+        self.metrics.record_lifecycle("fork");
+
         let pb_handle: pb::VmHandle = handle
             .try_into()
             .map_err(|e: life_kernel_proto::ConvertError| Status::internal(e.to_string()))?;
         Ok(Response::new(pb_handle))
     }
 
+    #[tracing::instrument(
+        skip(self, request),
+        fields(
+            kernel.vm_id = tracing::field::Empty,
+        )
+    )]
     async fn hibernate(
         &self,
         request: Request<pb::LifecycleRequest>,
@@ -269,14 +347,26 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
         let pb_vm = inner
             .vm
             .ok_or_else(|| Status::invalid_argument("missing vm"))?;
-        let vm = pb_vm.try_into().map_err(convert_error_to_status)?;
+        let vm: VmHandle = pb_vm.try_into().map_err(convert_error_to_status)?;
+
+        tracing::Span::current().record("kernel.vm_id", vm.vm_id.0.as_str());
+
         self.engine
             .hibernate(&vm)
             .await
             .map_err(kernel_error_to_status)?;
+
+        self.metrics.record_lifecycle("hibernate");
+
         Ok(Response::new(pb::Empty {}))
     }
 
+    #[tracing::instrument(
+        skip(self, request),
+        fields(
+            kernel.vm_id = tracing::field::Empty,
+        )
+    )]
     async fn resume(
         &self,
         request: Request<pb::LifecycleRequest>,
@@ -285,18 +375,30 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
         let pb_vm = inner
             .vm
             .ok_or_else(|| Status::invalid_argument("missing vm"))?;
-        let vm = pb_vm.try_into().map_err(convert_error_to_status)?;
+        let vm: VmHandle = pb_vm.try_into().map_err(convert_error_to_status)?;
+
+        tracing::Span::current().record("kernel.vm_id", vm.vm_id.0.as_str());
+
         let handle = self
             .engine
             .resume(&vm)
             .await
             .map_err(kernel_error_to_status)?;
+
+        self.metrics.record_lifecycle("resume");
+
         let pb_handle: pb::VmHandle = handle
             .try_into()
             .map_err(|e: life_kernel_proto::ConvertError| Status::internal(e.to_string()))?;
         Ok(Response::new(pb_handle))
     }
 
+    #[tracing::instrument(
+        skip(self, request),
+        fields(
+            kernel.vm_id = tracing::field::Empty,
+        )
+    )]
     async fn destroy(
         &self,
         request: Request<pb::DestroyRequest>,
@@ -309,6 +411,8 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
 
         // Capture vm_id before the engine consumes the handle.
         let vm_id_str = vm.vm_id.to_string();
+
+        tracing::Span::current().record("kernel.vm_id", vm_id_str.as_str());
 
         self.engine
             .destroy(vm)
@@ -324,11 +428,14 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
             map.remove(&vm_id_str);
         }
 
+        self.metrics.record_lifecycle("destroy");
+
         Ok(Response::new(pb::Empty {}))
     }
 
     type ListVmsStream = ReceiverStream<Result<pb::VmInfo, Status>>;
 
+    #[tracing::instrument(skip(self, request))]
     async fn list_vms(
         &self,
         request: Request<pb::ListVmsRequest>,
@@ -897,5 +1004,92 @@ mod tests {
             0,
             "counter must return to zero after dispatch completes"
         );
+    }
+
+    // ── BRO-899 metric smoke tests ────────────────────────────────────────────
+    //
+    // These tests verify that the metric handle construction and the
+    // record_lifecycle / observe_dispatch call paths do not panic. End-to-end
+    // metric pipeline verification (InMemoryMetricsExporter + reader) is done
+    // in BRO-903 where the full OTel SDK test harness is wired.
+
+    /// `KernelMetrics` registered inside `with_seed` is accessible via clone
+    /// and the `record_lifecycle` call path does not panic.
+    #[tokio::test]
+    async fn metric_record_lifecycle_smoke() {
+        let mock = MockKernel::new();
+        mock.push_create_vm(Ok(test_vm_handle()));
+        let svc = LifeKernelService::new(Arc::new(mock));
+
+        // Drive create_vm → triggers record_lifecycle("create") internally.
+        let req = Request::new(pb::CreateVmRequest {
+            spec: Some(test_vm_spec_pb()),
+            ctx: Some(test_ctx_pb()),
+        });
+        svc.create_vm(req)
+            .await
+            .expect("create_vm should succeed for metric smoke test");
+        // No assertion needed — the test passes if no panic occurs.
+    }
+
+    /// `observe_dispatch` path is exercised via a successful dispatch call;
+    /// verifies the timing path does not panic and the in-flight counter stays
+    /// consistent.
+    #[tokio::test]
+    async fn metric_observe_dispatch_smoke() {
+        let mock = MockKernel::new();
+        mock.push_dispatch(Ok(ToolResult {
+            call_id: "metric-smoke".into(),
+            tool_name: "read_file".into(),
+            output: serde_json::json!({"content": "hello"}),
+            content: None,
+            is_error: false,
+            usage: None,
+        }));
+        let svc = LifeKernelService::new(Arc::new(mock));
+
+        let call_pb = pb::ToolCall {
+            call_id: "metric-smoke".into(),
+            tool_name: "read_file".into(),
+            input_json: b"{\"path\":\"/tmp/x\"}".to_vec(),
+            requested_capabilities: vec![],
+        };
+        let req = Request::new(pb::DispatchRequest {
+            vm: Some(test_vm_handle_pb()),
+            call: Some(call_pb),
+            ctx: Some(test_ctx_pb()),
+        });
+        svc.dispatch(req)
+            .await
+            .expect("dispatch should succeed for metric smoke test");
+
+        // Counter back at zero after successful dispatch.
+        assert_eq!(svc.in_flight().load(Ordering::SeqCst), 0);
+    }
+
+    /// All six lifecycle actions flow through `record_lifecycle` without panic.
+    #[tokio::test]
+    async fn metric_all_lifecycle_actions_smoke() {
+        use crate::observability::KernelMetrics;
+        let metrics = KernelMetrics::register();
+        for action in &[
+            "create",
+            "destroy",
+            "hibernate",
+            "resume",
+            "snapshot",
+            "fork",
+        ] {
+            metrics.record_lifecycle(action);
+        }
+    }
+
+    /// `LifeKernelService<E>: Clone` still holds after the metrics field was
+    /// added in BRO-899.
+    #[tokio::test]
+    async fn service_clone_with_metrics_field() {
+        let svc = LifeKernelService::new(Arc::new(MockKernel::new()));
+        let _clone = svc.clone();
+        // Drives `KernelMetrics: Clone` — test passes if no panic.
     }
 }
