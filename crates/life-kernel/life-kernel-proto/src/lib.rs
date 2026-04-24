@@ -54,6 +54,13 @@ pub mod approvals {
     tonic::include_proto!("broomva.life.kernel.v1.approvals");
 }
 
+/// `life.Policy` — PolicyGatePort projection (served direct from lifed
+/// via `life-kernel-gate`).
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod policy {
+    tonic::include_proto!("broomva.life.kernel.v1.policy");
+}
+
 mod convert;
 
 pub use convert::ConvertError;
