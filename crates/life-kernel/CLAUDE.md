@@ -10,14 +10,14 @@ Spec: `../../../../docs/superpowers/specs/2026-04-23-lifed-kernel-daemon-design.
 - `life-kernel-core` — `KernelPort` engine composing `BackendRegistry` + `GateChain` + `MeteringWrapper` over any `HypervisorBackend`. Pure state machine; reconstructable from the Lago event stream via `KernelEngine::replay`. (SHIPPED in Phase 1, #974.)
 - `life-kernel-gate` — Phase 1 MVS gate impls: `NoOpBudgetGate`, `NoOpNetworkIsolation`, `StaticPolicyGate` (wraps `aios-policy::PolicyGatePort`). Real budget + network impls land in Phase 4. (SHIPPED in Phase 1, #974.)
 - `life-kernel-conformance` — backend-agnostic conformance battery (lifecycle / errors / metering / events). 100% green against `arcan-provider-local` through `life-kernel-core`. (SCAFFOLDED in Phase 0, FLESHED OUT in Phase 1.)
-- `lifed` (binary) — the daemon. **NOT YET CREATED; Phase 2.**
-- `lifectl` (binary) — operator CLI over the tonic contract. **NOT YET CREATED; Phase 2.**
+- `lifed` (binary) — daemon hosting the `KernelEngine`; Unix + vsock transport, Lago + Vigil wired, replay-on-restart + graceful shutdown + systemd unit. (SHIPPED in Phase 2.)
+- `lifectl` (binary) — operator CLI: `create-vm`, `dispatch`, `list-vms` over the tonic Unix-socket contract. (SHIPPED in Phase 2.)
 
 ## Phase status
 
 - **Phase 0** — ABI Foundation: shipped (#963). `aios-protocol` additive extensions, `HypervisorBackend` promotion, conformance scaffold.
 - **Phase 1** — Kernel Proto + Core Library: shipped (#974). Four library-tier crates live; engine proven as a deterministic fold over the event journal.
-- **Phase 2** — lifed Daemon + Observability: in progress. Boxes the Phase 1 library inside a systemd-managed binary; Lago + Vigil wiring; `lifectl` CLI. Plan: `docs/superpowers/plans/2026-04-24-lifed-phase-2-daemon.md`.
+- **Phase 2** — lifed Daemon + Observability: **SHIPPED** (see PR). Boxes the Phase 1 library inside a systemd-managed binary; Lago + Vigil wiring; `lifectl` CLI; end-to-end tests. Plan: `docs/superpowers/plans/2026-04-24-lifed-phase-2-daemon.md`.
 - **Phases 3–5** — `arcan-provider-cube`, real gates, arcand cutover. Parallelisable after Phase 2.
 
 ## Dependency rules

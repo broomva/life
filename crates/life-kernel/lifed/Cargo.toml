@@ -24,6 +24,7 @@ vsock-listener = []
 
 [dependencies]
 aios-protocol.workspace = true
+anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 clap.workspace = true
@@ -32,7 +33,7 @@ lago-core.workspace = true
 lago-journal.workspace = true
 life-kernel-core.workspace = true
 life-kernel-gate.workspace = true
-life-kernel-proto = { workspace = true, features = ["server"] }
+life-kernel-proto = { workspace = true, features = ["server", "client"] }
 life-vigil.workspace = true
 opentelemetry.workspace = true
 prost.workspace = true
@@ -57,6 +58,8 @@ tokio-vsock = { version = "0.5", default-features = false }
 [dev-dependencies]
 # tempfile is declared in [dependencies] for production use
 # (Bootstrap._lago_tempdir); no extra dev-only tempfile needed.
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower.workspace = true
 
 [lints]
 workspace = true

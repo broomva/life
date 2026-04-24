@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use lifed::{LifedConfig, LifedResult};
+use lifed::LifedConfig;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -30,7 +30,7 @@ struct Cli {
 }
 
 #[tokio::main]
-async fn main() -> LifedResult<()> {
+async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let cfg = LifedConfig::load(cli.config.as_deref())?;
 

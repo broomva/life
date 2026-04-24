@@ -28,7 +28,17 @@ check_no_dep() {
 }
 
 echo "=== life-kernel dependency rules ==="
+# Library-tier crates: must not depend on runtime/adapter crates.
 for crate in life-kernel-proto life-kernel-core life-kernel-gate life-kernel-conformance; do
+    check_no_dep "$crate" "arcand"
+    check_no_dep "$crate" "arcan-core"
+    check_no_dep "$crate" "arcan-harness"
+    check_no_dep "$crate" "arcan-aios-adapters"
+done
+# Binary-tier crates (lifed, lifectl): also must not pull in the
+# runtime/adapter crates (they depend on arcan-provider-* via
+# life-kernel-core, but not on arcand/arcan-core/arcan-harness/arcan-aios-adapters).
+for crate in lifed lifectl; do
     check_no_dep "$crate" "arcand"
     check_no_dep "$crate" "arcan-core"
     check_no_dep "$crate" "arcan-harness"

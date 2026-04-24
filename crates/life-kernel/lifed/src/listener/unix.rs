@@ -16,7 +16,18 @@ use crate::error::{LifedError, LifedResult};
 ///
 /// The `router` argument is consumed because `Router::serve_with_incoming_shutdown`
 /// takes `self` — callers must not re-use it after calling this function.
-pub async fn serve(
+///
+/// # Bind→chmod Race
+///
+/// [`UnixListener::bind`] creates the socket file at the OS-default mode
+/// controlled by the process `umask`. The subsequent `set_permissions` call
+/// is a separate syscall, so there is a brief window between `bind` and the
+/// `chmod` where the socket exists at the default mode (typically `0666 & ~umask`).
+/// Production deployments that need strict mode-at-bind semantics should use
+/// systemd's `SocketMode=0660` directive (combined with `Type=notify` or a
+/// socket-activated unit) to set the mode at bind time, outside the daemon
+/// process.
+pub(crate) async fn serve(
     cfg: &ServerConfig,
     router: Router,
     shutdown_rx: oneshot::Receiver<()>,
