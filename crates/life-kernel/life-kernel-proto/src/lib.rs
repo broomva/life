@@ -29,6 +29,13 @@ pub mod pb {
     tonic::include_proto!("broomva.life.kernel.v1");
 }
 
+/// Shared wire DTOs — `LifeError`, `Attribution`, `Pagination`, and the
+/// typed ID wrappers used across every `life.*` service proto.
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod common {
+    tonic::include_proto!("broomva.life.kernel.v1.common");
+}
+
 mod convert;
 
 pub use convert::ConvertError;

@@ -1,0 +1,54 @@
+syntax = "proto3";
+package broomva.life.kernel.v1.common;
+
+import "google/protobuf/timestamp.proto";
+
+// Canonical error surface for every life.* service. Adapters in
+// life-kernel-facade map KernelError -> LifeError; clients map back.
+message LifeError {
+    Kind kind = 1;
+    string message = 2;
+    // Opaque — serialized detail payload (JSON). Clients inspect when
+    // the kind is insufficient.
+    bytes detail_json = 3;
+
+    enum Kind {
+        KIND_UNKNOWN = 0;
+        BACKEND_UNAVAILABLE = 1;
+        BACKEND_REJECTED = 2;
+        BACKEND_PROTOCOL = 3;
+        BACKEND_STREAM_BROKEN = 4;
+        POLICY_DENIED = 5;
+        BUDGET_EXHAUSTED = 6;
+        APPROVAL_REQUIRED = 7;
+        UNIMPLEMENTED = 8;
+        CAPABILITY_UNAVAILABLE = 9;
+        INVALID_ARGUMENT = 10;
+        NOT_FOUND = 11;
+    }
+}
+
+// Session/agent/wallet attribution. Threaded through every mutating
+// call so downstream daemons can log and enforce against the caller.
+message Attribution {
+    string session_id = 1;
+    string agent_id = 2;
+    optional string wallet_address = 3;
+    optional string wallet_chain_caip2 = 4;
+}
+
+// Cursor + limit for list-style RPCs.
+message Pagination {
+    optional uint32 limit = 1;
+    optional string cursor = 2;
+}
+
+// Common identifiers. Keeping them here avoids repeating the
+// (value=) wrapper pattern inside each service.
+message SessionId { string value = 1; }
+message AgentId   { string value = 1; }
+message BranchId  { string value = 1; }
+message ApprovalId { string value = 1; }
+
+// Scalar alias for monotonic event sequence numbers.
+message SequenceNumber { uint64 value = 1; }
