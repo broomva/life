@@ -33,11 +33,15 @@ use crate::error::{LifedError, LifedResult};
 // we redeclare them here scoped to bootstrap, with a comment pointing at the
 // source.
 
-/// Allow-all [`PolicyGatePort`] — returns an all-allowed decision for every
-/// session. Phase 2 MVS only; real policy lands in Phase 4.
+/// Phase 2 MVS stub: grants every requested capability without consulting
+/// any policy document. Echoes the caller's `requested` list back on
+/// `allowed` so the positive contract is explicit — a reader sees "every
+/// capability the caller asked for is allowed" rather than the ambiguous
+/// empty-vector shape that also happens to produce `Allow` via
+/// `StaticPolicyGate`'s mapping.
 ///
-/// Shape mirrors the `StubPolicyGate` in
-/// `life-kernel-gate/src/policy.rs` tests (allow-everything variant).
+/// Real, policy-driven evaluation lands in Phase 4. Shape mirrors the
+/// `StubPolicyGate` from `life-kernel-gate/src/policy.rs` tests.
 struct AllowAllPolicyGate;
 
 #[async_trait]
@@ -45,10 +49,13 @@ impl PolicyGatePort for AllowAllPolicyGate {
     async fn evaluate(
         &self,
         _session_id: SessionId,
-        _requested: Vec<Capability>,
+        requested: Vec<Capability>,
     ) -> LegacyKernelResult<PolicyGateDecision> {
+        // Echo requested capabilities into `allowed` so the decision's
+        // positive side mirrors the input — the Phase 2 stub explicitly
+        // grants everything the caller asked for.
         Ok(PolicyGateDecision {
-            allowed: Vec::new(),
+            allowed: requested,
             requires_approval: Vec::new(),
             denied: Vec::new(),
         })
@@ -179,19 +186,20 @@ pub async fn build_engine(cfg: &LifedConfig) -> LifedResult<Bootstrap> {
         builder = builder.register_backend(Arc::new(local)).await;
     }
 
-    // Cube backend — placeholder until Phase 3 (BRO-???).
+    // Cube backend — placeholder until BRO-859 lands.
     if let Some(_cube_cfg) = &cfg.backends.cube {
         unimplemented!(
-            "Cube backend unavailable until BRO-??? (Phase 3). \
+            "Cube backend unavailable until BRO-859 (Phase 3 — arcan-provider-cube). \
              Remove [backends.cube] from your config to use the local backend."
         );
     }
 
-    // Vercel backend — placeholder until Phase 4 (BRO-???).
+    // Vercel backend — placeholder until BRO-860 lands.
     if let Some(_vercel_cfg) = &cfg.backends.vercel {
         unimplemented!(
-            "Vercel backend unavailable until BRO-??? (Phase 4). \
-             Remove [backends.vercel] from your config to use the local backend."
+            "Vercel backend unavailable until BRO-860 (Phase 4 — First Real Gates, \
+             Vercel provider wiring). Remove [backends.vercel] from your config \
+             to use the local backend."
         );
     }
 
@@ -266,10 +274,18 @@ async fn replay_from_store(
 
         let batch_len = batch.len();
         for record in &batch {
-            // Advance cursor past the last sequence we read.
-            if record.sequence >= cursor {
-                cursor = record.sequence + 1;
+            // An EventStorePort adapter that ever returns records out of
+            // order is a correctness bug in the adapter — making the skip
+            // loud surfaces that bug instead of silently folding a
+            // corrupted state.
+            if record.sequence < cursor {
+                warn!(
+                    seq = record.sequence,
+                    cursor, "out-of-order record during replay — skipping",
+                );
+                continue;
             }
+            cursor = record.sequence + 1;
         }
         all_records.extend(batch);
 
@@ -488,5 +504,54 @@ mod tests {
             Err(other) => panic!("expected LifedError::Config, got: {other:?}"),
             Ok(_) => panic!("expected an error when no backends are enabled, but got Ok"),
         }
+    }
+
+    /// Happy-path end-to-end wiring: default config (local = true, lago =
+    /// InMemory) builds a complete [`Bootstrap`] whose engine, event store,
+    /// replayed state, and TempDir are all in the expected shape.
+    ///
+    /// Gated behind `#[ignore]` because `LocalSandboxProvider::from_env()`
+    /// probes the host for Docker / nsjail and returns `Err` when neither
+    /// is available. CI runners without either will fail otherwise. Run
+    /// locally with:
+    ///
+    /// ```bash
+    /// cargo test -p lifed -- --ignored \
+    ///   build_engine_succeeds_with_local_backend_and_in_memory_lago
+    /// ```
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires Docker or nsjail on the host for LocalSandboxProvider::from_env()"]
+    async fn build_engine_succeeds_with_local_backend_and_in_memory_lago() {
+        let cfg = LifedConfig::default();
+        let bootstrap = build_engine(&cfg).await.expect("build_engine must succeed");
+
+        // Engine is Arc-wrapped; strong count is ≥ 1 while the Bootstrap
+        // holds it, and exactly 1 here since nothing else has cloned it.
+        assert!(Arc::strong_count(&bootstrap.engine) >= 1);
+
+        // Empty store → replay folds nothing.
+        assert_eq!(bootstrap.replayed.events_applied, 0);
+
+        // Session ID derived from namespace (default `"lifed"`).
+        assert_eq!(bootstrap.session_id.as_str(), "lifed:lifed");
+
+        // Branch defaults to "main".
+        assert_eq!(bootstrap.branch_id.as_str(), "main");
+
+        // Event store is functional: `head` must succeed and return 0 for a
+        // fresh in-memory journal.
+        let head = bootstrap
+            .event_store
+            .head(bootstrap.session_id.clone(), bootstrap.branch_id.clone())
+            .await
+            .expect("event_store head must succeed on a fresh store");
+        assert_eq!(head, 0);
+
+        // InMemory variant must carry a TempDir so the backing file survives
+        // the bootstrap call.
+        assert!(
+            bootstrap._lago_tempdir.is_some(),
+            "InMemory store must own a TempDir"
+        );
     }
 }
