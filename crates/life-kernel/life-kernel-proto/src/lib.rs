@@ -42,6 +42,12 @@ pub mod events {
     tonic::include_proto!("broomva.life.kernel.v1.events");
 }
 
+/// `life.Session` — SessionPort projection (served by arcand).
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod session {
+    tonic::include_proto!("broomva.life.kernel.v1.session");
+}
+
 mod convert;
 
 pub use convert::ConvertError;

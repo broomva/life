@@ -1,0 +1,57 @@
+syntax = "proto3";
+package broomva.life.kernel.v1.session;
+
+import "common.proto";
+import "events.proto";
+
+message SessionManifest {
+    // Opaque — serialized aios_protocol::session::SessionManifest.
+    bytes manifest_json = 1;
+}
+
+message CreateRequest {
+    broomva.life.kernel.v1.common.Attribution attribution = 1;
+    // Opaque — serialized aios_protocol::session::CreateSessionRequest.
+    bytes request_json = 2;
+}
+
+message SessionFilterWire {
+    // Opaque — serialized aios_protocol::session::SessionFilter.
+    bytes filter_json = 1;
+}
+
+message ListResponse { repeated SessionManifest manifests = 1; }
+
+message GetRequest   { broomva.life.kernel.v1.common.SessionId session = 1; }
+message ListRequest  { SessionFilterWire filter = 1; }
+
+message TickRequest {
+    broomva.life.kernel.v1.common.SessionId session = 1;
+    // Opaque — serialized aios_protocol::session::TickInput.
+    bytes input_json = 2;
+}
+message TickResponse {
+    // Opaque — serialized aios_protocol::session::TickOutput.
+    bytes output_json = 1;
+}
+
+message StreamEventsRequest {
+    broomva.life.kernel.v1.common.SessionId session = 1;
+    broomva.life.kernel.v1.common.BranchId branch = 2;
+    uint64 after_sequence = 3;
+}
+
+message CloseRequest {
+    broomva.life.kernel.v1.common.SessionId session = 1;
+    string reason = 2;
+}
+message CloseResponse {}
+
+service SessionService {
+    rpc Create(CreateRequest) returns (SessionManifest);
+    rpc Get(GetRequest) returns (SessionManifest);
+    rpc List(ListRequest) returns (ListResponse);
+    rpc Tick(TickRequest) returns (TickResponse);
+    rpc StreamEvents(StreamEventsRequest) returns (stream broomva.life.kernel.v1.events.EventRecord);
+    rpc Close(CloseRequest) returns (CloseResponse);
+}
