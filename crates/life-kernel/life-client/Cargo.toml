@@ -17,9 +17,12 @@ tcp   = []
 [dependencies]
 aios-protocol.workspace = true
 async-trait.workspace = true
+chrono = { workspace = true, features = ["serde"] }
 futures = { workspace = true, features = ["std"] }
 life-kernel-proto = { workspace = true, features = ["client"] }
 prost.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt", "sync"] }
 tokio-stream.workspace = true

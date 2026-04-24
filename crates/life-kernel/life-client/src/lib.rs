@@ -17,3 +17,30 @@ pub mod services;
 
 pub use connect::{LifeClient, LifeTransport};
 pub use error::{LifeClientError, LifeResult};
+
+impl LifeClient {
+    /// Handle over the `life.Kernel` service.
+    pub fn kernel(&self) -> services::Kernel<'_> {
+        services::Kernel::new(self)
+    }
+
+    /// Handle over the `life.Events` service.
+    pub fn events(&self) -> services::Events<'_> {
+        services::Events::new(self)
+    }
+
+    /// Handle over the `life.Session` service.
+    pub fn session(&self) -> services::Session<'_> {
+        services::Session::new(self)
+    }
+
+    /// Handle over the `life.Approvals` service.
+    pub fn approvals(&self) -> services::Approvals<'_> {
+        services::Approvals::new(self)
+    }
+
+    /// Handle over the `life.Policy` service.
+    pub fn policy(&self) -> services::Policy<'_> {
+        services::Policy::new(self)
+    }
+}
