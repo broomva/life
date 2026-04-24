@@ -20,9 +20,22 @@ use tonic::{Request, Response, Status};
 ///
 /// Generic so tests can inject a mock; production always passes
 /// `Arc<KernelEngine>`.
-#[derive(Clone)]
 pub struct LifeKernelService<E: KernelPort> {
     engine: Arc<E>,
+}
+
+// Hand-written `Clone` so the bound is `E: KernelPort` and NOT
+// `E: KernelPort + Clone`. `KernelEngine` itself is not `Clone` (it holds
+// `Arc<GateChain>` + `Arc<EventEmitter>` internally), so `#[derive(Clone)]`
+// would silently fail to provide `LifeKernelService<KernelEngine>: Clone`
+// — which `tonic::transport::Server::add_service` and any multi-threaded
+// service wiring will require.
+impl<E: KernelPort> Clone for LifeKernelService<E> {
+    fn clone(&self) -> Self {
+        Self {
+            engine: Arc::clone(&self.engine),
+        }
+    }
 }
 
 impl<E: KernelPort + 'static> LifeKernelService<E> {
@@ -133,6 +146,8 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
             .snapshot(&vm, &inner.name)
             .await
             .map_err(kernel_error_to_status)?;
+        // Infallible by design — see life-kernel-proto::convert line 548.
+        // Promote to TryFrom + map_err if that ever changes.
         let pb_handle: pb::VmSnapshotHandle = handle.into();
         Ok(Response::new(pb_handle))
     }
@@ -293,6 +308,26 @@ mod tests {
 
         fn push_dispatch(&self, r: aios_protocol::kernel::KernelResult<ToolResult>) {
             self.dispatch_results.lock().unwrap().push_back(r);
+        }
+
+        fn push_snapshot(&self, r: aios_protocol::kernel::KernelResult<VmSnapshotHandle>) {
+            self.snapshot_results.lock().unwrap().push_back(r);
+        }
+
+        fn push_fork(&self, r: aios_protocol::kernel::KernelResult<VmHandle>) {
+            self.fork_results.lock().unwrap().push_back(r);
+        }
+
+        fn push_hibernate(&self, r: aios_protocol::kernel::KernelResult<()>) {
+            self.hibernate_results.lock().unwrap().push_back(r);
+        }
+
+        fn push_resume(&self, r: aios_protocol::kernel::KernelResult<VmHandle>) {
+            self.resume_results.lock().unwrap().push_back(r);
+        }
+
+        fn push_destroy(&self, r: aios_protocol::kernel::KernelResult<()>) {
+            self.destroy_results.lock().unwrap().push_back(r);
         }
     }
 
@@ -529,6 +564,18 @@ mod tests {
             .await
             .expect_err("gate denial must propagate");
         assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    }
+
+    /// Locks in the `Clone` guarantee: `LifeKernelService<E>` must be
+    /// cloneable regardless of whether `E: Clone`. The production engine
+    /// (`KernelEngine`) is NOT `Clone`; `#[derive(Clone)]` would silently
+    /// constrain the impl to `E: Clone` and would require a refactor when
+    /// `tonic::transport::Server::add_service` is wired in BRO-896.
+    /// This test ensures the hand-written `Clone` impl stays in place.
+    #[tokio::test]
+    async fn service_is_clone_regardless_of_engine_clone() {
+        let svc = LifeKernelService::new(Arc::new(MockKernel::new()));
+        let _clone = svc.clone();
     }
 
     /// `list_vms` with an optional session filter must return `Ok(Response)`
