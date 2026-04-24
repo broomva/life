@@ -8,6 +8,7 @@
 // warnings until the entrypoint lands; BRO-900 removes this allow.
 #![allow(dead_code)]
 
+mod bootstrap;
 mod config;
 mod error;
 mod server;
