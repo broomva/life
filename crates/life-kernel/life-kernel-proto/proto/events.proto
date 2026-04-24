@@ -1,0 +1,58 @@
+syntax = "proto3";
+package broomva.life.kernel.v1.events;
+
+import "google/protobuf/timestamp.proto";
+import "common.proto";
+
+// Wire projection of aios_protocol::event::EventRecord.
+message EventRecord {
+    string event_id = 1;
+    string session_id = 2;
+    string branch_id = 3;
+    string agent_id = 4;
+    uint64 sequence = 5;
+    google.protobuf.Timestamp recorded_at = 6;
+    // Opaque — serialized aios_protocol::event::EventKind (JSON) so we
+    // do not fan out 100+ event-kind messages into the wire surface.
+    bytes kind_json = 7;
+    optional bytes causation_json = 8;
+}
+
+message AppendRequest {
+    broomva.life.kernel.v1.common.Attribution attribution = 1;
+    EventRecord record = 2;
+}
+message AppendResponse {
+    EventRecord record = 1;
+}
+
+message ReadRequest {
+    broomva.life.kernel.v1.common.SessionId session = 1;
+    broomva.life.kernel.v1.common.BranchId branch = 2;
+    uint64 after_sequence = 3;
+    optional uint32 limit = 4;
+}
+message ReadResponse {
+    repeated EventRecord records = 1;
+}
+
+message HeadRequest {
+    broomva.life.kernel.v1.common.SessionId session = 1;
+    broomva.life.kernel.v1.common.BranchId branch = 2;
+}
+message HeadResponse {
+    broomva.life.kernel.v1.common.SequenceNumber head = 1;
+}
+
+message SubscribeRequest {
+    broomva.life.kernel.v1.common.SessionId session = 1;
+    broomva.life.kernel.v1.common.BranchId branch = 2;
+    uint64 after_sequence = 3;
+}
+
+service EventsService {
+    rpc Append(AppendRequest) returns (AppendResponse);
+    rpc Read(ReadRequest) returns (ReadResponse);
+    rpc Head(HeadRequest) returns (HeadResponse);
+    rpc Subscribe(SubscribeRequest) returns (stream EventRecord);
+}

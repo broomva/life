@@ -36,6 +36,12 @@ pub mod common {
     tonic::include_proto!("broomva.life.kernel.v1.common");
 }
 
+/// `life.Events` — EventStorePort projection (served by lagod).
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod events {
+    tonic::include_proto!("broomva.life.kernel.v1.events");
+}
+
 mod convert;
 
 pub use convert::ConvertError;
