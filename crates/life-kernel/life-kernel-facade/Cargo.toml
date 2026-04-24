@@ -35,8 +35,10 @@ life-lago  = { workspace = true, default-features = false, features = ["schema"]
 
 [dev-dependencies]
 assert_matches.workspace = true
+life-client.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }
+tokio-stream = { workspace = true, features = ["net"] }
 tonic-prost.workspace = true
 wiremock.workspace = true
 

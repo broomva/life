@@ -85,8 +85,10 @@ impl LifeClient {
     }
 
     /// Access the underlying tonic `Channel` — used by service handles
-    /// to construct the generated client stubs.
-    pub(crate) fn channel(&self) -> Channel {
+    /// to construct the generated client stubs, and by advanced
+    /// consumers that need to reach a service not yet exposed as a
+    /// typed handle (for example, the v0.2 reserved stubs).
+    pub fn channel(&self) -> Channel {
         self.channel.clone()
     }
 }
