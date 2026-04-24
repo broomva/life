@@ -48,6 +48,12 @@ pub mod session {
     tonic::include_proto!("broomva.life.kernel.v1.session");
 }
 
+/// `life.Approvals` — ApprovalPort projection (served by arcand).
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod approvals {
+    tonic::include_proto!("broomva.life.kernel.v1.approvals");
+}
+
 mod convert;
 
 pub use convert::ConvertError;
