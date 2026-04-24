@@ -5,13 +5,17 @@
 //! `KernelError → tonic::Status` mapping lives here; tracing + metrics
 //! instrumentation is added in a follow-up ticket (BRO-899).
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use aios_protocol::hypervisor::{VmHandle, VmInfo};
 use aios_protocol::ports::KernelPort;
 use life_kernel_proto::pb::{
     self,
     kernel_service_server::{KernelService, KernelServiceServer},
 };
+use std::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -22,6 +26,18 @@ use tonic::{Request, Response, Status};
 /// `Arc<KernelEngine>`.
 pub struct LifeKernelService<E: KernelPort> {
     engine: Arc<E>,
+    /// Live-VM index, keyed by stringified `VmId`. Seeded from
+    /// `ReplayedState::snapshot_vm_handles()` at daemon start and kept
+    /// consistent by `create_vm` / `destroy`. `list_vms` reads from it.
+    ///
+    /// Uses `std::sync::RwLock` — all reads/writes are short and synchronous,
+    /// so there is no need for the `tokio::sync::RwLock` overhead.
+    live_vms: Arc<RwLock<HashMap<String, VmHandle>>>,
+    /// Number of dispatches currently in-flight.  Bracketed by
+    /// `fetch_add(1)` on entry and `fetch_sub(1)` on exit (including early
+    /// returns) via [`InFlightGuard`].  Exposed to the drain logic through
+    /// [`Self::in_flight`].
+    in_flight: Arc<AtomicUsize>,
 }
 
 // Hand-written `Clone` so the bound is `E: KernelPort` and NOT
@@ -34,19 +50,67 @@ impl<E: KernelPort> Clone for LifeKernelService<E> {
     fn clone(&self) -> Self {
         Self {
             engine: Arc::clone(&self.engine),
+            live_vms: Arc::clone(&self.live_vms),
+            in_flight: Arc::clone(&self.in_flight),
         }
     }
 }
 
 impl<E: KernelPort + 'static> LifeKernelService<E> {
-    /// Construct a service over the given engine.
+    /// Construct a service over the given engine with an empty live-VM index.
     pub fn new(engine: Arc<E>) -> Self {
-        Self { engine }
+        Self::with_seed(engine, Vec::new())
+    }
+
+    /// Construct a service and seed the live-VM index from a prior replay.
+    ///
+    /// Callers pass `bootstrap.replayed.snapshot_vm_handles()` to restore
+    /// the VM index after a daemon restart without replaying from scratch at
+    /// the RPC layer.
+    pub fn with_seed(engine: Arc<E>, seed: Vec<VmHandle>) -> Self {
+        let mut map = HashMap::new();
+        for handle in seed {
+            map.insert(handle.vm_id.to_string(), handle);
+        }
+        Self {
+            engine,
+            live_vms: Arc::new(RwLock::new(map)),
+            in_flight: Arc::new(AtomicUsize::new(0)),
+        }
     }
 
     /// Wrap the service in a tonic `KernelServiceServer` ready to add to a router.
     pub fn into_server(self) -> KernelServiceServer<Self> {
         KernelServiceServer::new(self)
+    }
+
+    /// Return a reference-counted handle to the in-flight counter.
+    ///
+    /// The shutdown / drain logic calls this to wait for all in-flight
+    /// dispatches to complete before the process exits.
+    pub fn in_flight(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.in_flight)
+    }
+}
+
+// ── RAII guard for in-flight dispatch accounting ─────────────────────────────
+
+/// Increments the in-flight counter on construction; decrements on drop.
+///
+/// Using a guard struct ensures the counter is decremented even when an RPC
+/// handler returns early via `?`.
+struct InFlightGuard(Arc<AtomicUsize>);
+
+impl InFlightGuard {
+    fn new(counter: &Arc<AtomicUsize>) -> Self {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(counter))
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -96,6 +160,16 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
             .create_vm(spec, ctx)
             .await
             .map_err(kernel_error_to_status)?;
+
+        // Insert into the live-VM index.
+        {
+            let mut map = self
+                .live_vms
+                .write()
+                .expect("live_vms RwLock poisoned in create_vm");
+            map.insert(handle.vm_id.to_string(), handle.clone());
+        }
+
         let pb_handle: pb::VmHandle = handle
             .try_into()
             .map_err(|e: life_kernel_proto::ConvertError| Status::internal(e.to_string()))?;
@@ -106,6 +180,10 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
         &self,
         request: Request<pb::DispatchRequest>,
     ) -> Result<Response<pb::ToolResult>, Status> {
+        // Bracket the entire handler with an in-flight guard so any early
+        // return via `?` still decrements the counter.
+        let _guard = InFlightGuard::new(&self.in_flight);
+
         let inner = request.into_inner();
         let pb_vm = inner
             .vm
@@ -227,11 +305,25 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
         let pb_vm = inner
             .vm
             .ok_or_else(|| Status::invalid_argument("missing vm"))?;
-        let vm = pb_vm.try_into().map_err(convert_error_to_status)?;
+        let vm: VmHandle = pb_vm.try_into().map_err(convert_error_to_status)?;
+
+        // Capture vm_id before the engine consumes the handle.
+        let vm_id_str = vm.vm_id.to_string();
+
         self.engine
             .destroy(vm)
             .await
             .map_err(kernel_error_to_status)?;
+
+        // Remove from live-VM index on successful destroy.
+        {
+            let mut map = self
+                .live_vms
+                .write()
+                .expect("live_vms RwLock poisoned in destroy");
+            map.remove(&vm_id_str);
+        }
+
         Ok(Response::new(pb::Empty {}))
     }
 
@@ -241,13 +333,56 @@ impl<E: KernelPort + 'static> KernelService for LifeKernelService<E> {
         &self,
         request: Request<pb::ListVmsRequest>,
     ) -> Result<Response<Self::ListVmsStream>, Status> {
-        // Session filter is parsed so callers discover the filter surface
-        // via their generated stubs. The live-VM index is seeded in BRO-900;
-        // until then the daemon reports an empty result regardless of filter.
-        let _session_filter = request.into_inner().session_id.map(|id| id.value);
+        let session_filter = request.into_inner().session_id.map(|id| id.value);
+
+        // Snapshot the live-VM map under a short read-lock, then stream items
+        // through a buffered channel (buffer 32, as per spec).  The channel
+        // task runs independently so the RPC handler can return quickly.
+        let snapshot: Vec<VmHandle> = {
+            let map = self
+                .live_vms
+                .read()
+                .expect("live_vms RwLock poisoned in list_vms");
+            map.values()
+                .filter(|h| {
+                    // Apply optional session filter.
+                    if let Some(ref filter) = session_filter {
+                        h.session_id.as_str() == filter.as_str()
+                    } else {
+                        true
+                    }
+                })
+                .cloned()
+                .collect()
+        };
 
         let (tx, rx) = mpsc::channel::<Result<pb::VmInfo, Status>>(32);
-        drop(tx); // Close immediately — placeholder response until BRO-900.
+
+        tokio::spawn(async move {
+            for handle in snapshot {
+                // Convert VmHandle → VmInfo (dropping session_id/agent_id/metadata
+                // which are not part of the pb::VmInfo projection).
+                let vm_info = VmInfo {
+                    vm_id: handle.vm_id,
+                    backend: handle.backend,
+                    status: handle.status,
+                    created_at: handle.created_at,
+                };
+                let pb_info = match pb::VmInfo::try_from(vm_info) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "VmHandle→VmInfo conversion failed in list_vms — skipping");
+                        continue;
+                    }
+                };
+                if tx.send(Ok(pb_info)).await.is_err() {
+                    // Receiver dropped — client disconnected.
+                    break;
+                }
+            }
+            // Channel sender drops here, closing the stream on the client side.
+        });
+
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
@@ -289,6 +424,7 @@ mod tests {
         destroy_results: Mutex<VecDeque<aios_protocol::kernel::KernelResult<()>>>,
     }
 
+    #[allow(dead_code)]
     impl MockKernel {
         fn new() -> Self {
             Self {
@@ -415,6 +551,18 @@ mod tests {
             vm_id: VmId::from("vm-test"),
             backend: BackendId::from("local"),
             session_id: SessionId::from_string("sess-1"),
+            agent_id: AgentId::from_string("agent-1"),
+            status: VmStatus::Running,
+            created_at: Utc::now(),
+            metadata: serde_json::Value::Null,
+        }
+    }
+
+    fn test_vm_handle_with_session(vm_id: &str, session: &str) -> VmHandle {
+        VmHandle {
+            vm_id: VmId::from(vm_id),
+            backend: BackendId::from("local"),
+            session_id: SessionId::from_string(session),
             agent_id: AgentId::from_string("agent-1"),
             status: VmStatus::Running,
             created_at: Utc::now(),
@@ -579,7 +727,7 @@ mod tests {
     }
 
     /// `list_vms` with an optional session filter must return `Ok(Response)`
-    /// wrapping a stream that yields zero items before closing.
+    /// wrapping a stream that yields zero items before closing (empty index).
     #[tokio::test]
     async fn list_vms_returns_empty_stream_and_accepts_session_filter() {
         let mock = MockKernel::new();
@@ -592,11 +740,162 @@ mod tests {
         });
         let resp = svc.list_vms(req).await.expect("list_vms should succeed");
         let mut stream = resp.into_inner();
-        // The stream should close immediately (no items).
+        // The stream should close immediately (no items in empty index).
         let item = stream.next().await;
         assert!(
             item.is_none(),
-            "expected empty stream before BRO-900, got {item:?}"
+            "expected empty stream for empty live-VM index, got {item:?}"
+        );
+    }
+
+    // ── New tests for BRO-900 ─────────────────────────────────────────────────
+
+    /// `create_vm` inserts the returned handle into the live-VM index.
+    #[tokio::test]
+    async fn create_vm_inserts_into_live_vms() {
+        let mock = MockKernel::new();
+        mock.push_create_vm(Ok(test_vm_handle()));
+        let svc = LifeKernelService::new(Arc::new(mock));
+
+        let req = Request::new(pb::CreateVmRequest {
+            spec: Some(test_vm_spec_pb()),
+            ctx: Some(test_ctx_pb()),
+        });
+        svc.create_vm(req).await.expect("create_vm should succeed");
+
+        // The VM should now be in the live index.
+        let map = svc.live_vms.read().unwrap();
+        assert!(
+            map.contains_key("vm-test"),
+            "vm-test must be in live_vms after create_vm"
+        );
+    }
+
+    /// `destroy` removes the handle from the live-VM index.
+    #[tokio::test]
+    async fn destroy_removes_from_live_vms() {
+        let mock = MockKernel::new();
+        mock.push_destroy(Ok(()));
+
+        // Seed with a pre-existing handle.
+        let svc = LifeKernelService::with_seed(Arc::new(mock), vec![test_vm_handle()]);
+
+        // Confirm it's seeded.
+        assert!(
+            svc.live_vms.read().unwrap().contains_key("vm-test"),
+            "vm-test must be in live_vms before destroy"
+        );
+
+        let req = Request::new(pb::DestroyRequest {
+            vm: Some(test_vm_handle_pb()),
+        });
+        svc.destroy(req).await.expect("destroy should succeed");
+
+        // Must be removed from the index.
+        assert!(
+            !svc.live_vms.read().unwrap().contains_key("vm-test"),
+            "vm-test must be removed from live_vms after destroy"
+        );
+    }
+
+    /// `list_vms` returns seeded handles and correctly filters by session_id.
+    #[tokio::test]
+    async fn list_vms_returns_seeded_handles_and_filters_by_session() {
+        let mock = MockKernel::new();
+        let seed = vec![
+            test_vm_handle_with_session("vm-s1-a", "sess-alpha"),
+            test_vm_handle_with_session("vm-s1-b", "sess-alpha"),
+            test_vm_handle_with_session("vm-s2-a", "sess-beta"),
+        ];
+        let svc = LifeKernelService::with_seed(Arc::new(mock), seed);
+
+        // No filter → all three.
+        {
+            let req = Request::new(pb::ListVmsRequest { session_id: None });
+            let resp = svc.list_vms(req).await.expect("list_vms should succeed");
+            let mut stream = resp.into_inner();
+            let mut count = 0usize;
+            while let Some(item) = stream.next().await {
+                item.expect("stream item must be Ok");
+                count += 1;
+            }
+            assert_eq!(count, 3, "no filter must return all 3 VMs");
+        }
+
+        // Filter by sess-alpha → two.
+        {
+            let req = Request::new(pb::ListVmsRequest {
+                session_id: Some(pb::SessionId {
+                    value: "sess-alpha".into(),
+                }),
+            });
+            let resp = svc.list_vms(req).await.expect("list_vms should succeed");
+            let mut stream = resp.into_inner();
+            let mut count = 0usize;
+            while let Some(item) = stream.next().await {
+                item.expect("stream item must be Ok");
+                count += 1;
+            }
+            assert_eq!(count, 2, "filter sess-alpha must return 2 VMs");
+        }
+
+        // Filter by sess-beta → one.
+        {
+            let req = Request::new(pb::ListVmsRequest {
+                session_id: Some(pb::SessionId {
+                    value: "sess-beta".into(),
+                }),
+            });
+            let resp = svc.list_vms(req).await.expect("list_vms should succeed");
+            let mut stream = resp.into_inner();
+            let mut count = 0usize;
+            while let Some(item) = stream.next().await {
+                item.expect("stream item must be Ok");
+                count += 1;
+            }
+            assert_eq!(count, 1, "filter sess-beta must return 1 VM");
+        }
+    }
+
+    /// `dispatch` increments the in-flight counter on entry and decrements it
+    /// on exit (including error paths).
+    #[tokio::test]
+    async fn dispatch_increments_and_decrements_in_flight() {
+        let mock = MockKernel::new();
+        mock.push_dispatch(Ok(ToolResult {
+            call_id: "c-inflight".into(),
+            tool_name: "shell".into(),
+            output: serde_json::json!("ok"),
+            content: None,
+            is_error: false,
+            usage: None,
+        }));
+        let svc = LifeKernelService::new(Arc::new(mock));
+        let counter = svc.in_flight();
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "counter must start at zero"
+        );
+
+        let call_pb = pb::ToolCall {
+            call_id: "c-inflight".into(),
+            tool_name: "shell".into(),
+            input_json: b"{}".to_vec(),
+            requested_capabilities: vec![],
+        };
+        let req = Request::new(pb::DispatchRequest {
+            vm: Some(test_vm_handle_pb()),
+            call: Some(call_pb),
+            ctx: Some(test_ctx_pb()),
+        });
+        svc.dispatch(req).await.expect("dispatch should succeed");
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "counter must return to zero after dispatch completes"
         );
     }
 }

@@ -6,15 +6,13 @@
 //! Phase 2; internal helpers remain `pub(crate)`.
 
 #![deny(unsafe_code)]
-// Phase 2 scaffold: suppress dead-code for modules exercised only by
-// integration tests / BRO-900 entrypoint. Remove when BRO-900 lands.
-#![allow(dead_code)]
 
 pub mod bootstrap;
 pub mod config;
 pub mod error;
 pub mod listener;
 pub mod server;
+pub mod shutdown;
 
 // ── Convenience re-exports ────────────────────────────────────────────────────
 
