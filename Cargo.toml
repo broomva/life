@@ -112,8 +112,10 @@ members = [
     # Paths — shared path resolution
     "crates/life-paths",
     # life-kernel — kernel daemon (Phase 1 in progress; see spec 2026-04-23-lifed-kernel-daemon-design.md)
+    "crates/life-kernel/life-client",
     "crates/life-kernel/life-kernel-conformance",
     "crates/life-kernel/life-kernel-core",
+    "crates/life-kernel/life-kernel-facade",
     "crates/life-kernel/life-kernel-gate",
     "crates/life-kernel/life-kernel-proto",
     # Opsis — world state engine
@@ -203,8 +205,8 @@ praxis-skills = { path = "crates/praxis/praxis-skills", version = "0.3.0" }
 praxis-tools = { path = "crates/praxis/praxis-tools", version = "0.3.0" }
 # Facade crates
 life-aios = { path = "crates/aios/life-aios", version = "0.3.0" }
-life-arcan = { path = "crates/arcan/life-arcan", version = "0.3.0" }
-life-lago = { path = "crates/lago/life-lago", version = "0.3.0" }
+life-arcan = { path = "crates/arcan/life-arcan", version = "0.3.0", default-features = false }
+life-lago = { path = "crates/lago/life-lago", version = "0.3.0", default-features = false }
 life-praxis = { path = "crates/praxis/life-praxis", version = "0.3.0" }
 life-autonomic = { path = "crates/autonomic/life-autonomic", version = "0.3.0" }
 life-haima = { path = "crates/haima/life-haima", version = "0.3.0" }
@@ -213,8 +215,12 @@ life-anima = { path = "crates/anima/life-anima", version = "0.3.0" }
 life-opsis = { path = "crates/opsis/life-opsis", version = "0.3.0" }
 life-relay = { path = "crates/relay/life-relay", version = "0.3.0" }
 life-paths = { path = "crates/life-paths", version = "0.3.0" }
+life-client           = { path = "crates/life-kernel/life-client",        version = "0.3.0" }
+life-kernel-facade    = { path = "crates/life-kernel/life-kernel-facade", version = "0.3.0" }
+life-kernel-proto     = { path = "crates/life-kernel/life-kernel-proto",  version = "0.3.0" }
 
 # ── External dependencies ──
+assert_matches = "1"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
@@ -232,6 +238,7 @@ dashmap = "6"
 datafusion = "43"
 dirs = "6"
 ed25519-dalek = { version = "2", features = ["rand_core", "serde"] }
+eventsource-stream = "0.2"
 futures = "0.3"
 futures-util = "0.3"
 geo = "0.28"
@@ -276,6 +283,8 @@ thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "fs"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+tokio-vsock = "0.5"
+wiremock = "0.6"
 tokio-util = { version = "0.7", features = ["rt"] }
 toml = "0.9"
 tonic = "0.14"
@@ -284,6 +293,7 @@ tonic-prost = "0.14"
 tonic-prost-build = "0.14"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 tracing = "0.1"
 tracing-opentelemetry = "0.30"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

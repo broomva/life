@@ -1,0 +1,43 @@
+syntax = "proto3";
+package broomva.life.kernel.v1.approvals;
+
+import "common.proto";
+
+message ApprovalTicket {
+    // Opaque — serialized aios_protocol::approval::ApprovalTicket.
+    bytes ticket_json = 1;
+}
+
+message EnqueueRequest {
+    broomva.life.kernel.v1.common.Attribution attribution = 1;
+    // Opaque — serialized aios_protocol::approval::ApprovalRequest.
+    bytes request_json = 2;
+}
+
+message ListPendingRequest {
+    broomva.life.kernel.v1.common.SessionId session = 1;
+}
+message ListPendingResponse {
+    repeated ApprovalTicket tickets = 1;
+}
+
+message ResolveRequest {
+    broomva.life.kernel.v1.common.ApprovalId approval_id = 1;
+    bool approved = 2;
+    string actor = 3;
+}
+message ResolveResponse {
+    // Opaque — serialized aios_protocol::approval::ApprovalResolution.
+    bytes resolution_json = 1;
+}
+
+message SubscribeRequest {
+    broomva.life.kernel.v1.common.SessionId session = 1;
+}
+
+service ApprovalsService {
+    rpc Enqueue(EnqueueRequest) returns (ApprovalTicket);
+    rpc ListPending(ListPendingRequest) returns (ListPendingResponse);
+    rpc Resolve(ResolveRequest) returns (ResolveResponse);
+    rpc Subscribe(SubscribeRequest) returns (stream ApprovalTicket);
+}
