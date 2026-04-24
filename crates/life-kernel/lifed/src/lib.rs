@@ -11,6 +11,7 @@ pub mod bootstrap;
 pub mod config;
 pub mod error;
 pub mod listener;
+pub mod observability;
 pub mod server;
 pub mod shutdown;
 
