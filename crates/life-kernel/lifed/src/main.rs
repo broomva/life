@@ -4,8 +4,10 @@
 
 #![deny(unsafe_code)]
 
+mod config;
 mod error;
 
+pub use config::LifedConfig;
 pub use error::{LifedError, LifedResult};
 
 fn main() {
