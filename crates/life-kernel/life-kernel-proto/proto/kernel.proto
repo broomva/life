@@ -179,6 +179,11 @@ message ForkRequest { VmSnapshotHandle snapshot = 1; ForkSpec spec = 2; KernelCo
 message LifecycleRequest { VmHandle vm = 1; }
 message DestroyRequest { VmHandle vm = 1; }
 
+message ListVmsRequest {
+    // Optional — restrict listing to a single session. Empty == all.
+    optional SessionId session_id = 1;
+}
+
 message Empty {}
 
 service KernelService {
@@ -189,4 +194,5 @@ service KernelService {
     rpc Hibernate(LifecycleRequest) returns (Empty);
     rpc Resume(LifecycleRequest) returns (VmHandle);
     rpc Destroy(DestroyRequest) returns (Empty);
+    rpc ListVms(ListVmsRequest) returns (stream VmInfo);
 }

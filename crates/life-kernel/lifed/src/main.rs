@@ -10,6 +10,7 @@
 
 mod config;
 mod error;
+mod server;
 
 fn main() {
     eprintln!("lifed: scaffold — entrypoint wired in BRO-900");
