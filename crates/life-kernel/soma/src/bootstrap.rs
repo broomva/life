@@ -229,9 +229,8 @@ async fn build_event_store(
 ) -> SomaResult<(Arc<dyn EventStorePort>, Option<TempDir>)> {
     match &cfg.store {
         LagoStoreKind::InMemory => {
-            let dir = TempDir::new().map_err(|e| {
-                SomaError::BackendInit(format!("tempdir for in-memory store: {e}"))
-            })?;
+            let dir = TempDir::new()
+                .map_err(|e| SomaError::BackendInit(format!("tempdir for in-memory store: {e}")))?;
             let db_path = dir.path().join("journal.redb");
             let journal = RedbJournal::open(&db_path).map_err(|e| {
                 SomaError::BackendInit(format!("RedbJournal::open({db_path:?}): {e}"))
@@ -240,9 +239,8 @@ async fn build_event_store(
             Ok((Arc::new(adapter) as Arc<dyn EventStorePort>, Some(dir)))
         }
         LagoStoreKind::Redb { path } => {
-            let journal = RedbJournal::open(path).map_err(|e| {
-                SomaError::BackendInit(format!("RedbJournal::open({path:?}): {e}"))
-            })?;
+            let journal = RedbJournal::open(path)
+                .map_err(|e| SomaError::BackendInit(format!("RedbJournal::open({path:?}): {e}")))?;
             let adapter = LagoAiosEventStoreAdapter::new(Arc::new(journal));
             Ok((Arc::new(adapter) as Arc<dyn EventStorePort>, None))
         }

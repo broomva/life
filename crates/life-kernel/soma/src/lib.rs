@@ -18,5 +18,5 @@ pub mod shutdown;
 
 // ── Convenience re-exports ────────────────────────────────────────────────────
 
-pub use config::{SomaConfig, ServerConfig};
+pub use config::{ServerConfig, SomaConfig};
 pub use error::{SomaError, SomaResult};

@@ -336,9 +336,10 @@ async fn end_to_end_full() {
 
     let server_cfg = cfg.clone();
     let engine = Arc::clone(&bootstrap.engine);
-    let server_task = tokio::spawn(async move {
-        soma::listener::serve(&server_cfg, engine, shutdown_rx, seed).await
-    });
+    let server_task =
+        tokio::spawn(
+            async move { soma::listener::serve(&server_cfg, engine, shutdown_rx, seed).await },
+        );
 
     // Wait for the socket.
     let mut tries = 0;
