@@ -1,4 +1,4 @@
-//! Wire contract for the lifed kernel daemon.
+//! Wire contract for the soma kernel daemon.
 //!
 //! The [`pb`] module holds the prost-generated message types and the
 //! tonic-generated `KernelService` server/client stubs. A private
@@ -11,7 +11,7 @@
 //! See `build.rs` for the full rationale — in short, `ttrpc-codegen`
 //! is incompatible with `prost = "0.14"`, and the workspace already
 //! standardises on tonic. Tonic over a Unix domain socket will match
-//! the deployment shape the lifed daemon needs in Phase 2.
+//! the deployment shape the soma daemon needs in Phase 2.
 
 #![deny(unsafe_code)]
 
@@ -54,7 +54,7 @@ pub mod approvals {
     tonic::include_proto!("broomva.life.kernel.v1.approvals");
 }
 
-/// `life.Policy` — PolicyGatePort projection (served direct from lifed
+/// `life.Policy` — PolicyGatePort projection (served direct from soma
 /// via `life-kernel-gate`).
 #[allow(unused_qualifications, clippy::all, missing_docs)]
 pub mod policy {

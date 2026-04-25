@@ -12,7 +12,7 @@
 //!
 //! 2. **Generic tonic-service-trait adapters** that translate
 //!    `life-kernel-proto` wire requests into port-trait calls. Each
-//!    adapter is parameterised over its port trait so `lifed` (Spec A
+//!    adapter is parameterised over its port trait so `soma` (Spec A
 //!    Phase 2) can register any combination of HTTP proxy impls (for
 //!    capabilities hosted by external daemons) or in-process impls
 //!    (e.g. `PolicyService<StaticPolicyGate>` from `life-kernel-gate`).

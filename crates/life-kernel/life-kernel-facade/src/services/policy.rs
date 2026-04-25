@@ -1,6 +1,6 @@
 //! `life.Policy` service adapter.
 //!
-//! Generic over `PolicyGatePort` so `lifed` can wire in any
+//! Generic over `PolicyGatePort` so `soma` can wire in any
 //! `aios-policy` gate impl — the default static gate from
 //! `life-kernel-gate` in Spec A Phase 1, or a future dynamic gate —
 //! without touching the adapter.

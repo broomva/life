@@ -2,7 +2,7 @@
 //! [`BackendRegistry`] + [`GateChain`] + [`MeteringWrapper`] on top of
 //! any [`HypervisorBackend`] registered at construction.
 //!
-//! This is the canonical surface the daemon (`lifed`) and the in-process
+//! This is the canonical surface the daemon (`soma`) and the in-process
 //! Life Runtime library share. The engine is itself a library: the
 //! daemon wraps it behind a ttrpc transport (`life-kernel-proto`),
 //! while the library case uses it directly through
@@ -674,7 +674,7 @@ impl KernelPort for KernelEngine {
         let snapshot_id = backend.snapshot(vm).await?;
 
         // Phase 1: we do not yet ask the backend for the snapshot's
-        // size — that arrives with the lifed persistence layer in
+        // size — that arrives with the soma persistence layer in
         // Phase 2 where snapshots get full lifecycle metadata.
         let handle = VmSnapshotHandle {
             snapshot_id: snapshot_id.clone(),

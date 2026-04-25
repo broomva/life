@@ -1,0 +1,66 @@
+[package]
+name = "soma"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Soma — Life Agent OS kernel daemon (privileged µVM hypervisor + admin CLI). Pairs with anima (identity)."
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "soma"
+path = "src/lib.rs"
+
+[[bin]]
+name = "soma"
+path = "src/main.rs"
+
+[features]
+default = ["vsock-listener"]
+# vsock-listener is a no-op on non-Linux builds; the feature flag exists so
+# downstream integrators can opt out without code changes.
+vsock-listener = []
+
+[dependencies]
+aios-protocol.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+clap = { workspace = true, features = ["derive", "env"] }
+lago-aios-eventstore-adapter.workspace = true
+lago-core.workspace = true
+lago-journal.workspace = true
+life-kernel-core.workspace = true
+life-kernel-gate.workspace = true
+life-kernel-proto = { workspace = true, features = ["server", "client"] }
+life-vigil.workspace = true
+opentelemetry.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-stream.workspace = true
+toml.workspace = true
+tonic.workspace = true
+tower.workspace = true
+tempfile.workspace = true
+tracing.workspace = true
+hyper-util = { version = "0.1", features = ["tokio"] }
+
+arcan-provider-local.workspace = true
+
+# vsock is Linux-only; this dep is excluded on other platforms so macOS dev
+# builds remain green.  The `vsock-listener` feature still compiles cleanly
+# everywhere; the listener implementation is gated by `#[cfg(target_os = "linux")]`.
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-vsock = { version = "0.5", default-features = false }
+
+[dev-dependencies]
+# tempfile is in [dependencies] for production use (Bootstrap._lago_tempdir);
+# no extra dev-only tempfile needed.
+# (lifectl's old dev-dep tempfile entry collapses into this comment.)
+
+[lints]
+workspace = true

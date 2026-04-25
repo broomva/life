@@ -1,0 +1,35 @@
+[server]
+unix_socket = "/run/life/soma.sock"
+unix_socket_mode = 0o660
+unix_socket_group = "soma"
+drain_secs = 30
+
+# Enable on Linux with the `vsock-listener` feature.
+# [server.vsock]
+# cid = 2          # VMADDR_CID_HOST
+# port = 10024
+
+[backends]
+local = true
+
+# [backends.cube]
+# endpoint = "https://cube.internal/v1"
+# api_token_env = "CUBE_TOKEN"
+
+[gates]
+policy = "static"
+budget = "noop"
+network = "noop"
+
+[lago]
+namespace = "soma"
+
+[lago.store]
+kind = "redb"
+path = "/var/lib/soma/events.redb"
+
+[vigil]
+level = "info"
+
+[vigil.exporter]
+kind = "console"

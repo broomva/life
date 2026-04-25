@@ -8,7 +8,7 @@
 //! use futures::StreamExt;
 //!
 //! # async fn demo() -> LifeResult<()> {
-//! let client = LifeClient::connect(LifeTransport::Unix("/run/lifed/sock".into())).await?;
+//! let client = LifeClient::connect(LifeTransport::Unix("/run/soma/sock".into())).await?;
 //! let mut stream = client
 //!     .events()
 //!     .subscribe(SessionId::from("s-1"), BranchId::from("main"), 0)

@@ -16,7 +16,7 @@ use tokio::net::UnixStream;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
 
-/// Transport selector for connecting to a `lifed` instance.
+/// Transport selector for connecting to a `soma` instance.
 #[non_exhaustive]
 #[derive(Clone, Debug)]
 pub enum LifeTransport {
@@ -44,7 +44,7 @@ pub struct LifeClient {
 }
 
 impl LifeClient {
-    /// Connect to a `lifed` instance over the given transport.
+    /// Connect to a `soma` instance over the given transport.
     pub async fn connect(transport: LifeTransport) -> LifeResult<Self> {
         let channel = match transport {
             LifeTransport::Unix(path) => {

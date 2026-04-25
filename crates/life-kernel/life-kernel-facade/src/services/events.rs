@@ -1,6 +1,6 @@
 //! `life.Events` service adapter.
 //!
-//! Generic over `EventStorePort` so `lifed` can use `EventsProxy` (over lagod)
+//! Generic over `EventStorePort` so `soma` can use `EventsProxy` (over lagod)
 //! or a direct impl without changing the adapter.
 
 use crate::convert::{from_json, kernel_err_to_status, to_json};
