@@ -1,4 +1,4 @@
-//! `lifectl dispatch` — dispatch a tool call into an existing VM.
+//! `soma dispatch` — dispatch a tool call into an existing VM.
 
 use std::path::Path;
 
@@ -25,11 +25,11 @@ pub struct Args {
     pub input: String,
 
     /// Session ID for the dispatch context.
-    #[arg(long, default_value = "lifectl")]
+    #[arg(long, default_value = "soma")]
     pub session: String,
 
     /// Agent ID for the dispatch context.
-    #[arg(long, default_value = "lifectl")]
+    #[arg(long, default_value = "soma")]
     pub agent: String,
 
     /// Emit JSON on stdout instead of human-readable text.
@@ -39,7 +39,7 @@ pub struct Args {
 
 /// Run `dispatch` against the daemon at `socket`.
 pub async fn run(socket: &Path, args: Args) -> Result<()> {
-    let mut client = crate::client::connect(socket).await?;
+    let mut client = crate::cli::client::connect(socket).await?;
     let request = build_request(&args)?;
     let response = client
         .dispatch(request)
@@ -152,7 +152,7 @@ fn uuid_v4_hex() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
-    format!("lifectl-{nanos:08x}")
+    format!("soma-{nanos:08x}")
 }
 
 // ── Unit tests ───────────────────────────────────────────────────────────────

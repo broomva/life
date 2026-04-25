@@ -1,4 +1,4 @@
-//! `lifectl create-vm` — provision a new VM in the soma daemon.
+//! `soma create-vm` — provision a new VM in the soma daemon.
 
 use std::path::Path;
 
@@ -25,11 +25,11 @@ pub struct Args {
     pub runtime: String,
 
     /// Session ID to associate with the created VM.
-    #[arg(long, default_value = "lifectl")]
+    #[arg(long, default_value = "soma")]
     pub session: String,
 
     /// Agent ID to associate with the created VM.
-    #[arg(long, default_value = "lifectl")]
+    #[arg(long, default_value = "soma")]
     pub agent: String,
 
     /// Wallet address for attribution (required by KernelContext).
@@ -47,7 +47,7 @@ pub struct Args {
 
 /// Run `create-vm` against the daemon at `socket`.
 pub async fn run(socket: &Path, args: Args) -> Result<()> {
-    let mut client = crate::client::connect(socket).await?;
+    let mut client = crate::cli::client::connect(socket).await?;
     let request = build_request(&args);
     let response = client
         .create_vm(request)

@@ -1,4 +1,4 @@
-//! `lifectl list-vms` — list VMs managed by the soma daemon.
+//! `soma list-vms` — list VMs managed by the soma daemon.
 
 use std::path::Path;
 
@@ -20,7 +20,7 @@ pub struct Args {
 
 /// Run `list-vms` against the daemon at `socket`.
 pub async fn run(socket: &Path, args: Args) -> Result<()> {
-    let mut client = crate::client::connect(socket).await?;
+    let mut client = crate::cli::client::connect(socket).await?;
     let request = build_request(&args);
 
     let mut stream = client
