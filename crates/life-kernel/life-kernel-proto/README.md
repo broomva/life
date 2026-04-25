@@ -1,6 +1,7 @@
 # life-kernel-proto
 
-Wire contract for the lifed kernel daemon — generated Rust stubs for
+Wire contract for the soma kernel daemon (formerly `lifed`; renamed
+2026-04-25 per Spec C M0) — generated Rust stubs for
 `KernelPort`. The `pb` module ships the prost-generated message types and
 the tonic-generated `KernelService` server/client stubs; `convert` bridges
 those generated types to the canonical `aios_protocol` types consumed
