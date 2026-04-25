@@ -118,6 +118,8 @@ members = [
     "crates/life-kernel/life-kernel-facade",
     "crates/life-kernel/life-kernel-gate",
     "crates/life-kernel/life-kernel-proto",
+    "crates/life-kernel/lifed",
+    "crates/life-kernel/lifectl",
     # Opsis — world state engine
     "crates/opsis/life-opsis",
     "crates/opsis/opsis-api-schema",
@@ -185,6 +187,7 @@ lago-policy = { path = "crates/lago/lago-policy", version = "0.3.0" }
 lago-store = { path = "crates/lago/lago-store", version = "0.3.0" }
 life-kernel-core = { path = "crates/life-kernel/life-kernel-core", version = "0.3.0" }
 life-kernel-gate = { path = "crates/life-kernel/life-kernel-gate", version = "0.3.0" }
+life-kernel-proto = { path = "crates/life-kernel/life-kernel-proto", version = "0.3.0" }
 life-vigil = { path = "crates/vigil/life-vigil", version = "0.3.0" }
 nous-api = { path = "crates/nous/nous-api", version = "0.3.0" }
 nous-core = { path = "crates/nous/nous-core", version = "0.3.0" }
@@ -217,7 +220,7 @@ life-relay = { path = "crates/relay/life-relay", version = "0.3.0" }
 life-paths = { path = "crates/life-paths", version = "0.3.0" }
 life-client           = { path = "crates/life-kernel/life-client",        version = "0.3.0" }
 life-kernel-facade    = { path = "crates/life-kernel/life-kernel-facade", version = "0.3.0" }
-life-kernel-proto     = { path = "crates/life-kernel/life-kernel-proto",  version = "0.3.0" }
+# (life-kernel-proto already declared above with the other life-kernel-* crates)
 
 # ── External dependencies ──
 assert_matches = "1"
@@ -233,7 +236,7 @@ bs58 = "0.5"
 bytes = "1"
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 dashmap = "6"
 datafusion = "43"
 dirs = "6"
@@ -281,7 +284,7 @@ sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "u
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "fs"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-stream = { version = "0.1", features = ["sync", "net"] }
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 tokio-vsock = "0.5"
 wiremock = "0.6"

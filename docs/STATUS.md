@@ -215,6 +215,40 @@ The baseline unification is active and enforced in production paths:
 - 20 commits; 10 Linear tickets (BRO-857, BRO-869..877) under the
   "Phase 1 — Kernel Proto + Core Library" milestone
 
+### lifed Phase 2 — Daemon + Observability (2026-04-24)
+
+- 2026-04-24: lifed Phase 2 (Daemon + Observability) shipped. Two new binary
+  crates live under `crates/life-kernel/`:
+  - `lifed` — privileged daemon hosting the `KernelEngine` from Phase 1, serving
+    the tonic `KernelService` over `/run/lifed/sock` (and optional vsock on
+    Linux). Lago integration, Vigil spans + `kernel.{vm.lifecycle,dispatch.duration,egress.bytes}`
+    metrics, replay-on-restart via `KernelEngine::replay`, graceful shutdown
+    with in-flight drain, kill -9 backend resilience, hardened systemd unit.
+  - `lifectl` — operator CLI: `create-vm`, `dispatch`, `list-vms` over the same
+    tonic contract.
+  Tests: lifed 44 (+2 ignored), lifectl 15. Critical-path unblocks Phase 5
+  (arcand cutover / MVS ship). PR #1014.
+  See `docs/superpowers/plans/2026-04-24-lifed-phase-2-daemon.md`.
+
+- ✅ `lifed` binary: tonic `KernelService` over Unix socket + optional vsock
+- ✅ `lifed` binary: Lago `EventStorePort` adapter for `kernel.*` events
+- ✅ `lifed` binary: Vigil tracing on every RPC + 3 canonical metrics
+- ✅ `lifed` binary: `KernelEngine::replay` on startup (replay-on-restart)
+- ✅ `lifed` binary: graceful SIGINT/SIGTERM shutdown with in-flight drain
+- ✅ `lifed` binary: kill-9 backend resilience (no silent VM leaks)
+- ✅ `lifed` binary: cold-start budget test (bootstrap + bind under 500ms)
+- ✅ `lifed` binary: hardened systemd unit with full sandboxing directives
+- ✅ `lifectl` CLI: `create-vm`, `dispatch`, `list-vms` over tonic Unix socket
+- ✅ End-to-end CI test (`end_to_end_with_stub_backend`) — no Docker required
+- ✅ `end_to_end_full` — Docker-gated acceptance test (`#[ignore]`)
+- ✅ `example_config.rs` — guards against schema drift in `lifed.example.toml`
+- ✅ `listener/mod.rs` → `listener.rs` rename (workspace naming convention)
+- ✅ `main()` returns `anyhow::Result<()>` (CLAUDE.md convention for binaries)
+- ✅ `unix::serve` visibility tightened to `pub(crate)` with bind→chmod race doc
+- Tests: 3313 → 3394+ passing (+81 Phase 2 new; 0 regressions)
+- Closes BRO-858, BRO-895, BRO-896, BRO-897, BRO-898, BRO-899, BRO-900,
+  BRO-901, BRO-902, BRO-903
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |

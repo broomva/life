@@ -231,6 +231,31 @@ impl KernelEngine {
     }
 }
 
+impl ReplayedState {
+    /// Materialise the replayed live-VM index as a vector of [`VmHandle`]s.
+    ///
+    /// `VmStatus` is set to `Running` — the replayed state has no way to know
+    /// whether a pre-restart VM was actually healthy, so the daemon hands out
+    /// "optimistic" handles and the first dispatch fails cleanly with
+    /// `VmNotFound` if the backend has genuinely lost the VM.
+    ///
+    /// Order is deterministic (BTreeMap iteration order).
+    pub fn snapshot_vm_handles(&self) -> Vec<VmHandle> {
+        self.live_vms
+            .values()
+            .map(|vm| VmHandle {
+                vm_id: vm.vm_id.clone(),
+                backend: vm.backend.clone(),
+                session_id: vm.session_id.clone(),
+                agent_id: vm.agent_id.clone(),
+                status: aios_protocol::hypervisor::VmStatus::Running,
+                created_at: chrono::Utc::now(),
+                metadata: serde_json::Value::Null,
+            })
+            .collect()
+    }
+}
+
 /// Observable state reconstructed by folding a `kernel.*` event stream.
 ///
 /// Produced by [`KernelEngine::replay`]. Two replays of the same event
@@ -1411,4 +1436,53 @@ mod tests {
     // re-used by future tests in the file's same scope.
     #[allow(dead_code)]
     fn _assert_legacy_err(_: LegacyKernelError) {}
+
+    // ── snapshot_vm_handles tests ────────────────────────────────────────
+
+    #[test]
+    fn snapshot_vm_handles_empty_state_returns_empty_vec() {
+        let state = ReplayedState::default();
+        let handles = state.snapshot_vm_handles();
+        assert!(handles.is_empty());
+    }
+
+    #[test]
+    fn snapshot_vm_handles_populated_state_returns_handles_in_btree_order() {
+        use aios_protocol::event::EventKind;
+
+        // Build state by replaying two KernelVmCreated events.
+        let events = [
+            EventKind::KernelVmCreated(aios_protocol::event::KernelVmCreated {
+                vm_id: VmId::from("vm-b"),
+                backend: BackendId::from("local"),
+                spec_hash: "hash-b".into(),
+                session_id: SessionId::from_string("sess-1"),
+                agent_id: AgentId::from_string("agent-1"),
+            }),
+            EventKind::KernelVmCreated(aios_protocol::event::KernelVmCreated {
+                vm_id: VmId::from("vm-a"),
+                backend: BackendId::from("local"),
+                spec_hash: "hash-a".into(),
+                session_id: SessionId::from_string("sess-1"),
+                agent_id: AgentId::from_string("agent-1"),
+            }),
+        ];
+
+        let state = KernelEngine::replay(events.iter());
+        let handles = state.snapshot_vm_handles();
+
+        // BTreeMap iteration is lexicographic — "vm-a" comes before "vm-b".
+        assert_eq!(handles.len(), 2);
+        assert_eq!(handles[0].vm_id, VmId::from("vm-a"));
+        assert_eq!(handles[1].vm_id, VmId::from("vm-b"));
+
+        // All handles get optimistic Running status.
+        for h in &handles {
+            assert!(
+                matches!(h.status, aios_protocol::hypervisor::VmStatus::Running),
+                "expected Running, got {:?}",
+                h.status
+            );
+        }
+    }
 }

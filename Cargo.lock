@@ -5696,6 +5696,57 @@ dependencies = [
 ]
 
 [[package]]
+name = "lifectl"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "hyper-util",
+ "life-kernel-proto",
+ "prost 0.14.3",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.14.5",
+ "tower 0.5.3",
+ "tracing",
+]
+
+[[package]]
+name = "lifed"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "anyhow",
+ "arcan-provider-local",
+ "async-trait",
+ "chrono",
+ "clap",
+ "hyper-util",
+ "lago-aios-eventstore-adapter",
+ "lago-core",
+ "lago-journal",
+ "life-kernel-core",
+ "life-kernel-gate",
+ "life-kernel-proto",
+ "life-vigil",
+ "opentelemetry",
+ "prost 0.14.3",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tokio-vsock",
+ "toml",
+ "tonic 0.14.5",
+ "tower 0.5.3",
+ "tracing",
+]
+
+[[package]]
 name = "line-clipping"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
