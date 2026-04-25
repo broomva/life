@@ -1,9 +1,8 @@
 //! Build script for `life-kernel-proto`.
 //!
-//! Uses `tonic-prost-build` to generate prost message types and tonic
-//! service stubs (client + server) from `proto/kernel.proto`. The
-//! generated files are emitted into `OUT_DIR` and included from
-//! `src/lib.rs` under `mod pb`.
+//! Compiles every `.proto` file under `proto/` into its own generated
+//! module. The `tonic-prost-build` pipeline emits both server traits
+//! and client stubs for each service.
 //!
 //! ## Transport choice (tonic over ttrpc)
 //!
@@ -21,13 +20,21 @@
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("proto");
-    let proto_file = proto_root.join("kernel.proto");
-    println!("cargo:rerun-if-changed={}", proto_file.display());
+
+    let proto_files: Vec<std::path::PathBuf> = std::fs::read_dir(&proto_root)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("proto"))
+        .collect();
+
+    for proto in &proto_files {
+        println!("cargo:rerun-if-changed={}", proto.display());
+    }
 
     tonic_prost_build::configure()
         .build_server(true)
         .build_client(true)
-        .compile_protos(&[proto_file], &[proto_root])?;
+        .compile_protos(&proto_files, &[proto_root])?;
 
     Ok(())
 }

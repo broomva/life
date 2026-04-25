@@ -10,7 +10,7 @@ use std::fmt;
 macro_rules! typed_id {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         #[serde(transparent)]
         pub struct $name(String);
 
@@ -123,6 +123,12 @@ pub struct BlobHash(String);
 impl BlobHash {
     pub fn from_hex(hex: impl Into<String>) -> Self {
         Self(hex.into())
+    }
+
+    /// Alias for [`BlobHash::from_hex`] — semantically clearer when the
+    /// caller knows the hex is a SHA-256 digest.
+    pub fn from_sha256_hex(hex: impl Into<String>) -> Self {
+        Self::from_hex(hex)
     }
 
     pub fn as_str(&self) -> &str {

@@ -1,0 +1,31 @@
+syntax = "proto3";
+package broomva.life.kernel.v1.policy;
+
+import "common.proto";
+
+// Policy evaluation inputs/outputs are opaque JSON blobs — the policy
+// language is aios-policy-defined and the wire surface shouldn't churn
+// every time the DSL grows a clause.
+message EvaluateRequest {
+    broomva.life.kernel.v1.common.Attribution attribution = 1;
+    // Opaque — serialized aios_protocol::policy::PolicyQuery (or
+    // whatever aios-policy's evaluate argument shape is called).
+    bytes query_json = 2;
+}
+message EvaluateResponse {
+    // Opaque — serialized aios_protocol::policy::PolicyDecision (or
+    // the port's evaluate return type).
+    bytes decision_json = 1;
+}
+
+message SetPolicyRequest {
+    broomva.life.kernel.v1.common.SessionId session = 1;
+    // Opaque — serialized aios_protocol::policy::PolicySet.
+    bytes policy_set_json = 2;
+}
+message SetPolicyResponse {}
+
+service PolicyService {
+    rpc Evaluate(EvaluateRequest) returns (EvaluateResponse);
+    rpc SetPolicy(SetPolicyRequest) returns (SetPolicyResponse);
+}

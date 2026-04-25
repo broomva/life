@@ -17,6 +17,7 @@
 //! - [`sandbox`] — SandboxTier, SandboxLimits, NetworkPolicy
 //! - [`memory`] — SoulProfile, Observation, Provenance, MemoryScope
 //! - [`session`] — SessionManifest, BranchInfo, CheckpointManifest
+//! - [`finance`] — Finance DTOs (wallet, authorization, settlement, transaction history, usage)
 //! - [`payment`] — PaymentPort for agent financial operations (x402, MPP)
 //! - [`ports`] — Runtime boundary ports (event store, provider, tools, policy, approvals,
 //!   memory, KernelPort for high-level Tool-ABI dispatch)
@@ -33,13 +34,19 @@
 //! - [`network_isolation`] — EgressTarget, EgressProtocol, NetworkIsolationPort
 //!   (egress metering + per-VM enforcement)
 
+pub mod billing;
+pub mod blob;
 pub mod budget;
 pub mod error;
+pub mod evaluation;
 pub mod event;
+pub mod finance;
+pub mod homeostasis;
 pub mod hypervisor;
 pub mod identity;
 pub mod ids;
 pub mod kernel;
+pub mod knowledge;
 pub mod memory;
 pub mod mode;
 pub mod network_isolation;
@@ -47,10 +54,12 @@ pub mod payment;
 pub mod policy;
 pub mod ports;
 pub mod rcs;
+pub mod relay;
 pub mod sandbox;
 pub mod session;
 pub mod state;
 pub mod tool;
+pub mod world;
 
 // Re-export the most commonly used types at the crate root.
 pub use budget::{BudgetDecision, BudgetGatePort, ResourceBudget, ResourceUsage, UsageConfidence};

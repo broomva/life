@@ -1,0 +1,46 @@
+[package]
+name = "life-kernel-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Proxy implementations of Life aiOS port traits over each daemon's HTTP/SSE surface, plus generic tonic service adapters that project those ports onto the life-kernel-proto wire surface."
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+aios-protocol.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+eventsource-stream.workspace = true
+futures = { workspace = true, features = ["std"] }
+life-kernel-proto = { workspace = true, features = ["server", "client"] }
+life-vigil.workspace = true
+prost.workspace = true
+prost-types.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio-stream.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+
+# Schema-only features on meta crates — gives us DTO types without daemon runtimes.
+life-arcan = { workspace = true, default-features = false, features = ["schema"] }
+life-lago  = { workspace = true, default-features = false, features = ["schema"] }
+
+[dev-dependencies]
+assert_matches.workspace = true
+life-client.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full", "test-util"] }
+tokio-stream = { workspace = true, features = ["net"] }
+tonic-prost.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

@@ -87,7 +87,9 @@ name = "aios-protocol"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "base64",
  "bitflags 2.11.0",
+ "bytes",
  "chrono",
  "futures-util",
  "indexmap 2.13.1",
@@ -421,6 +423,17 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "arcan-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1013,6 +1026,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "assert_matches"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
+
+[[package]]
 name = "async-lock"
 version = "3.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1134,6 +1153,17 @@ dependencies = [
  "tokio-util",
  "tower 0.5.3",
  "tracing",
+]
+
+[[package]]
+name = "autonomic-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3652,6 +3682,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "haima-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "haima-core"
 version = "0.3.0"
 dependencies = [
@@ -4577,6 +4618,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lago-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "lago-auth"
 version = "0.3.0"
 dependencies = [
@@ -5298,6 +5350,7 @@ dependencies = [
 name = "life-anima"
 version = "0.3.0"
 dependencies = [
+ "aios-protocol",
  "anima-core",
  "anima-identity",
  "anima-lago",
@@ -5308,6 +5361,7 @@ name = "life-arcan"
 version = "0.3.0"
 dependencies = [
  "arcan-aios-adapters",
+ "arcan-api-schema",
  "arcan-core",
  "arcan-harness",
  "arcan-provider",
@@ -5320,6 +5374,7 @@ name = "life-autonomic"
 version = "0.3.0"
 dependencies = [
  "autonomic-api",
+ "autonomic-api-schema",
  "autonomic-controller",
  "autonomic-core",
 ]
@@ -5349,10 +5404,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "life-client"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "assert_matches",
+ "async-trait",
+ "chrono",
+ "futures",
+ "hyper-util",
+ "life-kernel-proto",
+ "prost 0.14.3",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tokio-vsock",
+ "tonic 0.14.5",
+ "tower 0.5.3",
+ "tracing",
+]
+
+[[package]]
 name = "life-haima"
 version = "0.3.0"
 dependencies = [
  "haima-api",
+ "haima-api-schema",
  "haima-core",
  "haima-wallet",
  "haima-x402",
@@ -5393,6 +5473,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "life-kernel-facade"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "anyhow",
+ "assert_matches",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "eventsource-stream",
+ "futures",
+ "life-arcan",
+ "life-client",
+ "life-kernel-proto",
+ "life-lago",
+ "life-vigil",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tracing",
+ "wiremock",
+]
+
+[[package]]
 name = "life-kernel-gate"
 version = "0.3.0"
 dependencies = [
@@ -5429,6 +5541,7 @@ name = "life-lago"
 version = "0.3.0"
 dependencies = [
  "lago-api",
+ "lago-api-schema",
  "lago-core",
  "lago-fs",
  "lago-journal",
@@ -5441,9 +5554,20 @@ name = "life-nous"
 version = "0.3.0"
 dependencies = [
  "nous-api",
+ "nous-api-schema",
  "nous-core",
  "nous-heuristics",
  "nous-judge",
+]
+
+[[package]]
+name = "life-opsis"
+version = "0.3.0"
+dependencies = [
+ "opsis-api-schema",
+ "opsis-core",
+ "opsis-engine",
+ "opsis-lago",
 ]
 
 [[package]]
@@ -5489,6 +5613,7 @@ name = "life-relay"
 version = "0.3.0"
 dependencies = [
  "life-relay-api",
+ "life-relay-api-schema",
  "life-relay-core",
 ]
 
@@ -5504,6 +5629,17 @@ dependencies = [
  "tower-http",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "life-relay-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -6080,6 +6216,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nous-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "nous-core"
 version = "0.3.0"
 dependencies = [
@@ -6496,6 +6643,17 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "opsis-api-schema"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

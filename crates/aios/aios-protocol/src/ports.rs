@@ -327,6 +327,71 @@ mod kernel_port {
 
 pub use kernel_port::KernelPort;
 
+use crate::session::{CreateSessionRequest, SessionFilter, SessionManifest, TickInput, TickOutput};
+
+/// High-level session lifecycle port.
+///
+/// Implementors provide create/get/list/tick/stream/close over the session tier.
+/// `arcand` is the reference implementation; `life-kernel-facade` consumes this
+/// trait through `Arc<dyn SessionPort>`.
+#[async_trait]
+pub trait SessionPort: Send + Sync {
+    async fn create(&self, req: CreateSessionRequest) -> KernelResult<SessionManifest>;
+    async fn get(&self, id: SessionId) -> KernelResult<SessionManifest>;
+    async fn list(&self, filter: SessionFilter) -> KernelResult<Vec<SessionManifest>>;
+    async fn tick(&self, id: SessionId, input: TickInput) -> KernelResult<TickOutput>;
+    async fn stream_events(
+        &self,
+        id: SessionId,
+        branch: BranchId,
+        after_sequence: u64,
+    ) -> KernelResult<EventRecordStream>;
+    async fn close(&self, id: SessionId, reason: String) -> KernelResult<()>;
+}
+
+#[cfg(test)]
+mod session_port_tests {
+    use super::*;
+
+    #[test]
+    fn _assert_session_port_dyn_safe() {
+        fn _dyn_safe(_p: &dyn SessionPort) {}
+    }
+}
+
+// ── IdentityPort ─────────────────────────────────────────────────────────────
+
+use crate::identity::{Belief, BeliefFilter, SoulUpdate};
+use crate::ids::AgentId;
+use crate::memory::SoulProfile;
+
+/// High-level identity and belief management port.
+///
+/// Implementors provide soul-profile CRUD and belief-store access for an
+/// agent. `anima-core` is the reference implementation; `life-kernel-facade`
+/// consumes this trait through `Arc<dyn IdentityPort>`.
+#[async_trait]
+pub trait IdentityPort: Send + Sync {
+    /// Fetch the current [`SoulProfile`] for `agent`.
+    async fn get_soul(&self, agent: AgentId) -> KernelResult<SoulProfile>;
+
+    /// Apply a partial [`SoulUpdate`] to `agent` and return the updated profile.
+    async fn update_soul(&self, agent: AgentId, update: SoulUpdate) -> KernelResult<SoulProfile>;
+
+    /// Query the belief store for `agent`, narrowed by `filter`.
+    async fn get_beliefs(&self, agent: AgentId, filter: BeliefFilter) -> KernelResult<Vec<Belief>>;
+}
+
+#[cfg(test)]
+mod identity_port_tests {
+    use super::*;
+
+    #[test]
+    fn _assert_identity_port_dyn_safe() {
+        fn _dyn_safe(_p: &dyn IdentityPort) {}
+    }
+}
+
 #[cfg(test)]
 mod trait_tests {
     use super::*;
@@ -343,5 +408,277 @@ mod trait_tests {
         // If this compiles, the trait is dyn-compatible.
         #[allow(dead_code)]
         fn _use_it(_: &dyn KernelPort) {}
+    }
+}
+
+// ── Lago port family ─────────────────────────────────────────────────────────
+
+use crate::billing::{BillingPeriod, Invoice, TenantId, UsageRecord};
+use crate::blob::{BlobHash, BlobMetadata};
+use crate::knowledge::{KnowledgeQuery, KnowledgeSearchResult, Note, NoteDraft, NoteEdge, NoteId};
+
+/// High-level knowledge index + wikilink graph port.
+///
+/// Implementors provide full-text search, note CRUD, and graph traversal over
+/// the knowledge index. `lago-knowledge` is the reference implementation;
+/// `life-kernel-facade` consumes this trait through `Arc<dyn KnowledgePort>`.
+#[async_trait]
+pub trait KnowledgePort: Send + Sync {
+    async fn search(&self, query: KnowledgeQuery) -> KernelResult<KnowledgeSearchResult>;
+    async fn get_note(&self, id: NoteId) -> KernelResult<Note>;
+    async fn upsert_note(&self, note: NoteDraft) -> KernelResult<Note>;
+    async fn graph_traverse(&self, from: NoteId, limit: u32) -> KernelResult<Vec<NoteEdge>>;
+}
+
+/// Content-addressed blob storage port.
+///
+/// Implementors provide immutable put/get over SHA-256–addressed payloads.
+/// `lago-store` is the reference implementation; `life-kernel-facade` consumes
+/// this trait through `Arc<dyn BlobStorePort>`.
+#[async_trait]
+pub trait BlobStorePort: Send + Sync {
+    async fn put(
+        &self,
+        payload: bytes::Bytes,
+        content_type: Option<String>,
+    ) -> KernelResult<BlobHash>;
+    async fn get(&self, hash: BlobHash) -> KernelResult<bytes::Bytes>;
+    async fn head(&self, hash: BlobHash) -> KernelResult<BlobMetadata>;
+}
+
+/// Per-tenant usage metering and invoicing port.
+///
+/// Implementors record usage events and synthesize invoices. `life-kernel-facade`
+/// consumes this trait through `Arc<dyn BillingPort>`.
+#[async_trait]
+pub trait BillingPort: Send + Sync {
+    async fn record_usage(&self, usage: UsageRecord) -> KernelResult<()>;
+    async fn get_invoice(&self, tenant: TenantId, period: BillingPeriod) -> KernelResult<Invoice>;
+}
+
+#[cfg(test)]
+mod lago_ports_tests {
+    use super::*;
+
+    #[test]
+    fn _dyn_checks() {
+        fn _k(_p: &dyn KnowledgePort) {}
+        fn _b(_p: &dyn BlobStorePort) {}
+        fn _i(_p: &dyn BillingPort) {}
+    }
+}
+
+// ── HomeostasisPort ───────────────────────────────────────────────────────────
+
+use crate::homeostasis::{
+    BudgetStateDto, EconomicMode, HomeostaticProjectionDto, HomeostaticStateDto,
+};
+
+/// High-level homeostasis query port.
+///
+/// Implementors provide read-access to live homeostatic state and budget
+/// snapshots for a session. `autonomicd` is the reference implementation;
+/// `life-kernel-facade` consumes this trait through
+/// `Arc<dyn HomeostasisPort>`.
+///
+/// Streaming projections are returned as a [`BoxStream`] so callers can
+/// consume them incrementally without holding a large in-memory buffer.
+#[async_trait]
+pub trait HomeostasisPort: Send + Sync {
+    /// Return the current three-pillar homeostatic snapshot for `session`.
+    async fn get_state(&self, session: SessionId) -> KernelResult<HomeostaticStateDto>;
+
+    /// Return the budget snapshot for the economic pillar of `session`.
+    async fn get_budget(&self, session: SessionId) -> KernelResult<BudgetStateDto>;
+
+    /// Return the current economic operating mode for `session`.
+    async fn get_economic_mode(&self, session: SessionId) -> KernelResult<EconomicMode>;
+
+    /// Open a stream of projected future states for `session`.
+    ///
+    /// The stream is `'static` so it can be held across `.await` points
+    /// without a borrow on `self`.
+    async fn stream_projections(
+        &self,
+        session: SessionId,
+    ) -> KernelResult<BoxStream<'static, KernelResult<HomeostaticProjectionDto>>>;
+}
+
+#[cfg(test)]
+mod homeostasis_port_tests {
+    use super::*;
+
+    #[test]
+    fn _assert_homeostasis_port_dyn_safe() {
+        fn _dyn_safe(_p: &dyn HomeostasisPort) {}
+    }
+}
+
+// ── FinancePort ───────────────────────────────────────────────────────────────
+
+use crate::budget::ResourceUsage;
+use crate::finance::{
+    PaymentAuthRequest, PaymentAuthorization, SettlementReceipt, TimeWindow, TransactionFilter,
+    TransactionRecord, UsageReport, WalletManifest,
+};
+
+/// High-level finance and payment port.
+///
+/// Implementors provide wallet inspection, payment authorization, on-chain
+/// settlement, transaction history, and spend reporting for a session.
+/// `haimad` is the reference implementation; `life-kernel-facade` consumes
+/// this trait through `Arc<dyn FinancePort>`.
+///
+/// ## Authorization lifecycle
+///
+/// 1. Caller calls [`authorize_payment`](FinancePort::authorize_payment) — haimad evaluates the
+///    request against the active `WalletPolicy` and returns a time-limited
+///    `PaymentAuthorization` (or an error if denied / requires human approval).
+/// 2. Caller calls [`settle`](FinancePort::settle) with the authorization and the actual
+///    resource usage — haimad submits the on-chain transaction and returns a
+///    `SettlementReceipt`.
+///
+/// Authorization IDs correlate authorization ↔ receipt for audit.
+#[async_trait]
+pub trait FinancePort: Send + Sync {
+    /// Fetch the current wallet manifest (address, balance, policy) for `owner`.
+    async fn get_wallet(&self, owner: SessionId) -> KernelResult<WalletManifest>;
+
+    /// Authorize an outbound payment from `owner`.
+    ///
+    /// Returns a time-limited authorization if the request passes policy.
+    /// Returns `KernelError::PolicyViolation` (or similar) if denied.
+    async fn authorize_payment(
+        &self,
+        req: PaymentAuthRequest,
+    ) -> KernelResult<PaymentAuthorization>;
+
+    /// Settle a pre-authorized payment and record actual resource usage.
+    ///
+    /// `usage` is forwarded to the budget gate and written to the audit log
+    /// so callers can correlate compute cost with financial cost.
+    async fn settle(
+        &self,
+        auth: PaymentAuthorization,
+        usage: ResourceUsage,
+    ) -> KernelResult<SettlementReceipt>;
+
+    /// List transactions for `owner` filtered by `filter`.
+    async fn list_transactions(
+        &self,
+        owner: SessionId,
+        filter: TransactionFilter,
+    ) -> KernelResult<Vec<TransactionRecord>>;
+
+    /// Return an aggregated spend report for `owner` over `window`.
+    async fn get_usage_report(
+        &self,
+        owner: SessionId,
+        window: TimeWindow,
+    ) -> KernelResult<UsageReport>;
+}
+
+#[cfg(test)]
+mod finance_port_tests {
+    use super::*;
+
+    #[test]
+    fn _assert_finance_port_dyn_safe() {
+        fn _dyn_safe(_p: &dyn FinancePort) {}
+    }
+}
+
+// ── EvaluationPort ───────────────────────────────────────────────────────────
+
+use crate::evaluation::{
+    EvaluationReport, EvaluationRequest, HeuristicScore, HeuristicScoreRequest, JudgementRequest,
+    JudgementVerdict,
+};
+
+/// High-level metacognitive evaluation port.
+///
+/// Implementors provide rubric-based evaluation, heuristic scoring, and
+/// comparative judgement. `nousd` is the reference implementation;
+/// `life-kernel-facade` consumes this trait through `Arc<dyn EvaluationPort>`.
+#[async_trait]
+pub trait EvaluationPort: Send + Sync {
+    async fn evaluate(&self, req: EvaluationRequest) -> KernelResult<EvaluationReport>;
+    async fn heuristic_score(&self, req: HeuristicScoreRequest) -> KernelResult<HeuristicScore>;
+    async fn judge(&self, req: JudgementRequest) -> KernelResult<JudgementVerdict>;
+}
+
+#[cfg(test)]
+mod evaluation_port_tests {
+    use super::*;
+    #[test]
+    fn _assert_evaluation_port_dyn_safe() {
+        fn _dyn_safe(_p: &dyn EvaluationPort) {}
+    }
+}
+
+// ── RelayPort ─────────────────────────────────────────────────────────────────
+
+use crate::relay::{RelayFrame, RelayOpenRequest, RelaySession, RelayToken};
+
+/// Remote session relay port — v0.2 reserved stub.
+///
+/// Implementors proxy web-based remote agent sessions from life-relayd.
+/// Facade implementations return `KernelError::Unimplemented` until v0.2
+/// lights the proxies up (Phase 4).
+#[async_trait]
+pub trait RelayPort: Send + Sync {
+    async fn open(&self, req: RelayOpenRequest) -> KernelResult<RelaySession>;
+    async fn send(&self, session: RelayToken, frame: RelayFrame) -> KernelResult<()>;
+    async fn subscribe(
+        &self,
+        session: RelayToken,
+    ) -> KernelResult<BoxStream<'static, KernelResult<RelayFrame>>>;
+    async fn close(&self, session: RelayToken) -> KernelResult<()>;
+}
+
+#[cfg(test)]
+mod relay_port_tests {
+    use super::*;
+    #[test]
+    fn _assert_relay_port_dyn_safe() {
+        fn _dyn_safe(_p: &dyn RelayPort) {}
+    }
+}
+
+// ── WorldPort ─────────────────────────────────────────────────────────────────
+
+use crate::world::{WorldEvent, WorldId, WorldMutation, WorldSnapshot, WorldVersion};
+
+/// High-level world state port.
+///
+/// Implementors provide snapshot queries, state mutations, and event streaming
+/// for a named world. `opsisd` is the reference implementation;
+/// `life-kernel-facade` consumes this trait through `Arc<dyn WorldPort>`.
+#[async_trait]
+pub trait WorldPort: Send + Sync {
+    /// Return the current state snapshot for `world`.
+    async fn snapshot(&self, world: WorldId) -> KernelResult<WorldSnapshot>;
+
+    /// Apply a mutation to `world` and return the resulting version.
+    async fn mutate(&self, world: WorldId, mutation: WorldMutation) -> KernelResult<WorldVersion>;
+
+    /// Open a stream of world events for `world` starting after `after_version`.
+    ///
+    /// The stream is `'static` so it can be held across `.await` points
+    /// without a borrow on `self`.
+    async fn subscribe(
+        &self,
+        world: WorldId,
+        after_version: u64,
+    ) -> KernelResult<BoxStream<'static, KernelResult<WorldEvent>>>;
+}
+
+#[cfg(test)]
+mod world_port_tests {
+    use super::*;
+
+    #[test]
+    fn _assert_world_port_dyn_safe() {
+        fn _dyn_safe(_p: &dyn WorldPort) {}
     }
 }

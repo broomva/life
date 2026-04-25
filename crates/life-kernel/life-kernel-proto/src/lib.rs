@@ -29,6 +29,57 @@ pub mod pb {
     tonic::include_proto!("broomva.life.kernel.v1");
 }
 
+/// Shared wire DTOs — `LifeError`, `Attribution`, `Pagination`, and the
+/// typed ID wrappers used across every `life.*` service proto.
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod common {
+    tonic::include_proto!("broomva.life.kernel.v1.common");
+}
+
+/// `life.Events` — EventStorePort projection (served by lagod).
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod events {
+    tonic::include_proto!("broomva.life.kernel.v1.events");
+}
+
+/// `life.Session` — SessionPort projection (served by arcand).
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod session {
+    tonic::include_proto!("broomva.life.kernel.v1.session");
+}
+
+/// `life.Approvals` — ApprovalPort projection (served by arcand).
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod approvals {
+    tonic::include_proto!("broomva.life.kernel.v1.approvals");
+}
+
+/// `life.Policy` — PolicyGatePort projection (served direct from lifed
+/// via `life-kernel-gate`).
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod policy {
+    tonic::include_proto!("broomva.life.kernel.v1.policy");
+}
+
+/// `life.Tools` — v0.2 reserved stub; methods return
+/// `Status::unimplemented` until the port trait is wire-projected.
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod tools {
+    tonic::include_proto!("broomva.life.kernel.v1.tools");
+}
+
+/// `life.Model` — v0.2 reserved stub.
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod model {
+    tonic::include_proto!("broomva.life.kernel.v1.model");
+}
+
+/// `life.Relay` — v0.2 reserved stub.
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod relay {
+    tonic::include_proto!("broomva.life.kernel.v1.relay");
+}
+
 mod convert;
 
 pub use convert::ConvertError;

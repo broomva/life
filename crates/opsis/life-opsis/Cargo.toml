@@ -1,0 +1,23 @@
+[package]
+name = "life-opsis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "World state engine facade for the Life Agent OS — re-exports opsis-core, opsis-engine, and opsis-lago"
+
+[features]
+default = ["runtime"]
+runtime = []
+schema = ["dep:opsis-api-schema"]
+
+[dependencies]
+opsis-core = { path = "../opsis-core", version = "0.3.0" }
+opsis-engine = { path = "../opsis-engine", version = "0.3.0" }
+opsis-lago = { path = "../opsis-lago", version = "0.3.0" }
+opsis-api-schema = { workspace = true, optional = true }
+
+[lints]
+workspace = true
