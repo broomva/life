@@ -26,7 +26,7 @@ aios-protocol = { version = "0.3.0", path = "../../aios/aios-protocol" }
 thiserror = "2.0"
 
 # gRPC transport (required for OTLP header injection)
-tonic = "0.12"
+tonic = "0.14"
 
 # Utilities
 serde = { version = "1", features = ["derive"] }
