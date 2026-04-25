@@ -21,7 +21,7 @@ sha2.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-opentelemetry = "0.30"
-opentelemetry = "0.29"
+opentelemetry = "0.31"
 uuid.workspace = true
 life-vigil.workspace = true
 
