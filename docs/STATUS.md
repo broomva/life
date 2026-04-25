@@ -168,6 +168,8 @@ The baseline unification is active and enforced in production paths:
   session (already in conversation context). Internal eval/autonomic/vigil
   events are skipped.
 
+> **2026-04-25 — RENAMED.** The kernel daemon shipped as `lifed` in Phases 0–2 has been renamed `soma` (master spec C, M0). The phase entries below are preserved verbatim as historical record. All ongoing work (Phase 3 + future) uses the `soma` name. Crate path: `crates/life-kernel/lifed/` → `crates/life-kernel/soma/`. Binary: `lifed` → `soma`. CLI `lifectl` folded into the `soma` binary as subcommands. systemd unit: `lifed.service` → `soma.service`. UDS: `/run/lifed/sock` → `/run/life/soma.sock`. See `docs/superpowers/specs/2026-04-25-life-runtime-architecture-spec.md` §L1, §L5.
+
 ### lifed Phase 0 — ABI Foundation (2026-04-23 → 2026-04-23)
 
 - ✅ aios-protocol extended: `KernelPort`, `BudgetGatePort`,
@@ -248,6 +250,14 @@ The baseline unification is active and enforced in production paths:
 - Tests: 3313 → 3394+ passing (+81 Phase 2 new; 0 regressions)
 - Closes BRO-858, BRO-895, BRO-896, BRO-897, BRO-898, BRO-899, BRO-900,
   BRO-901, BRO-902, BRO-903
+
+### soma rename — kernel daemon (2026-04-25)
+
+- Renamed `lifed` → `soma` per master spec C M0 (Linear BRO-920).
+- `lifectl` operator CLI folded into the unified `soma` binary.
+- All systemd / config / UDS paths updated; tests green; CI passes.
+- Phase 3 (`arcan-provider-cube`) work resumes under `soma` name in M2.
+- Spec C₁ — soma scope spec — written at `docs/superpowers/specs/2026-04-25-soma-scope.md` (workspace-level docs branch, PR #23).
 
 ## Health Summary
 
