@@ -289,7 +289,7 @@ tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 tokio-vsock = "0.5"
 wiremock = "0.6"
 tokio-util = { version = "0.7", features = ["rt"] }
-toml = "0.9"
+toml = "1.1"
 tonic = "0.14"
 tonic-build = "0.14"
 tonic-prost = "0.14"
