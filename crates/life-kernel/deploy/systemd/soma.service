@@ -1,23 +1,23 @@
 [Unit]
-Description=Life Agent OS kernel daemon (lifed)
+Description=Life Agent OS kernel daemon (soma)
 Documentation=https://github.com/broomva/life/tree/main/crates/life-kernel/deploy/systemd/README.md
 After=network.target
 Wants=network.target
 
 [Service]
-# Type=simple: systemd marks lifed as "active" as soon as the process forks.
-# Readiness check is "can connect to /run/lifed/sock".
+# Type=simple: systemd marks soma as "active" as soon as the process forks.
+# Readiness check is "can connect to /run/life/soma.sock".
 #
-# NOTE: Type=notify (proper sd_notify(STATE_READY) integration) is deferred
-# to BRO-903 / post-Phase-2.  See deploy/systemd/README.md for details.
+# NOTE: Type=notify (proper sd_notify(STATE_READY) integration) is deferred.
+# See deploy/systemd/README.md for details.
 Type=simple
-ExecStart=/usr/local/bin/lifed
+ExecStart=/usr/local/bin/soma daemon
 Restart=on-failure
 RestartSec=5s
 
 # ── Environment ─────────────────────────────────────────────────────────────
-# Override per deployment.  The daemon also reads LIFED_CONFIG at startup.
-Environment=LIFED_CONFIG=/etc/lifed/config.toml
+# Override per deployment. The daemon also reads SOMA_CONFIG at startup.
+Environment=SOMA_CONFIG=/etc/soma/config.toml
 Environment=RUST_LOG=info
 
 # ── Security hardening ───────────────────────────────────────────────────────
@@ -31,14 +31,15 @@ ProtectKernelModules=yes
 ProtectControlGroups=yes
 
 # ── Runtime / state / log directories (auto-created by systemd) ─────────────
-# /run/lifed/      — Unix socket and PID file
-# /var/lib/lifed/  — redb journal (durable Lago store)
-# /var/log/lifed/  — structured log files (journald is the primary sink)
-RuntimeDirectory=lifed
+# /run/life/         — Unix socket and PID file (shared with the future Life
+#                       Runtime daemons: lifed (facade), lifegw (edge gateway))
+# /var/lib/soma/     — redb journal (durable Lago store)
+# /var/log/soma/     — structured log files (journald is the primary sink)
+RuntimeDirectory=life
 RuntimeDirectoryMode=0750
-StateDirectory=lifed
+StateDirectory=soma
 StateDirectoryMode=0750
-LogsDirectory=lifed
+LogsDirectory=soma
 LogsDirectoryMode=0750
 
 # ── Capabilities ─────────────────────────────────────────────────────────────
@@ -57,7 +58,7 @@ LimitNOFILE=65536
 
 # ── Restart limits ───────────────────────────────────────────────────────────
 # Allow up to 5 quick restarts within 60 s (tolerates new redb files /
-# config changes).  After exhaustion systemd enters failed state.
+# config changes). After exhaustion systemd enters failed state.
 StartLimitIntervalSec=60
 StartLimitBurst=5
 

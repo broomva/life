@@ -1,7 +1,7 @@
 [server]
-unix_socket = "/run/lifed/sock"
+unix_socket = "/run/life/soma.sock"
 unix_socket_mode = 0o660
-unix_socket_group = "lifed"
+unix_socket_group = "soma"
 drain_secs = 30
 
 # Enable on Linux with the `vsock-listener` feature.
@@ -22,11 +22,11 @@ budget = "noop"
 network = "noop"
 
 [lago]
-namespace = "lifed"
+namespace = "soma"
 
 [lago.store]
 kind = "redb"
-path = "/var/lib/lifed/events.redb"
+path = "/var/lib/soma/events.redb"
 
 [vigil]
 level = "info"
