@@ -49,7 +49,7 @@ fn make_kernel_created_record(vm_id: &str, session_id: &str) -> EventRecord {
             backend: BackendId::from("local"),
             spec_hash: "test-replay-restart".into(),
             session_id: SessionId::from_string(session_id),
-            agent_id: AgentId::from_string("lifed"),
+            agent_id: AgentId::from_string("soma"),
         }),
     )
 }
@@ -66,8 +66,8 @@ async fn daemon_reconstructs_live_vms_after_restart() {
     // Open the redb journal directly and append a KernelVmCreated event, as if
     // a real first daemon run had called create_vm successfully.  The session
     // ID follows the same derivation as `bootstrap::build_engine`:
-    // `"lifed:{namespace}"`.
-    let session_id = "lifed:replay-restart-test";
+    // `"soma:{namespace}"`.
+    let session_id = "soma:replay-restart-test";
     {
         let journal = RedbJournal::open(&db_path).expect("open journal for first run");
         let store: Arc<dyn EventStorePort> =

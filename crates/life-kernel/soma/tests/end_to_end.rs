@@ -1,4 +1,4 @@
-//! End-to-end integration tests for the lifed daemon.
+//! End-to-end integration tests for the soma daemon.
 //!
 //! ## `end_to_end_with_stub_backend` (CI-safe, always runs)
 //!
@@ -20,7 +20,7 @@
 //! Run locally with:
 //!
 //! ```bash
-//! cargo test -p lifed -- --ignored end_to_end_full
+//! cargo test -p soma -- --ignored end_to_end_full
 //! ```
 
 use std::sync::Arc;
@@ -129,7 +129,7 @@ async fn connect_unix(socket: &std::path::Path) -> KernelServiceClient<Channel> 
             async move { UnixStream::connect(&path).await.map(TokioIo::new) }
         }))
         .await
-        .expect("connect to stub lifed socket");
+        .expect("connect to stub soma socket");
     KernelServiceClient::new(channel)
 }
 
@@ -194,7 +194,7 @@ async fn end_to_end_with_stub_backend() {
 
     // Spin up the Unix listener via the top-level multiplexer.
     // `listener::serve` creates the service internally from the engine.
-    let mut server_cfg = lifed::SomaConfig::default();
+    let mut server_cfg = soma::SomaConfig::default();
     server_cfg.server.unix_socket = socket.clone();
     server_cfg.server.unix_socket_mode = Some(0o660);
     server_cfg.server.unix_socket_group = None;
@@ -204,7 +204,7 @@ async fn end_to_end_with_stub_backend() {
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     let server_task = tokio::spawn(async move {
-        lifed::listener::serve(&server_cfg, stub_engine, shutdown_rx, Vec::new()).await
+        soma::listener::serve(&server_cfg, stub_engine, shutdown_rx, Vec::new()).await
     });
 
     // Wait for the socket to appear.
@@ -302,7 +302,7 @@ async fn end_to_end_with_stub_backend() {
 /// runs:
 ///
 /// ```bash
-/// cargo test -p lifed -- --ignored end_to_end_full
+/// cargo test -p soma -- --ignored end_to_end_full
 /// ```
 ///
 /// What this test verifies beyond `end_to_end_with_stub_backend`:
@@ -313,17 +313,17 @@ async fn end_to_end_with_stub_backend() {
 #[ignore = "requires Docker or nsjail on the host for LocalSandboxProvider::from_env()"]
 async fn end_to_end_full() {
     let tmpdir = tempfile::tempdir().unwrap();
-    let socket_path = tmpdir.path().join("lifed-full.sock");
+    let socket_path = tmpdir.path().join("soma-full.sock");
 
     // Build config with real local backend + in-memory lago.
-    let mut cfg = lifed::SomaConfig::default();
+    let mut cfg = soma::SomaConfig::default();
     cfg.server.unix_socket = socket_path.clone();
     cfg.server.unix_socket_mode = Some(0o660);
     cfg.server.unix_socket_group = None;
     cfg.server.drain_secs = 10;
 
     // Bootstrap the real engine (requires Docker / nsjail).
-    let bootstrap = lifed::bootstrap::build_engine(&cfg)
+    let bootstrap = soma::bootstrap::build_engine(&cfg)
         .await
         .expect("build_engine with local backend");
 
@@ -337,7 +337,7 @@ async fn end_to_end_full() {
     let server_cfg = cfg.clone();
     let engine = Arc::clone(&bootstrap.engine);
     let server_task = tokio::spawn(async move {
-        lifed::listener::serve(&server_cfg, engine, shutdown_rx, seed).await
+        soma::listener::serve(&server_cfg, engine, shutdown_rx, seed).await
     });
 
     // Wait for the socket.

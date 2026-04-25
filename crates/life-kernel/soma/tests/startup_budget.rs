@@ -29,7 +29,7 @@
 //! because it requires Docker or nsjail to succeed.  Run it with:
 //!
 //! ```bash
-//! cargo test -p lifed -- --ignored cold_start_under_500ms
+//! cargo test -p soma -- --ignored cold_start_under_500ms
 //! ```
 //!
 //! ## Measurement methodology
@@ -239,7 +239,7 @@ async fn assemble_engine() -> (Arc<KernelEngine>, TempDir) {
 /// 500 ms even in unoptimised debug mode.
 ///
 /// If this test flakes due to machine load (e.g. on a heavily loaded CI
-/// runner), run with `cargo test --release -p lifed` and measure the
+/// runner), run with `cargo test --release -p soma` and measure the
 /// release-mode time — it will be substantially faster.
 ///
 /// Target: < 500 ms (debug). Expected actual: < 50 ms on any modern machine.
@@ -254,7 +254,7 @@ async fn bootstrap_engine_core_under_500ms() {
     assert!(
         elapsed < threshold,
         "KernelEngine assembly took {elapsed:?}, which exceeds the 500 ms cold-start budget. \
-         Run `cargo test --release -p lifed` to measure release-mode performance. \
+         Run `cargo test --release -p soma` to measure release-mode performance. \
          If this is a slow CI machine, consider bumping the threshold with a comment explaining why.",
     );
 }
@@ -269,7 +269,7 @@ async fn bootstrap_engine_core_under_500ms() {
 /// Operator measurement:
 ///
 /// ```bash
-/// cargo test -p lifed -- --ignored cold_start_under_500ms
+/// cargo test -p soma -- --ignored cold_start_under_500ms
 /// ```
 ///
 /// Target: < 500 ms (debug). If the Docker socket probe adds significant
@@ -280,7 +280,7 @@ async fn bootstrap_engine_core_under_500ms() {
 async fn cold_start_under_500ms() {
     use std::time::Duration;
 
-    use lifed::{SomaConfig, bootstrap};
+    use soma::{SomaConfig, bootstrap};
 
     let threshold = Duration::from_millis(500);
     let t0 = Instant::now();
@@ -297,12 +297,12 @@ async fn cold_start_under_500ms() {
     // Basic sanity: the returned bootstrap is in a useful shape.
     assert!(Arc::strong_count(&bootstrap.engine) >= 1);
     assert_eq!(bootstrap.replayed.events_applied, 0);
-    assert_eq!(bootstrap.session_id.as_str(), "lifed:lifed");
+    assert_eq!(bootstrap.session_id.as_str(), "soma:soma");
 
     assert!(
         elapsed < threshold,
         "Full bootstrap::build_engine took {elapsed:?}, which exceeds the 500 ms cold-start \
-         budget. Run `cargo test --release -p lifed -- --ignored cold_start_under_500ms` for a \
+         budget. Run `cargo test --release -p soma -- --ignored cold_start_under_500ms` for a \
          release-mode measurement.",
     );
 }

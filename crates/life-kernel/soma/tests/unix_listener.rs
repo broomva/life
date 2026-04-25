@@ -70,12 +70,12 @@ impl KernelPort for PanicIfCalledKernel {
 #[tokio::test(flavor = "multi_thread")]
 async fn listener_accepts_connection_and_shuts_down() {
     let tmpdir = tempfile::tempdir().unwrap();
-    let socket = tmpdir.path().join("lifed.sock");
+    let socket = tmpdir.path().join("soma.sock");
 
     // `SomaConfig` and `ServerConfig` are `#[non_exhaustive]`, so we cannot
     // construct them via struct literals outside the defining crate.
     // Use `Default::default()` and then mutate the public fields we care about.
-    let mut cfg = lifed::SomaConfig::default();
+    let mut cfg = soma::SomaConfig::default();
     cfg.server.unix_socket = socket.clone();
     cfg.server.unix_socket_mode = Some(0o660);
     cfg.server.unix_socket_group = None;
@@ -88,7 +88,7 @@ async fn listener_accepts_connection_and_shuts_down() {
 
     let server_cfg = cfg.clone();
     let server_task = tokio::spawn(async move {
-        lifed::listener::serve(&server_cfg, stub_engine, shutdown_rx, Vec::new()).await
+        soma::listener::serve(&server_cfg, stub_engine, shutdown_rx, Vec::new()).await
     });
 
     // Wait up to 2 s for the socket to appear and permissions to land.

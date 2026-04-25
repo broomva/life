@@ -51,7 +51,7 @@ use lago_journal::RedbJournal;
 use life_kernel_core::KernelEngine;
 use life_kernel_gate::{budget::NoOpBudgetGate, network::NoOpNetworkIsolation};
 use life_kernel_proto::pb::{self, kernel_service_server::KernelService as _};
-use lifed::server::LifeKernelService;
+use soma::server::LifeKernelService;
 use tempfile::TempDir;
 use tokio_stream::StreamExt as _;
 use tonic::Request;

@@ -1,6 +1,6 @@
 //! Integration test: shutdown drain.
 //!
-//! Proves that [`lifed::shutdown::drain_in_flight`] correctly:
+//! Proves that [`soma::shutdown::drain_in_flight`] correctly:
 //! 1. Returns `Ok(())` immediately when the counter is zero.
 //! 2. Returns `Err(remaining)` when the deadline expires with a positive count.
 //! 3. Returns `Ok(())` when the counter reaches zero before the deadline.
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use lifed::shutdown::drain_in_flight;
+use soma::shutdown::drain_in_flight;
 
 // ── drain_in_flight tests ─────────────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ async fn service_in_flight_is_zero_outside_dispatch() {
     };
     use chrono::Utc;
     use life_kernel_proto::pb::{self, kernel_service_server::KernelService as _};
-    use lifed::server::LifeKernelService;
+    use soma::server::LifeKernelService;
     use tonic::Request;
 
     // ── Minimal mock kernel ───────────────────────────────────────────────────

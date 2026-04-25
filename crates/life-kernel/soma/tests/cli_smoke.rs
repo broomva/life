@@ -1,30 +1,30 @@
-//! Smoke tests for the `lifectl` binary.
+//! Smoke tests for the `soma` binary's CLI subcommands.
 //!
 //! These tests verify that the binary compiles, the clap argument tree is
 //! wired correctly, and every top-level subcommand exists — without requiring
-//! a live lifed daemon (that's BRO-903's job).
+//! a live soma daemon (that's BRO-903's job).
 
 use std::process::Command;
 
-/// Returns the path to the compiled `lifectl` binary provided by Cargo.
+/// Returns the path to the compiled `soma` binary provided by Cargo.
 ///
-/// `CARGO_BIN_EXE_lifectl` is injected by Cargo when running integration
-/// tests from the crate that declares the binary, so this always points to
-/// the freshly compiled artifact.
-fn lifectl() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_lifectl"))
+/// `CARGO_BIN_EXE_soma` is injected by Cargo when running integration tests
+/// from the crate that declares the binary, so this always points to the
+/// freshly compiled artifact.
+fn soma() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_soma"))
 }
 
 #[test]
 fn help_exits_zero() {
-    let output = lifectl()
+    let output = soma()
         .arg("--help")
         .output()
-        .expect("failed to run lifectl --help");
+        .expect("failed to run soma --help");
 
     assert!(
         output.status.success(),
-        "lifectl --help exited with {:?}\nstdout: {}\nstderr: {}",
+        "soma --help exited with {:?}\nstdout: {}\nstderr: {}",
         output.status.code(),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
@@ -33,12 +33,16 @@ fn help_exits_zero() {
 
 #[test]
 fn help_mentions_subcommands() {
-    let output = lifectl()
+    let output = soma()
         .arg("--help")
         .output()
-        .expect("failed to run lifectl --help");
+        .expect("failed to run soma --help");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("daemon"),
+        "expected 'daemon' in --help output:\n{stdout}"
+    );
     assert!(
         stdout.contains("create-vm"),
         "expected 'create-vm' in --help output:\n{stdout}"
@@ -55,14 +59,14 @@ fn help_mentions_subcommands() {
 
 #[test]
 fn create_vm_help_exits_zero_and_mentions_backend() {
-    let output = lifectl()
+    let output = soma()
         .args(["create-vm", "--help"])
         .output()
-        .expect("failed to run lifectl create-vm --help");
+        .expect("failed to run soma create-vm --help");
 
     assert!(
         output.status.success(),
-        "lifectl create-vm --help exited with {:?}",
+        "soma create-vm --help exited with {:?}",
         output.status.code()
     );
 
@@ -71,14 +75,18 @@ fn create_vm_help_exits_zero_and_mentions_backend() {
         stdout.contains("--backend"),
         "expected '--backend' in create-vm --help output:\n{stdout}"
     );
+    assert!(
+        stdout.contains("--socket"),
+        "expected '--socket' in create-vm --help output:\n{stdout}"
+    );
 }
 
 #[test]
 fn dispatch_help_mentions_vm_id_and_tool_name() {
-    let output = lifectl()
+    let output = soma()
         .args(["dispatch", "--help"])
         .output()
-        .expect("failed to run lifectl dispatch --help");
+        .expect("failed to run soma dispatch --help");
 
     assert!(output.status.success());
 
@@ -92,10 +100,10 @@ fn dispatch_help_mentions_vm_id_and_tool_name() {
 
 #[test]
 fn list_vms_help_mentions_session() {
-    let output = lifectl()
+    let output = soma()
         .args(["list-vms", "--help"])
         .output()
-        .expect("failed to run lifectl list-vms --help");
+        .expect("failed to run soma list-vms --help");
 
     assert!(output.status.success());
 
