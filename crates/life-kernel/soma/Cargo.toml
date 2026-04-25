@@ -1,19 +1,19 @@
 [package]
-name = "lifed"
+name = "soma"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Privileged daemon implementing the aiOS kernel contract for the µVM isolation tier"
+description = "Soma — Life Agent OS kernel daemon (privileged µVM hypervisor + admin CLI). Pairs with anima (identity)."
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [lib]
-name = "lifed"
+name = "soma"
 path = "src/lib.rs"
 
 [[bin]]
-name = "lifed"
+name = "soma"
 path = "src/main.rs"
 
 [features]
@@ -27,7 +27,7 @@ aios-protocol.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["derive", "env"] }
 lago-aios-eventstore-adapter.workspace = true
 lago-core.workspace = true
 lago-journal.workspace = true
@@ -44,8 +44,10 @@ tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
 toml.workspace = true
 tonic.workspace = true
+tower.workspace = true
 tempfile.workspace = true
 tracing.workspace = true
+hyper-util = { version = "0.1", features = ["tokio"] }
 
 arcan-provider-local.workspace = true
 
@@ -56,10 +58,9 @@ arcan-provider-local.workspace = true
 tokio-vsock = { version = "0.5", default-features = false }
 
 [dev-dependencies]
-# tempfile is declared in [dependencies] for production use
-# (Bootstrap._lago_tempdir); no extra dev-only tempfile needed.
-hyper-util = { version = "0.1", features = ["tokio"] }
-tower.workspace = true
+# tempfile is in [dependencies] for production use (Bootstrap._lago_tempdir);
+# no extra dev-only tempfile needed.
+# (lifectl's old dev-dep tempfile entry collapses into this comment.)
 
 [lints]
 workspace = true
