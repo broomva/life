@@ -1,4 +1,4 @@
-//! `lifectl` — operator CLI for the lifed kernel daemon.
+//! `lifectl` — operator CLI for the soma kernel daemon.
 
 #![deny(unsafe_code)]
 
@@ -16,8 +16,8 @@ use clap::Parser;
     about = "Operator CLI for the lifed kernel daemon"
 )]
 struct Cli {
-    /// Path to the lifed Unix socket.
-    #[arg(long, env = "LIFED_SOCKET", default_value = "/run/lifed/sock")]
+    /// Path to the soma Unix socket.
+    #[arg(long, env = "SOMA_SOCKET", default_value = "/run/life/soma.sock")]
     socket: PathBuf,
 
     #[command(subcommand)]

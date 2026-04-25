@@ -34,10 +34,10 @@ use tempfile::TempDir;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// `LifedConfig`, `BackendsConfig`, and `LagoConfig` are `#[non_exhaustive]`
+// `SomaConfig`, `BackendsConfig`, and `LagoConfig` are `#[non_exhaustive]`
 // and cannot be constructed via struct literals outside their defining crate.
 // This test exercises replay directly via the event store without calling
-// build_engine, so no LifedConfig construction is needed.
+// build_engine, so no SomaConfig construction is needed.
 
 fn make_kernel_created_record(vm_id: &str, session_id: &str) -> EventRecord {
     EventRecord::new(

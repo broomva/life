@@ -7,7 +7,7 @@ pub mod list_vms;
 /// The set of subcommands exposed by `lifectl`.
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
-    /// Create a new VM in the lifed daemon.
+    /// Create a new VM in the soma daemon.
     CreateVm(create_vm::Args),
     /// Dispatch a tool call into an existing VM.
     Dispatch(dispatch::Args),

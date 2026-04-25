@@ -1,16 +1,16 @@
-//! Error surface for the `lifed` daemon.
+//! Error surface for the `soma` daemon.
 
 use thiserror::Error;
 
 /// All errors surfaced by the daemon entrypoint.
 ///
 /// The daemon converts every fallible subsystem result into this enum at the
-/// `main.rs` boundary so startup failures surface with a single `LifedError`
+/// `main.rs` boundary so startup failures surface with a single `SomaError`
 /// printed to stderr (and to the systemd journal via the inherited stdio).
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum LifedError {
-    /// Raised by `config::LifedConfig::load` when the config file is missing,
+pub enum SomaError {
+    /// Raised by `config::SomaConfig::load` when the config file is missing,
     /// unreadable, malformed TOML, or validates to an invalid combination
     /// (e.g. vsock listener enabled with no CID).
     #[error("configuration: {0}")]
@@ -30,4 +30,4 @@ pub enum LifedError {
 }
 
 /// Convenience alias used throughout the daemon.
-pub type LifedResult<T> = Result<T, LifedError>;
+pub type SomaResult<T> = Result<T, SomaError>;

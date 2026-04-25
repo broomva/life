@@ -1,7 +1,7 @@
-//! `lifed` library surface — re-exports for integration tests and
+//! `soma` library surface — re-exports for integration tests and
 //! downstream crates that need access to daemon internals.
 //!
-//! The binary entrypoint (`main.rs`) uses `use lifed::*` to pull in
+//! The binary entrypoint (`main.rs`) uses `use soma::*` to pull in
 //! the same types. All public items here are semver-stable across
 //! Phase 2; internal helpers remain `pub(crate)`.
 
@@ -17,5 +17,5 @@ pub mod shutdown;
 
 // ── Convenience re-exports ────────────────────────────────────────────────────
 
-pub use config::{LifedConfig, ServerConfig};
-pub use error::{LifedError, LifedResult};
+pub use config::{SomaConfig, ServerConfig};
+pub use error::{SomaError, SomaResult};

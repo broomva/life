@@ -22,8 +22,8 @@ use aios_protocol::ports::KernelPort;
 use tokio::sync::oneshot;
 use tonic::transport::Server;
 
-use crate::config::LifedConfig;
-use crate::error::LifedResult;
+use crate::config::SomaConfig;
+use crate::error::SomaResult;
 use crate::server::LifeKernelService;
 
 /// Spawns every configured listener and awaits shutdown + in-flight drain.
@@ -33,13 +33,13 @@ use crate::server::LifeKernelService;
 /// `Vec::new()` for tests that do not need seeding.
 ///
 /// Returns `Ok(())` on graceful shutdown. Any listener error bubbles up as
-/// `LifedError::Server(..)`.
+/// `SomaError::Server(..)`.
 pub async fn serve<E: KernelPort + 'static>(
-    cfg: &LifedConfig,
+    cfg: &SomaConfig,
     engine: Arc<E>,
     shutdown_rx: oneshot::Receiver<()>,
     seed: Vec<VmHandle>,
-) -> LifedResult<()> {
+) -> SomaResult<()> {
     let service = LifeKernelService::with_seed(engine, seed);
     let in_flight = service.in_flight();
 
@@ -71,11 +71,11 @@ pub async fn serve<E: KernelPort + 'static>(
 /// that sends `()` on both per-listener oneshots.
 #[cfg(all(target_os = "linux", feature = "vsock-listener"))]
 async fn serve_unix_and_vsock(
-    cfg: &crate::config::LifedConfig,
+    cfg: &crate::config::SomaConfig,
     vsock_cfg: &crate::config::VsockConfig,
     router: tonic::transport::server::Router,
     shutdown_rx: oneshot::Receiver<()>,
-) -> LifedResult<()> {
+) -> SomaResult<()> {
     use tokio::sync::Notify;
 
     // Shared notifier: fires when the original shutdown_rx completes.

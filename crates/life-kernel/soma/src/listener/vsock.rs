@@ -20,7 +20,7 @@
 //! `#[cfg(all(target_os = "linux", feature = "vsock-listener"))]` in the test
 //! block below. CI on Linux with the feature enabled provides the live test
 //! surface; macOS dev builds verify compile-time correctness only via
-//! `cargo check -p lifed --no-default-features`.
+//! `cargo check -p soma --no-default-features`.
 
 #![cfg(all(target_os = "linux", feature = "vsock-listener"))]
 
@@ -35,7 +35,7 @@ use tokio_vsock::{VsockAddr, VsockListener, VsockStream};
 use tonic::transport::server::{Connected, Router};
 
 use crate::config::VsockConfig;
-use crate::error::{LifedError, LifedResult};
+use crate::error::{SomaError, SomaResult};
 
 // ── Connected newtype ─────────────────────────────────────────────────────────
 
@@ -120,13 +120,13 @@ pub async fn serve(
     cfg: &VsockConfig,
     router: Router,
     shutdown_rx: oneshot::Receiver<()>,
-) -> LifedResult<()> {
+) -> SomaResult<()> {
     let addr = VsockAddr::new(cfg.cid, cfg.port);
     let listener = VsockListener::bind(addr)
-        .map_err(|e| LifedError::Server(format!("vsock bind {:?}: {e}", addr)))?;
+        .map_err(|e| SomaError::Server(format!("vsock bind {:?}: {e}", addr)))?;
 
     tracing::info!(
-        target: "lifed::listener::vsock",
+        target: "soma::listener::vsock",
         cid = cfg.cid,
         port = cfg.port,
         "vsock listener bound",
@@ -139,7 +139,7 @@ pub async fn serve(
             let _ = shutdown_rx.await;
         })
         .await
-        .map_err(|e| LifedError::Server(format!("vsock serve: {e}")))
+        .map_err(|e| SomaError::Server(format!("vsock serve: {e}")))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

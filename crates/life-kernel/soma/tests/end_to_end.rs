@@ -194,7 +194,7 @@ async fn end_to_end_with_stub_backend() {
 
     // Spin up the Unix listener via the top-level multiplexer.
     // `listener::serve` creates the service internally from the engine.
-    let mut server_cfg = lifed::LifedConfig::default();
+    let mut server_cfg = lifed::SomaConfig::default();
     server_cfg.server.unix_socket = socket.clone();
     server_cfg.server.unix_socket_mode = Some(0o660);
     server_cfg.server.unix_socket_group = None;
@@ -316,7 +316,7 @@ async fn end_to_end_full() {
     let socket_path = tmpdir.path().join("lifed-full.sock");
 
     // Build config with real local backend + in-memory lago.
-    let mut cfg = lifed::LifedConfig::default();
+    let mut cfg = lifed::SomaConfig::default();
     cfg.server.unix_socket = socket_path.clone();
     cfg.server.unix_socket_mode = Some(0o660);
     cfg.server.unix_socket_group = None;

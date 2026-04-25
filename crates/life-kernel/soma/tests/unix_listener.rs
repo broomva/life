@@ -72,10 +72,10 @@ async fn listener_accepts_connection_and_shuts_down() {
     let tmpdir = tempfile::tempdir().unwrap();
     let socket = tmpdir.path().join("lifed.sock");
 
-    // `LifedConfig` and `ServerConfig` are `#[non_exhaustive]`, so we cannot
+    // `SomaConfig` and `ServerConfig` are `#[non_exhaustive]`, so we cannot
     // construct them via struct literals outside the defining crate.
     // Use `Default::default()` and then mutate the public fields we care about.
-    let mut cfg = lifed::LifedConfig::default();
+    let mut cfg = lifed::SomaConfig::default();
     cfg.server.unix_socket = socket.clone();
     cfg.server.unix_socket_mode = Some(0o660);
     cfg.server.unix_socket_group = None;

@@ -280,14 +280,14 @@ async fn bootstrap_engine_core_under_500ms() {
 async fn cold_start_under_500ms() {
     use std::time::Duration;
 
-    use lifed::{LifedConfig, bootstrap};
+    use lifed::{SomaConfig, bootstrap};
 
     let threshold = Duration::from_millis(500);
     let t0 = Instant::now();
 
-    // `LifedConfig::default()` has `backends.local = true` and
+    // `SomaConfig::default()` has `backends.local = true` and
     // `lago.store = InMemory`.
-    let cfg = LifedConfig::default();
+    let cfg = SomaConfig::default();
     let bootstrap = bootstrap::build_engine(&cfg)
         .await
         .expect("build_engine must succeed");

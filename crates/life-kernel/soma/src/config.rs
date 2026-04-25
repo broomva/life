@@ -1,7 +1,7 @@
-//! Parser + validator for `/etc/lifed/config.toml`.
+//! Parser + validator for `/etc/soma/config.toml`.
 //!
 //! The daemon loads the config once at startup. Every field has a sensible
-//! default so the minimal config (`[server]\nunix_socket = "/run/lifed/sock"`)
+//! default so the minimal config (`[server]\nunix_socket = "/run/life/soma.sock"`)
 //! starts a usable daemon backed by `arcan-provider-local`, `NoOp` gates,
 //! and an in-memory Lago journal.
 
@@ -9,16 +9,16 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{LifedError, LifedResult};
+use crate::error::{SomaError, SomaResult};
 
-/// Top-level `/etc/lifed/config.toml` schema.
+/// Top-level `/etc/soma/config.toml` schema.
 ///
 /// Every nested section has its own `Default` impl so an empty file still
-/// produces a valid `LifedConfig`.
+/// produces a valid `SomaConfig`.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct LifedConfig {
+pub struct SomaConfig {
     /// Transport configuration (Unix socket path, optional vsock listener, shutdown drain).
     #[serde(default)]
     pub server: ServerConfig,
@@ -60,7 +60,7 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            unix_socket: PathBuf::from("/run/lifed/sock"),
+            unix_socket: PathBuf::from("/run/life/soma.sock"),
             unix_socket_mode: Some(0o660),
             unix_socket_group: None,
             vsock: None,
@@ -253,50 +253,50 @@ mod defaults {
         "noop".into()
     }
     pub(super) fn lago_namespace() -> String {
-        "lifed".into()
+        "soma".into()
     }
     pub(super) fn vigil_level() -> String {
         "info".into()
     }
 }
 
-impl LifedConfig {
+impl SomaConfig {
     /// Load and validate a config file.
     ///
-    /// `path = None` returns `LifedConfig::default()` — the all-defaults
+    /// `path = None` returns `SomaConfig::default()` — the all-defaults
     /// profile. Callers should prefer this over `Default::default()` so
     /// future validation steps (e.g. backend credential presence) run.
-    pub fn load(path: Option<&Path>) -> LifedResult<Self> {
+    pub fn load(path: Option<&Path>) -> SomaResult<Self> {
         let raw = match path {
             Some(p) => std::fs::read_to_string(p)
-                .map_err(|e| LifedError::Config(format!("reading {}: {e}", p.display())))?,
+                .map_err(|e| SomaError::Config(format!("reading {}: {e}", p.display())))?,
             None => String::new(),
         };
         let cfg: Self = if raw.is_empty() {
             Self::default()
         } else {
-            toml::from_str(&raw).map_err(|e| LifedError::Config(format!("parsing: {e}")))?
+            toml::from_str(&raw).map_err(|e| SomaError::Config(format!("parsing: {e}")))?
         };
         cfg.validate()?;
         Ok(cfg)
     }
 
     /// Validate the loaded configuration for semantic correctness.
-    pub(crate) fn validate(&self) -> LifedResult<()> {
+    pub(crate) fn validate(&self) -> SomaResult<()> {
         if !self.backends.local && self.backends.cube.is_none() && self.backends.vercel.is_none() {
-            return Err(LifedError::Config(
+            return Err(SomaError::Config(
                 "at least one backend must be enabled ([backends] section)".into(),
             ));
         }
         if let Some(vsock) = self.server.vsock.as_ref() {
             if !cfg!(all(target_os = "linux", feature = "vsock-listener")) {
-                return Err(LifedError::Config(
+                return Err(SomaError::Config(
                     "vsock listener requested but daemon not built with vsock-listener on Linux"
                         .into(),
                 ));
             }
             if vsock.port == 0 {
-                return Err(LifedError::Config("vsock.port must be non-zero".into()));
+                return Err(SomaError::Config("vsock.port must be non-zero".into()));
             }
         }
         Ok(())
@@ -310,54 +310,54 @@ mod tests {
 
     #[test]
     fn load_empty_path_uses_defaults() {
-        let cfg = LifedConfig::load(None).unwrap();
-        assert_eq!(cfg.server.unix_socket, PathBuf::from("/run/lifed/sock"));
+        let cfg = SomaConfig::load(None).unwrap();
+        assert_eq!(cfg.server.unix_socket, PathBuf::from("/run/life/soma.sock"));
         assert!(cfg.backends.local);
         assert_eq!(cfg.gates.budget, "noop");
-        assert_eq!(cfg.lago.namespace, "lifed");
+        assert_eq!(cfg.lago.namespace, "soma");
     }
 
     #[test]
     fn load_minimal_file_matches_defaults() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
-        writeln!(file, "[server]\nunix_socket = \"/tmp/lifed.sock\"").unwrap();
-        let cfg = LifedConfig::load(Some(file.path())).unwrap();
-        assert_eq!(cfg.server.unix_socket, PathBuf::from("/tmp/lifed.sock"));
+        writeln!(file, "[server]\nunix_socket = \"/tmp/soma.sock\"").unwrap();
+        let cfg = SomaConfig::load(Some(file.path())).unwrap();
+        assert_eq!(cfg.server.unix_socket, PathBuf::from("/tmp/soma.sock"));
     }
 
     #[test]
     fn load_rejects_unknown_fields() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         writeln!(file, "[server]\nunix_socket = \"/x\"\nfoo = 1").unwrap();
-        let err = LifedConfig::load(Some(file.path())).unwrap_err();
-        assert!(matches!(err, LifedError::Config(ref msg) if msg.contains("unknown field")));
+        let err = SomaConfig::load(Some(file.path())).unwrap_err();
+        assert!(matches!(err, SomaError::Config(ref msg) if msg.contains("unknown field")));
     }
 
     #[test]
     fn validate_requires_at_least_one_backend() {
-        let cfg: LifedConfig = toml::from_str("[backends]\nlocal = false\n").unwrap();
+        let cfg: SomaConfig = toml::from_str("[backends]\nlocal = false\n").unwrap();
         let err = cfg.validate().unwrap_err();
-        assert!(matches!(err, LifedError::Config(ref msg) if msg.contains("at least one backend")));
+        assert!(matches!(err, SomaError::Config(ref msg) if msg.contains("at least one backend")));
     }
 
     #[test]
     fn vsock_rejects_on_non_linux_or_without_feature() {
-        let cfg: LifedConfig = toml::from_str(
+        let cfg: SomaConfig = toml::from_str(
             "[server]\nunix_socket = \"/x\"\n\n[server.vsock]\ncid = 2\nport = 10024\n",
         )
         .unwrap();
         if cfg!(all(target_os = "linux", feature = "vsock-listener")) {
             // vsock on: port = 10024 is valid. Try port 0 instead.
-            let cfg2: LifedConfig = toml::from_str(
+            let cfg2: SomaConfig = toml::from_str(
                 "[server]\nunix_socket = \"/x\"\n\n[server.vsock]\ncid = 2\nport = 0\n",
             )
             .unwrap();
             assert!(matches!(
                 cfg2.validate().unwrap_err(),
-                LifedError::Config(ref msg) if msg.contains("port must be non-zero")
+                SomaError::Config(ref msg) if msg.contains("port must be non-zero")
             ));
         } else {
-            assert!(matches!(cfg.validate().unwrap_err(), LifedError::Config(_)));
+            assert!(matches!(cfg.validate().unwrap_err(), SomaError::Config(_)));
         }
     }
 
@@ -365,22 +365,22 @@ mod tests {
     fn lago_store_kind_roundtrips() {
         // Verify that LagoStoreKind serialises and deserialises symmetrically.
         let toml_str = "[lago]\nnamespace = \"test\"\n\n[lago.store]\nkind = \"in_memory\"\n";
-        let cfg: LifedConfig = toml::from_str(toml_str).unwrap();
+        let cfg: SomaConfig = toml::from_str(toml_str).unwrap();
         assert!(matches!(cfg.lago.store, LagoStoreKind::InMemory));
 
         let redb_str = "[lago]\nnamespace = \"prod\"\n\n[lago.store]\nkind = \"redb\"\npath = \"/tmp/e.redb\"\n";
-        let cfg2: LifedConfig = toml::from_str(redb_str).unwrap();
+        let cfg2: SomaConfig = toml::from_str(redb_str).unwrap();
         assert!(matches!(cfg2.lago.store, LagoStoreKind::Redb { .. }));
     }
 
     #[test]
     fn vigil_exporter_roundtrips() {
         let console = "[vigil]\nlevel = \"debug\"\n\n[vigil.exporter]\nkind = \"console\"\n";
-        let cfg: LifedConfig = toml::from_str(console).unwrap();
+        let cfg: SomaConfig = toml::from_str(console).unwrap();
         assert!(matches!(cfg.vigil.exporter, VigilExporter::Console));
 
         let otlp = "[vigil]\nlevel = \"trace\"\n\n[vigil.exporter]\nkind = \"otlp\"\nendpoint = \"http://localhost:4317\"\n";
-        let cfg2: LifedConfig = toml::from_str(otlp).unwrap();
+        let cfg2: SomaConfig = toml::from_str(otlp).unwrap();
         assert!(matches!(cfg2.vigil.exporter, VigilExporter::Otlp { .. }));
     }
 }

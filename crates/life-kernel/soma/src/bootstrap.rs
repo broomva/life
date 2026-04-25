@@ -1,4 +1,4 @@
-//! Build a running `KernelEngine` from a `LifedConfig`.
+//! Build a running `KernelEngine` from a `SomaConfig`.
 //!
 //! Handles event store instantiation (in-memory via TempDir-backed RedbJournal
 //! for MVS, or an explicit on-disk redb path), backend registration, gate
@@ -23,8 +23,8 @@ use life_kernel_gate::{NoOpBudgetGate, NoOpNetworkIsolation, StaticPolicyGate};
 use tempfile::TempDir;
 use tracing::warn;
 
-use crate::config::{LagoConfig, LagoStoreKind, LifedConfig};
-use crate::error::{LifedError, LifedResult};
+use crate::config::{LagoConfig, LagoStoreKind, SomaConfig};
+use crate::error::{SomaError, SomaResult};
 
 // ── Allow-all policy + approval stubs ───────────────────────────────────────
 //
@@ -131,7 +131,7 @@ pub struct Bootstrap {
     pub _lago_tempdir: Option<TempDir>,
 }
 
-/// Assemble a [`Bootstrap`] from a validated [`LifedConfig`].
+/// Assemble a [`Bootstrap`] from a validated [`SomaConfig`].
 ///
 /// Steps:
 /// 1. Build the event store (redb or in-memory-backed-by-tempdir).
@@ -140,18 +140,18 @@ pub struct Bootstrap {
 /// 4. Compose gates (NoOp budget, NoOp network, StaticPolicy with allow-all
 ///    stubs — real gates land in Phase 4).
 /// 5. Register backends per `cfg.backends` and build the engine.
-pub async fn build_engine(cfg: &LifedConfig) -> LifedResult<Bootstrap> {
+pub async fn build_engine(cfg: &SomaConfig) -> SomaResult<Bootstrap> {
     // Validate first — `load()` already runs this, but guard against callers
-    // that construct `LifedConfig` by hand without going through `load()`.
+    // that construct `SomaConfig` by hand without going through `load()`.
     cfg.validate()?;
 
     // 1. Event store.
     let (event_store, _lago_tempdir) = build_event_store(&cfg.lago).await?;
 
     // 2. IDs.
-    let session_id = SessionId::from_string(format!("lifed:{}", cfg.lago.namespace));
+    let session_id = SessionId::from_string(format!("soma:{}", cfg.lago.namespace));
     let branch_id = BranchId::main();
-    let agent_id = AgentId::from_string("lifed");
+    let agent_id = AgentId::from_string("soma");
 
     // 3. Replay.
     let replayed = replay_from_store(Arc::clone(&event_store), &session_id, &branch_id).await?;
@@ -167,7 +167,7 @@ pub async fn build_engine(cfg: &LifedConfig) -> LifedResult<Bootstrap> {
 
     // 5. Build engine — register backends from config.
     if !cfg.backends.local && cfg.backends.cube.is_none() && cfg.backends.vercel.is_none() {
-        return Err(LifedError::Config(
+        return Err(SomaError::Config(
             "at least one backend must be enabled ([backends] section)".into(),
         ));
     }
@@ -182,7 +182,7 @@ pub async fn build_engine(cfg: &LifedConfig) -> LifedResult<Bootstrap> {
     // Local backend.
     if cfg.backends.local {
         let local = arcan_provider_local::LocalSandboxProvider::from_env()
-            .map_err(|e| LifedError::BackendInit(format!("arcan-provider-local: {e}")))?;
+            .map_err(|e| SomaError::BackendInit(format!("arcan-provider-local: {e}")))?;
         builder = builder.register_backend(Arc::new(local)).await;
     }
 
@@ -206,7 +206,7 @@ pub async fn build_engine(cfg: &LifedConfig) -> LifedResult<Bootstrap> {
     let engine = builder
         .build()
         .await
-        .map_err(|e| LifedError::BackendInit(format!("KernelEngine::build: {e}")))?;
+        .map_err(|e| SomaError::BackendInit(format!("KernelEngine::build: {e}")))?;
 
     Ok(Bootstrap {
         engine: Arc::new(engine),
@@ -226,22 +226,22 @@ pub async fn build_engine(cfg: &LifedConfig) -> LifedResult<Bootstrap> {
 /// the daemon for the `InMemory` variant.
 async fn build_event_store(
     cfg: &LagoConfig,
-) -> LifedResult<(Arc<dyn EventStorePort>, Option<TempDir>)> {
+) -> SomaResult<(Arc<dyn EventStorePort>, Option<TempDir>)> {
     match &cfg.store {
         LagoStoreKind::InMemory => {
             let dir = TempDir::new().map_err(|e| {
-                LifedError::BackendInit(format!("tempdir for in-memory store: {e}"))
+                SomaError::BackendInit(format!("tempdir for in-memory store: {e}"))
             })?;
             let db_path = dir.path().join("journal.redb");
             let journal = RedbJournal::open(&db_path).map_err(|e| {
-                LifedError::BackendInit(format!("RedbJournal::open({db_path:?}): {e}"))
+                SomaError::BackendInit(format!("RedbJournal::open({db_path:?}): {e}"))
             })?;
             let adapter = LagoAiosEventStoreAdapter::new(Arc::new(journal));
             Ok((Arc::new(adapter) as Arc<dyn EventStorePort>, Some(dir)))
         }
         LagoStoreKind::Redb { path } => {
             let journal = RedbJournal::open(path).map_err(|e| {
-                LifedError::BackendInit(format!("RedbJournal::open({path:?}): {e}"))
+                SomaError::BackendInit(format!("RedbJournal::open({path:?}): {e}"))
             })?;
             let adapter = LagoAiosEventStoreAdapter::new(Arc::new(journal));
             Ok((Arc::new(adapter) as Arc<dyn EventStorePort>, None))
@@ -259,7 +259,7 @@ async fn replay_from_store(
     store: Arc<dyn EventStorePort>,
     session_id: &SessionId,
     branch_id: &BranchId,
-) -> LifedResult<ReplayedState> {
+) -> SomaResult<ReplayedState> {
     const PAGE_SIZE: usize = 512;
     const MAX_EVENTS: usize = 10_000;
 
@@ -270,7 +270,7 @@ async fn replay_from_store(
         let batch = store
             .read(session_id.clone(), branch_id.clone(), cursor, PAGE_SIZE)
             .await
-            .map_err(|e| LifedError::BackendInit(format!("event store read during replay: {e}")))?;
+            .map_err(|e| SomaError::BackendInit(format!("event store read during replay: {e}")))?;
 
         let batch_len = batch.len();
         for record in &batch {
@@ -319,7 +319,7 @@ mod tests {
     use aios_protocol::hypervisor::{BackendId, VmId};
     use aios_protocol::ids::{BranchId, SessionId};
 
-    use crate::config::{BackendsConfig, GatesConfig, LagoConfig, LagoStoreKind, LifedConfig};
+    use crate::config::{BackendsConfig, GatesConfig, LagoConfig, LagoStoreKind, SomaConfig};
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -342,7 +342,7 @@ mod tests {
             backend: BackendId::from("local"),
             spec_hash: "test-hash".into(),
             session_id: SessionId::from_string(session),
-            agent_id: AgentId::from_string("lifed"),
+            agent_id: AgentId::from_string("soma"),
         })
     }
 
@@ -476,11 +476,11 @@ mod tests {
 
     #[tokio::test]
     async fn build_engine_fails_with_no_backends_enabled() {
-        // Construct a LifedConfig that has no backends enabled.
+        // Construct a SomaConfig that has no backends enabled.
         // We do this by bypassing `validate()` — the point of this test is to
         // verify that `build_engine` *also* surfaces the error if called
         // without prior `load()`.
-        let cfg = LifedConfig {
+        let cfg = SomaConfig {
             backends: BackendsConfig {
                 local: false,
                 cube: None,
@@ -495,13 +495,13 @@ mod tests {
         };
 
         match build_engine(&cfg).await {
-            Err(LifedError::Config(msg)) => {
+            Err(SomaError::Config(msg)) => {
                 assert!(
                     msg.contains("at least one backend"),
                     "expected 'at least one backend' in error message, got: {msg}"
                 );
             }
-            Err(other) => panic!("expected LifedError::Config, got: {other:?}"),
+            Err(other) => panic!("expected SomaError::Config, got: {other:?}"),
             Ok(_) => panic!("expected an error when no backends are enabled, but got Ok"),
         }
     }
@@ -516,13 +516,13 @@ mod tests {
     /// locally with:
     ///
     /// ```bash
-    /// cargo test -p lifed -- --ignored \
+    /// cargo test -p soma -- --ignored \
     ///   build_engine_succeeds_with_local_backend_and_in_memory_lago
     /// ```
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "requires Docker or nsjail on the host for LocalSandboxProvider::from_env()"]
     async fn build_engine_succeeds_with_local_backend_and_in_memory_lago() {
-        let cfg = LifedConfig::default();
+        let cfg = SomaConfig::default();
         let bootstrap = build_engine(&cfg).await.expect("build_engine must succeed");
 
         // Engine is Arc-wrapped; strong count is ≥ 1 while the Bootstrap
@@ -532,8 +532,8 @@ mod tests {
         // Empty store → replay folds nothing.
         assert_eq!(bootstrap.replayed.events_applied, 0);
 
-        // Session ID derived from namespace (default `"lifed"`).
-        assert_eq!(bootstrap.session_id.as_str(), "lifed:lifed");
+        // Session ID derived from namespace (default `"soma"`).
+        assert_eq!(bootstrap.session_id.as_str(), "soma:soma");
 
         // Branch defaults to "main".
         assert_eq!(bootstrap.branch_id.as_str(), "main");

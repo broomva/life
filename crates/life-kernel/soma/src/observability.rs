@@ -26,12 +26,12 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
 
 use crate::config::{VigilConfig, VigilExporter};
-use crate::error::{LifedError, LifedResult};
+use crate::error::{SomaError, SomaResult};
 
 /// Initialise Vigil tracing + metrics for the daemon. Returns a guard that
 /// flushes spans + metrics on drop. Hold it for the process lifetime.
-pub fn init(cfg: &VigilConfig) -> LifedResult<VigGuard> {
-    let mut vig = VigConfig::for_service("lifed");
+pub fn init(cfg: &VigilConfig) -> SomaResult<VigGuard> {
+    let mut vig = VigConfig::for_service("soma");
     match &cfg.exporter {
         VigilExporter::Console => {
             // VigConfig defaults emit to stdout/journald via the tracing
@@ -45,7 +45,7 @@ pub fn init(cfg: &VigilConfig) -> LifedResult<VigGuard> {
     // `init_telemetry` also respects OTEL_EXPORTER_OTLP_ENDPOINT and
     // VIGIL_LOG_FORMAT env vars via the VigConfig — callers can always
     // override programmatic values.
-    init_telemetry(vig).map_err(|e: VigError| LifedError::Config(format!("vigil init: {e}")))
+    init_telemetry(vig).map_err(|e: VigError| SomaError::Config(format!("vigil init: {e}")))
 }
 
 /// Canonical kernel.* metric handles. Cheap to clone — each field is an
@@ -65,7 +65,7 @@ impl KernelMetrics {
     /// (when an OTLP endpoint is configured). In no-endpoint mode the metrics
     /// remain in-process no-ops but are still constructable.
     pub fn register() -> Self {
-        let meter: Meter = opentelemetry::global::meter("lifed");
+        let meter: Meter = opentelemetry::global::meter("soma");
         Self {
             vm_lifecycle: meter
                 .u64_counter("kernel.vm.lifecycle")
@@ -175,7 +175,7 @@ mod tests {
         };
         match init(&cfg) {
             Ok(_guard) => {} // guard dropped here — flush on drop is safe
-            Err(LifedError::Config(msg))
+            Err(SomaError::Config(msg))
                 if msg.contains("already") || msg.contains("Subscriber") =>
             {
                 // Global subscriber already set by another test — acceptable.

@@ -1,4 +1,4 @@
-//! `lifectl list-vms` — list VMs managed by the lifed daemon.
+//! `lifectl list-vms` — list VMs managed by the soma daemon.
 
 use std::path::Path;
 

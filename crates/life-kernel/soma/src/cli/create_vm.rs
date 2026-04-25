@@ -1,4 +1,4 @@
-//! `lifectl create-vm` — provision a new VM in the lifed daemon.
+//! `lifectl create-vm` — provision a new VM in the soma daemon.
 
 use std::path::Path;
 

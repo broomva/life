@@ -1,4 +1,4 @@
-//! Unix-socket tonic client for the lifed daemon.
+//! Unix-socket tonic client for the soma daemon.
 //!
 //! Builds a tonic [`Channel`] connected to the daemon's Unix domain socket
 //! using a `tower::service_fn` connector + `hyper_util::rt::TokioIo`.
@@ -15,7 +15,7 @@ use tokio::net::UnixStream;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
 
-/// Connect to the lifed daemon over its Unix socket and return a
+/// Connect to the soma daemon over its Unix socket and return a
 /// [`KernelServiceClient`] ready for RPC calls.
 pub async fn connect(socket: &Path) -> Result<KernelServiceClient<Channel>> {
     let socket_path = socket.to_path_buf();
@@ -31,7 +31,7 @@ pub async fn connect(socket: &Path) -> Result<KernelServiceClient<Channel>> {
             async move { UnixStream::connect(&path).await.map(TokioIo::new) }
         }))
         .await
-        .context("connecting to lifed unix socket")?;
+        .context("connecting to soma unix socket")?;
 
     Ok(KernelServiceClient::new(channel))
 }
