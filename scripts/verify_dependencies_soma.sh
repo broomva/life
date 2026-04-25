@@ -7,7 +7,7 @@
 #   arcand, arcan-core, arcan-harness, arcan-aios-adapters
 #
 # life-kernel-facade (Phase 1) must NOT directly depend on runtime daemon crates.
-# life-client (Phase 1) must NOT depend on life-kernel-* internal crates or lifed.
+# life-client (Phase 1) must NOT depend on life-kernel-* internal crates or soma.
 # *-api-schema crates must NOT depend on runtime crates (tokio, axum, reqwest, tonic, hyper).
 #
 # Runs from the monorepo root (core/life) — uses workspace `cargo tree`.
@@ -56,10 +56,10 @@ for crate in life-kernel-proto life-kernel-core life-kernel-gate life-kernel-con
     check_no_dep "$crate" "arcan-harness"
     check_no_dep "$crate" "arcan-aios-adapters"
 done
-# Binary-tier crates (lifed, lifectl): also must not pull in the
-# runtime/adapter crates (they depend on arcan-provider-* via
+# Binary-tier crate (soma): also must not pull in the
+# runtime/adapter crates (it depends on arcan-provider-* via
 # life-kernel-core, but not on arcand/arcan-core/arcan-harness/arcan-aios-adapters).
-for crate in lifed lifectl; do
+for crate in soma; do
     check_no_dep "$crate" "arcand"
     check_no_dep "$crate" "arcan-core"
     check_no_dep "$crate" "arcan-harness"
@@ -84,9 +84,9 @@ for forbidden in "${FACADE_FORBIDDEN_RUNTIME[@]}"; do
 done
 
 # ── Rule set 3: life-client (Phase 1 — dormant until crate exists) ───────────
-# life-client must not depend on life-kernel internal crates or lifed.
+# life-client must not depend on life-kernel internal crates or soma.
 CLIENT_FORBIDDEN=(
-    life-kernel-core life-kernel-gate life-kernel-facade lifed
+    life-kernel-core life-kernel-gate life-kernel-facade soma
 )
 echo "=== life-client dependency rules (dormant until Phase 1) ==="
 for forbidden in "${CLIENT_FORBIDDEN[@]}"; do
@@ -105,7 +105,7 @@ SCHEMA_CRATES=(
 )
 SCHEMA_FORBIDDEN_RUNTIME=(
     tokio axum reqwest tonic hyper
-    arcand lagod autonomicd haimad nousd opsisd life-relayd lifed
+    arcand lagod autonomicd haimad nousd opsisd life-relayd soma
 )
 echo "=== *-api-schema runtime isolation rules ==="
 for schema_crate in "${SCHEMA_CRATES[@]}"; do
