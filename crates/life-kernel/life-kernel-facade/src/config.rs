@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Where the facade reaches each downstream daemon. Typically sourced
-/// from `lifed`'s `/etc/lifed/config.toml` `[daemons]` section; tests
+/// from `soma`'s `/etc/soma/config.toml` `[daemons]` section; tests
 /// construct this directly.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]

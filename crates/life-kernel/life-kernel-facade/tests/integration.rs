@@ -1,7 +1,7 @@
 //! Phase 1 v0 integration harness.
 //!
 //! Validates the full wire surface end-to-end without requiring the
-//! (as-yet uncreated) `lifed` binary:
+//! (as-yet uncreated) `soma` binary:
 //!
 //! 1. `wiremock` stands in for `lagod` + `arcand`.
 //! 2. The three v0 proxies (`EventsProxy`, `SessionProxy`,
@@ -12,7 +12,7 @@
 //!    round-trip, confirming the typed handles speak the generated
 //!    wire surface cleanly.
 //!
-//! When Spec A Phase 2 lands and `lifed` starts hosting these services
+//! When Spec A Phase 2 lands and `soma` starts hosting these services
 //! itself, the harness becomes the template for that binary's
 //! `server.rs`.
 
@@ -63,7 +63,7 @@ async fn v0_events_head_roundtrip_via_unix_socket() {
 
     // 4. Bind an in-process tonic server on a temp Unix socket.
     let tempdir = tempfile::tempdir().expect("tempdir");
-    let socket_path = tempdir.path().join("lifed.sock");
+    let socket_path = tempdir.path().join("soma.sock");
     let listener = UnixListener::bind(&socket_path).expect("bind unix");
     let incoming = UnixListenerStream::new(listener);
 
@@ -121,7 +121,7 @@ async fn v0_2_tools_returns_unimplemented() {
     let approvals_proxy = Arc::new(ApprovalsProxy::new(arcan_client));
 
     let tempdir = tempfile::tempdir().unwrap();
-    let socket_path = tempdir.path().join("lifed-v02.sock");
+    let socket_path = tempdir.path().join("soma-v02.sock");
     let listener = UnixListener::bind(&socket_path).unwrap();
     let incoming = UnixListenerStream::new(listener);
 

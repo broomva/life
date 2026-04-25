@@ -137,7 +137,7 @@ impl BackendRegistry {
     /// Return the ids of all registered backends in insertion order.
     ///
     /// Useful for diagnostics and for the (future) `/backends`
-    /// introspection endpoint on the lifed daemon.
+    /// introspection endpoint on the soma daemon.
     pub async fn list_backend_ids(&self) -> Vec<BackendId> {
         let state = self.inner.read().await;
         state.order.clone()
