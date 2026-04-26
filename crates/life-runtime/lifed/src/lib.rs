@@ -10,10 +10,10 @@
 
 #![deny(unsafe_code)]
 
+pub mod config;
 pub mod error;
 
-// Sub-phase A modules — populated in tasks A3–A8.
-// pub mod config;
+// Sub-phase A modules — populated in tasks A4–A8.
 // pub mod bootstrap;
 // pub mod listener;
 // pub mod auth;
