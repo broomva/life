@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+// Admin-plane Runtime dialect — full service body lands in M5 sub-phase C
+// task C2.
+//
+// See docs/superpowers/specs/2026-04-26-spec-c2-lifed-facade.md §3.5.
+
+package life.admin.v1;
+
+message Empty {}

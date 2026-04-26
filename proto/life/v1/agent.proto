@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+// Public-plane Agent dialect — full service body lands in M5 sub-phase A
+// task A5. M5 sub-phase A task A4 ships only the package declaration and the
+// canonical `Empty` message used across the dialect.
+//
+// See docs/superpowers/specs/2026-04-26-spec-c2-lifed-facade.md §3.1 for the
+// full service definition.
+
+package life.v1;
+
+message Empty {}

@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+// Public-plane Wallet dialect — full service body lands in M5 sub-phase B
+// task B13.
+//
+// See docs/superpowers/specs/2026-04-26-spec-c2-lifed-facade.md §3.3.
+
+package life.v1;
