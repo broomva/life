@@ -646,6 +646,7 @@ dependencies = [
  "aios-protocol",
  "arcan-sandbox",
  "async-trait",
+ "base64",
  "bitflags 2.11.0",
  "chrono",
  "mockito",
