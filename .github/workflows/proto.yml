@@ -1,0 +1,61 @@
+name: Proto
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'proto/**'
+      - 'crates/aios/aios-proto/**'
+      - 'crates/life-kernel/life-kernel-proto/proto/**'
+      - 'crates/life-kernel/life-kernel-proto/build.rs'
+      - '.github/workflows/proto.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'proto/**'
+      - 'crates/aios/aios-proto/**'
+      - 'crates/life-kernel/life-kernel-proto/proto/**'
+      - 'crates/life-kernel/life-kernel-proto/build.rs'
+      - '.github/workflows/proto.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── buf lint — schema correctness against the canonical tree ──────
+  lint:
+    name: buf lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: '1.x'
+      - name: buf lint
+        working-directory: proto
+        run: buf lint
+
+  # ── buf breaking — wire-compat enforcement against main ───────────
+  #
+  # Runs on PRs only. Compares the proto tree at HEAD against
+  # `origin/main` to ensure proto field tags + service shape stay
+  # additive. M3 (BRO-928) shipped a package rename + identifier
+  # extraction into aios.v1.* — both wire-compatible.
+  breaking:
+    name: buf breaking
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: '1.x'
+      - name: buf breaking
+        working-directory: proto
+        run: |
+          buf breaking \
+            --against ".git#branch=${{ github.base_ref || 'main' }},subdir=proto"
