@@ -1,7 +1,11 @@
 version: v2
+# Single module covering the whole proto/ tree so life/* can import from
+# aios/v1/* without cross-module dep registration. Splitting into separate
+# modules would require either a buf workspace or per-module dep
+# declarations against published BSR names — both overkill while every
+# proto file lives in this repo.
 modules:
-  - path: aios
-  - path: life
+  - path: .
 lint:
   use:
     - STANDARD
