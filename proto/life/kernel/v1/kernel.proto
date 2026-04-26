@@ -1,15 +1,22 @@
 syntax = "proto3";
-package broomva.life.kernel.v1;
+
+// Migrated 2026-04-25 from crates/life-kernel/life-kernel-proto/proto/kernel.proto
+// per master spec C M3 (proto consolidation). Wire-compatible with the
+// previous broomva.life.kernel.v1 package — only the Rust module path
+// changes (a deprecated alias is retained for one minor version in
+// life-kernel-proto::lib.rs).
+package life.kernel.v1;
 
 import "google/protobuf/timestamp.proto";
+import "aios/v1/identifiers.proto";  // VmId, VmSnapshotId, BackendId, SessionId, AgentId
 
 // ── Identity ─────────────────────────────────────────────────────────
-
-message VmId { string value = 1; }
-message VmSnapshotId { string value = 1; }
-message BackendId { string value = 1; }
-message SessionId { string value = 1; }
-message AgentId { string value = 1; }
+//
+// The 5 canonical identifier message types previously defined in this
+// file (VmId, VmSnapshotId, BackendId, SessionId, AgentId) now live in
+// aios/v1/identifiers.proto. Internal Rust callers use the typed
+// `aios_protocol::ids::*` newtypes and bridge to the proto representation
+// via `aios_protocol::proto_bridge`.
 
 // ── Resources / spec ────────────────────────────────────────────────
 
@@ -42,7 +49,7 @@ message RuntimeHint {
 
 message BackendSelector {
     oneof kind {
-        BackendId explicit = 1;
+        aios.v1.BackendId explicit = 1;
         Empty auto = 2;
     }
 }
@@ -59,7 +66,7 @@ message VmSpec {
 }
 
 message ForkSpec {
-    VmSnapshotId parent_snapshot = 1;
+    aios.v1.VmSnapshotId parent_snapshot = 1;
     VmResources resources_override = 2;
     map<string, string> env_override = 3;
     map<string, string> label_override = 4;
@@ -73,10 +80,10 @@ message VmStatus {
 }
 
 message VmHandle {
-    VmId vm_id = 1;
-    BackendId backend = 2;
-    SessionId session_id = 3;
-    AgentId agent_id = 4;
+    aios.v1.VmId vm_id = 1;
+    aios.v1.BackendId backend = 2;
+    aios.v1.SessionId session_id = 3;
+    aios.v1.AgentId agent_id = 4;
     VmStatus status = 5;
     google.protobuf.Timestamp created_at = 6;
     // Opaque — serialized `aios_protocol::hypervisor::VmHandle.metadata` JSON.
@@ -84,16 +91,16 @@ message VmHandle {
 }
 
 message VmSnapshotHandle {
-    VmSnapshotId snapshot_id = 1;
-    VmId vm_id = 2;
+    aios.v1.VmSnapshotId snapshot_id = 1;
+    aios.v1.VmId vm_id = 2;
     string name = 3;
     google.protobuf.Timestamp created_at = 4;
     uint64 size_bytes = 5;
 }
 
 message VmInfo {
-    VmId vm_id = 1;
-    BackendId backend = 2;
+    aios.v1.VmId vm_id = 1;
+    aios.v1.BackendId backend = 2;
     VmStatus status = 3;
     google.protobuf.Timestamp created_at = 4;
 }
@@ -119,8 +126,8 @@ message TraceContext {
 }
 
 message KernelContext {
-    SessionId session_id = 1;
-    AgentId agent_id = 2;
+    aios.v1.SessionId session_id = 1;
+    aios.v1.AgentId agent_id = 2;
     WalletAttribution wallet = 3;
     optional ResourceBudget cost_hint = 4;
     optional TraceContext trace_ctx = 5;
@@ -181,7 +188,7 @@ message DestroyRequest { VmHandle vm = 1; }
 
 message ListVmsRequest {
     // Optional — restrict listing to a single session. Empty == all.
-    optional SessionId session_id = 1;
+    optional aios.v1.SessionId session_id = 1;
 }
 
 message Empty {}
