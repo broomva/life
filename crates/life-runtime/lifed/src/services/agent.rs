@@ -109,7 +109,7 @@ mod uuid_like {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos() as u128;
+            .as_nanos();
         nanos.to_le_bytes()
     }
 }

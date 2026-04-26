@@ -48,10 +48,8 @@ pub async fn bind(cfg: &PublicPlaneConfig) -> LifedResult<UnixListenerStream> {
 }
 
 /// Build the shutdown-signal future the tonic server consumes.
-pub fn shutdown_signal(rx: oneshot::Receiver<()>) -> impl std::future::Future<Output = ()> + Send {
-    async move {
-        let _ = rx.await;
-    }
+pub async fn shutdown_signal(rx: oneshot::Receiver<()>) {
+    let _ = rx.await;
 }
 
 fn prepare_socket_path(path: &Path) -> LifedResult<()> {

@@ -8,9 +8,14 @@ use tokio::sync::mpsc;
 
 use life_runtime_proto::life::v1 as pb;
 
+/// Type alias for the per-tab AgentEvent sender. Sub-phase A keeps the
+/// queue bounded by the receiver-side mpsc capacity (no slow-consumer
+/// policy yet — that lands in D4).
+pub type AgentEventSender = mpsc::Sender<Result<pb::AgentEvent, tonic::Status>>;
+
 #[derive(Default)]
 pub struct FanoutRegistry {
-    senders: Arc<RwLock<Vec<mpsc::Sender<Result<pb::AgentEvent, tonic::Status>>>>>,
+    senders: Arc<RwLock<Vec<AgentEventSender>>>,
 }
 
 impl FanoutRegistry {
@@ -18,7 +23,7 @@ impl FanoutRegistry {
         Self::default()
     }
     /// Register a downstream sender. Returns the registry index.
-    pub fn register(&self, tx: mpsc::Sender<Result<pb::AgentEvent, tonic::Status>>) -> usize {
+    pub fn register(&self, tx: AgentEventSender) -> usize {
         let mut guard = self.senders.write();
         let i = guard.len();
         guard.push(tx);
