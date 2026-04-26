@@ -69,6 +69,18 @@ where
                 .and_then(|tok| jwks.validate(tok).ok());
 
             // Attach (or default) CapabilityClaims as a request extension.
+            //
+            // SUB-PHASE A ONLY: Missing/invalid bearer falls through to a
+            // default-empty `CapabilityClaims`, which lets handlers proceed
+            // with empty `user_id`/`project_id`. This is plan-sanctioned for
+            // the dev-signer mock-substrate path (integration tests still
+            // attach valid bearers; the daemon is dev-only at this point).
+            //
+            // SUB-PHASE B5 MUST CHANGE THIS: replace `unwrap_or_default()`
+            // with an early-return `Status::unauthenticated` for the public
+            // plane. Per Spec C₂ §5.1 step 5, invalid Tier-2 capability
+            // tokens MUST be rejected before reaching any handler. Tracked
+            // as part of B5 (real ES256 + JWKS verification).
             req.extensions_mut().insert(claims.unwrap_or_default());
             inner.call(req).await
         })
