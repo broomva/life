@@ -259,6 +259,32 @@ The baseline unification is active and enforced in production paths:
 - Phase 3 (`arcan-provider-cube`) work resumes under `soma` name in M2.
 - Spec C₁ — soma scope spec — written at `docs/superpowers/specs/2026-04-25-soma-scope.md` (workspace-level docs branch, PR #23).
 
+### M3 — Proto Consolidation (2026-04-25)
+
+- Canonical proto tree at `core/life/proto/` per master spec §L6.5.
+- `aios.v1.*` canonical vocabulary extracted from `kernel.proto`'s in-file
+  identifier definitions into `proto/aios/v1/identifiers.proto` (5 message
+  types: `VmId`, `VmSnapshotId`, `BackendId`, `SessionId`, `AgentId`).
+- `kernel.proto` migrated to `proto/life/kernel/v1/kernel.proto` with
+  package rename `broomva.life.kernel.v1` → `life.kernel.v1` (Rust alias
+  `broomva_life_kernel_v1` preserved for one minor version).
+- New crate `aios-proto` at `crates/aios/aios-proto/` hosts the generated
+  Layer-2 proto types. `tonic-prost-build` compiles `proto/aios/v1/*.proto`
+  into the `aios::v1` Rust module.
+- `aios_protocol::proto_bridge` module ships round-trip `From`/`Into`
+  impls for the 5 identifier types (M3.5 extends the bridge to compound
+  types like `VmHandle`, `KernelContext`, …).
+- buf pipeline live: `proto/buf.yaml` + `proto/buf.gen.yaml`. CI runs
+  `buf lint` + `buf breaking` against `origin/main`.
+- The 8 v0 service protos (`approvals`, `events`, `model`, `policy`,
+  `relay`, `session`, `tools`, `common`) stay at the legacy
+  `crates/life-kernel/life-kernel-proto/proto/` location until M3.5/M4.
+- Wire compatibility: proto field tags + service shape unchanged.
+  Existing `KernelService` clients keep working without recompilation.
+- `cargo test --workspace`: baseline 3439 + 5 new bridge round-trip tests
+  = 3444 passed / 0 failed / 19 ignored.
+- Linear BRO-928. PR #TBD.
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
