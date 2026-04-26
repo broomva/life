@@ -1,0 +1,144 @@
+//! In-memory routing cache. Sub-phase A ships the basic shape; eviction lands
+//! in B8; cold-start replay from lago lands in D2.
+//!
+//! Per Spec C₂ §6.1, the cache maps `SessionId → RouteEntry`. Multi-tab
+//! fanout senders are stored per entry. Locking uses DashMap on the outer
+//! map and parking_lot::RwLock on entries (ergonomic; tokio::sync::RwLock
+//! would be required only when await is held across the lock).
+
+use std::sync::Arc;
+use std::time::Instant;
+
+use dashmap::DashMap;
+use parking_lot::RwLock;
+
+use aios_proto::aios::v1 as aios_v1;
+
+/// Routing cache — DashMap-backed sharded outer map; parking_lot::RwLock per entry.
+pub struct RoutingCache {
+    by_sid: DashMap<String, Arc<RwLock<RouteEntry>>>,
+    by_user: DashMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RouteEntry {
+    pub sid: aios_v1::SessionId,
+    pub user_id: String,
+    pub project_id: String,
+    pub agent_id: String,
+    pub lago_namespace: String,
+    pub haima_wallet: String,
+    pub anima_account: String,
+    pub last_touched: Instant,
+    pub status: SessionStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionStatus {
+    Active,
+    Detached,
+    Hibernated,
+}
+
+impl RoutingCache {
+    pub fn new() -> Self {
+        Self {
+            by_sid: DashMap::new(),
+            by_user: DashMap::new(),
+        }
+    }
+
+    /// Sub-phase A: insert a minimal entry. B11 will replace this with the full
+    /// saga-result entry shape.
+    pub fn insert_minimal(&self, sid: &aios_v1::SessionId, user_id: &str, project_id: &str) {
+        let entry = RouteEntry {
+            sid: sid.clone(),
+            user_id: user_id.to_string(),
+            project_id: project_id.to_string(),
+            agent_id: format!("agent-{}", sid.value),
+            lago_namespace: format!("session/{}", sid.value),
+            haima_wallet: format!("wallet-{}", sid.value),
+            anima_account: format!("account-{user_id}"),
+            last_touched: Instant::now(),
+            status: SessionStatus::Active,
+        };
+        self.by_sid
+            .insert(sid.value.clone(), Arc::new(RwLock::new(entry)));
+        self.by_user
+            .entry(user_id.to_string())
+            .or_default()
+            .push(sid.value.clone());
+    }
+
+    pub fn lookup(&self, sid: &aios_v1::SessionId) -> Option<RouteEntry> {
+        self.by_sid.get(&sid.value).map(|e| e.read().clone())
+    }
+
+    pub fn evict(&self, sid: &aios_v1::SessionId) {
+        if let Some((_, entry)) = self.by_sid.remove(&sid.value) {
+            let user_id = entry.read().user_id.clone();
+            if let Some(mut sids) = self.by_user.get_mut(&user_id) {
+                sids.retain(|s| s != &sid.value);
+            }
+        }
+    }
+
+    pub fn list_for_user(&self, user_id: &str) -> Vec<aios_v1::SessionId> {
+        self.by_user
+            .get(user_id)
+            .map(|v| {
+                v.iter()
+                    .map(|s| aios_v1::SessionId { value: s.clone() })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn size(&self) -> usize {
+        self.by_sid.len()
+    }
+}
+
+impl Default for RoutingCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sid(s: &str) -> aios_v1::SessionId {
+        aios_v1::SessionId {
+            value: s.to_string(),
+        }
+    }
+
+    #[test]
+    fn insert_lookup_evict_round_trip() {
+        let cache = RoutingCache::new();
+        cache.insert_minimal(&sid("abc"), "alice", "p1");
+        let entry = cache.lookup(&sid("abc")).expect("present");
+        assert_eq!(entry.user_id, "alice");
+        assert_eq!(entry.project_id, "p1");
+        assert_eq!(cache.size(), 1);
+
+        let mine = cache.list_for_user("alice");
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].value, "abc");
+
+        cache.evict(&sid("abc"));
+        assert!(cache.lookup(&sid("abc")).is_none());
+        assert_eq!(cache.size(), 0);
+        assert!(cache.list_for_user("alice").is_empty());
+    }
+
+    #[test]
+    fn multiple_sessions_for_one_user() {
+        let cache = RoutingCache::new();
+        cache.insert_minimal(&sid("a"), "alice", "p1");
+        cache.insert_minimal(&sid("b"), "alice", "p2");
+        assert_eq!(cache.list_for_user("alice").len(), 2);
+    }
+}

@@ -36,6 +36,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_prost_build::configure()
         .build_server(true)
         .build_client(true)
+        // Reuse the canonical aios.v1 types from the aios-proto crate instead
+        // of regenerating them inside this crate. This keeps a single Rust
+        // representation per wire type (Spec C₂ §10.3) and avoids duplicate
+        // symbol definitions when both crates are linked into the same binary.
+        .extern_path(".aios.v1", "::aios_proto::aios::v1")
         .compile_protos(
             &inputs.iter().map(|p| p.as_path()).collect::<Vec<_>>(),
             &[proto_root.as_path()],

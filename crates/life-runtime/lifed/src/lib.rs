@@ -10,19 +10,18 @@
 
 #![deny(unsafe_code)]
 
+pub mod auth;
+pub mod bootstrap;
+pub mod cli;
 pub mod config;
+pub mod dev_mocks;
 pub mod error;
-
-// Sub-phase A modules — populated in tasks A4–A8.
-// pub mod bootstrap;
-// pub mod listener;
-// pub mod auth;
-// pub mod routing;
-// pub mod saga;
-// pub mod services;
-// pub mod observability;
-// pub mod shutdown;
-// pub mod idempotency;
-// pub mod cli;
+pub mod idempotency;
+pub mod listener;
+pub mod observability;
+pub mod routing;
+pub mod saga;
+pub mod services;
+pub mod shutdown;
 
 pub use error::{LifedError, LifedResult};

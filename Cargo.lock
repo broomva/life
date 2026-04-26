@@ -5746,6 +5746,14 @@ dependencies = [
 [[package]]
 name = "life-runtime-proto"
 version = "0.3.0"
+dependencies = [
+ "aios-proto",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tonic-prost-build",
+]
 
 [[package]]
 name = "life-vigil"
