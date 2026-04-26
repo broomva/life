@@ -1,0 +1,6 @@
+version: v2
+plugins:
+  # Codegen happens via the workspace's existing tonic-prost-build pipeline.
+  # buf is used for lint + breaking-change checks only at this stage.
+  # Future: switch to buf-driven codegen if cross-language SDKs need it (M8).
+  []

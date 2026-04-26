@@ -1,0 +1,13 @@
+version: v2
+modules:
+  - path: aios
+  - path: life
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX  # we use explicit /v1/ subdirs, not _v1 suffixes
+breaking:
+  use:
+    - WIRE_JSON
+deps: []
