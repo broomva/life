@@ -5821,6 +5821,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lifed-conformance"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "thiserror 2.0.18",
+ "tokio",
+ "tonic 0.14.5",
+]
+
+[[package]]
 name = "line-clipping"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

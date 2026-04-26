@@ -130,6 +130,7 @@ members = [
     "crates/opsis/opsisd",
     # M5 — life-runtime cluster (lifed facade-aggregator daemon, see Spec C₂)
     "crates/life-runtime/lifed",
+    "crates/life-runtime/lifed-conformance",
     "crates/life-runtime/arcan-proxy",
     "crates/life-runtime/lago-proxy",
     "crates/life-runtime/haima-proxy",
