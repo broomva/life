@@ -6,6 +6,7 @@ members = [
     "crates/aios/aios-events",
     "crates/aios/aios-kernel",
     "crates/aios/aios-policy",
+    "crates/aios/aios-proto",
     "crates/aios/aios-protocol",
     "crates/aios/aios-runtime",
     "crates/aios/aios-sandbox",
@@ -151,6 +152,7 @@ life-relay-api-schema  = { path = "crates/relay/life-relay-api-schema",    versi
 nous-api-schema        = { path = "crates/nous/nous-api-schema",           version = "0.1.0" }
 opsis-api-schema       = { path = "crates/opsis/opsis-api-schema",         version = "0.1.0" }
 aios-policy = { path = "crates/aios/aios-policy", version = "0.3.0" }
+aios-proto = { path = "crates/aios/aios-proto", version = "0.3.0" }
 aios-protocol = { path = "crates/aios/aios-protocol", version = "0.3.0" }
 aios-runtime = { path = "crates/aios/aios-runtime", version = "0.3.0" }
 aios-sandbox = { path = "crates/aios/aios-sandbox", version = "0.3.0" }
