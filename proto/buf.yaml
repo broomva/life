@@ -20,6 +20,13 @@ lint:
     - RPC_REQUEST_RESPONSE_UNIQUE  # VmHandle is reused across CreateVm + RestoreSnapshot
     - RPC_RESPONSE_STANDARD_NAME   # response types named VmHandle / Empty / etc., not <Method>Response
     - RPC_REQUEST_STANDARD_NAME    # LifecycleRequest reused for Hibernate + Resume RPCs
+    # life.v1 + life.admin.v1 service-name conventions locked by Spec C₂
+    # (docs/superpowers/specs/2026-04-26-spec-c2-lifed-facade.md §3.1–§3.5).
+    # Service names are bare nouns (Agent, Events, Wallet, Identity,
+    # Runtime, Saga, RoutingCache) — no `Service` suffix. This is an
+    # API surface decision that ships to apps + SDKs and cannot change
+    # without a major version bump.
+    - SERVICE_SUFFIX
 breaking:
   use:
     - WIRE_JSON
