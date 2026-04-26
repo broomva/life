@@ -55,11 +55,11 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: buf breaking
-        # Run from repo root (NOT from proto/) so the ".git" in --against
-        # resolves to the actual repo's .git, not a non-existent
-        # proto/.git. The "subdir=proto" qualifier selects the proto
-        # subtree for comparison; the input arg "proto" selects it for
+        # Use the HTTPS clone URL (documented approach) so buf can
+        # resolve the base ref independently of the local checkout's
+        # ref topology. "subdir=proto" selects the proto subtree on
+        # the comparison side; the "proto" input arg selects it on
         # the HEAD side.
         run: |
           buf breaking proto \
-            --against ".git#branch=${{ github.base_ref || 'main' }},subdir=proto"
+            --against "https://github.com/${{ github.repository }}.git#branch=${{ github.base_ref || 'main' }},subdir=proto"
