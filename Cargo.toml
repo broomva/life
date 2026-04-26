@@ -26,6 +26,7 @@ members = [
     "crates/arcan/arcan-prosopon",
     "crates/arcan/arcan-provider",
     "crates/arcan/arcan-provider-bubblewrap",
+    "crates/arcan/arcan-provider-cube",
     "crates/arcan/arcan-provider-local",
     "crates/arcan/arcan-provider-vercel",
     "crates/arcan/arcan-sandbox",
