@@ -285,6 +285,31 @@ The baseline unification is active and enforced in production paths:
   = 3444 passed / 0 failed / 19 ignored.
 - Linear BRO-928. PR #TBD.
 
+### 2026-04-26 — M5 sub-phase A: lifed facade — Agent + Events vs mock substrates
+
+Spec C₂ implementation begins. Sub-phase A ships:
+
+- New `crates/life-runtime/` cluster with `lifed`, four `*-proxy` stubs,
+  `life-runtime-proto`, `lifed-conformance` scaffold.
+- Public-plane proto: `life.v1.Agent` (full surface), `life.v1.Events`
+  (full surface). `life.v1.Wallet` and `life.v1.Identity` skeletons
+  (bodies in B13/B14).
+- Admin-plane proto skeletons (bodies in C2–C5).
+- `lifed daemon` binary boots, binds the configured public UDS, mounts
+  `Agent` + `Events` services through a tower-Layer auth middleware.
+- Auth: dev signer accepting `Bearer test-token-for-{user_id}`; real
+  ES256 + JWKS in B5.
+- Routing cache: in-memory shape, by_sid + by_user indices; eviction
+  in B8; cold-start replay in D2.
+- Saga driver: no-op skeleton; real driver in B6.
+- Idempotency-store: in-memory backend; lago-backed in B7.
+- Integration tests: `integration_create_session`,
+  `integration_send_message`, `integration_spawn_child_stub` all green.
+  `Agent.SpawnChild` returns `Status::unimplemented` per Spec C₂ §13.
+- New `verify_dependencies_lifed.sh` script + CI lane enforcing
+  Spec C₂ §11 dependency rules.
+- Linear BRO-930. PR #TBD.
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
