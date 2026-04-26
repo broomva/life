@@ -308,7 +308,16 @@ Spec C₂ implementation begins. Sub-phase A ships:
   `Agent.SpawnChild` returns `Status::unimplemented` per Spec C₂ §13.
 - New `verify_dependencies_lifed.sh` script + CI lane enforcing
   Spec C₂ §11 dependency rules.
-- Linear BRO-930. PR #TBD.
+- Tests: 3492 → 3505 (+13 — `integration_create_session`,
+  `integration_send_message` (×2), `integration_spawn_child_stub`,
+  `example_config` (×2), `routing::cache` unit (×2), `idempotency` unit,
+  `life-runtime-proto` codegen smokes (×2), `lifed-conformance` no-op).
+- Linear BRO-930 → Done. PR #1047 merged 2026-04-26 (commit `7f91f40`).
+  Spec compliance review APPROVED_WITH_CONCERNS (auth-middleware
+  lenience comment added in `c85f259` flags B5 follow-up). Code-quality
+  review APPROVED_WITH_CONCERNS — "merge as-is" verdict; concerns are
+  nice-to-have polish + sub-phase B/C/D/E follow-ups already documented
+  in code (5 items, all non-blocking).
 
 ## Health Summary
 
