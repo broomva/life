@@ -27,6 +27,7 @@ use crate::routing::cache::RoutingCache;
 use crate::services::agent::{
     AgentService, AnimaDispatch, ArcanDispatch, HaimaDispatch, LagoDispatch,
 };
+use crate::services::events::{EventsService, LagoTail};
 
 /// Sub-phase A entrypoint for tests + the early daemon.
 pub async fn run_with_mocks(
@@ -49,10 +50,12 @@ pub async fn run_with_mocks(
     let arcan: Arc<dyn ArcanDispatch> = Arc::new(MockArcanAdapter(mocks.arcan.clone()));
     let lago_dispatch: Arc<dyn LagoDispatch> =
         Arc::new(MockLagoDispatchAdapter(mocks.lago.clone()));
+    let lago_tail: Arc<dyn LagoTail> = Arc::new(MockLagoTailAdapter);
     let haima: Arc<dyn HaimaDispatch> = Arc::new(MockHaimaAdapter(mocks.haima.clone()));
     let anima: Arc<dyn AnimaDispatch> = Arc::new(MockAnimaAdapter(mocks.anima.clone()));
 
     let agent = AgentService::new(arcan, lago_dispatch, haima, anima, Arc::clone(&routing));
+    let events = EventsService::new(lago_tail);
 
     // Mount the AuthLayer at the transport boundary so it runs once per http
     // request, BEFORE tonic dispatches to the service. Handlers then read
@@ -60,7 +63,8 @@ pub async fn run_with_mocks(
     // accepts the `test-token-for-{user}` bearer.
     let router = Server::builder()
         .layer(auth)
-        .add_service(pb::agent_server::AgentServer::new(agent));
+        .add_service(pb::agent_server::AgentServer::new(agent))
+        .add_service(pb::events_server::EventsServer::new(events));
 
     let incoming = public_listener::bind(&cfg.public_plane).await?;
     router
@@ -84,6 +88,7 @@ pub async fn run_daemon(config_path: Option<&Path>) -> LifedResult<()> {
 
 struct MockArcanAdapter(MockArcan);
 struct MockLagoDispatchAdapter(MockLago);
+struct MockLagoTailAdapter;
 struct MockHaimaAdapter(MockHaima);
 struct MockAnimaAdapter(MockAnima);
 
@@ -142,6 +147,36 @@ impl LagoDispatch for MockLagoDispatchAdapter {
             .close_namespace(ns)
             .await
             .map_err(tonic::Status::internal)
+    }
+}
+
+#[async_trait]
+impl LagoTail for MockLagoTailAdapter {
+    async fn read(
+        &self,
+        _sid: &str,
+        _from: u64,
+        _limit: u32,
+    ) -> Result<
+        Pin<Box<dyn Stream<Item = Result<pb::EventRecord, tonic::Status>> + Send>>,
+        tonic::Status,
+    > {
+        let (tx, rx) = tokio::sync::mpsc::channel::<Result<pb::EventRecord, tonic::Status>>(1);
+        drop(tx); // empty stream
+        Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)))
+    }
+    async fn subscribe(
+        &self,
+        sid: &str,
+        from: u64,
+    ) -> Result<
+        Pin<Box<dyn Stream<Item = Result<pb::EventRecord, tonic::Status>> + Send>>,
+        tonic::Status,
+    > {
+        self.read(sid, from, 0).await
+    }
+    async fn get_blob(&self, _ns: &str, _sha256: &str) -> Result<(Vec<u8>, String), tonic::Status> {
+        Ok((b"empty".to_vec(), "application/octet-stream".to_string()))
     }
 }
 

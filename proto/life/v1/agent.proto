@@ -4,6 +4,7 @@ package life.v1;
 
 import "google/protobuf/timestamp.proto";
 import "aios/v1/identifiers.proto";
+import "life/v1/events.proto"; // EventRecord lives in the events dialect
 
 // Public-plane Agent dialect. See Spec C₂ §3.1 for the full definition.
 //
@@ -36,16 +37,8 @@ service Agent {
   rpc SpawnChild(SpawnChildReq) returns (SpawnChildResp);
 }
 
-// EventRecord — minimal sub-phase A shape. Mirrors the master-spec
-// EventEnvelope; full parity with the aios.v1 vocabulary lands in sub-phase B
-// once aios/v1/event.proto is published.
-message EventRecord {
-  aios.v1.SessionId session_id = 1;
-  uint64 sequence = 2;
-  google.protobuf.Timestamp at = 3;
-  string kind = 4; // free-form kind tag for sub-phase A
-  bytes payload = 5;
-}
+// EventRecord lives in events.proto (same life.v1 package). Both AgentEvent
+// and the Events service stream that one canonical type.
 
 message CreateSessionReq {
   string user_id = 1;
