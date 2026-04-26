@@ -19,6 +19,7 @@ lint:
     - ENUM_ZERO_VALUE_SUFFIX       # RuntimeHintKind has no _UNSPECIFIED zero variant
     - RPC_REQUEST_RESPONSE_UNIQUE  # VmHandle is reused across CreateVm + RestoreSnapshot
     - RPC_RESPONSE_STANDARD_NAME   # response types named VmHandle / Empty / etc., not <Method>Response
+    - RPC_REQUEST_STANDARD_NAME    # LifecycleRequest reused for Hibernate + Resume RPCs
 breaking:
   use:
     - WIRE_JSON
