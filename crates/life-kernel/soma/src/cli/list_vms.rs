@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use life_kernel_proto::pb;
+use life_kernel_proto::{aios_v1, pb};
 use tokio_stream::StreamExt;
 
 /// Arguments for the `list-vms` subcommand.
@@ -68,7 +68,7 @@ pub async fn run(socket: &Path, args: Args) -> Result<()> {
 /// without a live daemon connection.
 pub(crate) fn build_request(args: &Args) -> tonic::Request<pb::ListVmsRequest> {
     tonic::Request::new(pb::ListVmsRequest {
-        session_id: args.session.as_deref().map(|s| pb::SessionId {
+        session_id: args.session.as_deref().map(|s| aios_v1::SessionId {
             value: s.to_owned(),
         }),
     })

@@ -1,0 +1,26 @@
+version: v2
+# Single module covering the whole proto/ tree so life/* can import from
+# aios/v1/* without cross-module dep registration. Splitting into separate
+# modules would require either a buf workspace or per-module dep
+# declarations against published BSR names — both overkill while every
+# proto file lives in this repo.
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX        # we use explicit /v1/ subdirs, not _v1 suffixes
+    # Pre-existing kernel.proto wire-shape decisions that predate buf
+    # lint enforcement. Wire-compat is a master-spec invariant (§L11)
+    # so these stay in the schema verbatim until a planned major
+    # version bump (which would land in life/kernel/v2/).
+    - ENUM_VALUE_PREFIX            # RUNTIME_HINT_SHELL etc. don't carry the RUNTIME_HINT_KIND_ prefix
+    - ENUM_ZERO_VALUE_SUFFIX       # RuntimeHintKind has no _UNSPECIFIED zero variant
+    - RPC_REQUEST_RESPONSE_UNIQUE  # VmHandle is reused across CreateVm + RestoreSnapshot
+    - RPC_RESPONSE_STANDARD_NAME   # response types named VmHandle / Empty / etc., not <Method>Response
+    - RPC_REQUEST_STANDARD_NAME    # LifecycleRequest reused for Hibernate + Resume RPCs
+breaking:
+  use:
+    - WIRE_JSON
+deps: []

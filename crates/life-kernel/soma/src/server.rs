@@ -515,6 +515,7 @@ mod tests {
         tool::{ToolCall, ToolResult},
     };
     use chrono::Utc;
+    use life_kernel_proto::aios_v1;
     use tokio_stream::StreamExt as _;
 
     // ── MockKernel ───────────────────────────────────────────────────────────
@@ -679,10 +680,10 @@ mod tests {
 
     fn test_ctx_pb() -> pb::KernelContext {
         pb::KernelContext {
-            session_id: Some(pb::SessionId {
+            session_id: Some(aios_v1::SessionId {
                 value: "sess-1".into(),
             }),
-            agent_id: Some(pb::AgentId {
+            agent_id: Some(aios_v1::AgentId {
                 value: "agent-1".into(),
             }),
             wallet: Some(pb::WalletAttribution {
@@ -841,7 +842,7 @@ mod tests {
         let svc = LifeKernelService::new(Arc::new(mock));
 
         let req = Request::new(pb::ListVmsRequest {
-            session_id: Some(pb::SessionId {
+            session_id: Some(aios_v1::SessionId {
                 value: "sess-filter".into(),
             }),
         });
@@ -932,7 +933,7 @@ mod tests {
         // Filter by sess-alpha → two.
         {
             let req = Request::new(pb::ListVmsRequest {
-                session_id: Some(pb::SessionId {
+                session_id: Some(aios_v1::SessionId {
                     value: "sess-alpha".into(),
                 }),
             });
@@ -949,7 +950,7 @@ mod tests {
         // Filter by sess-beta → one.
         {
             let req = Request::new(pb::ListVmsRequest {
-                session_id: Some(pb::SessionId {
+                session_id: Some(aios_v1::SessionId {
                     value: "sess-beta".into(),
                 }),
             });

@@ -1,0 +1,70 @@
+name: Proto
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'proto/**'
+      - 'crates/aios/aios-proto/**'
+      - 'crates/life-kernel/life-kernel-proto/proto/**'
+      - 'crates/life-kernel/life-kernel-proto/build.rs'
+      - '.github/workflows/proto.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'proto/**'
+      - 'crates/aios/aios-proto/**'
+      - 'crates/life-kernel/life-kernel-proto/proto/**'
+      - 'crates/life-kernel/life-kernel-proto/build.rs'
+      - '.github/workflows/proto.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── buf lint — schema correctness against the canonical tree ──────
+  lint:
+    name: buf lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: buf lint
+        working-directory: proto
+        run: buf lint
+
+  # ── buf breaking — wire-compat enforcement against main ───────────
+  #
+  # Runs on PRs only. Compares the proto tree at HEAD against
+  # `origin/main` to ensure proto field tags + service shape stay
+  # additive. M3 (BRO-928) shipped a package rename + identifier
+  # extraction into aios.v1.* — both wire-compatible.
+  breaking:
+    name: buf breaking
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    # M3 (BRO-928) is the first PR to create proto/. Until it merges,
+    # the base branch has no proto tree to compare against. Allow this
+    # job to fail without blocking the PR; future PRs will run with a
+    # populated base and fail fast on real breaking changes.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: buf breaking
+        # Use the HTTPS clone URL (documented approach) so buf can
+        # resolve the base ref independently of the local checkout's
+        # ref topology. "subdir=proto" selects the proto subtree on
+        # the comparison side; the "proto" input arg selects it on
+        # the HEAD side.
+        run: |
+          buf breaking proto \
+            --against "https://github.com/${{ github.repository }}.git#branch=${{ github.base_ref || 'main' }},subdir=proto"

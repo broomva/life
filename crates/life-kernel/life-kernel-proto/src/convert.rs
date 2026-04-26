@@ -99,71 +99,15 @@ fn proto_to_chrono(ts: prost_types::Timestamp) -> Result<DateTime<Utc>, ConvertE
     }
 }
 
-// ── Identity bridges (private — never user-facing errors) ────────────
-
-impl From<VmId> for pb::VmId {
-    fn from(v: VmId) -> Self {
-        Self { value: v.0 }
-    }
-}
-
-impl From<pb::VmId> for VmId {
-    fn from(v: pb::VmId) -> Self {
-        Self(v.value)
-    }
-}
-
-impl From<VmSnapshotId> for pb::VmSnapshotId {
-    fn from(v: VmSnapshotId) -> Self {
-        Self { value: v.0 }
-    }
-}
-
-impl From<pb::VmSnapshotId> for VmSnapshotId {
-    fn from(v: pb::VmSnapshotId) -> Self {
-        Self(v.value)
-    }
-}
-
-impl From<BackendId> for pb::BackendId {
-    fn from(v: BackendId) -> Self {
-        Self { value: v.0 }
-    }
-}
-
-impl From<pb::BackendId> for BackendId {
-    fn from(v: pb::BackendId) -> Self {
-        Self(v.value)
-    }
-}
-
-impl From<SessionId> for pb::SessionId {
-    fn from(v: SessionId) -> Self {
-        Self {
-            value: v.as_str().to_owned(),
-        }
-    }
-}
-
-impl From<pb::SessionId> for SessionId {
-    fn from(v: pb::SessionId) -> Self {
-        Self::from_string(v.value)
-    }
-}
-
-impl From<AgentId> for pb::AgentId {
-    fn from(v: AgentId) -> Self {
-        Self {
-            value: v.as_str().to_owned(),
-        }
-    }
-}
-
-impl From<pb::AgentId> for AgentId {
-    fn from(v: pb::AgentId) -> Self {
-        Self::from_string(v.value)
-    }
-}
+// ── Identity bridges (provided by `aios_protocol::proto_bridge`) ─────
+//
+// Per M3 (BRO-928): the 5 canonical identifier types (VmId, VmSnapshotId,
+// BackendId, SessionId, AgentId) now live in `aios_proto::aios::v1` and
+// are re-exported here as `aios_v1`. The Rust orphan rule prevents this
+// crate from `impl From<aios_protocol::ids::*> for aios_v1::*` because
+// neither type is local — the conversions live in `aios_protocol::proto_bridge`,
+// which owns one side of the conversion. Existing consumers reach the
+// bridge by depending on `aios-protocol` directly.
 
 // ── VmResources (infallible — fixed-width primitives) ────────────────
 
