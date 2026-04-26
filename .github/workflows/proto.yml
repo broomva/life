@@ -55,7 +55,11 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: buf breaking
-        working-directory: proto
+        # Run from repo root (NOT from proto/) so the ".git" in --against
+        # resolves to the actual repo's .git, not a non-existent
+        # proto/.git. The "subdir=proto" qualifier selects the proto
+        # subtree for comparison; the input arg "proto" selects it for
+        # the HEAD side.
         run: |
-          buf breaking \
+          buf breaking proto \
             --against ".git#branch=${{ github.base_ref || 'main' }},subdir=proto"
