@@ -128,6 +128,14 @@ members = [
     "crates/opsis/opsis-engine",
     "crates/opsis/opsis-lago",
     "crates/opsis/opsisd",
+    # M5 — life-runtime cluster (lifed facade-aggregator daemon, see Spec C₂)
+    "crates/life-runtime/lifed",
+    "crates/life-runtime/lifed-conformance",
+    "crates/life-runtime/arcan-proxy",
+    "crates/life-runtime/lago-proxy",
+    "crates/life-runtime/haima-proxy",
+    "crates/life-runtime/anima-proxy",
+    "crates/life-runtime/life-runtime-proto",
 ]
 exclude = ["crates/spaces/life-spaces/spacetimedb"]
 
@@ -224,6 +232,15 @@ life-client           = { path = "crates/life-kernel/life-client",        versio
 life-kernel-facade    = { path = "crates/life-kernel/life-kernel-facade", version = "0.3.0" }
 # (life-kernel-proto already declared above with the other life-kernel-* crates)
 
+# M5 — lifed facade-aggregator daemon (Spec C₂)
+arcan-proxy        = { path = "crates/life-runtime/arcan-proxy",        version = "0.3.0" }
+lago-proxy         = { path = "crates/life-runtime/lago-proxy",         version = "0.3.0" }
+haima-proxy        = { path = "crates/life-runtime/haima-proxy",        version = "0.3.0" }
+anima-proxy        = { path = "crates/life-runtime/anima-proxy",        version = "0.3.0" }
+life-runtime-proto = { path = "crates/life-runtime/life-runtime-proto", version = "0.3.0" }
+# Workspace-level tooling for lifed (used only by the lifed crate behind a feature)
+failsafe = { version = "1", default-features = false }
+
 # ── External dependencies ──
 assert_matches = "1"
 anyhow = "1"
@@ -296,7 +313,7 @@ tonic = "0.14"
 tonic-build = "0.14"
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
-tower = { version = "0.5", features = ["util"] }
+tower = { version = "0.5", features = ["util", "limit", "load-shed", "timeout"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 tracing = "0.1"

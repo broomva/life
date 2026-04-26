@@ -1,0 +1,22 @@
+[package]
+name = "life-runtime-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Generated proto types for life.v1.* (public plane) and life.admin.v1.* (admin plane). Mirrors the aios-proto codegen pattern."
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+prost = "0.14"
+prost-types = "0.14"
+tonic = "0.14"
+tonic-prost = "0.14"
+aios-proto.workspace = true
+
+[build-dependencies]
+tonic-prost-build = "0.14"
+
+[lints]
+workspace = true

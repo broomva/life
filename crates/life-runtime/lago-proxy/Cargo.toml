@@ -1,0 +1,14 @@
+[package]
+name = "lago-proxy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "M5 placeholder — typed tonic client for lago substrate. Real impl lands in M5 sub-phase B."
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

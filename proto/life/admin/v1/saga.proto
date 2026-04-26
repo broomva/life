@@ -1,0 +1,6 @@
+syntax = "proto3";
+
+// Admin-plane Saga dialect — full service body lands in M5 sub-phase C
+// task C3.
+
+package life.admin.v1;
