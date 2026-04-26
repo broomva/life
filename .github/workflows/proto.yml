@@ -33,6 +33,7 @@ jobs:
       - uses: bufbuild/buf-setup-action@v1
         with:
           version: '1.x'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: buf lint
         working-directory: proto
         run: buf lint
@@ -54,6 +55,7 @@ jobs:
       - uses: bufbuild/buf-setup-action@v1
         with:
           version: '1.x'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: buf breaking
         working-directory: proto
         run: |
