@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use life_kernel_proto::pb;
+use life_kernel_proto::{aios_v1, pb};
 
 /// Arguments for the `create-vm` subcommand.
 #[derive(Debug, clap::Args)]
@@ -99,7 +99,7 @@ pub(crate) fn build_request(args: &Args) -> tonic::Request<pb::CreateVmRequest> 
             kind: Some(pb::backend_selector::Kind::Auto(pb::Empty {})),
         },
         explicit => pb::BackendSelector {
-            kind: Some(pb::backend_selector::Kind::Explicit(pb::BackendId {
+            kind: Some(pb::backend_selector::Kind::Explicit(aios_v1::BackendId {
                 value: explicit.to_owned(),
             })),
         },
@@ -130,10 +130,10 @@ pub(crate) fn build_request(args: &Args) -> tonic::Request<pb::CreateVmRequest> 
     };
 
     let ctx = pb::KernelContext {
-        session_id: Some(pb::SessionId {
+        session_id: Some(aios_v1::SessionId {
             value: args.session.clone(),
         }),
-        agent_id: Some(pb::AgentId {
+        agent_id: Some(aios_v1::AgentId {
             value: args.agent.clone(),
         }),
         wallet: Some(pb::WalletAttribution {

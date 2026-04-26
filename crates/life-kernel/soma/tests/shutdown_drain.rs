@@ -89,6 +89,7 @@ async fn service_in_flight_is_zero_outside_dispatch() {
         tool::{ToolCall, ToolResult},
     };
     use chrono::Utc;
+    use life_kernel_proto::aios_v1;
     use life_kernel_proto::pb::{self, kernel_service_server::KernelService as _};
     use soma::server::LifeKernelService;
     use tonic::Request;
@@ -190,10 +191,10 @@ async fn service_in_flight_is_zero_outside_dispatch() {
             requested_capabilities: vec![],
         }),
         ctx: Some(pb::KernelContext {
-            session_id: Some(pb::SessionId {
+            session_id: Some(aios_v1::SessionId {
                 value: "sess-drain".into(),
             }),
-            agent_id: Some(pb::AgentId {
+            agent_id: Some(aios_v1::AgentId {
                 value: "agent-drain".into(),
             }),
             wallet: Some(pb::WalletAttribution {

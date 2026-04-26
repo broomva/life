@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use life_kernel_proto::pb;
+use life_kernel_proto::{aios_v1, pb};
 
 /// Arguments for the `dispatch` subcommand.
 #[derive(Debug, clap::Args)]
@@ -93,16 +93,16 @@ pub(crate) fn build_request(args: &Args) -> Result<tonic::Request<pb::DispatchRe
     // Build a stub VmHandle from the caller-supplied IDs. The daemon will
     // resolve the real handle from its live-VM registry.
     let vm = pb::VmHandle {
-        vm_id: Some(pb::VmId {
+        vm_id: Some(aios_v1::VmId {
             value: args.vm_id.clone(),
         }),
-        backend: Some(pb::BackendId {
+        backend: Some(aios_v1::BackendId {
             value: args.backend.clone(),
         }),
-        session_id: Some(pb::SessionId {
+        session_id: Some(aios_v1::SessionId {
             value: args.session.clone(),
         }),
-        agent_id: Some(pb::AgentId {
+        agent_id: Some(aios_v1::AgentId {
             value: args.agent.clone(),
         }),
         status: Some(pb::VmStatus {
@@ -121,10 +121,10 @@ pub(crate) fn build_request(args: &Args) -> Result<tonic::Request<pb::DispatchRe
     };
 
     let ctx = pb::KernelContext {
-        session_id: Some(pb::SessionId {
+        session_id: Some(aios_v1::SessionId {
             value: args.session.clone(),
         }),
-        agent_id: Some(pb::AgentId {
+        agent_id: Some(aios_v1::AgentId {
             value: args.agent.clone(),
         }),
         wallet: Some(pb::WalletAttribution {

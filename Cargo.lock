@@ -96,6 +96,7 @@ dependencies = [
 name = "aios-protocol"
 version = "0.3.0"
 dependencies = [
+ "aios-proto",
  "async-trait",
  "base64",
  "bitflags 2.11.0",
@@ -5532,6 +5533,7 @@ dependencies = [
 name = "life-kernel-proto"
 version = "0.3.0"
 dependencies = [
+ "aios-proto",
  "aios-protocol",
  "async-trait",
  "chrono",

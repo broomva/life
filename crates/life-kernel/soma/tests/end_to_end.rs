@@ -34,6 +34,7 @@ use aios_protocol::{
 };
 use chrono::Utc;
 use hyper_util::rt::TokioIo;
+use life_kernel_proto::aios_v1;
 use life_kernel_proto::pb::{self, kernel_service_client::KernelServiceClient};
 use tokio::net::UnixStream;
 use tonic::transport::{Channel, Endpoint, Uri};
@@ -135,10 +136,10 @@ async fn connect_unix(socket: &std::path::Path) -> KernelServiceClient<Channel> 
 
 fn stub_ctx_pb() -> pb::KernelContext {
     pb::KernelContext {
-        session_id: Some(pb::SessionId {
+        session_id: Some(aios_v1::SessionId {
             value: "e2e-session".into(),
         }),
-        agent_id: Some(pb::AgentId {
+        agent_id: Some(aios_v1::AgentId {
             value: "e2e-agent".into(),
         }),
         wallet: Some(pb::WalletAttribution {

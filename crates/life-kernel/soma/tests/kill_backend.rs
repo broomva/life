@@ -50,6 +50,7 @@ use lago_aios_eventstore_adapter::LagoAiosEventStoreAdapter;
 use lago_journal::RedbJournal;
 use life_kernel_core::KernelEngine;
 use life_kernel_gate::{budget::NoOpBudgetGate, network::NoOpNetworkIsolation};
+use life_kernel_proto::aios_v1;
 use life_kernel_proto::pb::{self, kernel_service_server::KernelService as _};
 use soma::server::LifeKernelService;
 use tempfile::TempDir;
@@ -245,10 +246,10 @@ async fn build_killable_service() -> (
 /// Build a `pb::KernelContext` for the kill-backend test session.
 fn kill_ctx_pb() -> pb::KernelContext {
     pb::KernelContext {
-        session_id: Some(pb::SessionId {
+        session_id: Some(aios_v1::SessionId {
             value: "sess-kill".into(),
         }),
-        agent_id: Some(pb::AgentId {
+        agent_id: Some(aios_v1::AgentId {
             value: "agent-kill".into(),
         }),
         wallet: Some(pb::WalletAttribution {

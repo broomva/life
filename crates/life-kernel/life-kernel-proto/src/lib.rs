@@ -6,6 +6,16 @@
 //! `aios_protocol` types consumed elsewhere in the workspace; its
 //! public error type surfaces as [`ConvertError`].
 //!
+//! ## M3 — canonical proto tree
+//!
+//! Generated from `core/life/proto/life/kernel/v1/kernel.proto` (canonical
+//! tree per master spec C M3) plus the legacy v0 service protos at
+//! `proto/*.proto` (migrated in M3.5 / M4). The kernel proto imports
+//! `aios.v1.*` types from the `aios-proto` crate via the
+//! `extern_path` directive in `build.rs`, so identifier message types
+//! (`VmId`, `VmSnapshotId`, `BackendId`, `SessionId`, `AgentId`) are
+//! re-exported from `aios_proto::aios::v1` rather than redefined locally.
+//!
 //! ## Transport choice (tonic over ttrpc)
 //!
 //! See `build.rs` for the full rationale — in short, `ttrpc-codegen`
@@ -15,8 +25,7 @@
 
 #![deny(unsafe_code)]
 
-/// Generated prost + tonic code for the `broomva.life.kernel.v1`
-/// package.
+/// Generated prost + tonic code for the `life.kernel.v1` package.
 ///
 /// The generated code is wrapped in broad `#[allow(...)]` attributes
 /// because it intentionally ignores our workspace-level style lints
@@ -24,10 +33,34 @@
 /// this module as an opaque wire contract — interact with it through
 /// the private `convert` bridges (surfaced as `impl TryFrom<…>` on the
 /// canonical `aios_protocol` types) rather than reaching in directly.
+///
+/// M3 (BRO-928): the package was renamed `broomva.life.kernel.v1` →
+/// `life.kernel.v1`. Wire field tags + service shape are unchanged; only
+/// the Rust module path moved. A deprecated `broomva_life_kernel_v1`
+/// alias is preserved below for one minor version.
 #[allow(unused_qualifications, clippy::all, missing_docs)]
 pub mod pb {
-    tonic::include_proto!("broomva.life.kernel.v1");
+    tonic::include_proto!("life.kernel.v1");
 }
+
+/// Deprecated alias for the pre-M3 package path. Remove in 0.4.
+///
+/// New code should use [`pb`] directly. Existing internal callers see no
+/// behavioural change — message types remain wire-compatible across the
+/// rename.
+#[deprecated(
+    since = "0.3.1",
+    note = "package renamed `broomva.life.kernel.v1` → `life.kernel.v1`; use `pb` instead"
+)]
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod broomva_life_kernel_v1 {
+    pub use super::pb::*;
+}
+
+/// Re-export the canonical `aios.v1.*` types so callers can write
+/// `use life_kernel_proto::aios_v1::VmId` without depending on
+/// `aios-proto` directly.
+pub use aios_proto::aios::v1 as aios_v1;
 
 /// Shared wire DTOs — `LifeError`, `Attribution`, `Pagination`, and the
 /// typed ID wrappers used across every `life.*` service proto.
