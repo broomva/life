@@ -13,7 +13,6 @@ use std::time::Instant;
 
 use aios_protocol::hypervisor::{VmHandle, VmInfo};
 use aios_protocol::ports::KernelPort;
-use life_kernel_proto::aios_v1;
 use life_kernel_proto::pb::{
     self,
     kernel_service_server::{KernelService, KernelServiceServer},
@@ -516,6 +515,7 @@ mod tests {
         tool::{ToolCall, ToolResult},
     };
     use chrono::Utc;
+    use life_kernel_proto::aios_v1;
     use tokio_stream::StreamExt as _;
 
     // ── MockKernel ───────────────────────────────────────────────────────────
