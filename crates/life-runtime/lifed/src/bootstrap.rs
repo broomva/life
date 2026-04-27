@@ -24,11 +24,13 @@ use crate::auth::middleware::AuthLayer;
 use crate::config::LifedConfig;
 use crate::dev_mocks::MockSubstrates;
 use crate::error::{LifedError, LifedResult};
+use crate::idempotency::{IdempotencyStore, boxed_in_memory};
 use crate::listener::public as public_listener;
 use crate::routing::cache::RoutingCache;
 use crate::saga::driver::SagaDriver;
 use crate::services::agent::AgentService;
 use crate::services::events::EventsService;
+use crate::services::wallet::WalletService;
 
 /// Sub-phase B mocks entrypoint — used by integration tests + the dev
 /// daemon path until B16 wires the real-substrate path.
@@ -64,6 +66,9 @@ pub async fn run_with_mocks(
     let haima: Arc<dyn HaimaCall> = Arc::new(mocks.haima.clone());
     let anima: Arc<dyn AnimaCall> = Arc::new(mocks.anima.clone());
 
+    let idem: Arc<dyn IdempotencyStore> =
+        boxed_in_memory(std::time::Duration::from_secs(cfg.idempotency.ttl_secs));
+
     let agent = AgentService::new(
         Arc::clone(&arcan),
         Arc::clone(&lago),
@@ -74,11 +79,13 @@ pub async fn run_with_mocks(
         Arc::clone(&saga),
     );
     let events = EventsService::new(Arc::clone(&lago));
+    let wallet = WalletService::new(Arc::clone(&haima), Arc::clone(&idem));
 
     let router = Server::builder()
         .layer(auth)
         .add_service(pb::agent_server::AgentServer::new(agent))
-        .add_service(pb::events_server::EventsServer::new(events));
+        .add_service(pb::events_server::EventsServer::new(events))
+        .add_service(pb::wallet_server::WalletServer::new(wallet));
 
     let incoming = public_listener::bind(&cfg.public_plane).await?;
     router

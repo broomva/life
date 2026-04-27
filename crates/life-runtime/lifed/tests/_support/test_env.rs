@@ -14,6 +14,7 @@ use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
 use life_runtime_proto::life::v1::agent_client::AgentClient;
+use life_runtime_proto::life::v1::wallet_client::WalletClient;
 use life_runtime_proto::life::v1::{CreateSessionReq, Session};
 use lifed::config::LifedConfig;
 
@@ -69,11 +70,11 @@ impl TestEnv {
         }
     }
 
-    /// Returns an `AgentClient` connected to the test's public socket.
-    pub async fn agent_client(&self) -> AgentClient<tonic::transport::Channel> {
+    /// Dial the test's public UDS and return the underlying tonic Channel.
+    pub async fn dial_public(&self) -> tonic::transport::Channel {
         let socket = self.public_socket.clone();
         let endpoint = Endpoint::try_from("http://[::]:0").unwrap();
-        let channel = endpoint
+        endpoint
             .connect_with_connector(service_fn(move |_: Uri| {
                 let socket = socket.clone();
                 async move {
@@ -82,8 +83,17 @@ impl TestEnv {
                 }
             }))
             .await
-            .expect("connect");
-        AgentClient::new(channel)
+            .expect("connect")
+    }
+
+    /// Returns an `AgentClient` connected to the test's public socket.
+    pub async fn agent_client(&self) -> AgentClient<tonic::transport::Channel> {
+        AgentClient::new(self.dial_public().await)
+    }
+
+    /// Returns a `WalletClient` connected to the test's public socket.
+    pub async fn wallet_client(&self) -> WalletClient<tonic::transport::Channel> {
+        WalletClient::new(self.dial_public().await)
     }
 
     /// Convenience: build a `CreateSessionReq` with a dev Tier-2 token in metadata
