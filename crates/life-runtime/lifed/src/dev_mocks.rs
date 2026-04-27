@@ -88,6 +88,10 @@ impl ArcanCall for MockArcan {
 pub struct MockLago {
     pub open_namespace_calls: Arc<Mutex<Vec<String>>>,
     pub close_namespace_calls: Arc<Mutex<Vec<String>>>,
+    /// (namespace, event_type) pairs recorded by `append_event`. Used by
+    /// admin-plane integration tests to assert that saga state landed in
+    /// `system/lifed/saga/<saga_id>`.
+    pub append_event_calls: Arc<Mutex<Vec<(String, String)>>>,
     pub fail_next: Arc<AtomicBool>,
 }
 
@@ -141,6 +145,17 @@ impl LagoCall for MockLago {
         Ok(None)
     }
     async fn idem_persist(&self, _key: &[u8], _response: Vec<u8>) -> LagoProxyResult<()> {
+        Ok(())
+    }
+    async fn append_event(
+        &self,
+        namespace: &str,
+        event_type: &str,
+        _payload: Vec<u8>,
+    ) -> LagoProxyResult<()> {
+        self.append_event_calls
+            .lock()
+            .push((namespace.to_string(), event_type.to_string()));
         Ok(())
     }
 }

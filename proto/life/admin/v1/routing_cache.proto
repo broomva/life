@@ -1,6 +1,47 @@
 syntax = "proto3";
 
-// Admin-plane RoutingCache dialect — full service body lands in M5 sub-phase
-// C task C4.
+// Admin-plane RoutingCache dialect — dump + evict routing entries.
+// See docs/superpowers/specs/2026-04-26-spec-c2-lifed-facade.md §3.5, §6.
 
 package life.admin.v1;
+
+import "aios/v1/identifiers.proto";
+import "google/protobuf/timestamp.proto";
+
+service RoutingCache {
+  // Stream every routing-cache entry up to `limit`. life-admin /
+  // autonomic / root only.
+  rpc Dump(DumpReq) returns (stream RouteEntry);
+
+  // Force-evict one routing entry. life-admin / root only.
+  rpc Evict(EvictReq) returns (RoutingEmpty);
+
+  // Rebuild the routing cache from lago. Sub-phase C ships this as a
+  // documented stub returning 0 entries: the dependency on a lago
+  // `ListNamespaces` RPC that doesn't exist yet (master-spec ambiguity
+  // #3 / Spec C₂ §16 #3). Re-implemented in sub-phase D2. Root only.
+  rpc RebuildFromLago(RebuildReq) returns (RebuildResp);
+}
+
+message RoutingEmpty {}
+
+message RouteEntry {
+  aios.v1.SessionId sid = 1;
+  string user_id = 2;
+  string project_id = 3;
+  string arcan_addr = 4;
+  string lago_namespace = 5;
+  string haima_wallet = 6;
+  string anima_account = 7;
+  string vm_id = 8;
+  google.protobuf.Timestamp last_touched = 9;
+  uint32 attached_streams = 10;
+}
+
+message DumpReq { uint32 limit = 1; }
+message EvictReq { aios.v1.SessionId sid = 1; string reason = 2; }
+message RebuildReq {}
+message RebuildResp {
+  uint32 sessions_loaded = 1;
+  uint64 lago_events_read = 2;
+}
