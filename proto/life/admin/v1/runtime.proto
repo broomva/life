@@ -1,10 +1,69 @@
 syntax = "proto3";
 
-// Admin-plane Runtime dialect — full service body lands in M5 sub-phase C
-// task C2.
-//
+// Admin-plane Runtime dialect — operator + autonomic introspection.
 // See docs/superpowers/specs/2026-04-26-spec-c2-lifed-facade.md §3.5.
 
 package life.admin.v1;
 
-message Empty {}
+import "aios/v1/identifiers.proto";
+import "google/protobuf/timestamp.proto";
+
+service Runtime {
+  // Liveness check. Anyone who can connect to the admin socket may call
+  // this — it returns the daemon version and aggregated cache size.
+  rpc HealthCheck(HealthReq) returns (HealthResp);
+
+  // Stream a snapshot of currently routable sessions. life-admin /
+  // autonomic / root only.
+  rpc SessionsListAll(ListAllReq) returns (stream SessionSummary);
+
+  // Force-evict a session from the routing cache (best-effort close).
+  // life-admin / root only.
+  rpc SessionsForceClose(ForceCloseReq) returns (RuntimeEmpty);
+
+  // Mark a session Detached without evicting; the eviction sweeper will
+  // GC it once `idle_threshold_secs` passes. autonomic / root only.
+  rpc SessionsSuspend(SuspendReq) returns (RuntimeEmpty);
+
+  // Look up an idempotency key (best-effort — returns Found = false if
+  // the (user, project) tuple isn't recoverable from the key alone).
+  // life-admin / root only.
+  rpc IdempotencyLookup(IdemReq) returns (IdemResult);
+}
+
+message RuntimeEmpty {}
+
+message HealthReq {}
+
+message HealthResp {
+  bool ok = 1;
+  string version = 2;
+  uint64 cache_size = 3;
+  repeated SubstrateHealth substrates = 4;
+}
+
+message SubstrateHealth {
+  string substrate = 1;
+  string breaker_state = 2;
+  uint32 inflight = 3;
+  uint32 capacity = 4;
+}
+
+message SessionSummary {
+  aios.v1.SessionId sid = 1;
+  string user_id = 2;
+  string project_id = 3;
+  google.protobuf.Timestamp created_at = 4;
+  string status = 5;
+  uint32 attached_streams = 6;
+}
+
+message ListAllReq { uint32 limit = 1; }
+message ForceCloseReq { aios.v1.SessionId sid = 1; string reason = 2; }
+message SuspendReq    { aios.v1.SessionId sid = 1; string reason = 2; }
+message IdemReq       { string idempotency_key = 1; string method = 2; }
+message IdemResult    {
+  bool found = 1;
+  google.protobuf.Timestamp at = 2;
+  bytes original_response = 3;
+}

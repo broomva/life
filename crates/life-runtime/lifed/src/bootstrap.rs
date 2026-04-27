@@ -5,6 +5,12 @@
 //!   `MockSubstrates` injected via the per-substrate `*Call` traits.
 //! - `run_with_real_substrates` (production): real `*-proxy` crates dial
 //!   the substrate UDS sockets. See Task B16.
+//!
+//! Sub-phase C additions:
+//! - `LifedHandles` exposes routing/saga/idempotency/blocklist registries
+//!   so admin-plane services + tests can introspect the in-process state.
+//! - The admin-plane listener runs alongside the public-plane listener;
+//!   both drain on the same shutdown channel.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -16,6 +22,7 @@ use anima_proxy::{AnimaCall, AnimaProxy};
 use arcan_proxy::{ArcanCall, ArcanProxy};
 use haima_proxy::{HaimaCall, HaimaProxy};
 use lago_proxy::{LagoCall, LagoProxy};
+use life_runtime_proto::life::admin::v1 as adm;
 use life_runtime_proto::life::v1 as pb;
 
 use crate::idempotency::lago_store::LagoBackedStore;
@@ -24,17 +31,36 @@ use crate::auth::blocklist::RevokedSidSet;
 use crate::auth::jwks::JwksCache;
 use crate::auth::keystore::Keystore;
 use crate::auth::middleware::AuthLayer;
+use crate::auth::peercred;
 use crate::config::LifedConfig;
 use crate::dev_mocks::MockSubstrates;
 use crate::error::{LifedError, LifedResult};
 use crate::idempotency::{IdempotencyStore, boxed_in_memory};
+use crate::listener::admin as admin_listener;
 use crate::listener::public as public_listener;
 use crate::routing::cache::RoutingCache;
-use crate::saga::driver::SagaDriver;
+use crate::saga::driver::{LagoSagaJournal, SagaDriver, SagaJournal};
+use crate::saga::registry::SagaRegistry;
+use crate::services::admin::{
+    AdminPolicy, RoutingCacheAdminService, RuntimeAdminService, SagaAdminService,
+};
 use crate::services::agent::AgentService;
 use crate::services::events::EventsService;
 use crate::services::identity::IdentityService;
 use crate::services::wallet::WalletService;
+
+/// In-process state exposed by the bootstrap path so admin-plane services
+/// and integration tests can introspect lifed without re-dialing the
+/// public plane. Sub-phase C addition; sub-phase B's `run_with_*` paths
+/// owned these registries privately and tests could not reach them.
+#[derive(Clone)]
+pub struct LifedHandles {
+    pub routing: Arc<RoutingCache>,
+    pub revoked: Arc<RevokedSidSet>,
+    pub idem: Arc<dyn IdempotencyStore>,
+    pub saga_registry: Arc<SagaRegistry>,
+    pub approval_locks: Arc<crate::services::agent::ApprovalLocks>,
+}
 
 /// Sub-phase B mocks entrypoint — used by integration tests + the dev
 /// daemon path until B16 wires the real-substrate path.
@@ -43,12 +69,24 @@ pub async fn run_with_mocks(
     mocks: Arc<MockSubstrates>,
     shutdown_rx: oneshot::Receiver<()>,
 ) -> LifedResult<()> {
+    run_with_mocks_handles(cfg, mocks, shutdown_rx, None).await
+}
+
+/// Variant of `run_with_mocks` that publishes the in-process handles
+/// over a oneshot channel so callers (tests) can introspect the
+/// running daemon.
+pub async fn run_with_mocks_handles(
+    cfg: &LifedConfig,
+    mocks: Arc<MockSubstrates>,
+    shutdown_rx: oneshot::Receiver<()>,
+    handles_tx: Option<oneshot::Sender<LifedHandles>>,
+) -> LifedResult<()> {
     let _vigil_guard = crate::observability::init(&cfg.vigil)?;
 
     tracing::info!(
         public_socket = %cfg.public_plane.unix_socket.display(),
         admin_socket  = %cfg.admin_plane.unix_socket.display(),
-        "lifed starting (sub-phase B — mock substrates)",
+        "lifed starting (sub-phase C — mock substrates)",
     );
 
     let jwks = if cfg.auth.jwks_path.exists() {
@@ -61,48 +99,45 @@ pub async fn run_with_mocks(
         Arc::new(JwksCache::dev_only())
     };
     let auth = AuthLayer::new(Arc::clone(&jwks));
-    let routing = Arc::new(RoutingCache::new());
-    let ks = Arc::new(Keystore::generate_dev());
-    let saga = Arc::new(SagaDriver::new("lifed-runtime"));
 
     let arcan: Arc<dyn ArcanCall> = Arc::new(mocks.arcan.clone());
     let lago: Arc<dyn LagoCall> = Arc::new(mocks.lago.clone());
     let haima: Arc<dyn HaimaCall> = Arc::new(mocks.haima.clone());
     let anima: Arc<dyn AnimaCall> = Arc::new(mocks.anima.clone());
 
-    let idem: Arc<dyn IdempotencyStore> =
-        boxed_in_memory(std::time::Duration::from_secs(cfg.idempotency.ttl_secs));
-    let revoked = Arc::new(RevokedSidSet::new());
+    let handles = build_handles(cfg, Arc::clone(&lago));
 
-    let agent = AgentService::new(
+    let routing = Arc::clone(&handles.routing);
+    let revoked = Arc::clone(&handles.revoked);
+    let idem = Arc::clone(&handles.idem);
+    let saga_registry = Arc::clone(&handles.saga_registry);
+    let approval_locks = Arc::clone(&handles.approval_locks);
+
+    let ks = Arc::new(Keystore::generate_dev());
+    let saga = build_saga_driver(Arc::clone(&saga_registry), Arc::clone(&lago));
+
+    let admin_policy = build_admin_policy(cfg);
+
+    let services = build_services(
         Arc::clone(&arcan),
         Arc::clone(&lago),
         Arc::clone(&haima),
         Arc::clone(&anima),
         Arc::clone(&routing),
-        Arc::clone(&ks),
-        Arc::clone(&saga),
-    );
-    let events = EventsService::new(Arc::clone(&lago));
-    let wallet = WalletService::new(Arc::clone(&haima), Arc::clone(&idem));
-    let identity = IdentityService::new(
-        Arc::clone(&anima),
-        Arc::clone(&routing),
         Arc::clone(&revoked),
+        Arc::clone(&idem),
+        Arc::clone(&approval_locks),
+        Arc::clone(&saga_registry),
+        Arc::clone(&admin_policy),
+        Arc::clone(&ks),
+        saga,
     );
 
-    let router = Server::builder()
-        .layer(auth)
-        .add_service(pb::agent_server::AgentServer::new(agent))
-        .add_service(pb::events_server::EventsServer::new(events))
-        .add_service(pb::wallet_server::WalletServer::new(wallet))
-        .add_service(pb::identity_server::IdentityServer::new(identity));
+    if let Some(tx) = handles_tx {
+        let _ = tx.send(handles);
+    }
 
-    let incoming = public_listener::bind(&cfg.public_plane).await?;
-    router
-        .serve_with_incoming_shutdown(incoming, public_listener::shutdown_signal(shutdown_rx))
-        .await
-        .map_err(|e| LifedError::Server(format!("public-plane serve: {e}")))
+    serve_planes(cfg, auth, services, shutdown_rx).await
 }
 
 /// Sub-phase B daemon entrypoint. Tries the real-substrate path first;
@@ -144,7 +179,7 @@ pub async fn run_with_real_substrates(
     tracing::info!(
         public_socket = %cfg.public_plane.unix_socket.display(),
         admin_socket  = %cfg.admin_plane.unix_socket.display(),
-        "lifed starting (sub-phase B — real substrates)",
+        "lifed starting (sub-phase C — real substrates)",
     );
 
     let arcan: Arc<dyn ArcanCall> = Arc::new(
@@ -179,26 +214,28 @@ pub async fn run_with_real_substrates(
     });
     publish_jwks(&ks, &cfg.auth.substrate_jwks_publish_path)?;
 
-    let routing = Arc::new(RoutingCache::new());
-    let revoked = Arc::new(RevokedSidSet::new());
-    let idem: Arc<dyn IdempotencyStore> = Arc::new(LagoBackedStore::new(Arc::clone(&lago)));
-    let saga = Arc::new(SagaDriver::new("lifed-runtime"));
+    let handles = build_handles(cfg, Arc::clone(&lago));
+    let routing = Arc::clone(&handles.routing);
+    let revoked = Arc::clone(&handles.revoked);
+    let idem = Arc::clone(&handles.idem);
+    let saga_registry = Arc::clone(&handles.saga_registry);
+    let approval_locks = Arc::clone(&handles.approval_locks);
+    let saga = build_saga_driver(Arc::clone(&saga_registry), Arc::clone(&lago));
+    let admin_policy = build_admin_policy(cfg);
 
-    let agent = AgentService::new(
+    let services = build_services(
         Arc::clone(&arcan),
         Arc::clone(&lago),
         Arc::clone(&haima),
         Arc::clone(&anima),
         Arc::clone(&routing),
-        Arc::clone(&ks),
-        Arc::clone(&saga),
-    );
-    let events = EventsService::new(Arc::clone(&lago));
-    let wallet = WalletService::new(Arc::clone(&haima), Arc::clone(&idem));
-    let identity = IdentityService::new(
-        Arc::clone(&anima),
-        Arc::clone(&routing),
         Arc::clone(&revoked),
+        Arc::clone(&idem),
+        Arc::clone(&approval_locks),
+        Arc::clone(&saga_registry),
+        Arc::clone(&admin_policy),
+        Arc::clone(&ks),
+        saga,
     );
 
     let jwks = if cfg.auth.jwks_path.exists() {
@@ -221,18 +258,191 @@ pub async fn run_with_real_substrates(
         std::time::Duration::from_secs(cfg.routing.eviction_interval_secs),
     );
 
-    let router = Server::builder()
+    serve_planes(cfg, auth, services, shutdown_rx).await
+}
+
+fn build_handles(cfg: &LifedConfig, lago: Arc<dyn LagoCall>) -> LifedHandles {
+    let routing = Arc::new(RoutingCache::new());
+    let revoked = Arc::new(RevokedSidSet::new());
+    let idem: Arc<dyn IdempotencyStore> = match cfg.idempotency.backend {
+        crate::config::IdempotencyBackend::Lago => Arc::new(LagoBackedStore::new(lago)),
+        crate::config::IdempotencyBackend::InMemory => {
+            boxed_in_memory(std::time::Duration::from_secs(cfg.idempotency.ttl_secs))
+        }
+    };
+    let saga_registry = Arc::new(SagaRegistry::new());
+    let approval_locks = Arc::new(crate::services::agent::ApprovalLocks::new());
+    LifedHandles {
+        routing,
+        revoked,
+        idem,
+        saga_registry,
+        approval_locks,
+    }
+}
+
+fn build_saga_driver(registry: Arc<SagaRegistry>, lago: Arc<dyn LagoCall>) -> Arc<SagaDriver> {
+    let journal: Arc<dyn SagaJournal> = Arc::new(LagoSagaJournal::new(lago));
+    Arc::new(SagaDriver::with_registry(
+        "lifed-runtime",
+        registry,
+        journal,
+    ))
+}
+
+fn build_admin_policy(cfg: &LifedConfig) -> Arc<AdminPolicy> {
+    // When `unix_socket_group` is None the operator hasn't asked us to
+    // enforce a group filter — fall back to permissive mode (Spec C₂
+    // §5.3 expects systemd's SocketGroup directive to enforce access at
+    // the filesystem layer in that case, and tests rely on this for the
+    // tempdir socket that has no group).
+    match cfg.admin_plane.unix_socket_group.as_deref() {
+        None => Arc::new(AdminPolicy {
+            admin_gid: 0,
+            autonomic_uid: None,
+            permissive: true,
+        }),
+        Some(group) => {
+            let admin_gid = peercred::group_gid(group).ok().flatten().unwrap_or(0);
+            Arc::new(AdminPolicy {
+                admin_gid,
+                autonomic_uid: None, // wired in C₆ alongside autonomic-as-Π
+                permissive: false,
+            })
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+struct LifedServices {
+    agent: AgentService,
+    events: EventsService,
+    wallet: WalletService,
+    identity: IdentityService,
+    runtime_admin: RuntimeAdminService,
+    saga_admin: SagaAdminService,
+    routing_admin: RoutingCacheAdminService,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_services(
+    arcan: Arc<dyn ArcanCall>,
+    lago: Arc<dyn LagoCall>,
+    haima: Arc<dyn HaimaCall>,
+    anima: Arc<dyn AnimaCall>,
+    routing: Arc<RoutingCache>,
+    revoked: Arc<RevokedSidSet>,
+    idem: Arc<dyn IdempotencyStore>,
+    approval_locks: Arc<crate::services::agent::ApprovalLocks>,
+    saga_registry: Arc<SagaRegistry>,
+    admin_policy: Arc<AdminPolicy>,
+    ks: Arc<Keystore>,
+    saga: Arc<SagaDriver>,
+) -> LifedServices {
+    let agent = AgentService::new(
+        Arc::clone(&arcan),
+        Arc::clone(&lago),
+        Arc::clone(&haima),
+        Arc::clone(&anima),
+        Arc::clone(&routing),
+        Arc::clone(&ks),
+        Arc::clone(&saga),
+        Arc::clone(&approval_locks),
+    );
+    let events = EventsService::new(Arc::clone(&lago));
+    let wallet = WalletService::new(Arc::clone(&haima), Arc::clone(&idem));
+    let identity = IdentityService::new(
+        Arc::clone(&anima),
+        Arc::clone(&routing),
+        Arc::clone(&revoked),
+    );
+    let runtime_admin = RuntimeAdminService::new(
+        Arc::clone(&admin_policy),
+        Arc::clone(&routing),
+        Arc::clone(&idem),
+    );
+    let saga_admin = SagaAdminService::new(Arc::clone(&admin_policy), saga_registry);
+    let routing_admin = RoutingCacheAdminService::new(Arc::clone(&admin_policy), routing);
+    LifedServices {
+        agent,
+        events,
+        wallet,
+        identity,
+        runtime_admin,
+        saga_admin,
+        routing_admin,
+    }
+}
+
+async fn serve_planes(
+    cfg: &LifedConfig,
+    auth: AuthLayer,
+    services: LifedServices,
+    shutdown_rx: oneshot::Receiver<()>,
+) -> LifedResult<()> {
+    let LifedServices {
+        agent,
+        events,
+        wallet,
+        identity,
+        runtime_admin,
+        saga_admin,
+        routing_admin,
+    } = services;
+
+    // Public-plane router: AuthLayer + four life.v1 services.
+    let public_router = Server::builder()
         .layer(auth)
         .add_service(pb::agent_server::AgentServer::new(agent))
         .add_service(pb::events_server::EventsServer::new(events))
         .add_service(pb::wallet_server::WalletServer::new(wallet))
         .add_service(pb::identity_server::IdentityServer::new(identity));
 
-    let incoming = public_listener::bind(&cfg.public_plane).await?;
-    router
-        .serve_with_incoming_shutdown(incoming, public_listener::shutdown_signal(shutdown_rx))
+    // Admin-plane router: NO AuthLayer (peer-cred + AdminPolicy gates),
+    // three life.admin.v1 services.
+    let admin_router = Server::builder()
+        .add_service(adm::runtime_server::RuntimeServer::new(runtime_admin))
+        .add_service(adm::saga_server::SagaServer::new(saga_admin))
+        .add_service(adm::routing_cache_server::RoutingCacheServer::new(
+            routing_admin,
+        ));
+
+    let public_incoming = public_listener::bind(&cfg.public_plane).await?;
+    let admin_incoming = admin_listener::bind(&cfg.admin_plane).await?;
+
+    // Fork shutdown into two — one for each plane. When the outer signal
+    // fires, both planes drain.
+    let (public_shutdown_tx, public_shutdown_rx) = oneshot::channel::<()>();
+    let (admin_shutdown_tx, admin_shutdown_rx) = oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let _ = shutdown_rx.await;
+        let _ = public_shutdown_tx.send(());
+        let _ = admin_shutdown_tx.send(());
+    });
+
+    let admin_handle = tokio::spawn(async move {
+        admin_router
+            .serve_with_incoming_shutdown(
+                admin_incoming,
+                admin_listener::shutdown_signal(admin_shutdown_rx),
+            )
+            .await
+    });
+
+    let public_result = public_router
+        .serve_with_incoming_shutdown(
+            public_incoming,
+            public_listener::shutdown_signal(public_shutdown_rx),
+        )
         .await
-        .map_err(|e| LifedError::Server(format!("public-plane serve: {e}")))
+        .map_err(|e| LifedError::Server(format!("public-plane serve: {e}")));
+
+    // Drain admin plane after public plane finishes.
+    if let Err(e) = admin_handle.await {
+        tracing::warn!(error = ?e, "admin-plane task join failed");
+    }
+
+    public_result
 }
 
 fn publish_jwks(ks: &Keystore, path: &std::path::Path) -> LifedResult<()> {

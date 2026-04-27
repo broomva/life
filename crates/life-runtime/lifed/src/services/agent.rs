@@ -5,12 +5,20 @@
 //! the new `SagaDriver`. Per Spec C₂ §1, every public RPC handler reads
 //! the capability token, performs a single substrate route OR initiates
 //! one saga, and returns. ≤20 LOC per handler is a hard constraint.
+//!
+//! Sub-phase C wires `ApproveDispatch` first-responder-wins per Spec C₂
+//! §6.4: a per-sid `parking_lot::Mutex` whose held value is the
+//! `dispatch_id` of the first approver. Subsequent approvals for the same
+//! sid see the lock already taken and return `AlreadyExists`. Mutex is
+//! parking_lot (NOT tokio::sync) — never held across an await.
 
 use std::pin::Pin;
 use std::sync::Arc;
 
 use chrono::Utc;
+use dashmap::DashMap;
 use futures::Stream;
+use parking_lot::Mutex as PlMutex;
 use sha2::{Digest, Sha256};
 use tonic::{Request, Response, Status};
 
@@ -27,6 +35,63 @@ use crate::routing::cache::RoutingCache;
 use crate::routing::fanout::FanoutRegistry;
 use crate::saga::driver::{SagaCtx, SagaDriver, SagaStep};
 use crate::saga::steps::{BindWallet, CreateAgent, OpenLagoNamespace, RegisterAnimaSession};
+
+/// Per-sid first-responder-wins approval lock per Spec C₂ §6.4. Each
+/// inflight approval-pending dispatch holds a slot keyed by `sid`. The
+/// first `ApproveDispatch` call wins; concurrent retries see
+/// `AlreadyExists`. Uses `parking_lot::Mutex` so the lock is never held
+/// across an `await`.
+#[derive(Default)]
+pub struct ApprovalLocks {
+    inner: DashMap<String, Arc<PlMutex<Option<String>>>>,
+}
+
+impl ApprovalLocks {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Try to acquire the slot for `sid` with `dispatch_id`. Returns
+    /// `Ok(())` if this caller wins the race; `Err(prior)` if a prior
+    /// approval already won (with the prior dispatch_id).
+    pub fn try_acquire(&self, sid: &str, dispatch_id: &str) -> Result<(), String> {
+        // Insert a fresh slot if absent, then take its parking_lot lock.
+        // Cloning the inner Arc lets us drop the DashMap shard guard
+        // before locking (DashMap entry guards are sync; we want to keep
+        // the section narrow).
+        let slot = self
+            .inner
+            .entry(sid.to_string())
+            .or_insert_with(|| Arc::new(PlMutex::new(None)))
+            .clone();
+        let mut guard = slot.lock();
+        match guard.as_ref() {
+            Some(prior) => Err(prior.clone()),
+            None => {
+                *guard = Some(dispatch_id.to_string());
+                Ok(())
+            }
+        }
+    }
+
+    /// Release the slot for `sid` (e.g. after `CancelDispatch`). No-op
+    /// if absent.
+    pub fn release(&self, sid: &str) {
+        if let Some(slot) = self.inner.get(sid) {
+            *slot.lock() = None;
+        }
+    }
+
+    /// Number of sids currently tracked. Used by tests + admin
+    /// introspection.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+}
 
 /// Background pump: fetch the upstream stream from arcan and broadcast
 /// every event to every attached tab via the fan-out registry. Spec C₂ §6.4.
@@ -52,7 +117,8 @@ fn spawn_fanout_pump(
 }
 
 /// `Agent` service implementation. Holds typed substrate proxies, the
-/// signing keystore, the saga driver, and the routing cache.
+/// signing keystore, the saga driver, the routing cache, and the
+/// per-sid `ApproveDispatch` first-responder lock table.
 pub struct AgentService {
     pub arcan_call: Arc<dyn ArcanCall>,
     pub lago_call: Arc<dyn LagoCall>,
@@ -61,9 +127,11 @@ pub struct AgentService {
     pub routing: Arc<RoutingCache>,
     pub ks: Arc<Keystore>,
     pub saga: Arc<SagaDriver>,
+    pub approval_locks: Arc<ApprovalLocks>,
 }
 
 impl AgentService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         arcan_call: Arc<dyn ArcanCall>,
         lago_call: Arc<dyn LagoCall>,
@@ -72,6 +140,7 @@ impl AgentService {
         routing: Arc<RoutingCache>,
         ks: Arc<Keystore>,
         saga: Arc<SagaDriver>,
+        approval_locks: Arc<ApprovalLocks>,
     ) -> Self {
         Self {
             arcan_call,
@@ -81,6 +150,7 @@ impl AgentService {
             routing,
             ks,
             saga,
+            approval_locks,
         }
     }
 
@@ -275,16 +345,42 @@ impl pb::agent_server::Agent for AgentService {
 
     async fn approve_dispatch(
         &self,
-        _req: Request<pb::ApprovalReq>,
+        req: Request<pb::ApprovalReq>,
     ) -> Result<Response<pb::Empty>, Status> {
-        // Sub-phase A: ack-only stub. B12 wires the real per-sid lock.
-        Ok(Response::new(pb::Empty {}))
+        let _claims = Self::claims(&req)?;
+        let body = req.into_inner();
+        let sid = body
+            .sid
+            .ok_or_else(|| Status::invalid_argument("missing sid"))?;
+        if body.dispatch_id.is_empty() {
+            return Err(Status::invalid_argument("missing dispatch_id"));
+        }
+        // Spec C₂ §6.4: per-sid first-responder-wins. parking_lot::Mutex
+        // — never held across an await.
+        match self
+            .approval_locks
+            .try_acquire(&sid.value, &body.dispatch_id)
+        {
+            Ok(()) => Ok(Response::new(pb::Empty {})),
+            Err(prior) => Err(Status::already_exists(format!(
+                "dispatch {prior} already approved for session {}",
+                sid.value
+            ))),
+        }
     }
 
     async fn cancel_dispatch(
         &self,
-        _req: Request<pb::DispatchRef>,
+        req: Request<pb::DispatchRef>,
     ) -> Result<Response<pb::Empty>, Status> {
+        let _claims = Self::claims(&req)?;
+        let body = req.into_inner();
+        let sid = body
+            .sid
+            .ok_or_else(|| Status::invalid_argument("missing sid"))?;
+        // Releasing the slot lets a subsequent re-approval succeed; this
+        // matches Spec C₂ §6.4's "approver may revoke + re-approve" loop.
+        self.approval_locks.release(&sid.value);
         Ok(Response::new(pb::Empty {}))
     }
 

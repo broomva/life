@@ -66,18 +66,16 @@ async fn list_sessions_returns_empty() {
     env.shutdown().await;
 }
 
-/// Verifies that `Identity.RevokeSession` propagates the revocation to anima.
+/// Verifies that `Identity.RevokeSession` propagates the revocation to all
+/// three places per Spec C₂ §5.4 + §6.3:
+/// 1. anima — the substrate-of-record for session revocation.
+/// 2. local `RevokedSidSet` — blocklist that substrates poll for the
+///    30 s revocation gap before Tier-3 tokens expire.
+/// 3. local `RoutingCache` — evicting the entry guarantees no further
+///    substrate dispatches for that sid land on lifed's hot path.
 ///
-/// **Coverage scope (Sub-phase B):** asserts only the anima-side propagation.
-/// The handler at `services/identity.rs::revoke_session` ALSO inserts the sid
-/// into the local `RevokedSidSet` blocklist AND evicts the routing-cache
-/// entry, but those two effects are not asserted here because `TestEnv` does
-/// not yet expose accessors for the in-process `RoutingCache` and
-/// `RevokedSidSet` handles. Adding those accessors requires `bootstrap::
-/// run_with_mocks` to return handles; that refactor lands in Sub-phase C
-/// alongside the admin-plane `RoutingCache.Dump` and `Runtime.Sessions_*`
-/// RPCs which already need the same accessors. See BRO-933 (post-merge
-/// follow-up to widen this assertion).
+/// Sub-phase C widens the assertion (BRO-933) using the new
+/// `LifedHandles` accessors.
 #[tokio::test]
 async fn revoke_session_propagates_to_anima() {
     let env = TestEnv::start_with_mocks().await;
@@ -88,6 +86,13 @@ async fn revoke_session_propagates_to_anima() {
         .expect("create_session");
     let sid = session.sid.expect("sid");
 
+    // Pre-conditions: routing entry present, blocklist empty.
+    assert_eq!(env.handles.routing.size(), 1, "session opened");
+    assert!(
+        !env.handles.revoked.contains(&sid),
+        "blocklist starts empty",
+    );
+
     let mut client = env.identity_client().await;
     client
         .revoke_session(auth_req(IdentitySessionRef {
@@ -96,11 +101,16 @@ async fn revoke_session_propagates_to_anima() {
         .await
         .expect("revoke");
 
-    // Confirm the mock anima saw the revoke. Scope the lock so it drops
-    // before `env.shutdown()` consumes `env`.
+    // 1. Anima saw the revoke.
     {
         let revokes = env.mocks.anima.revoke_calls.lock();
         assert!(revokes.iter().any(|s| s == &sid.value));
     }
+    // 2. Local blocklist now contains the sid.
+    assert!(env.handles.revoked.contains(&sid), "sid added to blocklist",);
+    // 3. Routing cache no longer has an entry.
+    assert_eq!(env.handles.routing.size(), 0, "routing entry evicted");
+    assert!(env.handles.routing.lookup(&sid).is_none());
+
     env.shutdown().await;
 }

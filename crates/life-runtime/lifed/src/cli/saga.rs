@@ -1,12 +1,13 @@
 //! `lifed saga show <saga_id>` operator subcommand.
 //!
-//! Sub-phase A: scaffold only. Sub-phase C wires it against the admin-plane
-//! `Saga` service.
+//! Talks to the admin-plane `Saga` service.
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Args;
+
+use life_runtime_proto::life::admin::v1::{SagaRef, saga_client::SagaClient};
 
 #[derive(Debug, Args)]
 pub struct ShowArgs {
@@ -20,7 +21,14 @@ pub struct ShowArgs {
 }
 
 pub async fn run_show(args: ShowArgs) -> Result<()> {
-    eprintln!("lifed saga show {} — sub-phase C wires this", args.saga_id);
-    eprintln!("(socket: {})", args.socket.display());
+    let channel = crate::cli::client::connect(&args.socket).await?;
+    let mut client = SagaClient::new(channel);
+    let r = client
+        .show(SagaRef {
+            saga_id: args.saga_id,
+        })
+        .await?
+        .into_inner();
+    println!("{r:#?}");
     Ok(())
 }

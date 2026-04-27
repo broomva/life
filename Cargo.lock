@@ -5864,6 +5864,7 @@ dependencies = [
  "hyper-util",
  "jsonwebtoken",
  "lago-proxy",
+ "libc",
  "life-kernel-proto",
  "life-runtime-proto",
  "life-vigil",

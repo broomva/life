@@ -44,6 +44,24 @@ pub enum SessionStatus {
     Hibernated,
 }
 
+/// Flat snapshot of one routing-cache entry. Used by admin-plane
+/// `Runtime.SessionsListAll` + `RoutingCache.Dump`. Includes the
+/// downstream addresses (lago_namespace, haima_wallet, anima_account) so a
+/// single snapshot satisfies both RPCs without re-locking the entry.
+#[derive(Debug, Clone)]
+pub struct SessionSummary {
+    pub sid: aios_v1::SessionId,
+    pub user_id: String,
+    pub project_id: String,
+    pub agent_id: String,
+    pub lago_namespace: String,
+    pub haima_wallet: String,
+    pub anima_account: String,
+    pub last_touched: Instant,
+    pub status: SessionStatus,
+    pub attached_streams: u32,
+}
+
 impl RoutingCache {
     pub fn new() -> Self {
         Self {
@@ -119,6 +137,31 @@ impl RoutingCache {
         if let Some(entry) = self.by_sid.get(&sid.value) {
             entry.write().status = status;
         }
+    }
+
+    /// Snapshot the cache as `SessionSummary` records for admin-plane
+    /// `Runtime.SessionsListAll` + `RoutingCache.Dump`. `attached_streams`
+    /// is read from each entry's fan-out registry.
+    pub fn snapshot_summaries(&self, limit: usize) -> Vec<SessionSummary> {
+        self.by_sid
+            .iter()
+            .take(limit)
+            .map(|e| {
+                let g = e.value().read();
+                SessionSummary {
+                    sid: g.sid.clone(),
+                    user_id: g.user_id.clone(),
+                    project_id: g.project_id.clone(),
+                    agent_id: g.agent_id.clone(),
+                    lago_namespace: g.lago_namespace.clone(),
+                    haima_wallet: g.haima_wallet.clone(),
+                    anima_account: g.anima_account.clone(),
+                    last_touched: g.last_touched,
+                    status: g.status,
+                    attached_streams: g.fanout.len() as u32,
+                }
+            })
+            .collect()
     }
 
     /// Test helper: backdate `last_touched` so eviction logic can be
@@ -257,5 +300,29 @@ mod tests {
         assert!(cache.lookup(&sid("s0")).is_none());
         assert!(cache.lookup(&sid("s1")).is_none());
         assert!(cache.lookup(&sid("s4")).is_some());
+    }
+
+    #[test]
+    fn snapshot_summaries_returns_active_entries() {
+        let cache = RoutingCache::new();
+        cache.insert_minimal(&sid("a"), "alice", "p");
+        cache.insert_minimal(&sid("b"), "bob", "q");
+        let summaries = cache.snapshot_summaries(100);
+        assert_eq!(summaries.len(), 2);
+        assert!(summaries.iter().any(|s| s.user_id == "alice"));
+        assert!(summaries.iter().any(|s| s.user_id == "bob"));
+        for s in &summaries {
+            assert_eq!(s.attached_streams, 0, "no streams attached yet");
+        }
+    }
+
+    #[test]
+    fn snapshot_summaries_respects_limit() {
+        let cache = RoutingCache::new();
+        for i in 0..5 {
+            cache.insert_minimal(&sid(&format!("s{i}")), "alice", "p");
+        }
+        let summaries = cache.snapshot_summaries(3);
+        assert_eq!(summaries.len(), 3);
     }
 }

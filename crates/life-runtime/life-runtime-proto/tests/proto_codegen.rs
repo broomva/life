@@ -10,5 +10,11 @@ fn life_v1_agent_module_present() {
 
 #[test]
 fn life_admin_v1_module_present() {
-    let _ = std::any::type_name::<life_runtime_proto::life::admin::v1::Empty>();
+    // M5 sub-phase C populates the admin namespaces with three services
+    // (Runtime, Saga, RoutingCache). Each service has its own per-service
+    // Empty (RuntimeEmpty, SagaEmpty, RoutingEmpty) so we don't collide
+    // when including the same proto package twice.
+    let _ = std::any::type_name::<life_runtime_proto::life::admin::v1::RuntimeEmpty>();
+    let _ = std::any::type_name::<life_runtime_proto::life::admin::v1::SagaEmpty>();
+    let _ = std::any::type_name::<life_runtime_proto::life::admin::v1::RoutingEmpty>();
 }

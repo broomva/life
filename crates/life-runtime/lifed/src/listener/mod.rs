@@ -1,7 +1,8 @@
 //! UDS listener primitives.
 //!
-//! Sub-phase A ships only the public-plane listener. The admin-plane listener
-//! lands in C1 (Spec C₂ §5.3 — SO_PEERCRED + group membership + pidfd).
+//! - `public` — `/run/life/life.sock`, no peer-cred extraction.
+//! - `admin`  — `/run/life/life-admin.sock`, SO_PEERCRED-attached
+//!   per Spec C₂ §5.3 (sub-phase C).
 
+pub mod admin;
 pub mod public;
-// pub mod admin;     // sub-phase C (C1)

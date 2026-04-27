@@ -109,6 +109,21 @@ impl LagoProxy {
         let _ = (key, response);
         Ok(())
     }
+
+    /// Append a single event to a lago namespace. Sub-phase C ships this
+    /// as a best-effort no-op against the real lago daemon; a typed
+    /// `lago.Append` RPC lands in sub-phase D2 once the corresponding
+    /// proto method ships in lago. Used by `SagaDriver` to persist saga
+    /// lifecycle events to `system/lifed/saga/<saga_id>` (Spec C₂ §4.1).
+    pub async fn append_event(
+        &self,
+        namespace: &str,
+        event_type: &str,
+        payload: Vec<u8>,
+    ) -> LagoProxyResult<()> {
+        let _ = (namespace, event_type, payload);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -133,6 +148,12 @@ pub trait LagoCall: Send + Sync {
     async fn get_blob(&self, namespace: &str, sha256: &str) -> LagoProxyResult<(Vec<u8>, String)>;
     async fn idem_lookup(&self, key: &[u8]) -> LagoProxyResult<Option<Vec<u8>>>;
     async fn idem_persist(&self, key: &[u8], response: Vec<u8>) -> LagoProxyResult<()>;
+    async fn append_event(
+        &self,
+        namespace: &str,
+        event_type: &str,
+        payload: Vec<u8>,
+    ) -> LagoProxyResult<()>;
 }
 
 #[async_trait]
@@ -170,5 +191,13 @@ impl LagoCall for LagoProxy {
     }
     async fn idem_persist(&self, key: &[u8], response: Vec<u8>) -> LagoProxyResult<()> {
         LagoProxy::idem_persist(self, key, response).await
+    }
+    async fn append_event(
+        &self,
+        namespace: &str,
+        event_type: &str,
+        payload: Vec<u8>,
+    ) -> LagoProxyResult<()> {
+        LagoProxy::append_event(self, namespace, event_type, payload).await
     }
 }

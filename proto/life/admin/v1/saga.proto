@@ -1,6 +1,43 @@
 syntax = "proto3";
 
-// Admin-plane Saga dialect — full service body lands in M5 sub-phase C
-// task C3.
+// Admin-plane Saga dialect — inspect inflight + recently-completed sagas.
+// See docs/superpowers/specs/2026-04-26-spec-c2-lifed-facade.md §3.5, §4.
 
 package life.admin.v1;
+
+import "aios/v1/identifiers.proto";
+import "google/protobuf/timestamp.proto";
+
+service Saga {
+  // Stream an in-memory snapshot of inflight sagas. life-admin / autonomic
+  // / root only.
+  rpc ListInflight(ListInflightReq) returns (stream SagaState);
+
+  // Look up a saga by id (returns the most recent in-memory record;
+  // historical sagas can be reconstructed from lago `system/lifed/saga/<id>`).
+  // life-admin / autonomic / root only.
+  rpc Show(SagaRef) returns (SagaState);
+
+  // Force-compensate a stuck saga. Sub-phase C ships this as
+  // Status::unimplemented — re-entrant compensation needs a saga-driver
+  // entrypoint that exposes the steps + last-completed index of an
+  // inflight saga. Tracked as a follow-up ticket under the Spec C
+  // umbrella (post-Sub-phase-C; companion to BRO-934). Root only.
+  rpc ForceCompensate(SagaRef) returns (SagaEmpty);
+}
+
+message SagaEmpty {}
+
+message SagaState {
+  string saga_id = 1;
+  string saga_kind = 2;
+  aios.v1.SessionId sid = 3;
+  google.protobuf.Timestamp started_at = 4;
+  string current_step = 5;
+  repeated string completed_steps = 6;
+  repeated string compensations_applied = 7;
+  string status = 8;
+}
+
+message ListInflightReq { uint32 limit = 1; }
+message SagaRef { string saga_id = 1; }
