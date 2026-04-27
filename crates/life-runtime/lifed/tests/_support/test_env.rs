@@ -135,4 +135,24 @@ impl TestEnv {
             let _ = tokio::time::timeout(Duration::from_secs(5), h).await;
         }
     }
+
+    /// Inject a one-shot failure into the next mock arcan `create_agent` call.
+    pub fn inject_arcan_fault(&self) {
+        self.mocks.arcan.inject_fault();
+    }
+
+    /// Inject a one-shot failure into the next mock lago `open_namespace` call.
+    pub fn inject_lago_fault(&self) {
+        self.mocks.lago.inject_fault();
+    }
+
+    /// Inject a one-shot failure into the next mock haima `bind_wallet` call.
+    pub fn inject_haima_fault(&self) {
+        self.mocks.haima.inject_fault();
+    }
+
+    /// Inject a one-shot failure into the next mock anima `register_session` call.
+    pub fn inject_anima_fault(&self) {
+        self.mocks.anima.inject_fault();
+    }
 }
