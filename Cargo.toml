@@ -238,6 +238,7 @@ lago-proxy         = { path = "crates/life-runtime/lago-proxy",         version 
 haima-proxy        = { path = "crates/life-runtime/haima-proxy",        version = "0.3.0" }
 anima-proxy        = { path = "crates/life-runtime/anima-proxy",        version = "0.3.0" }
 life-runtime-proto = { path = "crates/life-runtime/life-runtime-proto", version = "0.3.0" }
+lifed-conformance  = { path = "crates/life-runtime/lifed-conformance",  version = "0.3.0" }
 # Workspace-level tooling for lifed (used only by the lifed crate behind a feature)
 failsafe = { version = "1", default-features = false }
 

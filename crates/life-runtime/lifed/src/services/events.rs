@@ -1,7 +1,9 @@
 //! life.v1.Events — public-plane events namespace.
 //!
-//! Sub-phase A returns canned empty streams to validate the wire shape.
-//! Sub-phase B wires real lago tail via `lago-proxy`.
+//! Sub-phase B drives events from the `lago-proxy::LagoCall` trait
+//! directly. The mock lago substrate (in dev/tests) and the real
+//! `LagoProxy` (in production) both implement `LagoCall`, so the
+//! handler doesn't care which is wired in.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -9,34 +11,17 @@ use std::sync::Arc;
 use futures::Stream;
 use tonic::{Request, Response, Status};
 
+use lago_proxy::LagoCall;
 use life_runtime_proto::life::v1 as pb;
 
 use crate::auth::capability::CapabilityClaims;
 
-#[async_trait::async_trait]
-pub trait LagoTail: Send + Sync + 'static {
-    async fn read(
-        &self,
-        sid: &str,
-        from: u64,
-        limit: u32,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<pb::EventRecord, Status>> + Send>>, Status>;
-
-    async fn subscribe(
-        &self,
-        sid: &str,
-        from: u64,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<pb::EventRecord, Status>> + Send>>, Status>;
-
-    async fn get_blob(&self, namespace: &str, sha256: &str) -> Result<(Vec<u8>, String), Status>;
-}
-
 pub struct EventsService {
-    pub lago: Arc<dyn LagoTail>,
+    pub lago: Arc<dyn LagoCall>,
 }
 
 impl EventsService {
-    pub fn new(lago: Arc<dyn LagoTail>) -> Self {
+    pub fn new(lago: Arc<dyn LagoCall>) -> Self {
         Self { lago }
     }
 
@@ -61,7 +46,11 @@ impl pb::events_server::Events for EventsService {
             .ok_or_else(|| Status::invalid_argument("missing session_id"))?
             .value
             .clone();
-        let stream = self.lago.read(&sid, body.from_sequence, body.limit).await?;
+        let stream = self
+            .lago
+            .read(&sid, body.from_sequence, body.limit)
+            .await
+            .map_err(Status::from)?;
         Ok(Response::new(stream))
     }
 
@@ -77,14 +66,22 @@ impl pb::events_server::Events for EventsService {
             .ok_or_else(|| Status::invalid_argument("missing session_id"))?
             .value
             .clone();
-        let stream = self.lago.subscribe(&sid, body.from_sequence).await?;
+        let stream = self
+            .lago
+            .subscribe(&sid, body.from_sequence)
+            .await
+            .map_err(Status::from)?;
         Ok(Response::new(stream))
     }
 
     async fn get_blob(&self, req: Request<pb::BlobRef>) -> Result<Response<pb::Blob>, Status> {
         let _claims = Self::claims(&req)?;
         let body = req.get_ref();
-        let (data, content_type) = self.lago.get_blob(&body.namespace, &body.sha256).await?;
+        let (data, content_type) = self
+            .lago
+            .get_blob(&body.namespace, &body.sha256)
+            .await
+            .map_err(Status::from)?;
         Ok(Response::new(pb::Blob { data, content_type }))
     }
 }

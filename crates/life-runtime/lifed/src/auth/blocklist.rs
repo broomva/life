@@ -1,5 +1,10 @@
-//! Active-session blocklist. Sub-phase A in-memory only; B14 wires
-//! `revoked_sids.json` snapshot + reload.
+//! Active-session blocklist + snapshot publisher.
+//!
+//! Spec C₂ §5.4: lifed maintains an in-memory blocklist of revoked
+//! session ids. Sub-phase B publishes the set as a JSON file at
+//! `cfg.auth.revoked_sids_path`; substrates poll the file every 30 s
+//! (revocation gap bounded by Tier-3 expiry of 30 s). Spec C₆ replaces
+//! the snapshot with a server-streamed `RevokedSessionStream`.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -28,5 +33,16 @@ impl RevokedSidSet {
 
     pub fn snapshot(&self) -> Vec<String> {
         self.inner.read().iter().cloned().collect()
+    }
+
+    /// Sub-phase B: write the snapshot to a file substrates can poll.
+    /// Spec C₆ replaces with a server-streamed `RevokedSessionStream`.
+    pub fn write_snapshot_to(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let snap = self.snapshot();
+        let json = serde_json::to_string(&snap).unwrap_or_else(|_| "[]".to_string());
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, json)
     }
 }

@@ -3,12 +3,27 @@ name = "anima-proxy"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "M5 placeholder — typed tonic client for anima substrate. Real impl lands in M5 sub-phase B."
+description = "Typed tonic client for the anima substrate, used by lifed's Identity handlers."
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
+aios-protocol.workspace = true
+aios-proto.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+prost = "0.14"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+tokio-stream.workspace = true
+tonic = "0.14"
+tonic-prost = "0.14"
+tower = { workspace = true }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tracing.workspace = true
+serde = { workspace = true, features = ["derive"] }
+chrono = { workspace = true, features = ["serde"] }
 
 [lints]
 workspace = true

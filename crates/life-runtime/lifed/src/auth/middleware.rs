@@ -3,6 +3,11 @@
 //! research synthesis 3.10, this MUST be a tower Layer (NOT a tonic
 //! interceptor) so it composes with tracing + load-shed + timeout layers
 //! without ordering surprises.
+//!
+//! Per Spec C₂ §5.1 step 5, an invalid or missing Tier-2 bearer token MUST
+//! be rejected with `Status::unauthenticated` BEFORE reaching any handler.
+//! Sub-phase B implements that early-return directly here; sub-phase A's
+//! `unwrap_or_default()` lenience is gone.
 
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -61,28 +66,46 @@ where
         let jwks = Arc::clone(&self.jwks);
         Box::pin(async move {
             // Extract authorization header.
-            let claims = req
+            let bearer = req
                 .headers()
                 .get("authorization")
                 .and_then(|v| v.to_str().ok())
                 .and_then(|h| h.strip_prefix("Bearer "))
-                .and_then(|tok| jwks.validate(tok).ok());
+                .map(|t| t.to_string());
 
-            // Attach (or default) CapabilityClaims as a request extension.
-            //
-            // SUB-PHASE A ONLY: Missing/invalid bearer falls through to a
-            // default-empty `CapabilityClaims`, which lets handlers proceed
-            // with empty `user_id`/`project_id`. This is plan-sanctioned for
-            // the dev-signer mock-substrate path (integration tests still
-            // attach valid bearers; the daemon is dev-only at this point).
-            //
-            // SUB-PHASE B5 MUST CHANGE THIS: replace `unwrap_or_default()`
-            // with an early-return `Status::unauthenticated` for the public
-            // plane. Per Spec C₂ §5.1 step 5, invalid Tier-2 capability
-            // tokens MUST be rejected before reaching any handler. Tracked
-            // as part of B5 (real ES256 + JWKS verification).
-            req.extensions_mut().insert(claims.unwrap_or_default());
+            let claims = match bearer {
+                Some(tok) => match jwks.validate(&tok) {
+                    Ok(c) => c,
+                    Err(_) => return Ok(unauth_response("invalid Tier-2 capability token")),
+                },
+                None => return Ok(unauth_response("missing Tier-2 capability token")),
+            };
+
+            req.extensions_mut().insert(claims);
             inner.call(req).await
         })
     }
+}
+
+/// Build a `Status::unauthenticated`-shaped HTTP response. Per Spec C₂
+/// §5.1 step 5, we never let the request reach a handler when auth fails.
+/// Tonic clients surface the response as `tonic::Status` of code
+/// `Unauthenticated` because we set the `grpc-status` trailer header.
+fn unauth_response(msg: &str) -> http::Response<Body> {
+    let status = tonic::Status::unauthenticated(msg.to_string());
+    let mut resp = http::Response::new(Body::empty());
+    *resp.status_mut() = http::StatusCode::OK;
+    let headers = resp.headers_mut();
+    headers.insert(
+        "content-type",
+        http::HeaderValue::from_static("application/grpc"),
+    );
+    headers.insert(
+        "grpc-status",
+        http::HeaderValue::from_str(&(status.code() as i32).to_string()).unwrap(),
+    );
+    if let Ok(v) = http::HeaderValue::from_str(status.message()) {
+        headers.insert("grpc-message", v);
+    }
+    resp
 }

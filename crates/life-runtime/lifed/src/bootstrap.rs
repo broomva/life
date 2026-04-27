@@ -1,35 +1,43 @@
 //! Bootstrap — wires config → substrate clients → router → listener.
 //!
-//! Sub-phase A entrypoints:
-//! - `run_with_mocks` (used by integration tests): mock substrates injected.
-//! - `run_daemon` (used by `lifed daemon`): mock substrates because the real
-//!   proxies don't exist yet. Sub-phase B replaces this with real-substrate
-//!   wiring (B16).
+//! Sub-phase B entrypoints:
+//! - `run_with_mocks` (used by integration tests + the dev daemon path):
+//!   `MockSubstrates` injected via the per-substrate `*Call` traits.
+//! - `run_with_real_substrates` (production): real `*-proxy` crates dial
+//!   the substrate UDS sockets. See Task B16.
 
 use std::path::Path;
-use std::pin::Pin;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use futures::Stream;
 use tokio::sync::oneshot;
 use tonic::transport::Server;
 
+use anima_proxy::{AnimaCall, AnimaProxy};
+use arcan_proxy::{ArcanCall, ArcanProxy};
+use haima_proxy::{HaimaCall, HaimaProxy};
+use lago_proxy::{LagoCall, LagoProxy};
 use life_runtime_proto::life::v1 as pb;
 
+use crate::idempotency::lago_store::LagoBackedStore;
+
+use crate::auth::blocklist::RevokedSidSet;
 use crate::auth::jwks::JwksCache;
+use crate::auth::keystore::Keystore;
 use crate::auth::middleware::AuthLayer;
 use crate::config::LifedConfig;
-use crate::dev_mocks::{MockAnima, MockArcan, MockHaima, MockLago, MockSubstrates};
-use crate::error::LifedResult;
+use crate::dev_mocks::MockSubstrates;
+use crate::error::{LifedError, LifedResult};
+use crate::idempotency::{IdempotencyStore, boxed_in_memory};
 use crate::listener::public as public_listener;
 use crate::routing::cache::RoutingCache;
-use crate::services::agent::{
-    AgentService, AnimaDispatch, ArcanDispatch, HaimaDispatch, LagoDispatch,
-};
-use crate::services::events::{EventsService, LagoTail};
+use crate::saga::driver::SagaDriver;
+use crate::services::agent::AgentService;
+use crate::services::events::EventsService;
+use crate::services::identity::IdentityService;
+use crate::services::wallet::WalletService;
 
-/// Sub-phase A entrypoint for tests + the early daemon.
+/// Sub-phase B mocks entrypoint — used by integration tests + the dev
+/// daemon path until B16 wires the real-substrate path.
 pub async fn run_with_mocks(
     cfg: &LifedConfig,
     mocks: Arc<MockSubstrates>,
@@ -40,174 +48,229 @@ pub async fn run_with_mocks(
     tracing::info!(
         public_socket = %cfg.public_plane.unix_socket.display(),
         admin_socket  = %cfg.admin_plane.unix_socket.display(),
-        "lifed starting (sub-phase A — mock substrates)",
+        "lifed starting (sub-phase B — mock substrates)",
     );
 
-    let jwks = Arc::new(JwksCache::load_from_path(&cfg.auth.jwks_path)?);
+    let jwks = if cfg.auth.jwks_path.exists() {
+        Arc::new(JwksCache::load_from_path(&cfg.auth.jwks_path)?)
+    } else {
+        tracing::warn!(
+            path = %cfg.auth.jwks_path.display(),
+            "jwks file missing — using dev keystore (test-token-for-{{user}} accepted)"
+        );
+        Arc::new(JwksCache::dev_only())
+    };
     let auth = AuthLayer::new(Arc::clone(&jwks));
     let routing = Arc::new(RoutingCache::new());
+    let ks = Arc::new(Keystore::generate_dev());
+    let saga = Arc::new(SagaDriver::new("lifed-runtime"));
 
-    let arcan: Arc<dyn ArcanDispatch> = Arc::new(MockArcanAdapter(mocks.arcan.clone()));
-    let lago_dispatch: Arc<dyn LagoDispatch> =
-        Arc::new(MockLagoDispatchAdapter(mocks.lago.clone()));
-    let lago_tail: Arc<dyn LagoTail> = Arc::new(MockLagoTailAdapter);
-    let haima: Arc<dyn HaimaDispatch> = Arc::new(MockHaimaAdapter(mocks.haima.clone()));
-    let anima: Arc<dyn AnimaDispatch> = Arc::new(MockAnimaAdapter(mocks.anima.clone()));
+    let arcan: Arc<dyn ArcanCall> = Arc::new(mocks.arcan.clone());
+    let lago: Arc<dyn LagoCall> = Arc::new(mocks.lago.clone());
+    let haima: Arc<dyn HaimaCall> = Arc::new(mocks.haima.clone());
+    let anima: Arc<dyn AnimaCall> = Arc::new(mocks.anima.clone());
 
-    let agent = AgentService::new(arcan, lago_dispatch, haima, anima, Arc::clone(&routing));
-    let events = EventsService::new(lago_tail);
+    let idem: Arc<dyn IdempotencyStore> =
+        boxed_in_memory(std::time::Duration::from_secs(cfg.idempotency.ttl_secs));
+    let revoked = Arc::new(RevokedSidSet::new());
 
-    // Mount the AuthLayer at the transport boundary so it runs once per http
-    // request, BEFORE tonic dispatches to the service. Handlers then read
-    // CapabilityClaims via Self::claims(&req); the dev signer in jwks.rs
-    // accepts the `test-token-for-{user}` bearer.
+    let agent = AgentService::new(
+        Arc::clone(&arcan),
+        Arc::clone(&lago),
+        Arc::clone(&haima),
+        Arc::clone(&anima),
+        Arc::clone(&routing),
+        Arc::clone(&ks),
+        Arc::clone(&saga),
+    );
+    let events = EventsService::new(Arc::clone(&lago));
+    let wallet = WalletService::new(Arc::clone(&haima), Arc::clone(&idem));
+    let identity = IdentityService::new(
+        Arc::clone(&anima),
+        Arc::clone(&routing),
+        Arc::clone(&revoked),
+    );
+
     let router = Server::builder()
         .layer(auth)
         .add_service(pb::agent_server::AgentServer::new(agent))
-        .add_service(pb::events_server::EventsServer::new(events));
+        .add_service(pb::events_server::EventsServer::new(events))
+        .add_service(pb::wallet_server::WalletServer::new(wallet))
+        .add_service(pb::identity_server::IdentityServer::new(identity));
 
     let incoming = public_listener::bind(&cfg.public_plane).await?;
     router
         .serve_with_incoming_shutdown(incoming, public_listener::shutdown_signal(shutdown_rx))
         .await
-        .map_err(|e| crate::error::LifedError::Server(format!("public-plane serve: {e}")))
+        .map_err(|e| LifedError::Server(format!("public-plane serve: {e}")))
 }
 
-/// Sub-phase A daemon entrypoint. Replaced in B16 with real-substrate wiring.
+/// Sub-phase B daemon entrypoint. Tries the real-substrate path first;
+/// falls back to mocks if any substrate UDS socket is missing (dev/CI
+/// mode). The real path is gated behind `cfg.substrates.*.unix_socket`
+/// existing so a fresh dev box without arcand/lagod/haimad/animad still
+/// boots a usable lifed.
 pub async fn run_daemon(config_path: Option<&Path>) -> LifedResult<()> {
     let cfg = LifedConfig::load(config_path)?;
     let _vigil_guard = crate::observability::init(&cfg.vigil)?;
     let shutdown_rx = crate::shutdown::install_signal_handler();
-    // Sub-phase A: synthesise mocks for the daemon entrypoint too. B16 swaps
-    // in real proxies.
-    let mocks = Arc::new(MockSubstrates::new());
-    run_with_mocks(&cfg, mocks, shutdown_rx).await
-}
-
-// ── Mock adapter glue ────────────────────────────────────────────────────────
-
-struct MockArcanAdapter(MockArcan);
-struct MockLagoDispatchAdapter(MockLago);
-struct MockLagoTailAdapter;
-struct MockHaimaAdapter(MockHaima);
-struct MockAnimaAdapter(MockAnima);
-
-#[async_trait]
-impl ArcanDispatch for MockArcanAdapter {
-    async fn create_agent(&self, sid: &str) -> Result<String, tonic::Status> {
-        self.0
-            .create_agent(sid)
-            .await
-            .map_err(tonic::Status::internal)
-    }
-    async fn destroy_agent(&self, sid: &str) -> Result<(), tonic::Status> {
-        self.0
-            .destroy_agent(sid)
-            .await
-            .map_err(tonic::Status::internal)
-    }
-    async fn dispatch_message(
-        &self,
-        _sid: &str,
-        _content: &str,
-    ) -> Result<
-        Pin<Box<dyn Stream<Item = Result<pb::AgentEvent, tonic::Status>> + Send>>,
-        tonic::Status,
-    > {
-        let (tx, rx) = tokio::sync::mpsc::channel::<Result<pb::AgentEvent, tonic::Status>>(8);
-        // Emit one canned token then finish.
-        tokio::spawn(async move {
-            let _ = tx
-                .send(Ok(pb::AgentEvent {
-                    record: None,
-                    kind: pb::AgentEventKind::Token as i32,
-                }))
-                .await;
-            let _ = tx
-                .send(Ok(pb::AgentEvent {
-                    record: None,
-                    kind: pb::AgentEventKind::Finish as i32,
-                }))
-                .await;
-        });
-        Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)))
+    if all_substrate_sockets_present(&cfg) {
+        run_with_real_substrates(&cfg, shutdown_rx).await
+    } else {
+        tracing::warn!(
+            "one or more substrate UDS sockets missing — booting with MockSubstrates (dev mode)"
+        );
+        let mocks = Arc::new(MockSubstrates::new());
+        run_with_mocks(&cfg, mocks, shutdown_rx).await
     }
 }
 
-#[async_trait]
-impl LagoDispatch for MockLagoDispatchAdapter {
-    async fn open_namespace(&self, sid: &str) -> Result<String, tonic::Status> {
-        self.0
-            .open_namespace(sid)
-            .await
-            .map_err(tonic::Status::internal)
-    }
-    async fn close_namespace(&self, ns: &str) -> Result<(), tonic::Status> {
-        self.0
-            .close_namespace(ns)
-            .await
-            .map_err(tonic::Status::internal)
-    }
+fn all_substrate_sockets_present(cfg: &LifedConfig) -> bool {
+    cfg.substrates.arcan.unix_socket.exists()
+        && cfg.substrates.lago.unix_socket.exists()
+        && cfg.substrates.haima.unix_socket.exists()
+        && cfg.substrates.anima.unix_socket.exists()
 }
 
-#[async_trait]
-impl LagoTail for MockLagoTailAdapter {
-    async fn read(
-        &self,
-        _sid: &str,
-        _from: u64,
-        _limit: u32,
-    ) -> Result<
-        Pin<Box<dyn Stream<Item = Result<pb::EventRecord, tonic::Status>> + Send>>,
-        tonic::Status,
-    > {
-        let (tx, rx) = tokio::sync::mpsc::channel::<Result<pb::EventRecord, tonic::Status>>(1);
-        drop(tx); // empty stream
-        Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)))
-    }
-    async fn subscribe(
-        &self,
-        sid: &str,
-        from: u64,
-    ) -> Result<
-        Pin<Box<dyn Stream<Item = Result<pb::EventRecord, tonic::Status>> + Send>>,
-        tonic::Status,
-    > {
-        self.read(sid, from, 0).await
-    }
-    async fn get_blob(&self, _ns: &str, _sha256: &str) -> Result<(Vec<u8>, String), tonic::Status> {
-        Ok((b"empty".to_vec(), "application/octet-stream".to_string()))
-    }
+/// Sub-phase B real-substrate entrypoint per Spec C₂ §12.B. Dials the
+/// four substrate UDS sockets, mints + publishes the substrate-token JWKS,
+/// builds the public-plane router, and serves until the shutdown channel
+/// fires.
+pub async fn run_with_real_substrates(
+    cfg: &LifedConfig,
+    shutdown_rx: oneshot::Receiver<()>,
+) -> LifedResult<()> {
+    let _vigil_guard = crate::observability::init(&cfg.vigil)?;
+    tracing::info!(
+        public_socket = %cfg.public_plane.unix_socket.display(),
+        admin_socket  = %cfg.admin_plane.unix_socket.display(),
+        "lifed starting (sub-phase B — real substrates)",
+    );
+
+    let arcan: Arc<dyn ArcanCall> = Arc::new(
+        ArcanProxy::connect(cfg.substrates.arcan.unix_socket.clone())
+            .await
+            .map_err(|e| LifedError::Substrate(format!("arcan dial: {e}")))?,
+    );
+    let lago_proxy = LagoProxy::connect(cfg.substrates.lago.unix_socket.clone())
+        .await
+        .map_err(|e| LifedError::Substrate(format!("lago dial: {e}")))?;
+    let lago: Arc<dyn LagoCall> = Arc::new(lago_proxy);
+    let haima: Arc<dyn HaimaCall> = Arc::new(
+        HaimaProxy::connect(cfg.substrates.haima.unix_socket.clone())
+            .await
+            .map_err(|e| LifedError::Substrate(format!("haima dial: {e}")))?,
+    );
+    let anima: Arc<dyn AnimaCall> = Arc::new(
+        AnimaProxy::connect(cfg.substrates.anima.unix_socket.clone())
+            .await
+            .map_err(|e| LifedError::Substrate(format!("anima dial: {e}")))?,
+    );
+
+    // Substrate-token signing keystore + JWKS publish.
+    let ks = Arc::new(if cfg.auth.substrate_signing_key_path.exists() {
+        let pub_path = cfg
+            .auth
+            .substrate_signing_key_path
+            .with_extension("pub.pem");
+        Keystore::load_from_files(&cfg.auth.substrate_signing_key_path, &pub_path)?
+    } else {
+        Keystore::generate_dev()
+    });
+    publish_jwks(&ks, &cfg.auth.substrate_jwks_publish_path)?;
+
+    let routing = Arc::new(RoutingCache::new());
+    let revoked = Arc::new(RevokedSidSet::new());
+    let idem: Arc<dyn IdempotencyStore> = Arc::new(LagoBackedStore::new(Arc::clone(&lago)));
+    let saga = Arc::new(SagaDriver::new("lifed-runtime"));
+
+    let agent = AgentService::new(
+        Arc::clone(&arcan),
+        Arc::clone(&lago),
+        Arc::clone(&haima),
+        Arc::clone(&anima),
+        Arc::clone(&routing),
+        Arc::clone(&ks),
+        Arc::clone(&saga),
+    );
+    let events = EventsService::new(Arc::clone(&lago));
+    let wallet = WalletService::new(Arc::clone(&haima), Arc::clone(&idem));
+    let identity = IdentityService::new(
+        Arc::clone(&anima),
+        Arc::clone(&routing),
+        Arc::clone(&revoked),
+    );
+
+    let jwks = if cfg.auth.jwks_path.exists() {
+        Arc::new(JwksCache::load_from_path(&cfg.auth.jwks_path)?)
+    } else {
+        tracing::warn!(
+            path = %cfg.auth.jwks_path.display(),
+            "lifegw JWKS missing — using built-in dev keystore"
+        );
+        Arc::new(JwksCache::dev_only())
+    };
+    let auth = AuthLayer::new(jwks);
+
+    // Spec C₂ §5.4 + §6.3 sweepers: revocation snapshot + routing-cache eviction.
+    spawn_revoked_snapshot_sweeper(Arc::clone(&revoked), cfg.auth.revoked_sids_path.clone());
+    spawn_routing_eviction_sweeper(
+        Arc::clone(&routing),
+        std::time::Duration::from_secs(cfg.routing.idle_threshold_secs),
+        cfg.routing.hard_cap,
+        std::time::Duration::from_secs(cfg.routing.eviction_interval_secs),
+    );
+
+    let router = Server::builder()
+        .layer(auth)
+        .add_service(pb::agent_server::AgentServer::new(agent))
+        .add_service(pb::events_server::EventsServer::new(events))
+        .add_service(pb::wallet_server::WalletServer::new(wallet))
+        .add_service(pb::identity_server::IdentityServer::new(identity));
+
+    let incoming = public_listener::bind(&cfg.public_plane).await?;
+    router
+        .serve_with_incoming_shutdown(incoming, public_listener::shutdown_signal(shutdown_rx))
+        .await
+        .map_err(|e| LifedError::Server(format!("public-plane serve: {e}")))
 }
 
-#[async_trait]
-impl HaimaDispatch for MockHaimaAdapter {
-    async fn bind_wallet(&self, sid: &str, project_id: &str) -> Result<String, tonic::Status> {
-        self.0
-            .bind_wallet(sid, project_id)
-            .await
-            .map_err(tonic::Status::internal)
+fn publish_jwks(ks: &Keystore, path: &std::path::Path) -> LifedResult<()> {
+    if let Some(p) = path.parent() {
+        std::fs::create_dir_all(p)
+            .map_err(|e| LifedError::Auth(format!("create {}: {e}", p.display())))?;
     }
-    async fn unbind_wallet(&self, wallet_id: &str) -> Result<(), tonic::Status> {
-        self.0
-            .unbind_wallet(wallet_id)
-            .await
-            .map_err(tonic::Status::internal)
-    }
+    let jwks_json = serde_json::to_string_pretty(&ks.publish_jwks())
+        .map_err(|e| LifedError::Auth(format!("jwks json: {e}")))?;
+    std::fs::write(path, jwks_json)
+        .map_err(|e| LifedError::Auth(format!("write {}: {e}", path.display())))?;
+    Ok(())
 }
 
-#[async_trait]
-impl AnimaDispatch for MockAnimaAdapter {
-    async fn register_session(&self, sid: &str, user_id: &str) -> Result<(), tonic::Status> {
-        self.0
-            .register_session(sid, user_id)
-            .await
-            .map_err(tonic::Status::internal)
-    }
-    async fn mark_session_closed(&self, sid: &str) -> Result<(), tonic::Status> {
-        self.0
-            .mark_session_closed(sid)
-            .await
-            .map_err(tonic::Status::internal)
-    }
+fn spawn_revoked_snapshot_sweeper(revoked: Arc<RevokedSidSet>, path: std::path::PathBuf) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            tick.tick().await;
+            if let Err(e) = revoked.write_snapshot_to(&path) {
+                tracing::warn!(path = %path.display(), error = ?e, "revoked-sids snapshot write failed");
+            }
+        }
+    });
+}
+
+fn spawn_routing_eviction_sweeper(
+    routing: Arc<RoutingCache>,
+    idle: std::time::Duration,
+    hard_cap: usize,
+    interval: std::time::Duration,
+) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(interval);
+        loop {
+            tick.tick().await;
+            routing.evict_idle(idle);
+            routing.evict_to_cap(hard_cap);
+        }
+    });
 }

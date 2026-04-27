@@ -82,6 +82,8 @@ tokio = { workspace = true, features = ["full", "test-util"] }
 tower-test = "0.4"
 assert_matches.workspace = true
 tonic-prost = "0.14"
+lifed-conformance.workspace = true
+async-trait.workspace = true
 
 [lints]
 workspace = true

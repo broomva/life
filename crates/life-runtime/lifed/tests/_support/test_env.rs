@@ -14,6 +14,8 @@ use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
 use life_runtime_proto::life::v1::agent_client::AgentClient;
+use life_runtime_proto::life::v1::identity_client::IdentityClient;
+use life_runtime_proto::life::v1::wallet_client::WalletClient;
 use life_runtime_proto::life::v1::{CreateSessionReq, Session};
 use lifed::config::LifedConfig;
 
@@ -69,11 +71,11 @@ impl TestEnv {
         }
     }
 
-    /// Returns an `AgentClient` connected to the test's public socket.
-    pub async fn agent_client(&self) -> AgentClient<tonic::transport::Channel> {
+    /// Dial the test's public UDS and return the underlying tonic Channel.
+    pub async fn dial_public(&self) -> tonic::transport::Channel {
         let socket = self.public_socket.clone();
         let endpoint = Endpoint::try_from("http://[::]:0").unwrap();
-        let channel = endpoint
+        endpoint
             .connect_with_connector(service_fn(move |_: Uri| {
                 let socket = socket.clone();
                 async move {
@@ -82,8 +84,22 @@ impl TestEnv {
                 }
             }))
             .await
-            .expect("connect");
-        AgentClient::new(channel)
+            .expect("connect")
+    }
+
+    /// Returns an `AgentClient` connected to the test's public socket.
+    pub async fn agent_client(&self) -> AgentClient<tonic::transport::Channel> {
+        AgentClient::new(self.dial_public().await)
+    }
+
+    /// Returns a `WalletClient` connected to the test's public socket.
+    pub async fn wallet_client(&self) -> WalletClient<tonic::transport::Channel> {
+        WalletClient::new(self.dial_public().await)
+    }
+
+    /// Returns an `IdentityClient` connected to the test's public socket.
+    pub async fn identity_client(&self) -> IdentityClient<tonic::transport::Channel> {
+        IdentityClient::new(self.dial_public().await)
     }
 
     /// Convenience: build a `CreateSessionReq` with a dev Tier-2 token in metadata
@@ -118,5 +134,25 @@ impl TestEnv {
         if let Some(h) = self.server_handle.take() {
             let _ = tokio::time::timeout(Duration::from_secs(5), h).await;
         }
+    }
+
+    /// Inject a one-shot failure into the next mock arcan `create_agent` call.
+    pub fn inject_arcan_fault(&self) {
+        self.mocks.arcan.inject_fault();
+    }
+
+    /// Inject a one-shot failure into the next mock lago `open_namespace` call.
+    pub fn inject_lago_fault(&self) {
+        self.mocks.lago.inject_fault();
+    }
+
+    /// Inject a one-shot failure into the next mock haima `bind_wallet` call.
+    pub fn inject_haima_fault(&self) {
+        self.mocks.haima.inject_fault();
+    }
+
+    /// Inject a one-shot failure into the next mock anima `register_session` call.
+    pub fn inject_anima_fault(&self) {
+        self.mocks.anima.inject_fault();
     }
 }

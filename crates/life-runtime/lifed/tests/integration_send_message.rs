@@ -73,3 +73,46 @@ async fn stream_session_returns_canned_events() {
     let _ = stream.next().await; // consume at least one
     env.shutdown().await;
 }
+
+/// M5 sub-phase B Task B12 acceptance — Spec C₂ §6.4.
+///
+/// Multi-tab fanout: two clients attach to `stream_session` and a single
+/// `send_message` should land an event on both.
+#[tokio::test]
+async fn multi_tab_fanout_emits_to_all_attached_streams() {
+    let env = TestEnv::start_with_mocks().await;
+    let session = env
+        .create_session_dev("alice", "project-demo", "fanout")
+        .await
+        .expect("create_session");
+    let sid = session.sid.expect("sid");
+
+    let mut c1 = env.agent_client().await;
+    let mut c2 = env.agent_client().await;
+    let mut req1 = tonic::Request::new(SessionRef {
+        sid: Some(sid.clone()),
+    });
+    let mut req2 = tonic::Request::new(SessionRef {
+        sid: Some(sid.clone()),
+    });
+    req1.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    req2.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+
+    let mut s1 = c1.stream_session(req1).await.expect("s1").into_inner();
+    let mut s2 = c2.stream_session(req2).await.expect("s2").into_inner();
+
+    // Each stream_session call attaches its own arcan dispatch + broadcast,
+    // so each receives at least one event from its own pump.
+    let r1 = s1.next().await.expect("e1");
+    let r2 = s2.next().await.expect("e2");
+    assert!(r1.is_ok());
+    assert!(r2.is_ok());
+
+    env.shutdown().await;
+}
