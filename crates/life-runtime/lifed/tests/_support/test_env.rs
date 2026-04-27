@@ -14,6 +14,7 @@ use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
 use life_runtime_proto::life::v1::agent_client::AgentClient;
+use life_runtime_proto::life::v1::identity_client::IdentityClient;
 use life_runtime_proto::life::v1::wallet_client::WalletClient;
 use life_runtime_proto::life::v1::{CreateSessionReq, Session};
 use lifed::config::LifedConfig;
@@ -94,6 +95,11 @@ impl TestEnv {
     /// Returns a `WalletClient` connected to the test's public socket.
     pub async fn wallet_client(&self) -> WalletClient<tonic::transport::Channel> {
         WalletClient::new(self.dial_public().await)
+    }
+
+    /// Returns an `IdentityClient` connected to the test's public socket.
+    pub async fn identity_client(&self) -> IdentityClient<tonic::transport::Channel> {
+        IdentityClient::new(self.dial_public().await)
     }
 
     /// Convenience: build a `CreateSessionReq` with a dev Tier-2 token in metadata

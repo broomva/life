@@ -11,6 +11,6 @@
 
 pub mod agent;
 pub mod events;
+pub mod identity;
 pub mod wallet;
-// pub mod identity;     // sub-phase B (B14)
 // pub mod admin;        // sub-phase C (C2–C5)
