@@ -43,7 +43,15 @@ pub async fn run_with_mocks(
         "lifed starting (sub-phase A — mock substrates)",
     );
 
-    let jwks = Arc::new(JwksCache::load_from_path(&cfg.auth.jwks_path)?);
+    let jwks = if cfg.auth.jwks_path.exists() {
+        Arc::new(JwksCache::load_from_path(&cfg.auth.jwks_path)?)
+    } else {
+        tracing::warn!(
+            path = %cfg.auth.jwks_path.display(),
+            "jwks file missing — using dev keystore (test-token-for-{{user}} accepted)"
+        );
+        Arc::new(JwksCache::dev_only())
+    };
     let auth = AuthLayer::new(Arc::clone(&jwks));
     let routing = Arc::new(RoutingCache::new());
 

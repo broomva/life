@@ -249,6 +249,23 @@ dependencies = [
 [[package]]
 name = "anima-proxy"
 version = "0.3.0"
+dependencies = [
+ "aios-proto",
+ "aios-protocol",
+ "async-trait",
+ "chrono",
+ "futures",
+ "hyper-util",
+ "prost 0.14.3",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tower 0.5.3",
+ "tracing",
+]
 
 [[package]]
 name = "anstream"
@@ -705,6 +722,22 @@ dependencies = [
 [[package]]
 name = "arcan-proxy"
 version = "0.3.0"
+dependencies = [
+ "aios-proto",
+ "aios-protocol",
+ "async-trait",
+ "futures",
+ "hyper-util",
+ "life-runtime-proto",
+ "prost 0.14.3",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tower 0.5.3",
+ "tracing",
+]
 
 [[package]]
 name = "arcan-sandbox"
@@ -3810,6 +3843,21 @@ dependencies = [
 [[package]]
 name = "haima-proxy"
 version = "0.3.0"
+dependencies = [
+ "aios-proto",
+ "aios-protocol",
+ "async-trait",
+ "futures",
+ "hyper-util",
+ "prost 0.14.3",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tower 0.5.3",
+ "tracing",
+]
 
 [[package]]
 name = "haima-wallet"
@@ -4848,6 +4896,24 @@ dependencies = [
 [[package]]
 name = "lago-proxy"
 version = "0.3.0"
+dependencies = [
+ "aios-proto",
+ "aios-protocol",
+ "async-trait",
+ "futures",
+ "hyper-util",
+ "life-runtime-proto",
+ "prost 0.14.3",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tower 0.5.3",
+ "tracing",
+]
 
 [[package]]
 name = "lago-store"
