@@ -1,0 +1,72 @@
+[Unit]
+Description=Life Agent OS edge gateway (lifegw)
+Documentation=https://github.com/broomva/life/tree/main/crates/life-runtime/lifegw
+After=network-online.target lifed.service
+Wants=network-online.target lifed.service
+Requires=lifegw.socket
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/local/bin/lifegw daemon
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+
+# ── Environment ─────────────────────────────────────────────────────────────
+Environment=LIFEGW_CONFIG=/etc/lifegw/config.toml
+Environment=RUST_LOG=info,lifegw=debug
+
+# ── Security hardening (Spec C₃ §4.1 / §4.2) ────────────────────────────────
+User=life-runtime-gw
+Group=life-runtime-gw
+SupplementaryGroups=life-runtime
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+# Public + IPv4/IPv6 + UDS; the daemon does NOT need raw sockets, netlink,
+# or BPF.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+# Inherit pre-bound TCP sockets from lifegw.socket — no CAP_NET_BIND_SERVICE
+# needed even though the listener is on :443.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# ── Runtime / state / log directories (auto-created by systemd) ─────────────
+RuntimeDirectory=life
+RuntimeDirectoryMode=0750
+StateDirectory=lifegw
+StateDirectoryMode=0750
+LogsDirectory=lifegw
+LogsDirectoryMode=0750
+ConfigurationDirectory=lifegw
+ConfigurationDirectoryMode=0750
+
+# ── File descriptor limits ──────────────────────────────────────────────────
+LimitNOFILE=65536
+
+# ── Restart limits ──────────────────────────────────────────────────────────
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Allow up to 30 s for graceful drain on SIGTERM / SIGHUP. Sub-phase D's
+# WS-drain semantics (close existing WS with 1001) consume most of this
+# budget; Sub-phase A drains in-flight unary requests via tonic's native
+# `serve_with_incoming_shutdown`.
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target
