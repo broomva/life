@@ -14,6 +14,8 @@ use parking_lot::RwLock;
 
 use aios_proto::aios::v1 as aios_v1;
 
+use super::fanout::FanoutRegistry;
+
 /// Routing cache — DashMap-backed sharded outer map; parking_lot::RwLock per entry.
 pub struct RoutingCache {
     by_sid: DashMap<String, Arc<RwLock<RouteEntry>>>,
@@ -31,6 +33,8 @@ pub struct RouteEntry {
     pub anima_account: String,
     pub last_touched: Instant,
     pub status: SessionStatus,
+    /// Per-session multi-tab fan-out registry. Spec C₂ §6.4.
+    pub fanout: Arc<FanoutRegistry>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,8 +52,9 @@ impl RoutingCache {
         }
     }
 
-    /// Sub-phase A: insert a minimal entry. B11 will replace this with the full
-    /// saga-result entry shape.
+    /// Insert a minimal entry. Each entry owns a fresh `FanoutRegistry`
+    /// so SendMessage and StreamSession can broadcast to all attached
+    /// tabs.
     pub fn insert_minimal(&self, sid: &aios_v1::SessionId, user_id: &str, project_id: &str) {
         let entry = RouteEntry {
             sid: sid.clone(),
@@ -61,6 +66,7 @@ impl RoutingCache {
             anima_account: format!("account-{user_id}"),
             last_touched: Instant::now(),
             status: SessionStatus::Active,
+            fanout: Arc::new(FanoutRegistry::new()),
         };
         self.by_sid
             .insert(sid.value.clone(), Arc::new(RwLock::new(entry)));
@@ -68,6 +74,15 @@ impl RoutingCache {
             .entry(user_id.to_string())
             .or_default()
             .push(sid.value.clone());
+    }
+
+    /// Return the per-session fan-out registry. Sub-phase B's
+    /// `SendMessage` / `StreamSession` handlers attach to this so a
+    /// single substrate dispatch reaches every connected tab.
+    pub fn lookup_fanout(&self, sid: &aios_v1::SessionId) -> Option<Arc<FanoutRegistry>> {
+        self.by_sid
+            .get(&sid.value)
+            .map(|e| Arc::clone(&e.read().fanout))
     }
 
     pub fn lookup(&self, sid: &aios_v1::SessionId) -> Option<RouteEntry> {

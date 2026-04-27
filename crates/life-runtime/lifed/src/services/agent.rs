@@ -24,8 +24,32 @@ use life_runtime_proto::life::v1 as pb;
 use crate::auth::capability::CapabilityClaims;
 use crate::auth::keystore::Keystore;
 use crate::routing::cache::RoutingCache;
+use crate::routing::fanout::FanoutRegistry;
 use crate::saga::driver::{SagaCtx, SagaDriver, SagaStep};
 use crate::saga::steps::{BindWallet, CreateAgent, OpenLagoNamespace, RegisterAnimaSession};
+
+/// Background pump: fetch the upstream stream from arcan and broadcast
+/// every event to every attached tab via the fan-out registry. Spec C₂ §6.4.
+fn spawn_fanout_pump(
+    arcan: Arc<dyn ArcanCall>,
+    sid: String,
+    content: String,
+    fanout: Arc<FanoutRegistry>,
+) {
+    tokio::spawn(async move {
+        match arcan.dispatch_message(&sid, &content).await {
+            Ok(mut up) => {
+                use futures::StreamExt;
+                while let Some(evt) = up.next().await {
+                    if let Ok(e) = evt {
+                        fanout.broadcast(e);
+                    }
+                }
+            }
+            Err(e) => tracing::warn!(sid = %sid, error = ?e, "fanout pump failed to dial arcan"),
+        }
+    });
+}
 
 /// `Agent` service implementation. Holds typed substrate proxies, the
 /// signing keystore, the saga driver, and the routing cache.
@@ -199,18 +223,26 @@ impl pb::agent_server::Agent for AgentService {
     ) -> Result<Response<Self::SendMessageStream>, Status> {
         let _claims = Self::claims(&req)?;
         let body = req.into_inner();
-        let sid = body
+        let sid_value = body
             .sid
             .as_ref()
             .ok_or_else(|| Status::invalid_argument("missing sid"))?
             .value
             .clone();
-        let stream = self
-            .arcan_call
-            .dispatch_message(&sid, &body.content)
-            .await
-            .map_err(Status::from)?;
-        Ok(Response::new(stream))
+        let fanout = self
+            .routing
+            .lookup_fanout(&aios_v1::SessionId {
+                value: sid_value.clone(),
+            })
+            .ok_or_else(|| Status::not_found("session not found"))?;
+        let stream = fanout.attach(64);
+        spawn_fanout_pump(
+            Arc::clone(&self.arcan_call),
+            sid_value,
+            body.content,
+            fanout,
+        );
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn stream_session(
@@ -218,19 +250,27 @@ impl pb::agent_server::Agent for AgentService {
         req: Request<pb::SessionRef>,
     ) -> Result<Response<Self::StreamSessionStream>, Status> {
         let _claims = Self::claims(&req)?;
-        let sid = req
+        let sid_value = req
             .get_ref()
             .sid
             .as_ref()
             .ok_or_else(|| Status::invalid_argument("missing sid"))?
             .value
             .clone();
-        let stream = self
-            .arcan_call
-            .dispatch_message(&sid, "")
-            .await
-            .map_err(Status::from)?;
-        Ok(Response::new(stream))
+        let fanout = self
+            .routing
+            .lookup_fanout(&aios_v1::SessionId {
+                value: sid_value.clone(),
+            })
+            .ok_or_else(|| Status::not_found("session not found"))?;
+        let stream = fanout.attach(64);
+        spawn_fanout_pump(
+            Arc::clone(&self.arcan_call),
+            sid_value,
+            String::new(),
+            fanout,
+        );
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn approve_dispatch(
