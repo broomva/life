@@ -2,9 +2,9 @@
 //!
 //! Per Spec C₂ §3.5 the admin RoutingCache service exposes the in-memory
 //! routing cache to operators. `RebuildFromLago` ships in sub-phase C as
-//! a documented stub returning 0 entries: it depends on a lago
-//! `ListNamespaces` RPC that doesn't exist yet (master-spec ambiguity #3
-//! / Spec C₂ §16 #3). Real impl lands in sub-phase D2.
+//! a documented carve-out returning 0 entries: it depends on a lago
+//! `ListNamespaces` RPC that doesn't exist yet. Real impl lands in
+//! sub-phase D2 (BRO-934) alongside cold-start replay from lago.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -97,15 +97,15 @@ impl adm::routing_cache_server::RoutingCache for RoutingCacheAdminService {
         let cred = Self::cred(&req)?;
         self.policy
             .check(&cred, AdminOp::RoutingCacheRebuildFromLago)?;
-        // Sub-phase C: documented stub. Returns 0 entries. The real
+        // Sub-phase C: documented carve-out. Returns 0 entries. The real
         // implementation needs lago to expose a `ListNamespaces` RPC so
         // we can enumerate `session/<sid>` namespaces and rebuild the
         // cache by replaying their head events. That RPC lands in
-        // sub-phase D2 (master-spec ambiguity #3 / Spec C₂ §16 #3).
+        // sub-phase D2 alongside cold-start replay (BRO-934).
         tracing::warn!(
             target: "lifed::admin::routing_cache",
-            "RebuildFromLago is a sub-phase C stub; returns 0 entries. \
-             Tracking ticket: lago `ListNamespaces` RPC + sub-phase D2.",
+            "RebuildFromLago is a sub-phase C carve-out; returns 0 entries. \
+             Real impl needs lago.ListNamespaces RPC and ships in BRO-934 (sub-phase D2).",
         );
         Ok(Response::new(adm::RebuildResp {
             sessions_loaded: 0,

@@ -2,10 +2,12 @@
 //!
 //! Per Spec C₂ §3.5 the admin Saga service exposes the saga registry to
 //! operators (and post-MVS, to autonomic). `ForceCompensate` ships in
-//! sub-phase C as `Status::unimplemented` per master-spec ambiguity #2 /
-//! Spec C₂ §16 #2 — re-entrant compensation needs a saga-driver entrypoint
-//! that hasn't shipped yet, tracked as a follow-up ticket against the
-//! Spec C umbrella.
+//! sub-phase C as a documented `Status::unimplemented` carve-out per the
+//! M5 plan acceptance criteria: re-entrant compensation needs a
+//! saga-driver entrypoint that exposes the steps + last-completed index
+//! of an inflight saga. Tracked as a follow-up ticket under the Spec C
+//! umbrella (companion to BRO-934 sub-phase D); until then operators
+//! force-evict via `RoutingCache.Evict` + `Runtime.SessionsForceClose`.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -102,15 +104,17 @@ impl adm::saga_server::Saga for SagaAdminService {
     ) -> Result<Response<adm::SagaEmpty>, Status> {
         let cred = Self::cred(&req)?;
         self.policy.check(&cred, AdminOp::SagaForceCompensate)?;
-        // Sub-phase C: documented stub per master-spec ambiguity #2 /
-        // Spec C₂ §16 #2. Re-entrant compensation needs a saga-driver
+        // Sub-phase C: documented carve-out per the M5 plan acceptance
+        // criteria. Re-entrant compensation needs a saga-driver
         // entrypoint that exposes the steps + last-completed index of an
-        // inflight saga. Tracked as a follow-up ticket against the Spec C
+        // inflight saga. Tracked as a follow-up ticket under the Spec C
         // umbrella; until then operators force-evict via
         // RoutingCache.Evict + SessionsForceClose.
         Err(Status::unimplemented(
-            "Saga.ForceCompensate ships in a follow-up to BRO-933 — \
-             Spec C₂ §16 #2 carve-out (re-entrancy ambiguity)",
+            "Saga.ForceCompensate is a documented carve-out — needs a \
+             saga-driver re-entrant entrypoint (post-Sub-phase-C \
+             follow-up under BRO-921 / BRO-934). Workaround: combine \
+             RoutingCache.Evict + Runtime.SessionsForceClose.",
         ))
     }
 }

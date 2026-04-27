@@ -17,9 +17,9 @@ service RoutingCache {
   rpc Evict(EvictReq) returns (RoutingEmpty);
 
   // Rebuild the routing cache from lago. Sub-phase C ships this as a
-  // documented stub returning 0 entries: the dependency on a lago
-  // `ListNamespaces` RPC that doesn't exist yet (master-spec ambiguity
-  // #3 / Spec C₂ §16 #3). Re-implemented in sub-phase D2. Root only.
+  // documented carve-out returning 0 entries: the dependency on a lago
+  // `ListNamespaces` RPC that doesn't exist yet. Real impl lands in
+  // sub-phase D2 alongside cold-start replay (BRO-934). Root only.
   rpc RebuildFromLago(RebuildReq) returns (RebuildResp);
 }
 

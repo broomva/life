@@ -19,9 +19,10 @@ service Saga {
   rpc Show(SagaRef) returns (SagaState);
 
   // Force-compensate a stuck saga. Sub-phase C ships this as
-  // Status::unimplemented per master-spec ambiguity #2 / Spec C₂ §16 #2 —
-  // re-entrant compensation needs a saga-driver entrypoint that is being
-  // tracked as a follow-up ticket. Root only.
+  // Status::unimplemented — re-entrant compensation needs a saga-driver
+  // entrypoint that exposes the steps + last-completed index of an
+  // inflight saga. Tracked as a follow-up ticket under the Spec C
+  // umbrella (post-Sub-phase-C; companion to BRO-934). Root only.
   rpc ForceCompensate(SagaRef) returns (SagaEmpty);
 }
 
