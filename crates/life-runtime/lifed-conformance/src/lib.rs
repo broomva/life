@@ -1,18 +1,21 @@
 //! Conformance harness for lifed's substrate-token verification.
 //!
-//! Each substrate's CI lane runs this harness as a smoke test to verify
-//! that:
-//! - lifed's published JWKS at `/run/life/lifed-jwks.json` parses cleanly.
-//! - The substrate's verifier accepts a freshly minted Tier-3 token.
-//! - The verifier REJECTS tokens with the wrong `aud`.
-//! - The verifier REJECTS expired tokens.
+//! Spec C₂ §15.5: every substrate (arcan, lago, haima, anima, soma) must
+//! agree on the verification rules for Tier-3 JWS bearer tokens minted by
+//! lifed. This crate exposes:
 //!
-//! Sub-phase A places only the trait scaffold; sub-phase B's task B17
-//! populates the test bodies.
+//! - `SubstrateUnderTest` — the trait each substrate's CI lane implements
+//!   (or wraps via `reference_verify` for the reference path).
+//! - `VerificationCase` — one bearer + expected outcome.
+//! - `run_battery` — drives a vec of cases against a `SubstrateUnderTest`
+//!   and asserts the accept/reject outcome matches.
+//! - `reference_verify` — a generic ES256 verifier substrates can plug in
+//!   if they don't yet have a hand-rolled implementation.
 
 #![deny(unsafe_code)]
 
 use async_trait::async_trait;
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -23,17 +26,63 @@ pub enum ConformanceError {
     Failed(&'static str, String),
 }
 
-#[async_trait]
-pub trait SubstrateUnderTest: Send + Sync {
-    /// Substrate name — `arcan`, `lago`, `haima`, `anima`, `soma`.
-    fn audience(&self) -> &'static str;
-    /// Verify a Tier-3 JWS bearer token. Returns Ok(()) on success.
-    async fn verify(&self, jws: &str) -> Result<(), tonic::Status>;
+pub struct VerificationCase {
+    pub name: &'static str,
+    pub jws: String,
+    pub expected_aud: &'static str,
+    pub should_pass: bool,
 }
 
-/// Sub-phase A no-op — B17 fills in the real conformance battery.
-pub async fn run_battery(_sut: &dyn SubstrateUnderTest) -> Result<(), ConformanceError> {
+#[async_trait]
+pub trait SubstrateUnderTest: Send + Sync {
+    fn audience(&self) -> &'static str;
+    async fn verify(
+        &self,
+        jws: &str,
+        audience: &str,
+        pubkey_pem: &str,
+    ) -> Result<(), tonic::Status>;
+}
+
+pub async fn run_battery(
+    sut: &dyn SubstrateUnderTest,
+    pubkey_pem: &str,
+    cases: &[VerificationCase],
+) -> Result<(), ConformanceError> {
+    for c in cases {
+        let res = sut.verify(&c.jws, c.expected_aud, pubkey_pem).await;
+        match (res, c.should_pass) {
+            (Ok(()), true) => continue,
+            (Err(_), false) => continue,
+            (Ok(()), false) => {
+                return Err(ConformanceError::Failed(
+                    c.name,
+                    format!("expected reject, got accept: {}", c.jws),
+                ));
+            }
+            (Err(e), true) => {
+                return Err(ConformanceError::Failed(
+                    c.name,
+                    format!("expected accept, got reject: {e}"),
+                ));
+            }
+        }
+    }
     Ok(())
+}
+
+/// Convenience generic verifier that uses jsonwebtoken directly. Real
+/// substrates may have their own; this is the reference impl + the
+/// substrate-side check that any conforming implementation must match.
+pub fn reference_verify(jws: &str, audience: &str, pubkey_pem: &str) -> Result<(), tonic::Status> {
+    let key = DecodingKey::from_ec_pem(pubkey_pem.as_bytes())
+        .map_err(|e| tonic::Status::internal(format!("decode pem: {e}")))?;
+    let mut v = Validation::new(Algorithm::ES256);
+    v.set_audience(&[audience]);
+    v.set_issuer(&["lifed"]);
+    decode::<serde_json::Value>(jws, &key, &v)
+        .map(|_| ())
+        .map_err(|e| tonic::Status::unauthenticated(format!("verify: {e}")))
 }
 
 #[cfg(test)]
@@ -47,14 +96,19 @@ mod tests {
         fn audience(&self) -> &'static str {
             "stub"
         }
-        async fn verify(&self, _jws: &str) -> Result<(), tonic::Status> {
+        async fn verify(
+            &self,
+            _jws: &str,
+            _audience: &str,
+            _pubkey_pem: &str,
+        ) -> Result<(), tonic::Status> {
             Ok(())
         }
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn battery_is_a_noop_in_sub_phase_a() {
+    async fn empty_battery_passes_for_any_substrate() {
         let sut = StubSubstrate;
-        run_battery(&sut).await.expect("noop battery passes");
+        run_battery(&sut, "irrelevant", &[]).await.expect("noop");
     }
 }

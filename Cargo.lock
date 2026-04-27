@@ -5866,6 +5866,7 @@ dependencies = [
  "life-kernel-proto",
  "life-runtime-proto",
  "life-vigil",
+ "lifed-conformance",
  "parking_lot",
  "prost 0.14.3",
  "prost-types 0.14.3",
@@ -5891,6 +5892,9 @@ name = "lifed-conformance"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "jsonwebtoken",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tonic 0.14.5",
