@@ -370,6 +370,102 @@ Replaces every Sub-phase A mock with real machinery. Sub-phase B ships:
   plane + saga lago persistence + ApproveDispatch lock), BRO-934
   (Sub-phase D — connection pools + circuit breakers + per-RPC bodies).
 
+### 2026-04-27 — M5 sub-phase C: lifed facade — admin plane + saga lago persistence + ApproveDispatch lock
+
+Lights up the operator surface and closes 4 Sub-phase B handoff items.
+Sub-phase C ships:
+
+- **Admin-plane UDS** at `/run/life/life-admin.sock` with SO_PEERCRED +
+  group-membership-gated authn (no bearer tokens). Permissive fallback
+  when `unix_socket_group is None` for dev/tests; production config
+  defaults to `Some("life-admin")`.
+- **9 admin RPCs functional**:
+  - `Runtime.{HealthCheck, SessionsListAll, SessionsForceClose, SessionsSuspend, IdempotencyLookup}`
+  - `Saga.{ListInflight, Show}` (+ `ForceCompensate` documented carve-out)
+  - `RoutingCache.{Dump, Evict}` (+ `RebuildFromLago` documented carve-out)
+- **Saga lago persistence** per Spec C₂ §4.1: `SagaJournal` trait +
+  `LagoSagaJournal` impl. `SagaDriver` writes 5 event kinds
+  (`saga.started` / `saga.step_forward` / `saga.step_compensated` /
+  `saga.completed` / `saga.failed`) to `system/lifed/saga/<saga_id>`.
+- **Per-sid `ApproveDispatch` first-responder-wins lock** per Spec C₂
+  §6.4: `ApprovalLocks` uses `DashMap<sid, Arc<parking_lot::Mutex<Option<dispatch_id>>>>`.
+  16-way concurrent test passes deterministically.
+- **`LifedHandles` accessor refactor** on `bootstrap::run_with_mocks`:
+  exposes `routing` + `revoked` + `idem` + `saga_registry` +
+  `approval_locks` as `Arc`s for tests + admin services.
+- **`revoke_session_propagates_to_anima`** widened to assert all three
+  effects (anima propagation + blocklist insert + routing cache eviction).
+- **Operator CLI**: `lifed admin sessions list`, `lifed admin saga show`,
+  `lifed admin routing dump|evict` wired against admin plane.
+- Tests: 3516 → 3550 (+34 — admin integration suite covering Runtime ×5,
+  Saga ×4, RoutingCache ×3 + saga-lago persistence ×1 + ApproveDispatch
+  concurrency ×4 + 5 saga-registry unit + 6 admin-policy unit + 3
+  peercred unit + 1 codegen + lifed snapshot_summaries unit).
+- Linear BRO-933 → Done. PR #1054 merged 2026-04-27 (commit `7285938`).
+  Spec compliance review APPROVED_WITH_CONCERNS (3 carve-out citations
+  misattributed to Spec C₂ §16; in-PR fix `77f43de` + `93c7cd9` rewrote
+  citations to point at descriptive technical gaps + BRO-934 follow-up).
+  Code-quality verdict not separately dispatched — spec reviewer's
+  anti-pattern audit + clippy-clean signal sufficient for the admin-only
+  surface (no public proxy/transport changes).
+- Carve-outs documented in code:
+  - `Saga.ForceCompensate` ships as `Status::unimplemented` — needs
+    saga-driver re-entrant entrypoint (post-Sub-phase-C follow-up).
+  - `RoutingCache.RebuildFromLago` returns 0 entries — needs lago
+    `ListNamespaces` RPC, lands in BRO-934 D2 alongside cold-start replay.
+  - `lago-proxy::append_event` is a production no-op shim; D2 swaps to
+    typed `lago.Append` RPC. Production lifed restarts will lose saga
+    history until D2 lands; in-memory `SagaRegistry` keeps `Saga.Show`
+    working regardless.
+
+### 2026-04-27 — M7 sub-phase A: lifegw edge gateway — scaffolding + TLS + dev-mode JWT proxy passthrough
+
+Foundation PR for the unprivileged web-facing edge gateway. M7 Sub-phase A
+ships:
+
+- **New `crates/life-runtime/lifegw/` cluster**: binary + lib that
+  terminates TLS, accepts dev-mode JWTs, mints static-key Tier-2
+  capability tokens, and forwards `life.v1.*` unary RPCs to lifed via UDS.
+- **`LifegwConfig` schema** with serde defaults + validation;
+  `lifegw.example.toml` ships a working dev config. `serde(deny_unknown_fields)`
+  + `#[non_exhaustive]` on every public struct.
+- **TLS bind via rustls** with self-signed cert test; TLS 1.2/1.3
+  default (per `tls12` rustls feature). Production cert hardening lands
+  in Sub-phase D.
+- **Dev-mode auth**: `Bearer dev-token-for-{user_id}` accepted via
+  `dev_signer::verify`; production ES256 + Vercel JWKS lands in
+  Sub-phase B as a body swap on the same function signature.
+- **Tier-2 mint**: `Tier2Minter::mint` produces an ES256 JWS with
+  audience=`lifed`, issuer=`lifegw`, ≤15min lifetime cap (config-validated).
+  Static dev keystore for A; KMS-backed swap-in for E.
+- **Auth Layer security boundary**: tower middleware reads inbound
+  `authorization` (single-value), strips it via `headers_mut().insert`,
+  inserts the minted Tier-2 before forwarding upstream. lifed never
+  sees the Tier-1 token.
+- **`tonic-web` proxy passthrough**: `proxy.rs` forwarders cleanly
+  preserve metadata + extensions (so traceparent + the rewritten
+  authorization header reach lifed). No business logic in lifegw.
+- **`/healthz` endpoint** at axum router level — short-circuits BEFORE
+  the auth layer. Returns 200 if upstream lifed UDS reachable, 503
+  otherwise.
+- **`scripts/verify_dependencies_lifegw.sh` + new CI lane** "Verify
+  lifegw dependency rules" enforces Spec C₃ §11: lifegw MUST NOT depend
+  on substrate runtime crates, lifed, or the four `*-proxy` crates.
+- **systemd unit + socket activation**: `deploy/systemd/lifegw.service`
+  drops privileges (`life-runtime-gw` user, no caps,
+  `MemoryDenyWriteExecute`, `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`,
+  `SystemCallFilter=@system-service ~@privileged @resources`).
+  `lifegw.socket` binds 80+443 with `ListenStream`.
+- Tests: 3550 → 3570 (+20 lifegw tests: 3 dev_signer + 5 config + 2
+  keystore + 2 tier2 + 3 listener + 2 health + 3 integration including
+  `proxy_forwards_create_session`).
+- Linear BRO-935 → Done (parent BRO-932). PR #1055 merged 2026-04-27
+  (commit `a751ffb`). Code-quality review APPROVED — no critical or
+  important issues, "Land this PR." 5 nice-to-have items (missing
+  `#[non_exhaustive]` on auth public types, `///` doc gaps, TLS 1.2/1.3
+  feature audit, `mod.rs` vs `name.rs` workspace decision, `unauth_response`
+  HTTP/200 quirk) deferred to Sub-phase B/C/D as appropriate.
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
