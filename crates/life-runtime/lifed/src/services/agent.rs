@@ -1,15 +1,10 @@
 //! life.v1.Agent — public-plane agent namespace.
 //!
-//! Sub-phase A wires the 11 RPCs against mock substrate clients. Sub-phase
-//! B replaces the mock dispatch with real `arcan-proxy` + saga driver.
-//!
-//! Per Spec C₂ §1 and §3.1 this implementation MUST:
-//! - Read CapabilityClaims from request extensions (set by AuthLayer middleware).
-//! - Dispatch a single substrate call OR initiate one saga.
-//! - Return.
-//!
-//! ≤20 LOC per handler is a hard constraint. Anything more is a sign that
-//! business logic is leaking into lifed.
+//! Sub-phase B wires real `*-proxy` clients via the per-substrate `*Call`
+//! traits. `CreateSession` runs the four-step saga (Spec C₂ §4.2) through
+//! the new `SagaDriver`. Per Spec C₂ §1, every public RPC handler reads
+//! the capability token, performs a single substrate route OR initiates
+//! one saga, and returns. ≤20 LOC per handler is a hard constraint.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -20,65 +15,48 @@ use sha2::{Digest, Sha256};
 use tonic::{Request, Response, Status};
 
 use aios_proto::aios::v1 as aios_v1;
+use anima_proxy::AnimaCall;
+use arcan_proxy::ArcanCall;
+use haima_proxy::HaimaCall;
+use lago_proxy::LagoCall;
 use life_runtime_proto::life::v1 as pb;
 
 use crate::auth::capability::CapabilityClaims;
+use crate::auth::keystore::Keystore;
 use crate::routing::cache::RoutingCache;
+use crate::saga::driver::{SagaCtx, SagaDriver, SagaStep};
+use crate::saga::steps::{BindWallet, CreateAgent, OpenLagoNamespace, RegisterAnimaSession};
 
-/// Trait abstracting the dispatch surface lifed needs from arcan.
-/// Sub-phase A backs this with `MockArcan`; sub-phase B wires `ArcanProxy`.
-#[async_trait::async_trait]
-pub trait ArcanDispatch: Send + Sync + 'static {
-    async fn create_agent(&self, sid: &str) -> Result<String, Status>;
-    async fn destroy_agent(&self, sid: &str) -> Result<(), Status>;
-    async fn dispatch_message(
-        &self,
-        sid: &str,
-        content: &str,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<pb::AgentEvent, Status>> + Send>>, Status>;
-}
-
-#[async_trait::async_trait]
-pub trait LagoDispatch: Send + Sync + 'static {
-    async fn open_namespace(&self, sid: &str) -> Result<String, Status>;
-    async fn close_namespace(&self, ns: &str) -> Result<(), Status>;
-}
-
-#[async_trait::async_trait]
-pub trait HaimaDispatch: Send + Sync + 'static {
-    async fn bind_wallet(&self, sid: &str, project_id: &str) -> Result<String, Status>;
-    async fn unbind_wallet(&self, wallet_id: &str) -> Result<(), Status>;
-}
-
-#[async_trait::async_trait]
-pub trait AnimaDispatch: Send + Sync + 'static {
-    async fn register_session(&self, sid: &str, user_id: &str) -> Result<(), Status>;
-    async fn mark_session_closed(&self, sid: &str) -> Result<(), Status>;
-}
-
-/// `Agent` service implementation.
+/// `Agent` service implementation. Holds typed substrate proxies, the
+/// signing keystore, the saga driver, and the routing cache.
 pub struct AgentService {
-    pub arcan: Arc<dyn ArcanDispatch>,
-    pub lago: Arc<dyn LagoDispatch>,
-    pub haima: Arc<dyn HaimaDispatch>,
-    pub anima: Arc<dyn AnimaDispatch>,
+    pub arcan_call: Arc<dyn ArcanCall>,
+    pub lago_call: Arc<dyn LagoCall>,
+    pub haima_call: Arc<dyn HaimaCall>,
+    pub anima_call: Arc<dyn AnimaCall>,
     pub routing: Arc<RoutingCache>,
+    pub ks: Arc<Keystore>,
+    pub saga: Arc<SagaDriver>,
 }
 
 impl AgentService {
     pub fn new(
-        arcan: Arc<dyn ArcanDispatch>,
-        lago: Arc<dyn LagoDispatch>,
-        haima: Arc<dyn HaimaDispatch>,
-        anima: Arc<dyn AnimaDispatch>,
+        arcan_call: Arc<dyn ArcanCall>,
+        lago_call: Arc<dyn LagoCall>,
+        haima_call: Arc<dyn HaimaCall>,
+        anima_call: Arc<dyn AnimaCall>,
         routing: Arc<RoutingCache>,
+        ks: Arc<Keystore>,
+        saga: Arc<SagaDriver>,
     ) -> Self {
         Self {
-            arcan,
-            lago,
-            haima,
-            anima,
+            arcan_call,
+            lago_call,
+            haima_call,
+            anima_call,
             routing,
+            ks,
+            saga,
         }
     }
 
@@ -89,8 +67,8 @@ impl AgentService {
     }
 }
 
-/// Sub-phase A: one-shot sid generator. Real saga in sub-phase B replaces this
-/// with the master-spec sid formula.
+/// Mint a SessionId from `(user_id, project_id, time, random)`. Sub-phase
+/// B keeps the same shape as sub-phase A so existing tests stay stable.
 fn mint_sid(user_id: &str, project_id: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(user_id.as_bytes());
@@ -104,8 +82,6 @@ fn mint_sid(user_id: &str, project_id: &str) -> String {
 mod uuid_like {
     use std::time::{SystemTime, UNIX_EPOCH};
     pub fn random_bytes_16() -> [u8; 16] {
-        // Deterministic-enough randomness for the sid mint;
-        // sub-phase B replaces with `getrandom`.
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -129,14 +105,38 @@ impl pb::agent_server::Agent for AgentService {
         let sid = aios_v1::SessionId {
             value: sid_value.clone(),
         };
-
-        // Sub-phase A: serial dispatch. Sub-phase B replaces with SagaDriver.
-        let _agent_id = self.arcan.create_agent(&sid_value).await?;
-        let _ns = self.lago.open_namespace(&sid_value).await?;
-        let _wallet = self.haima.bind_wallet(&sid_value, &body.project_id).await?;
-        self.anima
-            .register_session(&sid_value, &body.user_id)
-            .await?;
+        let ctx = SagaCtx {
+            saga_id: format!("create-session-{sid_value}"),
+            user_id: body.user_id.clone(),
+            project_id: body.project_id.clone(),
+            sid: sid.clone(),
+            idempotency_key: None,
+            deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+            trace: tracing::Span::current(),
+            claims,
+        };
+        let steps: Vec<Box<dyn SagaStep>> = vec![
+            Box::new(CreateAgent {
+                arcan: Arc::clone(&self.arcan_call),
+                ks: Arc::clone(&self.ks),
+            }),
+            Box::new(OpenLagoNamespace {
+                lago: Arc::clone(&self.lago_call),
+                ks: Arc::clone(&self.ks),
+            }),
+            Box::new(BindWallet {
+                haima: Arc::clone(&self.haima_call),
+                ks: Arc::clone(&self.ks),
+            }),
+            Box::new(RegisterAnimaSession {
+                anima: Arc::clone(&self.anima_call),
+                ks: Arc::clone(&self.ks),
+            }),
+        ];
+        self.saga
+            .run(ctx, steps)
+            .await
+            .map_err(|e| e.into_status())?;
         self.routing
             .insert_minimal(&sid, &body.user_id, &body.project_id);
         Ok(Response::new(pb::Session {
@@ -144,7 +144,7 @@ impl pb::agent_server::Agent for AgentService {
             agent_id: Some(aios_v1::AgentId {
                 value: format!("agent-{sid_value}"),
             }),
-            user_id: claims.user_id,
+            user_id: body.user_id,
             project_id: body.project_id,
             created_at: Some(prost_types::Timestamp::from(std::time::SystemTime::now())),
         }))
@@ -185,7 +185,10 @@ impl pb::agent_server::Agent for AgentService {
             .sid
             .clone()
             .ok_or_else(|| Status::invalid_argument("missing sid"))?;
-        self.anima.mark_session_closed(&sid.value).await?;
+        self.anima_call
+            .mark_session_closed(&sid.value)
+            .await
+            .map_err(Status::from)?;
         self.routing.evict(&sid);
         Ok(Response::new(pb::Empty {}))
     }
@@ -202,7 +205,11 @@ impl pb::agent_server::Agent for AgentService {
             .ok_or_else(|| Status::invalid_argument("missing sid"))?
             .value
             .clone();
-        let stream = self.arcan.dispatch_message(&sid, &body.content).await?;
+        let stream = self
+            .arcan_call
+            .dispatch_message(&sid, &body.content)
+            .await
+            .map_err(Status::from)?;
         Ok(Response::new(stream))
     }
 
@@ -218,8 +225,11 @@ impl pb::agent_server::Agent for AgentService {
             .ok_or_else(|| Status::invalid_argument("missing sid"))?
             .value
             .clone();
-        // Sub-phase A: re-use SendMessage's stub stream with empty content.
-        let stream = self.arcan.dispatch_message(&sid, "").await?;
+        let stream = self
+            .arcan_call
+            .dispatch_message(&sid, "")
+            .await
+            .map_err(Status::from)?;
         Ok(Response::new(stream))
     }
 
