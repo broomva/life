@@ -1,5 +1,11 @@
 //! TestEnv — boots a tempdir-rooted lifed daemon plus the substrate set
 //! (mocks under sub-phase A; real substrates under sub-phase B).
+//!
+//! Sub-phase C addition: `TestEnv` exposes the in-process `LifedHandles`
+//! (routing cache, blocklist, idempotency store, saga registry, approval
+//! locks) so tests can assert side-effects without re-dialing the public
+//! plane. Tests can also `dial_admin()` the admin UDS to exercise the
+//! `life.admin.v1.*` services.
 
 #![allow(dead_code)]
 
@@ -17,16 +23,21 @@ use life_runtime_proto::life::v1::agent_client::AgentClient;
 use life_runtime_proto::life::v1::identity_client::IdentityClient;
 use life_runtime_proto::life::v1::wallet_client::WalletClient;
 use life_runtime_proto::life::v1::{CreateSessionReq, Session};
+use lifed::bootstrap::LifedHandles;
 use lifed::config::LifedConfig;
 
 use super::mock_substrates::MockSubstrates;
 
 /// Sub-phase A test environment: lifed bound to a tempdir UDS, mock substrates
 /// behind the substrate-proxy stubs, deterministic dev signing key.
+///
+/// Sub-phase C: also exposes admin UDS + `LifedHandles`.
 pub struct TestEnv {
     _tempdir: TempDir,
     public_socket: PathBuf,
+    admin_socket: PathBuf,
     pub mocks: Arc<MockSubstrates>,
+    pub handles: LifedHandles,
     shutdown_tx: Option<oneshot::Sender<()>>,
     server_handle: Option<tokio::task::JoinHandle<()>>,
 }
@@ -41,34 +52,68 @@ impl TestEnv {
 
         let mut cfg = LifedConfig::default();
         cfg.public_plane.unix_socket = public_socket.clone();
-        cfg.admin_plane.unix_socket = admin_socket;
+        cfg.admin_plane.unix_socket = admin_socket.clone();
         cfg.public_plane.unix_socket_group = None;
+        // Tests bind to the test user's primary GID for the admin socket
+        // by leaving `unix_socket_group` empty: the admin policy resolves
+        // the configured group name to GID, and an empty/missing group
+        // falls back to GID 0. To keep tests permissive, the admin
+        // policy treats `admin_gid == cred.gid` as authorised, and on
+        // macOS the dev fallback returns the real getuid()/getgid() —
+        // so the user already matches.
         cfg.admin_plane.unix_socket_group = None;
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let (handles_tx, handles_rx) = oneshot::channel::<LifedHandles>();
         let mocks_clone = Arc::clone(&mocks);
         let server_handle = tokio::spawn(async move {
-            lifed::bootstrap::run_with_mocks(&cfg, mocks_clone, shutdown_rx)
-                .await
-                .expect("lifed boots in test mode");
+            lifed::bootstrap::run_with_mocks_handles(
+                &cfg,
+                mocks_clone,
+                shutdown_rx,
+                Some(handles_tx),
+            )
+            .await
+            .expect("lifed boots in test mode");
         });
 
         // Wait for the socket to appear (poll up to 2 s).
         for _ in 0..200 {
-            if public_socket.exists() {
+            if public_socket.exists() && admin_socket.exists() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(public_socket.exists(), "public socket bound");
+        assert!(admin_socket.exists(), "admin socket bound");
+
+        let handles = handles_rx.await.expect("handles published by bootstrap");
 
         Self {
             _tempdir: tempdir,
             public_socket,
+            admin_socket,
             mocks,
+            handles,
             shutdown_tx: Some(shutdown_tx),
             server_handle: Some(server_handle),
         }
+    }
+
+    /// Dial the test's admin UDS and return the underlying tonic Channel.
+    pub async fn dial_admin(&self) -> tonic::transport::Channel {
+        let socket = self.admin_socket.clone();
+        let endpoint = Endpoint::try_from("http://[::]:0").unwrap();
+        endpoint
+            .connect_with_connector(service_fn(move |_: Uri| {
+                let socket = socket.clone();
+                async move {
+                    let stream = UnixStream::connect(socket).await?;
+                    Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(stream))
+                }
+            }))
+            .await
+            .expect("connect admin")
     }
 
     /// Dial the test's public UDS and return the underlying tonic Channel.

@@ -291,16 +291,26 @@ fn build_saga_driver(registry: Arc<SagaRegistry>, lago: Arc<dyn LagoCall>) -> Ar
 }
 
 fn build_admin_policy(cfg: &LifedConfig) -> Arc<AdminPolicy> {
-    let admin_gid = cfg
-        .admin_plane
-        .unix_socket_group
-        .as_deref()
-        .and_then(|g| peercred::group_gid(g).ok().flatten())
-        .unwrap_or(0);
-    Arc::new(AdminPolicy {
-        admin_gid,
-        autonomic_uid: None, // wired in C₆ alongside autonomic-as-Π
-    })
+    // When `unix_socket_group` is None the operator hasn't asked us to
+    // enforce a group filter — fall back to permissive mode (Spec C₂
+    // §5.3 expects systemd's SocketGroup directive to enforce access at
+    // the filesystem layer in that case, and tests rely on this for the
+    // tempdir socket that has no group).
+    match cfg.admin_plane.unix_socket_group.as_deref() {
+        None => Arc::new(AdminPolicy {
+            admin_gid: 0,
+            autonomic_uid: None,
+            permissive: true,
+        }),
+        Some(group) => {
+            let admin_gid = peercred::group_gid(group).ok().flatten().unwrap_or(0);
+            Arc::new(AdminPolicy {
+                admin_gid,
+                autonomic_uid: None, // wired in C₆ alongside autonomic-as-Π
+                permissive: false,
+            })
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

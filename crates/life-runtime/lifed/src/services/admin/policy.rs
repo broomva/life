@@ -34,10 +34,21 @@ pub enum AdminOp {
 pub struct AdminPolicy {
     pub admin_gid: u32,
     pub autonomic_uid: Option<u32>,
+    /// Permissive mode — every op allowed for every peer. Set when the
+    /// daemon is configured without `admin_plane.unix_socket_group` (the
+    /// systemd unit is expected to enforce socket access at the
+    /// filesystem layer in that case). Used by integration tests that
+    /// bind a tempdir socket without a group, and by single-user dev
+    /// boxes where the operator IS the runtime user.
+    pub permissive: bool,
 }
 
 impl AdminPolicy {
     pub fn check(&self, cred: &PeerCred, op: AdminOp) -> Result<(), tonic::Status> {
+        if self.permissive {
+            return Ok(());
+        }
+
         let is_admin = cred.gid == self.admin_gid;
         let is_autonomic = self.autonomic_uid.map(|u| u == cred.uid).unwrap_or(false);
         let is_root = cred.uid == 0;
@@ -79,6 +90,25 @@ mod tests {
         AdminPolicy {
             admin_gid: 1500,
             autonomic_uid: Some(2000),
+            permissive: false,
+        }
+    }
+
+    #[test]
+    fn permissive_mode_authorises_every_op() {
+        let pol = AdminPolicy {
+            admin_gid: 0,
+            autonomic_uid: None,
+            permissive: true,
+        };
+        for op in [
+            AdminOp::HealthCheck,
+            AdminOp::SessionsForceClose,
+            AdminOp::SagaForceCompensate,
+            AdminOp::RoutingCacheRebuildFromLago,
+        ] {
+            pol.check(&cred(9999, 9999), op)
+                .expect("permissive allows all");
         }
     }
 
