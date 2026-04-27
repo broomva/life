@@ -116,6 +116,19 @@ jobs:
       - name: Run scripts/verify_dependencies_lifed.sh
         run: bash scripts/verify_dependencies_lifed.sh
 
+  # ── Gate 7c: lifegw dependency rules (Spec C₃ §11) ────────────────
+  verify-deps-lifegw:
+    name: Verify lifegw dependency rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run scripts/verify_dependencies_lifegw.sh
+        run: bash scripts/verify_dependencies_lifegw.sh
+
   # ── Gate 8: Secret Scanning ───────────────────────────────────────
   secrets:
     name: Secret Scan
