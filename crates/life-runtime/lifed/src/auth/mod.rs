@@ -10,6 +10,7 @@ pub mod capability;
 pub mod jwks;
 pub mod keystore;
 pub mod middleware;
+pub mod peercred;
 pub mod substrate_token;
 
 pub use capability::{CapabilityClaims, Tier};

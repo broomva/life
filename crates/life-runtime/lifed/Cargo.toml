@@ -69,6 +69,8 @@ clap = { workspace = true, features = ["derive", "env"] }
 toml.workspace = true
 sha2 = "0.10"
 base32 = "0.5"
+# admin-plane peer-cred extraction (SO_PEERCRED on Linux, getuid fallback elsewhere)
+libc = "0.2"
 
 # substrate proxy clients (real impls in sub-phase B; stubs in sub-phase A)
 arcan-proxy.workspace = true
