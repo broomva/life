@@ -110,24 +110,24 @@ impl JwksCache {
     /// When `dev_signer_enabled` is true, also accepts the
     /// `test-token-for-{user_id}` shortcut used by integration tests.
     pub fn validate(&self, bearer: &str) -> LifedResult<CapabilityClaims> {
-        if self.dev_signer_enabled {
-            if let Some(user_id) = bearer.strip_prefix("test-token-for-") {
-                return Ok(CapabilityClaims {
-                    user_id: user_id.to_string(),
-                    project_id: "project-demo".to_string(),
-                    sid: aios_v1::SessionId {
-                        value: String::new(),
-                    },
-                    scopes: vec![
-                        "agent:dispatch".to_string(),
-                        "events:read".to_string(),
-                        "wallet:debit".to_string(),
-                        "identity:read".to_string(),
-                    ],
-                    tier: Tier::Free,
-                    exp: Instant::now() + Duration::from_secs(900),
-                });
-            }
+        if self.dev_signer_enabled
+            && let Some(user_id) = bearer.strip_prefix("test-token-for-")
+        {
+            return Ok(CapabilityClaims {
+                user_id: user_id.to_string(),
+                project_id: "project-demo".to_string(),
+                sid: aios_v1::SessionId {
+                    value: String::new(),
+                },
+                scopes: vec![
+                    "agent:dispatch".to_string(),
+                    "events:read".to_string(),
+                    "wallet:debit".to_string(),
+                    "identity:read".to_string(),
+                ],
+                tier: Tier::Free,
+                exp: Instant::now() + Duration::from_secs(900),
+            });
         }
         // Real ES256 path.
         let header = decode_header(bearer).map_err(|e| LifedError::Auth(format!("header: {e}")))?;

@@ -13,9 +13,12 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use life_runtime_proto::life::v1 as pb;
 
+type AgentEventSender = mpsc::Sender<Result<pb::AgentEvent, tonic::Status>>;
+type SenderPool = Arc<RwLock<Vec<AgentEventSender>>>;
+
 #[derive(Default, Clone)]
 pub struct FanoutRegistry {
-    senders: Arc<RwLock<Vec<mpsc::Sender<Result<pb::AgentEvent, tonic::Status>>>>>,
+    senders: SenderPool,
 }
 
 impl std::fmt::Debug for FanoutRegistry {

@@ -35,8 +35,10 @@ async fn me_returns_canned_account() {
 async fn update_profile_round_trips() {
     let env = TestEnv::start_with_mocks().await;
     let mut client = env.identity_client().await;
-    let mut prof = Profile::default();
-    prof.bio = "hello".to_string();
+    let prof = Profile {
+        bio: "hello".to_string(),
+        ..Default::default()
+    };
     let acct = client
         .update_profile(auth_req(UpdateProfileReq {
             profile: Some(prof),
