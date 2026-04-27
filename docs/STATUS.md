@@ -319,6 +319,57 @@ Spec C₂ implementation begins. Sub-phase A ships:
   nice-to-have polish + sub-phase B/C/D/E follow-ups already documented
   in code (5 items, all non-blocking).
 
+### 2026-04-27 — M5 sub-phase B: lifed facade — real substrates + ES256 + Wallet + Identity
+
+Replaces every Sub-phase A mock with real machinery. Sub-phase B ships:
+
+- **4 substrate proxy crates** with real `*Call` traits + builders +
+  retry policy + Tier-3 token attachment hook (per-RPC bodies remain
+  stubbed; real RPC bodies + connection pools land in D).
+- **Real ES256 + JWKS** verifier replaces dev signer at the gate. Invalid
+  bearer tokens now early-return `Status::unauthenticated`. The Sub-phase A
+  comment-flagged lenience is gone. Dev signer survives for tests via
+  `JwksCache::dev_only()` constructor.
+- **Real `SagaDriver`** with forward-then-reverse-compensate semantics
+  per Spec C₂ §4; compensation failures logged not retried per §4.2.
+  Saga state lago persistence deferred to C alongside admin `Saga.Show`.
+- **Lago-backed `IdempotencyStore`** with in-memory fallback for tests.
+  24h TTL sweeper. `Wallet.Debit` consumes the trait correctly with
+  method `"Wallet.Debit"`; replay returns cached receipt.
+- **Routing cache eviction**: idle TTL + LRU hard-cap sweeper per
+  Spec C₂ §6.3.
+- **Full Wallet service**: `GetBalance`, `Statement`, `Debit` (idempotent),
+  `Transfer` (Transfer idempotency deferred to D).
+- **Full Identity service**: `Me`, `UpdateProfile`, `ListSessions`,
+  `RevokeSession` + 30s revoked-sids snapshot publisher. Revoke evicts
+  routing entry + inserts to local blocklist.
+- **Multi-tab fanout registry** per Spec C₂ §6.4 (per-session pump
+  refactor deferred to D6 — currently per-attach pumps).
+- **Conformance battery body** (`lifed-conformance`): 5 audiences
+  (arcan/lago/haima/anima/soma) substrate-token round-trip verified.
+- **`*Dispatch` → `*Call` collapse**: Sub-phase A's bridge-adapter
+  `*Dispatch` traits removed; mocks `impl ArcanCall|LagoCall|...`
+  directly via the proxy crates.
+- **B16 real-substrate bootstrap path**: `run_with_real_substrates`
+  exists; mock fallback if any UDS missing (gating behind explicit
+  dev-mode flag deferred to D).
+- Tests: 3505 → 3516 (+11 — `auth_substrate_token` (4),
+  `integration_wallet` (4), `integration_identity` (4),
+  `integration_saga_compensate` (4), `conformance_substrate_tokens` (3),
+  saga driver unit (2), routing cache unit (+2), `multi_tab_fanout` (1) —
+  some net offset from refactored A-baseline tests).
+- Linear BRO-931 → Done. PR #1050 merged 2026-04-27 (commit `f1362fc`).
+  Spec compliance review APPROVED_WITH_CONCERNS (3 deviations as C/D
+  follow-ups — saga lago persistence, ApproveDispatch lock, mock-fallback
+  flag). Code-quality review APPROVED_WITH_CONCERNS — "merge as-is"
+  verdict; one in-PR fix applied (`689f867` — test rename + CLAUDE.md
+  clarification); 6 D-wave follow-ups bundled into BRO-934 (with_token
+  wiring, JwksKey PEM, Transfer idempotency, deadline enforcement,
+  per-session fanout pump, retry-class proxy errors).
+- Sub-phase B follow-up tickets opened: BRO-933 (Sub-phase C — admin
+  plane + saga lago persistence + ApproveDispatch lock), BRO-934
+  (Sub-phase D — connection pools + circuit breakers + per-RPC bodies).
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
