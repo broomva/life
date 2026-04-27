@@ -66,8 +66,20 @@ async fn list_sessions_returns_empty() {
     env.shutdown().await;
 }
 
+/// Verifies that `Identity.RevokeSession` propagates the revocation to anima.
+///
+/// **Coverage scope (Sub-phase B):** asserts only the anima-side propagation.
+/// The handler at `services/identity.rs::revoke_session` ALSO inserts the sid
+/// into the local `RevokedSidSet` blocklist AND evicts the routing-cache
+/// entry, but those two effects are not asserted here because `TestEnv` does
+/// not yet expose accessors for the in-process `RoutingCache` and
+/// `RevokedSidSet` handles. Adding those accessors requires `bootstrap::
+/// run_with_mocks` to return handles; that refactor lands in Sub-phase C
+/// alongside the admin-plane `RoutingCache.Dump` and `Runtime.Sessions_*`
+/// RPCs which already need the same accessors. See BRO-933 (post-merge
+/// follow-up to widen this assertion).
 #[tokio::test]
-async fn revoke_session_evicts_routing_entry() {
+async fn revoke_session_propagates_to_anima() {
     let env = TestEnv::start_with_mocks().await;
     // Open a session so the routing cache has an entry.
     let session = env
