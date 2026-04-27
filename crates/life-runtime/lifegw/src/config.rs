@@ -1,0 +1,481 @@
+//! Parser + validator for `/etc/lifegw/config.toml`.
+//!
+//! The daemon loads the config once at startup. Every field has a sensible
+//! default so an empty file (`LifegwConfig::load(None)`) starts a usable
+//! daemon against the locked Spec C₃ paths.
+//!
+//! Sub-phase A scope (Spec C₃ §12.A):
+//! - `[tls]` cert + key paths (rustls bind).
+//! - `[listen]` listener address (default `[::]:443`).
+//! - `[upstream]` `lifed_uds_path` (default `/run/life/life.sock`).
+//! - `[auth]` Tier-2 mint settings + dev-signer toggle.
+//! - `[rate_limit]`, `[observability]` — fields present, unused in A.
+//!
+//! Real Vercel JWKS, KMS provider, and OTLP exporter wiring live in B/D/E.
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::{LifegwError, LifegwResult};
+
+/// Top-level `/etc/lifegw/config.toml` schema.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct LifegwConfig {
+    /// TLS termination configuration.
+    #[serde(default)]
+    pub tls: TlsConfig,
+    /// Listener configuration (TCP bind addresses).
+    #[serde(default)]
+    pub listen: ListenConfig,
+    /// Upstream lifed dial path.
+    #[serde(default)]
+    pub upstream: UpstreamConfig,
+    /// Authn / authz plumbing.
+    #[serde(default)]
+    pub auth: AuthConfig,
+    /// Rate-limit defaults (Sub-phase D fills this in).
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
+    /// Vigil OTLP exporter wiring (Sub-phase D fills this in).
+    #[serde(default)]
+    pub observability: ObservabilityConfig,
+}
+
+/// TLS termination configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct TlsConfig {
+    /// Path to the PEM-encoded full-chain certificate.
+    #[serde(default = "default_cert_path")]
+    pub cert_path: PathBuf,
+    /// Path to the PEM-encoded private key.
+    #[serde(default = "default_key_path")]
+    pub key_path: PathBuf,
+    /// Whether ACME-based cert issuance is enabled. Sub-phase E feature; field
+    /// present here so config-file consumers don't fail validation when they
+    /// pre-declare it. Default `false`.
+    #[serde(default)]
+    pub acme_enabled: bool,
+}
+
+fn default_cert_path() -> PathBuf {
+    PathBuf::from("/etc/lifegw/tls/fullchain.pem")
+}
+
+fn default_key_path() -> PathBuf {
+    PathBuf::from("/etc/lifegw/tls/privkey.pem")
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self {
+            cert_path: default_cert_path(),
+            key_path: default_key_path(),
+            acme_enabled: false,
+        }
+    }
+}
+
+/// Listener configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct ListenConfig {
+    /// HTTPS bind address (default `[::]:443`). Production uses systemd
+    /// socket activation which inherits the bound fd; the dev fallback
+    /// reads this field directly.
+    #[serde(default = "default_https_addr")]
+    pub https_addr: String,
+    /// Optional HTTP→HTTPS redirect bind. `None` disables the redirect
+    /// listener (the redirect is a hint, not a hard requirement).
+    #[serde(default = "default_http_redirect_addr")]
+    pub http_redirect_addr: Option<String>,
+}
+
+fn default_https_addr() -> String {
+    "[::]:443".to_string()
+}
+
+fn default_http_redirect_addr() -> Option<String> {
+    Some("[::]:80".to_string())
+}
+
+impl Default for ListenConfig {
+    fn default() -> Self {
+        Self {
+            https_addr: default_https_addr(),
+            http_redirect_addr: default_http_redirect_addr(),
+        }
+    }
+}
+
+/// Upstream lifed dial path.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct UpstreamConfig {
+    /// Path to the lifed public-plane UDS (Spec C₂ §3 — default
+    /// `/run/life/life.sock`).
+    #[serde(default = "default_lifed_uds_path")]
+    pub lifed_uds_path: PathBuf,
+}
+
+fn default_lifed_uds_path() -> PathBuf {
+    PathBuf::from("/run/life/life.sock")
+}
+
+impl Default for UpstreamConfig {
+    fn default() -> Self {
+        Self {
+            lifed_uds_path: default_lifed_uds_path(),
+        }
+    }
+}
+
+/// Authn / authz plumbing.
+///
+/// Sub-phase A uses the dev-signer path: `Bearer dev-token-for-{user_id}` is
+/// accepted and a Tier-2 capability token is minted via a static in-process
+/// P-256 keystore. Real ES256 + Vercel JWKS lands in Sub-phase B.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct AuthConfig {
+    /// Vercel JWKS endpoint URL. Field present in Sub-phase A but unused —
+    /// the dev signer bypasses JWKS verification. Wired in Sub-phase B.
+    #[serde(default = "default_jwks_url")]
+    pub jwks_url: String,
+    /// KMS provider. Sub-phase E feature; in Sub-phase A only the in-process
+    /// dev signer is used.
+    #[serde(default)]
+    pub kms_provider: KmsProvider,
+    /// Whether the `Bearer dev-token-for-{user_id}` shortcut is accepted.
+    /// MUST be `false` in production; set `true` only in dev / CI.
+    ///
+    /// Field name matches lifed's `JwksCache::dev_signer_enabled` so when
+    /// production goes live, both daemons gate dev paths the same way.
+    #[serde(default)]
+    pub dev_signer_enabled: bool,
+    /// Tier-2 audience (Spec C₃ §5.4). Default `lifed`.
+    #[serde(default = "default_tier2_audience")]
+    pub tier2_audience: String,
+    /// Tier-2 issuer (Spec C₃ §5.4). Default `lifegw`.
+    #[serde(default = "default_tier2_issuer")]
+    pub tier2_issuer: String,
+    /// Tier-2 capability lifetime cap (Spec C₃ §5.4 — ≤ 15 min).
+    #[serde(default = "default_tier2_ttl", with = "humantime_serde")]
+    pub tier2_ttl: Duration,
+}
+
+fn default_jwks_url() -> String {
+    "https://broomva.tech/api/auth/jwks.json".to_string()
+}
+
+fn default_tier2_audience() -> String {
+    "lifed".to_string()
+}
+
+fn default_tier2_issuer() -> String {
+    "lifegw".to_string()
+}
+
+fn default_tier2_ttl() -> Duration {
+    Duration::from_secs(15 * 60)
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum KmsProvider {
+    /// In-process dev signer. Sub-phase A default.
+    #[default]
+    Dev,
+    /// AWS KMS (Sub-phase E, behind feature flag `kms-aws`).
+    Aws,
+    /// GCP Cloud KMS (Sub-phase E, behind feature flag `kms-gcp`).
+    Gcp,
+    /// HashiCorp Vault Transit (Sub-phase E recommendation).
+    Vault,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            jwks_url: default_jwks_url(),
+            kms_provider: KmsProvider::default(),
+            dev_signer_enabled: false,
+            tier2_audience: default_tier2_audience(),
+            tier2_issuer: default_tier2_issuer(),
+            tier2_ttl: default_tier2_ttl(),
+        }
+    }
+}
+
+/// Rate-limit configuration. Spec C₃ §7 — fields present, unused in
+/// Sub-phase A. Defaults match master spec §L12 #10.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct RateLimitConfig {
+    /// Per-user token-bucket capacity (default 60 req).
+    #[serde(default = "default_per_user_capacity")]
+    pub per_user_capacity: u32,
+    /// Per-user refill rate (default 60 req/sec).
+    #[serde(default = "default_per_user_refill_per_sec")]
+    pub per_user_refill_per_sec: u32,
+    /// Per-IP token-bucket capacity for pre-auth requests (default 60 req).
+    #[serde(default = "default_per_ip_capacity")]
+    pub per_ip_capacity: u32,
+    /// Per-IP refill rate (default 60 req/min).
+    #[serde(default = "default_per_ip_refill_per_min")]
+    pub per_ip_refill_per_min: u32,
+    /// Concurrent WS connection cap per user (default 10 — `free` tier).
+    #[serde(default = "default_concurrent_ws_per_user")]
+    pub concurrent_ws_per_user: u32,
+}
+
+fn default_per_user_capacity() -> u32 {
+    60
+}
+fn default_per_user_refill_per_sec() -> u32 {
+    60
+}
+fn default_per_ip_capacity() -> u32 {
+    60
+}
+fn default_per_ip_refill_per_min() -> u32 {
+    60
+}
+fn default_concurrent_ws_per_user() -> u32 {
+    10
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            per_user_capacity: default_per_user_capacity(),
+            per_user_refill_per_sec: default_per_user_refill_per_sec(),
+            per_ip_capacity: default_per_ip_capacity(),
+            per_ip_refill_per_min: default_per_ip_refill_per_min(),
+            concurrent_ws_per_user: default_concurrent_ws_per_user(),
+        }
+    }
+}
+
+/// Vigil OTLP exporter configuration. Sub-phase D wires the real exporter.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct ObservabilityConfig {
+    /// OTLP endpoint URL. Empty / `None` = no remote exporter (stdout fallback).
+    #[serde(default)]
+    pub otlp_endpoint: Option<String>,
+    /// Trace sampler ratio (0.0–1.0). Default 0.05 — Spec C₃ §9.4.
+    #[serde(default = "default_trace_sample_ratio")]
+    pub trace_sample_ratio: f64,
+    /// Metric reader interval (default 60s).
+    #[serde(default = "default_metric_interval", with = "humantime_serde")]
+    pub metric_interval: Duration,
+}
+
+fn default_trace_sample_ratio() -> f64 {
+    0.05
+}
+
+fn default_metric_interval() -> Duration {
+    Duration::from_secs(60)
+}
+
+impl LifegwConfig {
+    /// Load a config from `path` if provided, otherwise produce all-defaults.
+    pub fn load(path: Option<&Path>) -> LifegwResult<Self> {
+        match path {
+            Some(p) => {
+                let text = std::fs::read_to_string(p)
+                    .map_err(|e| LifegwError::Config(format!("read {}: {e}", p.display())))?;
+                let cfg: LifegwConfig = toml::from_str(&text)
+                    .map_err(|e| LifegwError::Config(format!("parse {}: {e}", p.display())))?;
+                cfg.validate()?;
+                Ok(cfg)
+            }
+            None => {
+                let cfg = LifegwConfig::default();
+                cfg.validate()?;
+                Ok(cfg)
+            }
+        }
+    }
+
+    /// Cross-field validation. Pure — no I/O.
+    pub fn validate(&self) -> LifegwResult<()> {
+        if self.listen.https_addr.is_empty() {
+            return Err(LifegwError::Config(
+                "listen.https_addr must not be empty".to_string(),
+            ));
+        }
+        if self.auth.tier2_audience.is_empty() {
+            return Err(LifegwError::Config(
+                "auth.tier2_audience must not be empty".to_string(),
+            ));
+        }
+        if self.auth.tier2_issuer.is_empty() {
+            return Err(LifegwError::Config(
+                "auth.tier2_issuer must not be empty".to_string(),
+            ));
+        }
+        // Spec C₃ §5.4 LOCKED L4-D2: Tier-2 lifetime ≤ 15 minutes.
+        if self.auth.tier2_ttl > Duration::from_secs(15 * 60) {
+            return Err(LifegwError::Config(format!(
+                "auth.tier2_ttl ({}s) exceeds Spec C₃ §5.4 cap of 15 minutes",
+                self.auth.tier2_ttl.as_secs()
+            )));
+        }
+        if self.auth.tier2_ttl.is_zero() {
+            return Err(LifegwError::Config(
+                "auth.tier2_ttl must be > 0".to_string(),
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.observability.trace_sample_ratio) {
+            return Err(LifegwError::Config(
+                "observability.trace_sample_ratio must be in [0.0, 1.0]".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+// Inline serde helper for `Duration` round-tripping via `humantime`.
+mod humantime_serde {
+    use std::time::Duration;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
+
+    pub fn serialize<S>(d: &Duration, ser: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = format!("{}s", d.as_secs());
+        s.serialize(ser)
+    }
+
+    pub fn deserialize<'de, D>(de: D) -> Result<Duration, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(de)?;
+        // Accept either "<n>s" (lifed-style) or a bare number-of-seconds string.
+        if let Some(stripped) = s.strip_suffix('s') {
+            let n: u64 = stripped
+                .parse()
+                .map_err(|e| D::Error::custom(format!("parse seconds: {e}")))?;
+            return Ok(Duration::from_secs(n));
+        }
+        let n: u64 = s
+            .parse()
+            .map_err(|e| D::Error::custom(format!("parse duration: {e}")))?;
+        Ok(Duration::from_secs(n))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_validates() {
+        let cfg = LifegwConfig::default();
+        cfg.validate().expect("default config validates");
+        assert_eq!(cfg.listen.https_addr, "[::]:443");
+        assert_eq!(cfg.auth.tier2_audience, "lifed");
+        assert_eq!(cfg.auth.tier2_issuer, "lifegw");
+        assert_eq!(cfg.auth.tier2_ttl, Duration::from_secs(15 * 60));
+        assert!(!cfg.auth.dev_signer_enabled);
+        assert_eq!(
+            cfg.upstream.lifed_uds_path.to_string_lossy(),
+            "/run/life/life.sock"
+        );
+    }
+
+    #[test]
+    fn serde_roundtrip() {
+        // Minimal config: every field defaults.
+        let cfg = LifegwConfig::default();
+        let toml_text = toml::to_string(&cfg).expect("serialize default");
+        let parsed: LifegwConfig = toml::from_str(&toml_text).expect("re-parse default");
+        parsed.validate().expect("re-parsed default validates");
+
+        // Overridden config exercises every section + the `humantime_serde` helper.
+        let overridden_toml = r#"
+[tls]
+cert_path = "/tmp/cert.pem"
+key_path = "/tmp/key.pem"
+acme_enabled = true
+
+[listen]
+https_addr = "127.0.0.1:8443"
+http_redirect_addr = "127.0.0.1:8080"
+
+[upstream]
+lifed_uds_path = "/tmp/life.sock"
+
+[auth]
+jwks_url = "https://example.test/jwks"
+kms_provider = "vault"
+dev_signer_enabled = true
+tier2_audience = "lifed"
+tier2_issuer = "lifegw"
+tier2_ttl = "600s"
+
+[rate_limit]
+per_user_capacity = 100
+per_user_refill_per_sec = 100
+per_ip_capacity = 30
+per_ip_refill_per_min = 30
+concurrent_ws_per_user = 5
+
+[observability]
+otlp_endpoint = "http://otlp.test:4317"
+trace_sample_ratio = 0.1
+metric_interval = "30s"
+"#;
+        let cfg: LifegwConfig = toml::from_str(overridden_toml).expect("parse overrides");
+        cfg.validate().expect("overridden config validates");
+        assert!(cfg.tls.acme_enabled);
+        assert_eq!(cfg.listen.https_addr, "127.0.0.1:8443");
+        assert!(matches!(cfg.auth.kms_provider, KmsProvider::Vault));
+        assert!(cfg.auth.dev_signer_enabled);
+        assert_eq!(cfg.auth.tier2_ttl, Duration::from_secs(600));
+        assert_eq!(cfg.rate_limit.per_user_capacity, 100);
+        assert_eq!(cfg.observability.metric_interval, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn validate_rejects_oversized_tier2_ttl() {
+        let mut cfg = LifegwConfig::default();
+        cfg.auth.tier2_ttl = Duration::from_secs(20 * 60);
+        let err = cfg.validate().expect_err("must reject > 15min");
+        match err {
+            LifegwError::Config(m) => assert!(m.contains("15 minutes"), "got: {m}"),
+            other => panic!("expected Config error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_rejects_zero_tier2_ttl() {
+        let mut cfg = LifegwConfig::default();
+        cfg.auth.tier2_ttl = Duration::from_secs(0);
+        assert!(matches!(cfg.validate(), Err(LifegwError::Config(_))));
+    }
+
+    #[test]
+    fn validate_rejects_oob_sample_ratio() {
+        let mut cfg = LifegwConfig::default();
+        cfg.observability.trace_sample_ratio = 1.5;
+        assert!(matches!(cfg.validate(), Err(LifegwError::Config(_))));
+    }
+}
