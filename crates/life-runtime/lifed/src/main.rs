@@ -37,6 +37,9 @@ enum Cmd {
     /// Operator subcommand — dump the routing cache.
     RoutingCacheDump(lifed::cli::routing_cache::DumpArgs),
 
+    /// Operator subcommand — force-evict one routing-cache entry.
+    RoutingCacheEvict(lifed::cli::routing_cache::EvictArgs),
+
     /// Operator subcommand — show one saga.
     SagaShow(lifed::cli::saga::ShowArgs),
 }
@@ -52,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
         Cmd::SessionsLs(args) => lifed::cli::sessions::run_ls(args).await,
         Cmd::SessionsShow(args) => lifed::cli::sessions::run_show(args).await,
         Cmd::RoutingCacheDump(args) => lifed::cli::routing_cache::run_dump(args).await,
+        Cmd::RoutingCacheEvict(args) => lifed::cli::routing_cache::run_evict(args).await,
         Cmd::SagaShow(args) => lifed::cli::saga::run_show(args).await,
     }
 }
