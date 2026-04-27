@@ -4216,6 +4216,7 @@ dependencies = [
  "socket2 0.6.3",
  "system-configuration",
  "tokio",
+ "tower-layer",
  "tower-service",
  "tracing",
  "windows-registry",
@@ -5898,6 +5899,52 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tonic 0.14.5",
+]
+
+[[package]]
+name = "lifegw"
+version = "0.3.0"
+dependencies = [
+ "aios-proto",
+ "aios-protocol",
+ "anyhow",
+ "arc-swap",
+ "async-trait",
+ "base64",
+ "bytes",
+ "chrono",
+ "clap",
+ "futures",
+ "http 1.4.0",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "jsonwebtoken",
+ "life-runtime-proto",
+ "life-vigil",
+ "lifed",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
+ "rcgen",
+ "ring",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-rustls",
+ "tokio-stream",
+ "toml",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tonic-web",
+ "tower 0.5.3",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -8012,6 +8059,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rcgen"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75e669e5202259b5314d1ea5397316ad400819437857b90861765f24c4cf80a2"
+dependencies = [
+ "pem",
+ "ring",
+ "rustls-pki-types",
+ "time",
+ "yasna",
+]
+
+[[package]]
 name = "redb"
 version = "2.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10109,6 +10169,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "tonic-web"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29453d84de05f4f1b573db22e6f9f6c95c189a6089a440c9a098aa9dea009299"
+dependencies = [
+ "base64",
+ "bytes",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "pin-project",
+ "tokio-stream",
+ "tonic 0.14.5",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
 name = "tower"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11419,6 +11497,15 @@ name = "xmlparser"
 version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
+
+[[package]]
+name = "yasna"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd"
+dependencies = [
+ "time",
+]
 
 [[package]]
 name = "yoke"

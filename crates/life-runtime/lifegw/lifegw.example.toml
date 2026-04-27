@@ -1,0 +1,51 @@
+# lifegw example configuration — Sub-phase A.
+#
+# Production deployments load `/etc/lifegw/config.toml`; the systemd unit at
+# `deploy/systemd/lifegw.service` sets `Environment=LIFEGW_CONFIG=/etc/lifegw/config.toml`.
+# This file lives in the repo as a documented dev fallback.
+
+[tls]
+# Self-signed cert acceptable for local dev. Production cert lives in
+# /etc/lifegw/tls/{fullchain,privkey}.pem and is rotated by certbot/cert-manager.
+cert_path = "./crates/life-runtime/lifegw/dev-tls/cert.pem"
+key_path = "./crates/life-runtime/lifegw/dev-tls/key.pem"
+acme_enabled = false
+
+[listen]
+# Dev listener — production uses systemd socket activation on 80+443.
+https_addr = "127.0.0.1:8443"
+http_redirect_addr = "127.0.0.1:8080"
+
+[upstream]
+# lifed public-plane UDS (Spec C₂ §3).
+lifed_uds_path = "/run/life/life.sock"
+
+[auth]
+# Vercel JWKS endpoint — used in Sub-phase B; ignored in Sub-phase A while
+# the dev signer is the only accepted bearer.
+jwks_url = "https://broomva.tech/api/auth/jwks.json"
+
+# Production: "aws" / "gcp" / "vault" (Sub-phase E).
+kms_provider = "dev"
+
+# Dev only — accepts Bearer dev-token-for-{user_id} as a Tier-1 substitute.
+# MUST be `false` in production.
+dev_signer_enabled = true
+
+# Spec C₃ §5.4 — Tier-2 capability tokens.
+tier2_audience = "lifed"
+tier2_issuer = "lifegw"
+tier2_ttl = "900s"  # 15 min cap (master spec §L4 invariant 4)
+
+[rate_limit]
+# Sub-phase D wires these. Defaults match master spec §L12 #10.
+per_user_capacity = 60
+per_user_refill_per_sec = 60
+per_ip_capacity = 60
+per_ip_refill_per_min = 60
+concurrent_ws_per_user = 10
+
+[observability]
+# Empty / null = stdout fallback.
+trace_sample_ratio = 0.05
+metric_interval = "60s"
