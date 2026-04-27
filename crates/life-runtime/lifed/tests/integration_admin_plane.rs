@@ -214,7 +214,7 @@ async fn saga_force_compensate_returns_unimplemented() {
         .expect_err("unimplemented carve-out");
     assert_eq!(err.code(), tonic::Code::Unimplemented);
     assert!(
-        err.message().contains("BRO-933") || err.message().contains("Spec C₂ §16"),
+        err.message().contains("carve-out") || err.message().contains("re-entrant"),
         "carve-out reason surfaces in error message",
     );
     env.shutdown().await;
