@@ -136,6 +136,8 @@ members = [
     "crates/life-runtime/haima-proxy",
     "crates/life-runtime/anima-proxy",
     "crates/life-runtime/life-runtime-proto",
+    # M7 — lifegw edge gateway (see Spec C₃ at docs/superpowers/specs/2026-04-27-spec-c3-lifegw-design.md)
+    "crates/life-runtime/lifegw",
 ]
 exclude = ["crates/spaces/life-spaces/spacetimedb"]
 
