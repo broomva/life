@@ -362,7 +362,8 @@ fn build_services(
         Arc::clone(&idem),
     );
     let saga_admin = SagaAdminService::new(Arc::clone(&admin_policy), saga_registry);
-    let routing_admin = RoutingCacheAdminService::new(Arc::clone(&admin_policy), routing);
+    let routing_admin =
+        RoutingCacheAdminService::new(Arc::clone(&admin_policy), routing, Arc::clone(&lago));
     LifedServices {
         agent,
         events,

@@ -10,6 +10,7 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::Stream;
+use sha2::Digest;
 use tokio::net::UnixStream;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
@@ -110,19 +111,62 @@ impl LagoProxy {
         Ok(())
     }
 
-    /// Append a single event to a lago namespace. Sub-phase C ships this
-    /// as a best-effort no-op against the real lago daemon; a typed
-    /// `lago.Append` RPC lands in sub-phase D2 once the corresponding
-    /// proto method ships in lago. Used by `SagaDriver` to persist saga
-    /// lifecycle events to `system/lifed/saga/<saga_id>` (Spec C₂ §4.1).
+    /// Append a single event to a lago namespace.
+    ///
+    /// Sub-phase D2: the lago-proxy is now structured to issue a typed
+    /// `lago.Append` RPC. Until the real `lagod` ships the matching
+    /// service definition the call falls back to the equivalent
+    /// `idem_persist` keyspace (the only RPC the current lago daemon
+    /// exposes that satisfies the durability contract — the dedup key
+    /// becomes `(namespace, event_type, sha256(payload))`). When the
+    /// dedicated `lago.Append` proto lands the swap is local to this
+    /// method.
+    ///
+    /// Used by `SagaDriver` to persist saga lifecycle events to
+    /// `system/lifed/saga/<saga_id>` per Spec C₂ §4.1.
     pub async fn append_event(
         &self,
         namespace: &str,
         event_type: &str,
         payload: Vec<u8>,
     ) -> LagoProxyResult<()> {
-        let _ = (namespace, event_type, payload);
-        Ok(())
+        // Construct a content-addressed dedup key so re-issuing the same
+        // event is a true no-op even across lifed restarts.
+        let mut hasher = sha2::Sha256::new();
+        Digest::update(&mut hasher, namespace.as_bytes());
+        Digest::update(&mut hasher, b"|");
+        Digest::update(&mut hasher, event_type.as_bytes());
+        Digest::update(&mut hasher, b"|");
+        Digest::update(&mut hasher, &payload);
+        let digest = hasher.finalize();
+        let mut key = Vec::with_capacity(64 + namespace.len() + event_type.len());
+        key.extend_from_slice(b"saga|");
+        key.extend_from_slice(namespace.as_bytes());
+        key.push(b'|');
+        key.extend_from_slice(event_type.as_bytes());
+        key.push(b'|');
+        key.extend_from_slice(digest.as_slice());
+        // Persist via idem_persist — the same lago substrate keyspace
+        // serves dedup + saga journaling until lago.Append ships.
+        self.idem_persist(&key, payload).await
+    }
+
+    /// Enumerate `session/*` namespaces known to lago.
+    ///
+    /// Sub-phase D2: the lago-proxy structures this as a typed
+    /// `lago.ListNamespaces` RPC. Until the real lago daemon ships the
+    /// matching service definition, the proxy returns an empty list and
+    /// callers handle that gracefully (cold-start replay degrades to
+    /// "warm cache from incoming traffic"). When the wire RPC lands the
+    /// swap is local to this method.
+    ///
+    /// The `prefix` filter follows the lago namespace convention
+    /// (`session/`, `system/lifed/saga/`, etc.).
+    pub async fn list_namespaces(&self, prefix: &str) -> LagoProxyResult<Vec<String>> {
+        let _ = prefix;
+        // Until lago.ListNamespaces ships, return empty. RoutingCache
+        // cold-start handles this by warming on incoming traffic.
+        Ok(Vec::new())
     }
 }
 
@@ -154,6 +198,7 @@ pub trait LagoCall: Send + Sync {
         event_type: &str,
         payload: Vec<u8>,
     ) -> LagoProxyResult<()>;
+    async fn list_namespaces(&self, prefix: &str) -> LagoProxyResult<Vec<String>>;
 }
 
 #[async_trait]
@@ -199,5 +244,8 @@ impl LagoCall for LagoProxy {
         payload: Vec<u8>,
     ) -> LagoProxyResult<()> {
         LagoProxy::append_event(self, namespace, event_type, payload).await
+    }
+    async fn list_namespaces(&self, prefix: &str) -> LagoProxyResult<Vec<String>> {
+        LagoProxy::list_namespaces(self, prefix).await
     }
 }
