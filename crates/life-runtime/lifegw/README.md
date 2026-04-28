@@ -21,6 +21,21 @@ is the canonical implementation reference; this README is a navigation aid.
   limit + bounded backpressure + admin-plane UDS + cert-watch.
 - **Sub-phase E** (BRO-939, planned): production KMS swap-in + chaos tests.
 
+> ## ⚠️ PRODUCTION CUTOVER GATE — apps/chat JWKS bridge required
+>
+> Sub-phase B verifies Tier-1 JWTs against a JWKS endpoint at the configured
+> `auth.jwks_url`. The default points at `https://broomva.tech/api/auth/jwks.json`
+> — but **apps/chat does not yet publish that endpoint** (Spec C₃ §16 #1
+> open question). Until apps/chat ships the Better-Auth → JWT bridge that
+> publishes a Vercel-style JWKS at `/api/auth/jwks.json`, **DO NOT roll lifegw
+> to production with `dev_signer_enabled = false`** — every verify will fail
+> on first call (no JWKS endpoint to fetch). For staging / integration
+> testing, the wiremock-based test harness in `tests/integration_jwks_round_trip.rs`
+> is the canonical pattern.
+>
+> Production cutover blocker tracked as a follow-up ticket against Spec C₃
+> §16 #1. The blocker resolves when apps/chat (Better-Auth) ships the bridge.
+
 ## What ships in Sub-phase B
 
 | Subsystem | State |
