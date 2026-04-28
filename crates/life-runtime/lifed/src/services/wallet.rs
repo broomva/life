@@ -170,7 +170,18 @@ impl pb::wallet_server::Wallet for WalletService {
         &self,
         req: Request<pb::TransferReq>,
     ) -> Result<Response<pb::TransferReceipt>, Status> {
-        let _claims = Self::claims(&req)?;
+        let claims = Self::claims(&req)?.clone();
+        // Sub-phase D8 follow-up #3: Wallet.Transfer is now idempotent —
+        // same envelope as Debit. A retry with the same idempotency-key
+        // returns the cached TransferReceipt instead of double-transferring.
+        let key = Self::idem_key(&req, &claims, "Wallet.Transfer")
+            .ok_or_else(|| Status::failed_precondition("missing idempotency-key"))?;
+        if let Some(prev) = self.idem.lookup(&key).await? {
+            return Ok(Response::new(
+                pb::TransferReceipt::decode(&prev[..])
+                    .map_err(|e| Status::internal(format!("decode: {e}")))?,
+            ));
+        }
         let body = req.into_inner();
         let from = body.from.ok_or_else(|| Status::invalid_argument("from"))?;
         let to = body.to.ok_or_else(|| Status::invalid_argument("to"))?;
@@ -186,7 +197,7 @@ impl pb::wallet_server::Wallet for WalletService {
             )
             .await
             .map_err(Status::from)?;
-        Ok(Response::new(pb::TransferReceipt {
+        let receipt = pb::TransferReceipt {
             entry_id,
             from_balance: Some(pb::Balance {
                 micros: fbal.micros,
@@ -198,6 +209,12 @@ impl pb::wallet_server::Wallet for WalletService {
                 currency: tbal.currency,
                 as_of: Some(prost_types::Timestamp::from(SystemTime::now())),
             }),
-        }))
+        };
+        let mut buf = Vec::with_capacity(receipt.encoded_len());
+        receipt
+            .encode(&mut buf)
+            .map_err(|e| Status::internal(format!("encode: {e}")))?;
+        self.idem.persist(key, buf).await?;
+        Ok(Response::new(receipt))
     }
 }

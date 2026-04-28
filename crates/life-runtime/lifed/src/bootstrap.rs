@@ -147,24 +147,66 @@ pub async fn run_with_mocks_handles(
     serve_planes(cfg, auth, services, shutdown_rx).await
 }
 
-/// Sub-phase B daemon entrypoint. Tries the real-substrate path first;
-/// falls back to mocks if any substrate UDS socket is missing (dev/CI
-/// mode). The real path is gated behind `cfg.substrates.*.unix_socket`
-/// existing so a fresh dev box without arcand/lagod/haimad/animad still
-/// boots a usable lifed.
-pub async fn run_daemon(config_path: Option<&Path>) -> LifedResult<()> {
+/// Sub-phase B daemon entrypoint. Tries the real-substrate path first.
+///
+/// Sub-phase D follow-up #8: the silent mock-fallback that sub-phase B
+/// shipped is now gated behind `allow_mock_fallback`. Production
+/// deployments leave this `false` and lifed fails fast with
+/// [`LifedError::Substrate`] when a substrate socket is missing —
+/// which matches Spec C₂ §11.4's expectation that systemd must
+/// re-launch a daemon whose dependencies aren't ready. Dev and CI
+/// boxes pass `--allow-mock-fallback` (or `LIFED_ALLOW_MOCK_FALLBACK=1`)
+/// when they want the documented mock-substrate path.
+pub async fn run_daemon(config_path: Option<&Path>, allow_mock_fallback: bool) -> LifedResult<()> {
     let cfg = LifedConfig::load(config_path)?;
     let _vigil_guard = crate::observability::init(&cfg.vigil)?;
     let shutdown_rx = crate::shutdown::install_signal_handler();
     if all_substrate_sockets_present(&cfg) {
         run_with_real_substrates(&cfg, shutdown_rx).await
-    } else {
+    } else if allow_mock_fallback {
         tracing::warn!(
-            "one or more substrate UDS sockets missing — booting with MockSubstrates (dev mode)"
+            "one or more substrate UDS sockets missing — booting with MockSubstrates \
+             (dev mode, --allow-mock-fallback)"
         );
         let mocks = Arc::new(MockSubstrates::new());
         run_with_mocks(&cfg, mocks, shutdown_rx).await
+    } else {
+        let missing = list_missing_substrate_sockets(&cfg);
+        Err(LifedError::Substrate(format!(
+            "substrate UDS socket(s) missing — refusing to boot with MockSubstrates by default. \
+             Pass --allow-mock-fallback (or LIFED_ALLOW_MOCK_FALLBACK=1) to opt into the dev path. \
+             Missing sockets: {missing:?}"
+        )))
     }
+}
+
+fn list_missing_substrate_sockets(cfg: &LifedConfig) -> Vec<String> {
+    let mut out = Vec::new();
+    if !cfg.substrates.arcan.unix_socket.exists() {
+        out.push(format!(
+            "arcan@{}",
+            cfg.substrates.arcan.unix_socket.display()
+        ));
+    }
+    if !cfg.substrates.lago.unix_socket.exists() {
+        out.push(format!(
+            "lago@{}",
+            cfg.substrates.lago.unix_socket.display()
+        ));
+    }
+    if !cfg.substrates.haima.unix_socket.exists() {
+        out.push(format!(
+            "haima@{}",
+            cfg.substrates.haima.unix_socket.display()
+        ));
+    }
+    if !cfg.substrates.anima.unix_socket.exists() {
+        out.push(format!(
+            "anima@{}",
+            cfg.substrates.anima.unix_socket.display()
+        ));
+    }
+    out
 }
 
 fn all_substrate_sockets_present(cfg: &LifedConfig) -> bool {

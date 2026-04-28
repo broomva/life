@@ -201,7 +201,7 @@ impl TestEnv {
         self.mocks.anima.inject_fault();
     }
 
-    /// Sub-phase D7 chaos-test helpers.
+    // Sub-phase D7 chaos-test helpers.
 
     /// Read the current circuit-breaker state for the named substrate.
     pub fn arcan_breaker_state(&self) -> lifed::routing::breaker::BreakerState {

@@ -95,8 +95,81 @@ async fn transfer_returns_both_balances() {
         "authorization",
         "Bearer test-token-for-alice".parse().unwrap(),
     );
+    req.metadata_mut()
+        .insert("idempotency-key", "transfer-1".parse().unwrap());
     let out = client.transfer(req).await.expect("transfer").into_inner();
     assert!(out.from_balance.is_some());
     assert!(out.to_balance.is_some());
+    env.shutdown().await;
+}
+
+/// Sub-phase D8 follow-up #3: Wallet.Transfer is now idempotent.
+/// Replaying with the same idempotency-key returns the cached receipt
+/// instead of issuing a second transfer.
+#[tokio::test]
+async fn transfer_with_idempotency_key_replays() {
+    use life_runtime_proto::life::v1::TransferReq;
+    let env = TestEnv::start_with_mocks().await;
+    let mut client = env.wallet_client().await;
+    let req = || {
+        let mut r = tonic::Request::new(TransferReq {
+            from: Some(WalletRef {
+                user_id: "alice".to_string(),
+                project_id: "p".to_string(),
+            }),
+            to: Some(WalletRef {
+                user_id: "bob".to_string(),
+                project_id: "p".to_string(),
+            }),
+            amount_micros: 1500,
+            memo: "test".to_string(),
+        });
+        r.metadata_mut().insert(
+            "authorization",
+            "Bearer test-token-for-alice".parse().unwrap(),
+        );
+        r.metadata_mut()
+            .insert("idempotency-key", "transfer-replay".parse().unwrap());
+        r
+    };
+    let r1 = client.transfer(req()).await.expect("first").into_inner();
+    let r2 = client.transfer(req()).await.expect("replay").into_inner();
+    assert_eq!(
+        r1.entry_id, r2.entry_id,
+        "Wallet.Transfer replay returns same entry_id (idempotent)",
+    );
+    // The mock records every transfer call. With idempotency, only the
+    // first call should reach haima.
+    let transfer_count = env.mocks.haima.transfer_calls.lock().len();
+    assert_eq!(
+        transfer_count, 1,
+        "haima.transfer called exactly once across two replays"
+    );
+    env.shutdown().await;
+}
+
+#[tokio::test]
+async fn transfer_without_idempotency_key_fails_precondition() {
+    use life_runtime_proto::life::v1::TransferReq;
+    let env = TestEnv::start_with_mocks().await;
+    let mut client = env.wallet_client().await;
+    let mut req = tonic::Request::new(TransferReq {
+        from: Some(WalletRef {
+            user_id: "alice".to_string(),
+            project_id: "p".to_string(),
+        }),
+        to: Some(WalletRef {
+            user_id: "bob".to_string(),
+            project_id: "p".to_string(),
+        }),
+        amount_micros: 100,
+        memo: "test".to_string(),
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    let err = client.transfer(req).await.expect_err("missing idem-key");
+    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
     env.shutdown().await;
 }
