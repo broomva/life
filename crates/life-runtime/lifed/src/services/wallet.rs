@@ -20,11 +20,19 @@ use crate::idempotency::{IdemKey, IdempotencyStore};
 pub struct WalletService {
     pub haima: Arc<dyn HaimaCall>,
     pub idem: Arc<dyn IdempotencyStore>,
+    /// Sub-phase D: per-substrate pools. Every haima dispatch brackets
+    /// `pools.haima.load().acquire().await?` so the haima circuit
+    /// breaker + bounded semaphore enforce backpressure.
+    pub pools: Arc<crate::routing::pools::SubstratePools>,
 }
 
 impl WalletService {
-    pub fn new(haima: Arc<dyn HaimaCall>, idem: Arc<dyn IdempotencyStore>) -> Self {
-        Self { haima, idem }
+    pub fn new(
+        haima: Arc<dyn HaimaCall>,
+        idem: Arc<dyn IdempotencyStore>,
+        pools: Arc<crate::routing::pools::SubstratePools>,
+    ) -> Self {
+        Self { haima, idem, pools }
     }
 
     fn claims<T>(req: &Request<T>) -> Result<&CapabilityClaims, Status> {

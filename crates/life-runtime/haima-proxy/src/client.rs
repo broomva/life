@@ -70,7 +70,20 @@ impl HaimaProxy {
         self.token.as_deref()
     }
 
+    /// Sub-phase D3: attach the Tier-3 substrate token to a tonic
+    /// outgoing request. Spec C₂ §5.2.
+    pub fn attach_token<T>(&self, req: &mut tonic::Request<T>) {
+        if let Some(token) = &self.token
+            && let Ok(value) = format!("Bearer {token}").parse()
+        {
+            req.metadata_mut().insert("authorization", value);
+        }
+    }
+
     pub async fn bind_wallet(&self, sid: &str, project_id: &str) -> HaimaProxyResult<String> {
+        let mut req = tonic::Request::new((sid.to_string(), project_id.to_string()));
+        self.attach_token(&mut req);
+        let _ = req;
         Ok(format!("wallet-{sid}-{project_id}"))
     }
 
@@ -243,5 +256,28 @@ impl HaimaCall for HaimaProxy {
             memo,
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_proxy_with_token(token: &str) -> HaimaProxy {
+        let endpoint = tonic::transport::Endpoint::try_from("http://[::]:0").expect("endpoint");
+        let channel = endpoint.connect_lazy();
+        HaimaProxy {
+            channel,
+            token: Some(token.to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn attach_token_sets_authorization_header() {
+        let proxy = dummy_proxy_with_token("haima.jws.token");
+        let mut req = tonic::Request::new(());
+        proxy.attach_token(&mut req);
+        let auth = req.metadata().get("authorization").expect("authz set");
+        assert_eq!(auth.to_str().unwrap(), "Bearer haima.jws.token");
     }
 }

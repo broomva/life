@@ -39,6 +39,7 @@ use crate::idempotency::{IdempotencyStore, boxed_in_memory};
 use crate::listener::admin as admin_listener;
 use crate::listener::public as public_listener;
 use crate::routing::cache::RoutingCache;
+use crate::routing::pools::{Pool, SubstrateKind, SubstratePools, SubstratePoolsInitial};
 use crate::saga::driver::{LagoSagaJournal, SagaDriver, SagaJournal};
 use crate::saga::registry::SagaRegistry;
 use crate::services::admin::{
@@ -53,6 +54,9 @@ use crate::services::wallet::WalletService;
 /// and integration tests can introspect lifed without re-dialing the
 /// public plane. Sub-phase C addition; sub-phase B's `run_with_*` paths
 /// owned these registries privately and tests could not reach them.
+///
+/// Sub-phase D: also exposes `pools` so chaos / backpressure tests can
+/// read the breaker state without rebuilding the daemon.
 #[derive(Clone)]
 pub struct LifedHandles {
     pub routing: Arc<RoutingCache>,
@@ -60,6 +64,7 @@ pub struct LifedHandles {
     pub idem: Arc<dyn IdempotencyStore>,
     pub saga_registry: Arc<SagaRegistry>,
     pub approval_locks: Arc<crate::services::agent::ApprovalLocks>,
+    pub pools: Arc<SubstratePools>,
 }
 
 /// Sub-phase B mocks entrypoint — used by integration tests + the dev
@@ -112,6 +117,7 @@ pub async fn run_with_mocks_handles(
     let idem = Arc::clone(&handles.idem);
     let saga_registry = Arc::clone(&handles.saga_registry);
     let approval_locks = Arc::clone(&handles.approval_locks);
+    let pools = Arc::clone(&handles.pools);
 
     let ks = Arc::new(Keystore::generate_dev());
     let saga = build_saga_driver(Arc::clone(&saga_registry), Arc::clone(&lago));
@@ -131,6 +137,7 @@ pub async fn run_with_mocks_handles(
         Arc::clone(&admin_policy),
         Arc::clone(&ks),
         saga,
+        pools,
     );
 
     if let Some(tx) = handles_tx {
@@ -220,6 +227,7 @@ pub async fn run_with_real_substrates(
     let idem = Arc::clone(&handles.idem);
     let saga_registry = Arc::clone(&handles.saga_registry);
     let approval_locks = Arc::clone(&handles.approval_locks);
+    let pools = Arc::clone(&handles.pools);
     let saga = build_saga_driver(Arc::clone(&saga_registry), Arc::clone(&lago));
     let admin_policy = build_admin_policy(cfg);
 
@@ -236,6 +244,7 @@ pub async fn run_with_real_substrates(
         Arc::clone(&admin_policy),
         Arc::clone(&ks),
         saga,
+        pools,
     );
 
     let jwks = if cfg.auth.jwks_path.exists() {
@@ -272,13 +281,41 @@ fn build_handles(cfg: &LifedConfig, lago: Arc<dyn LagoCall>) -> LifedHandles {
     };
     let saga_registry = Arc::new(SagaRegistry::new());
     let approval_locks = Arc::new(crate::services::agent::ApprovalLocks::new());
+    let pools = build_substrate_pools(cfg);
     LifedHandles {
         routing,
         revoked,
         idem,
         saga_registry,
         approval_locks,
+        pools,
     }
+}
+
+/// Sub-phase D: construct [`SubstratePools`] from the config-supplied
+/// per-substrate capacities. Each pool wraps a tonic Channel built
+/// against the substrate's UDS path — but the channel is built lazily
+/// (`connect_lazy`) so the pool exists even when the substrate is
+/// down. The breaker layer then trips fast on every dispatch attempt
+/// against an offline substrate.
+fn build_substrate_pools(cfg: &LifedConfig) -> Arc<SubstratePools> {
+    let chan = || {
+        // A dummy lazy channel; production deployments use the real
+        // proxy's tonic channel once Sub-phase E moves the pool inside
+        // the proxy. For pool-bracketing semantics the channel itself
+        // is unused — the breaker + semaphore are the load-bearing
+        // pieces.
+        tonic::transport::Endpoint::try_from("http://[::]:0")
+            .expect("static endpoint")
+            .connect_lazy()
+    };
+    Arc::new(SubstratePools::new(SubstratePoolsInitial {
+        arcan: Pool::new(chan(), cfg.pools.arcan_capacity, SubstrateKind::Arcan),
+        lago: Pool::new(chan(), cfg.pools.lago_capacity, SubstrateKind::Lago),
+        haima: Pool::new(chan(), cfg.pools.haima_capacity, SubstrateKind::Haima),
+        anima: Pool::new(chan(), cfg.pools.anima_capacity, SubstrateKind::Anima),
+        soma: Pool::new(chan(), cfg.pools.soma_capacity, SubstrateKind::Soma),
+    }))
 }
 
 fn build_saga_driver(registry: Arc<SagaRegistry>, lago: Arc<dyn LagoCall>) -> Arc<SagaDriver> {
@@ -338,6 +375,7 @@ fn build_services(
     admin_policy: Arc<AdminPolicy>,
     ks: Arc<Keystore>,
     saga: Arc<SagaDriver>,
+    pools: Arc<SubstratePools>,
 ) -> LifedServices {
     let agent = AgentService::new(
         Arc::clone(&arcan),
@@ -348,9 +386,10 @@ fn build_services(
         Arc::clone(&ks),
         Arc::clone(&saga),
         Arc::clone(&approval_locks),
+        Arc::clone(&pools),
     );
     let events = EventsService::new(Arc::clone(&lago));
-    let wallet = WalletService::new(Arc::clone(&haima), Arc::clone(&idem));
+    let wallet = WalletService::new(Arc::clone(&haima), Arc::clone(&idem), Arc::clone(&pools));
     let identity = IdentityService::new(
         Arc::clone(&anima),
         Arc::clone(&routing),
