@@ -139,26 +139,56 @@ impl Default for UpstreamConfig {
 
 /// Authn / authz plumbing.
 ///
-/// Sub-phase A uses the dev-signer path: `Bearer dev-token-for-{user_id}` is
-/// accepted and a Tier-2 capability token is minted via a static in-process
-/// P-256 keystore. Real ES256 + Vercel JWKS lands in Sub-phase B.
+/// Sub-phase B (Spec C₃ §5):
+/// - Real Vercel-style JWKS verification of inbound Tier-1 tokens.
+/// - Tier-2 mint via a [`KmsProvider`]-resolved signer. Default
+///   provider is `Vault` (production primary); dev / CI flips to `Dev`
+///   alongside `dev_signer_enabled = true`.
+/// - JWKS publish to `publish_jwks_path` so downstream verifiers
+///   (lifed) can pick up rotation atomically.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct AuthConfig {
-    /// Vercel JWKS endpoint URL. Field present in Sub-phase A but unused —
-    /// the dev signer bypasses JWKS verification. Wired in Sub-phase B.
+    /// Vercel JWKS endpoint URL. Sub-phase B fetches this URL and uses
+    /// the contents to verify inbound Tier-1 tokens. When
+    /// `dev_signer_enabled` is true, the URL is ignored and the in-process
+    /// dev shortcut handles verification.
     #[serde(default = "default_jwks_url")]
     pub jwks_url: String,
-    /// KMS provider. Sub-phase E feature; in Sub-phase A only the in-process
-    /// dev signer is used.
+    /// JWKS cache TTL. Successful fetches are reused for this long
+    /// before refetching. Cache misses (unknown kid) trigger a refetch
+    /// regardless of TTL.
+    #[serde(default = "default_jwks_cache_ttl", with = "humantime_serde")]
+    pub jwks_cache_ttl: Duration,
+    /// Key rotation grace per Spec C₃ §5: retired keys remain valid
+    /// for this duration after the upstream JWKS publishes a
+    /// replacement.
+    #[serde(default = "default_jwks_rotation_grace", with = "humantime_serde")]
+    pub jwks_rotation_grace: Duration,
+    /// Expected `aud` claim on Tier-1 tokens. Default `lifegw`.
+    #[serde(default = "default_tier1_audience")]
+    pub tier1_audience: String,
+    /// Expected `iss` claim on Tier-1 tokens. Default the apps/chat
+    /// origin (`https://broomva.tech` for the demo deploy; production
+    /// overrides via config).
+    #[serde(default = "default_tier1_issuer")]
+    pub tier1_issuer: String,
+    /// KMS provider for Tier-2 signing.
     #[serde(default)]
     pub kms_provider: KmsProvider,
-    /// Whether the `Bearer dev-token-for-{user_id}` shortcut is accepted.
-    /// MUST be `false` in production; set `true` only in dev / CI.
-    ///
-    /// Field name matches lifed's `JwksCache::dev_signer_enabled` so when
-    /// production goes live, both daemons gate dev paths the same way.
+    /// HashiCorp Vault Transit configuration. Required when
+    /// `kms_provider = "vault"`.
+    #[serde(default)]
+    pub vault: Option<VaultConfig>,
+    /// Path to which the gateway publishes its Tier-2 JWKS document.
+    /// `None` disables publish (used by tests that share key material
+    /// in-memory). Default `/run/life/lifegw-jwks.json`.
+    #[serde(default = "default_publish_jwks_path")]
+    pub publish_jwks_path: Option<PathBuf>,
+    /// Whether the `Bearer dev-token-for-{user_id}` shortcut is
+    /// accepted. MUST be `false` in production; set `true` only in
+    /// dev / CI.
     #[serde(default)]
     pub dev_signer_enabled: bool,
     /// Tier-2 audience (Spec C₃ §5.4). Default `lifed`.
@@ -172,8 +202,48 @@ pub struct AuthConfig {
     pub tier2_ttl: Duration,
 }
 
+/// HashiCorp Vault Transit configuration (Sub-phase B production
+/// primary). Loaded only when `auth.kms_provider = "vault"`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct VaultConfig {
+    /// Vault HTTP base URL, e.g. `https://vault.internal:8200`.
+    pub addr: String,
+    /// Vault token with `transit/sign/<key>` capability. Loaded via
+    /// env-var indirection in production deployments — this field
+    /// stores the resolved token at config-load time.
+    pub token: String,
+    /// Vault transit key name (the gateway never sees the private
+    /// half).
+    pub key_name: String,
+    /// JWS `kid` value embedded in token headers + the published JWKS.
+    /// Convention: same as `key_name`.
+    pub kid: String,
+}
+
 fn default_jwks_url() -> String {
     "https://broomva.tech/api/auth/jwks.json".to_string()
+}
+
+fn default_jwks_cache_ttl() -> Duration {
+    Duration::from_secs(5 * 60)
+}
+
+fn default_jwks_rotation_grace() -> Duration {
+    Duration::from_secs(30 * 60)
+}
+
+fn default_tier1_audience() -> String {
+    "lifegw".to_string()
+}
+
+fn default_tier1_issuer() -> String {
+    "https://broomva.tech".to_string()
+}
+
+fn default_publish_jwks_path() -> Option<PathBuf> {
+    Some(PathBuf::from("/run/life/lifegw-jwks.json"))
 }
 
 fn default_tier2_audience() -> String {
@@ -207,7 +277,13 @@ impl Default for AuthConfig {
     fn default() -> Self {
         Self {
             jwks_url: default_jwks_url(),
+            jwks_cache_ttl: default_jwks_cache_ttl(),
+            jwks_rotation_grace: default_jwks_rotation_grace(),
+            tier1_audience: default_tier1_audience(),
+            tier1_issuer: default_tier1_issuer(),
             kms_provider: KmsProvider::default(),
+            vault: None,
+            publish_jwks_path: default_publish_jwks_path(),
             dev_signer_enabled: false,
             tier2_audience: default_tier2_audience(),
             tier2_issuer: default_tier2_issuer(),

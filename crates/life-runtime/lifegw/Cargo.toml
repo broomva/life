@@ -17,11 +17,20 @@ name = "lifegw"
 path = "src/main.rs"
 
 [features]
-default = []
-# Production KMS providers (deferred to Sub-phase E).
+# Default ships kms-vault as the production primary per Spec C₃ §16 #2.
+# kms-aws / kms-gcp ship as opt-in. dev-mode is OFF in production —
+# enabling it activates the `Bearer dev-token-for-{user_id}` shortcut.
+default = ["kms-vault"]
+# Production-recommended provider per Spec C₃ §5.4 + §16 #2.
+# Activates the `VaultTransit` signer which uses reqwest's blocking
+# HTTP client (already a dep for JWKS fetch).
+kms-vault = []
+# Sub-phase E completes the body of these providers.
 kms-aws = []
 kms-gcp = []
-# In-process dev signing key — gates the dev-token Bearer shortcut. Off in production.
+# Enables the in-process `Bearer dev-token-for-{user_id}` shortcut.
+# OFF in production. Enabled in CI / unit tests via the
+# integration_proxy_passthrough.rs rig.
 dev-mode = []
 
 [dependencies]
@@ -53,6 +62,13 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 jsonwebtoken.workspace = true
 ring = "0.17"
 
+# JWKS HTTP fetch (Sub-phase B). reqwest is already a transitive
+# dependency of lifegw via life-vigil's OpenTelemetry stack — adding it
+# explicitly here makes the dependency obvious and lets us pin the
+# rustls-only TLS backend so the gateway doesn't pull native-tls. KMS
+# providers (Sub-phase B's VaultTransit primary) also use reqwest.
+reqwest = { workspace = true }
+
 # concurrency / state
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "signal", "fs", "sync", "time", "io-util"] }
 tokio-stream = { workspace = true }
@@ -75,6 +91,8 @@ serde.workspace = true
 serde_json.workspace = true
 uuid = { workspace = true }
 base64 = { workspace = true }
+# Atomic JWKS publish (write-tmp + rename) — see auth/bootstrap.rs.
+tempfile = { workspace = true }
 
 [dev-dependencies]
 tempfile.workspace = true
