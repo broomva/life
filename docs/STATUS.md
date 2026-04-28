@@ -466,6 +466,104 @@ ships:
   feature audit, `mod.rs` vs `name.rs` workspace decision, `unauth_response`
   HTTP/200 quirk) deferred to Sub-phase B/C/D as appropriate.
 
+### 2026-04-28 — M7 sub-phase B: lifegw — real Vercel JWKS + ES256 verifier + KMS provider abstraction
+
+Replaces the Sub-phase A dev signer with a production-grade Tier-1
+verifier and adds a KMS-backed Tier-2 minting key. Sub-phase B ships:
+
+- **Real Vercel JWKS Tier-1 verifier**: `JwksCache` fetches from
+  configured URL, kid-keyed lookup, refetch on miss, 30-min rotation
+  grace per Spec C₃ §5.
+- **Algorithm-confusion defense**: alg derived from JWKS entry (not JWT
+  header); `alg=none` rejected; symmetric algs (HS256/384/512) rejected
+  before key lookup; `aud=lifegw` enforced; `iss` enforced; `nbf` + `exp`
+  enforced; JWT without `kid` rejected.
+- **`Tier2Claims` extension**: `nbf`/`iat`/`jti` added; `#[non_exhaustive]`.
+- **`KmsSigner` trait abstraction** with 4 impls:
+  - `StaticKeystore` (gated on `dev` feature)
+  - `VaultTransit` (default `kms-vault` Cargo feature; HashiCorp Vault
+    Transit primary recommendation per Spec C₃ §16 #2)
+  - `AwsKms` (feature-gated `kms-aws`, body deferred to E)
+  - `GcpKms` (feature-gated `kms-gcp`, body deferred to E)
+- **Atomic JWKS publish** to `/run/life/lifegw-jwks.json` via
+  `tempfile::NamedTempFile::persist` (POSIX-atomic rename); current +
+  previous keys included for rotation grace.
+- **TLS 1.3-only listener**: rustls/tokio-rustls `tls12` feature dropped;
+  README.md documents the decision.
+- **`#[non_exhaustive]`** on 13 lifegw auth public types.
+- **`///` doc comments** on `AuthLayer::new` + `AuthService<S>`.
+- **Cross-daemon conformance test** (`conformance_published_jwks.rs`):
+  lifed-pattern JWKS reader verifies Tier-2 token from JWKS file (no
+  shared in-memory state).
+- **Integration test** (`integration_jwks_round_trip.rs`): mock Vercel
+  JWKS server (axum) → Tier-1 JWT → lifegw verify+mint → forwards to
+  lifed mock → success. Plus kid rotation → refetch → still verifies.
+- Tests: 3550 → 3595 (+25 lifegw tests: 17 unit + 1 integration with 3
+  sub-suites + 4 conformance + bonus dev_signer swap test).
+- Linear BRO-936 → Done (parent BRO-932). PR #1057 merged 2026-04-28
+  (commit `37b89a3`). Spec compliance review APPROVED_WITH_CONCERNS —
+  all 13 CRITICAL security checks PASS; one in-PR fix (`19813dc` —
+  README warning about apps/chat JWKS bridge production cutover gate).
+  Code-quality review APPROVED — no critical/important findings,
+  "Land this PR as-is." 3 deviations bundled into BRO-938 (M7 Sub-phase
+  C): `KmsProvider::default()` → `Vault`, `Tier1Claims.tier`
+  propagation, route-scope intersection enforcement.
+
+### 2026-04-28 — M5 sub-phase D: lifed facade — pools + breakers + observability + B/C body completions
+
+Production hardening machinery + 9 carry-forward body completions from
+Sub-phases B and C reviews. Sub-phase D ships:
+
+- **Per-substrate connection pools** with `ArcSwap<Pool>`: capacities
+  match Spec C₂ §7.1 (arcan: 32, lago: 64, haima: 16, anima: 16,
+  soma: 8). `PoolGuard` records success/failure on Drop.
+- **Hand-rolled circuit breaker** per Spec C₂ §7.2: `FAILURE_THRESHOLD=5`,
+  `RATE_THRESHOLD=0.5` over `RATE_WINDOW=30s`, `OPEN_DURATION=10s`.
+  All transitions wait-free atomic ops. `failsafe-rs` Cargo feature
+  removed (was dead code; cleanup commit `92d6783`).
+- **Cold-start replay** scaffolding (`RoutingCache::cold_start` +
+  `lago.ListNamespaces` proxy method); typed wire RPC deferred to
+  Sub-phase E (lago daemon must ship the RPC first). Lazy-populate
+  fallback path matches Spec C₂ §6.3.
+- **Bounded mpsc audit**: 9 `mpsc::channel(N)` callsites, 0 unbounded.
+- **Observability stack**: `LifedMetrics` registers 15 canonical metric
+  series against the global OpenTelemetry meter; `TracePropagationLayer`
+  is the outermost middleware on both planes. OTLP exporter wiring
+  deferred to Sub-phase E.
+- **Slow-consumer policy in fanout**: `STALLED_THRESHOLD=5` consecutive
+  Full returns triggers GC. One upstream pump per session via
+  `pump_active: AtomicBool` CAS in `FanoutRegistry::try_claim_pump`.
+- **`with_token` wired across 4 proxies** via `attach_token` helper.
+- **`JwksKey` PEM material** — substrates can verify Tier-3 tokens
+  standalone using only the published JWKS file.
+- **`Wallet.Transfer` idempotent** via `(user, project, key,
+  "Wallet.Transfer")` envelope.
+- **`SagaCtx.deadline` enforced** via `tokio::time::timeout_at`;
+  `SagaError::Deadline` propagates → `Status::deadline_exceeded`.
+- **`RetryClass { Retryable, Permanent }`** symmetric across 4 proxies.
+  Pool retries on retryable, fails fast on permanent.
+- **`--allow-mock-fallback` flag** (default `false`): production fails
+  fast on missing substrate sockets per Spec C₂ §11.4.
+- **Chaos test** (`integration_circuit_breaker.rs`): kill-lago →
+  breaker opens, arcan unaffected, metric value observable.
+- **Backpressure test** (`integration_backpressure.rs`): saturate fanout
+  → slow-consumer GC fires, daemon stays up.
+- Tests: 3595 → 3640 (+45 — 22 lib + 8 proxy unit + 12 integration +
+  3 conformance, including chaos + backpressure + Wallet.Transfer
+  idempotency replay + mock-fallback gate).
+- Linear BRO-934 → Done. PR #1058 merged 2026-04-28 (commit `614dc84`).
+  Spec compliance review APPROVED_WITH_CONCERNS — no critical/missing
+  findings; all 12 implementer decisions confirmed correct; 4
+  Sub-phase E follow-ups recommended. Code-quality review
+  APPROVED_WITH_CONCERNS — 4 IMPORTANT items flagged: 2 in-PR fixes
+  applied (`92d6783` removed dead `failsafe-breaker` feature + corrected
+  breaker docstring; `55a6fc2` documented deferred pool bracketing in
+  wallet/identity/events services); 2 deferred to BRO-937 Sub-phase E
+  (half-open trial CAS + RAII PumpGuard).
+- Sub-phase D follow-up tickets opened: BRO-937 (Sub-phase E — body
+  completions + integration + bake-in), BRO-938 (M7 Sub-phase C — WS
+  upgrade + 3 Sub-phase B follow-ups bundled).
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
