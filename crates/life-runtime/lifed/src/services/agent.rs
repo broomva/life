@@ -95,30 +95,67 @@ impl ApprovalLocks {
 
 /// Background pump: fetch the upstream stream from arcan and broadcast
 /// every event to every attached tab via the fan-out registry. Spec C₂ §6.4.
-fn spawn_fanout_pump(
+///
+/// Sub-phase D3: the pump owns a `PoolGuard` for the duration of the
+/// upstream stream — when the pump completes the guard records success
+/// or failure on the breaker.
+///
+/// Sub-phase D6: the pump-claim is per session, not per attach. If the
+/// fanout already has an active pump, this call is a no-op (the
+/// existing pump will deliver to all attached tabs). When the active
+/// pump completes it releases the slot via `fanout.release_pump()`.
+/// This eliminates the two-tab dispatch duplication (sub-phase B
+/// review follow-up #5).
+fn spawn_or_attach_fanout_pump(
+    fanout: &Arc<FanoutRegistry>,
     arcan: Arc<dyn ArcanCall>,
     sid: String,
     content: String,
-    fanout: Arc<FanoutRegistry>,
+    guard: crate::routing::pools::PoolGuard,
 ) {
+    if !fanout.try_claim_pump() {
+        // A pump is already running for this session — the new
+        // SendMessage's content is dropped (the upstream pump will
+        // continue streaming the in-flight dispatch's events). Real
+        // arcan provides queue semantics for chained messages; until
+        // arcan-proto ships this is the documented Spec C₂ §6.4 path.
+        guard.record_success();
+        return;
+    }
+    let fanout = Arc::clone(fanout);
     tokio::spawn(async move {
         match arcan.dispatch_message(&sid, &content).await {
             Ok(mut up) => {
                 use futures::StreamExt;
+                let mut ok = true;
                 while let Some(evt) = up.next().await {
-                    if let Ok(e) = evt {
-                        fanout.broadcast(e);
+                    match evt {
+                        Ok(e) => fanout.broadcast(e),
+                        Err(_) => {
+                            ok = false;
+                            break;
+                        }
                     }
                 }
+                if ok {
+                    guard.record_success();
+                } else {
+                    guard.record_failure();
+                }
             }
-            Err(e) => tracing::warn!(sid = %sid, error = ?e, "fanout pump failed to dial arcan"),
+            Err(e) => {
+                tracing::warn!(sid = %sid, error = ?e, "fanout pump failed to dial arcan");
+                guard.record_failure();
+            }
         }
+        fanout.release_pump();
     });
 }
 
 /// `Agent` service implementation. Holds typed substrate proxies, the
-/// signing keystore, the saga driver, the routing cache, and the
-/// per-sid `ApproveDispatch` first-responder lock table.
+/// signing keystore, the saga driver, the routing cache, the per-sid
+/// `ApproveDispatch` first-responder lock table, and (sub-phase D) the
+/// per-substrate connection pools.
 pub struct AgentService {
     pub arcan_call: Arc<dyn ArcanCall>,
     pub lago_call: Arc<dyn LagoCall>,
@@ -128,6 +165,10 @@ pub struct AgentService {
     pub ks: Arc<Keystore>,
     pub saga: Arc<SagaDriver>,
     pub approval_locks: Arc<ApprovalLocks>,
+    /// Sub-phase D: per-substrate connection pools. Every dispatch
+    /// brackets `pools.<substrate>.load().acquire().await?` so the
+    /// circuit breaker + bounded semaphore enforce backpressure.
+    pub pools: Arc<crate::routing::pools::SubstratePools>,
 }
 
 impl AgentService {
@@ -141,6 +182,7 @@ impl AgentService {
         ks: Arc<Keystore>,
         saga: Arc<SagaDriver>,
         approval_locks: Arc<ApprovalLocks>,
+        pools: Arc<crate::routing::pools::SubstratePools>,
     ) -> Self {
         Self {
             arcan_call,
@@ -151,6 +193,7 @@ impl AgentService {
             ks,
             saga,
             approval_locks,
+            pools,
         }
     }
 
@@ -306,11 +349,14 @@ impl pb::agent_server::Agent for AgentService {
             })
             .ok_or_else(|| Status::not_found("session not found"))?;
         let stream = fanout.attach(64);
-        spawn_fanout_pump(
+        // Sub-phase D3: bracket the arcan dispatch with the per-substrate pool.
+        let guard = self.pools.arcan.load().acquire().await?;
+        spawn_or_attach_fanout_pump(
+            &fanout,
             Arc::clone(&self.arcan_call),
             sid_value,
             body.content,
-            fanout,
+            guard,
         );
         Ok(Response::new(Box::pin(stream)))
     }
@@ -334,11 +380,17 @@ impl pb::agent_server::Agent for AgentService {
             })
             .ok_or_else(|| Status::not_found("session not found"))?;
         let stream = fanout.attach(64);
-        spawn_fanout_pump(
+        // Sub-phase D6: per-session pump. If no pump is active yet,
+        // this `stream_session` claims the slot and dispatches an empty
+        // (resume-style) message so events flow. Subsequent
+        // stream_session / send_message calls reuse the active pump.
+        let guard = self.pools.arcan.load().acquire().await?;
+        spawn_or_attach_fanout_pump(
+            &fanout,
             Arc::clone(&self.arcan_call),
             sid_value,
             String::new(),
-            fanout,
+            guard,
         );
         Ok(Response::new(Box::pin(stream)))
     }

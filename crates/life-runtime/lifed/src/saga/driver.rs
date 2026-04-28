@@ -222,6 +222,15 @@ impl SagaDriver {
 
     /// Run a saga: forward all steps; on first error, compensate prior
     /// steps in reverse and return the original forward error.
+    ///
+    /// Sub-phase D: each step's forward is wrapped in
+    /// `tokio::time::timeout_at(ctx.deadline, ...)`. If the deadline
+    /// elapses before a step returns, the saga fails with
+    /// [`SagaError::Deadline`] and the prior steps compensate in
+    /// reverse — same path as a forward error. Compensation itself runs
+    /// without a deadline so a slow substrate doesn't abandon
+    /// rollbacks mid-flight (per Spec C₂ §4.1: compensation is
+    /// best-effort; pathologies surface in the operator admin plane).
     pub async fn run(
         &self,
         ctx: SagaCtx,
@@ -255,7 +264,13 @@ impl SagaDriver {
                 idx = i,
                 "saga forward",
             );
-            match step.forward(&ctx).await {
+            // Spec C₂ §4.1: every forward step honours the saga deadline.
+            let deadline = tokio::time::Instant::from_std(ctx.deadline);
+            let forward_result = match tokio::time::timeout_at(deadline, step.forward(&ctx)).await {
+                Ok(r) => r,
+                Err(_elapsed) => Err(SagaError::Deadline { kind }),
+            };
+            match forward_result {
                 Ok(()) => {
                     self.registry.step_completed(&ctx.saga_id, name);
                     self.persist(
@@ -429,6 +444,60 @@ mod tests {
         driver.run(ctx(), steps).await.expect("ok");
         assert_eq!(f.load(Ordering::SeqCst), 2);
         assert_eq!(c.load(Ordering::SeqCst), 0, "no compensation on success");
+    }
+
+    /// A step that sleeps past the saga deadline. Used by the deadline
+    /// test to verify timeout-driven failure + compensation.
+    struct SleepStep {
+        forwards: Arc<AtomicUsize>,
+        compensates: Arc<AtomicUsize>,
+        name: &'static str,
+        sleep: std::time::Duration,
+    }
+
+    #[async_trait]
+    impl SagaStep for SleepStep {
+        async fn forward(&self, _ctx: &SagaCtx) -> Result<(), SagaError> {
+            self.forwards.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(self.sleep).await;
+            Ok(())
+        }
+        async fn compensate(&self, _ctx: &SagaCtx) -> Result<(), SagaError> {
+            self.compensates.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        fn name(&self) -> &'static str {
+            self.name
+        }
+    }
+
+    #[tokio::test]
+    async fn deadline_exceeded_compensates_and_returns_deadline_error() {
+        let f = Arc::new(AtomicUsize::new(0));
+        let c = Arc::new(AtomicUsize::new(0));
+        let driver = SagaDriver::new("test");
+        let mut ctx = ctx();
+        // Tight 50ms deadline; the second step sleeps 500ms.
+        ctx.deadline = std::time::Instant::now() + std::time::Duration::from_millis(50);
+        let steps: Vec<Box<dyn SagaStep>> = vec![
+            Box::new(OkStep {
+                forwards: f.clone(),
+                compensates: c.clone(),
+                name: "a",
+            }),
+            Box::new(SleepStep {
+                forwards: f.clone(),
+                compensates: c.clone(),
+                name: "slow",
+                sleep: std::time::Duration::from_millis(500),
+            }),
+        ];
+        let err = driver.run(ctx, steps).await.expect_err("must err");
+        assert!(matches!(err, SagaError::Deadline { kind: "test" }));
+        // step `a` forwarded; `slow` was tripped by the deadline.
+        assert!(f.load(Ordering::SeqCst) >= 2);
+        // `a` compensated. `slow` never reached step_completed so no compensate.
+        assert_eq!(c.load(Ordering::SeqCst), 1, "only `a` compensated");
     }
 
     #[tokio::test]

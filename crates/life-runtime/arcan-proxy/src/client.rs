@@ -64,12 +64,32 @@ impl ArcanProxy {
         self.token.as_deref()
     }
 
+    /// Sub-phase D3: attach the Tier-3 substrate token to a tonic
+    /// outgoing request as `authorization: Bearer <jws>`. Per Spec C₂
+    /// §5.2 every substrate call carries the bearer so the substrate
+    /// can verify against lifed's published JWKS.
+    ///
+    /// This is the canonical token-attachment helper used by every
+    /// outgoing tonic call once the real arcan-proto ships. Until then
+    /// the stub methods bypass tonic but still call this helper for
+    /// shape parity with sub-phase E.
+    pub fn attach_token<T>(&self, req: &mut tonic::Request<T>) {
+        if let Some(token) = &self.token
+            && let Ok(value) = format!("Bearer {token}").parse()
+        {
+            req.metadata_mut().insert("authorization", value);
+        }
+    }
+
     /// Stub: pretend to create an agent and return an opaque agent_id.
     /// Real impl invokes the arcan AgentService.CreateAgent RPC.
     pub async fn create_agent(&self, sid: &str) -> ArcanProxyResult<String> {
-        let _ = (sid, &self.channel);
-        // Sub-phase B initial wiring: defer to the existing life-kernel-facade
-        // SessionProxy. Future ticket plugs in a real arcan-proto.
+        // Sub-phase D3: even the stub path goes through the token
+        // attachment helper so shape parity holds with sub-phase E's
+        // tonic-client implementation.
+        let mut req = tonic::Request::new(sid.to_string());
+        self.attach_token(&mut req);
+        let _ = (req, &self.channel);
         Ok(format!("agent-{sid}"))
     }
 
@@ -154,5 +174,41 @@ impl ArcanCall for ArcanProxy {
         >,
     > {
         ArcanProxy::dispatch_message(self, sid, content).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_proxy_with_token(token: &str) -> ArcanProxy {
+        let endpoint = tonic::transport::Endpoint::try_from("http://[::]:0").expect("endpoint");
+        let channel = endpoint.connect_lazy();
+        ArcanProxy {
+            channel,
+            token: Some(token.to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn attach_token_sets_authorization_header() {
+        let proxy = dummy_proxy_with_token("jws.payload.sig");
+        let mut req = tonic::Request::new(());
+        proxy.attach_token(&mut req);
+        let auth = req.metadata().get("authorization").expect("authz set");
+        assert_eq!(auth.to_str().unwrap(), "Bearer jws.payload.sig");
+    }
+
+    #[tokio::test]
+    async fn attach_token_no_op_when_token_absent() {
+        let endpoint = tonic::transport::Endpoint::try_from("http://[::]:0").expect("endpoint");
+        let channel = endpoint.connect_lazy();
+        let proxy = ArcanProxy {
+            channel,
+            token: None,
+        };
+        let mut req = tonic::Request::new(());
+        proxy.attach_token(&mut req);
+        assert!(req.metadata().get("authorization").is_none());
     }
 }

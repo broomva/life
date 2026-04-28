@@ -6,4 +6,4 @@ pub mod client;
 pub mod error;
 
 pub use client::{LagoCall, LagoProxy};
-pub use error::{LagoProxyError, LagoProxyResult};
+pub use error::{LagoProxyError, LagoProxyResult, RetryClass};

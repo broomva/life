@@ -39,6 +39,7 @@ use crate::idempotency::{IdempotencyStore, boxed_in_memory};
 use crate::listener::admin as admin_listener;
 use crate::listener::public as public_listener;
 use crate::routing::cache::RoutingCache;
+use crate::routing::pools::{Pool, SubstrateKind, SubstratePools, SubstratePoolsInitial};
 use crate::saga::driver::{LagoSagaJournal, SagaDriver, SagaJournal};
 use crate::saga::registry::SagaRegistry;
 use crate::services::admin::{
@@ -53,6 +54,9 @@ use crate::services::wallet::WalletService;
 /// and integration tests can introspect lifed without re-dialing the
 /// public plane. Sub-phase C addition; sub-phase B's `run_with_*` paths
 /// owned these registries privately and tests could not reach them.
+///
+/// Sub-phase D: also exposes `pools` so chaos / backpressure tests can
+/// read the breaker state without rebuilding the daemon.
 #[derive(Clone)]
 pub struct LifedHandles {
     pub routing: Arc<RoutingCache>,
@@ -60,6 +64,7 @@ pub struct LifedHandles {
     pub idem: Arc<dyn IdempotencyStore>,
     pub saga_registry: Arc<SagaRegistry>,
     pub approval_locks: Arc<crate::services::agent::ApprovalLocks>,
+    pub pools: Arc<SubstratePools>,
 }
 
 /// Sub-phase B mocks entrypoint — used by integration tests + the dev
@@ -112,6 +117,7 @@ pub async fn run_with_mocks_handles(
     let idem = Arc::clone(&handles.idem);
     let saga_registry = Arc::clone(&handles.saga_registry);
     let approval_locks = Arc::clone(&handles.approval_locks);
+    let pools = Arc::clone(&handles.pools);
 
     let ks = Arc::new(Keystore::generate_dev());
     let saga = build_saga_driver(Arc::clone(&saga_registry), Arc::clone(&lago));
@@ -131,6 +137,7 @@ pub async fn run_with_mocks_handles(
         Arc::clone(&admin_policy),
         Arc::clone(&ks),
         saga,
+        pools,
     );
 
     if let Some(tx) = handles_tx {
@@ -140,24 +147,66 @@ pub async fn run_with_mocks_handles(
     serve_planes(cfg, auth, services, shutdown_rx).await
 }
 
-/// Sub-phase B daemon entrypoint. Tries the real-substrate path first;
-/// falls back to mocks if any substrate UDS socket is missing (dev/CI
-/// mode). The real path is gated behind `cfg.substrates.*.unix_socket`
-/// existing so a fresh dev box without arcand/lagod/haimad/animad still
-/// boots a usable lifed.
-pub async fn run_daemon(config_path: Option<&Path>) -> LifedResult<()> {
+/// Sub-phase B daemon entrypoint. Tries the real-substrate path first.
+///
+/// Sub-phase D follow-up #8: the silent mock-fallback that sub-phase B
+/// shipped is now gated behind `allow_mock_fallback`. Production
+/// deployments leave this `false` and lifed fails fast with
+/// [`LifedError::Substrate`] when a substrate socket is missing —
+/// which matches Spec C₂ §11.4's expectation that systemd must
+/// re-launch a daemon whose dependencies aren't ready. Dev and CI
+/// boxes pass `--allow-mock-fallback` (or `LIFED_ALLOW_MOCK_FALLBACK=1`)
+/// when they want the documented mock-substrate path.
+pub async fn run_daemon(config_path: Option<&Path>, allow_mock_fallback: bool) -> LifedResult<()> {
     let cfg = LifedConfig::load(config_path)?;
     let _vigil_guard = crate::observability::init(&cfg.vigil)?;
     let shutdown_rx = crate::shutdown::install_signal_handler();
     if all_substrate_sockets_present(&cfg) {
         run_with_real_substrates(&cfg, shutdown_rx).await
-    } else {
+    } else if allow_mock_fallback {
         tracing::warn!(
-            "one or more substrate UDS sockets missing — booting with MockSubstrates (dev mode)"
+            "one or more substrate UDS sockets missing — booting with MockSubstrates \
+             (dev mode, --allow-mock-fallback)"
         );
         let mocks = Arc::new(MockSubstrates::new());
         run_with_mocks(&cfg, mocks, shutdown_rx).await
+    } else {
+        let missing = list_missing_substrate_sockets(&cfg);
+        Err(LifedError::Substrate(format!(
+            "substrate UDS socket(s) missing — refusing to boot with MockSubstrates by default. \
+             Pass --allow-mock-fallback (or LIFED_ALLOW_MOCK_FALLBACK=1) to opt into the dev path. \
+             Missing sockets: {missing:?}"
+        )))
     }
+}
+
+fn list_missing_substrate_sockets(cfg: &LifedConfig) -> Vec<String> {
+    let mut out = Vec::new();
+    if !cfg.substrates.arcan.unix_socket.exists() {
+        out.push(format!(
+            "arcan@{}",
+            cfg.substrates.arcan.unix_socket.display()
+        ));
+    }
+    if !cfg.substrates.lago.unix_socket.exists() {
+        out.push(format!(
+            "lago@{}",
+            cfg.substrates.lago.unix_socket.display()
+        ));
+    }
+    if !cfg.substrates.haima.unix_socket.exists() {
+        out.push(format!(
+            "haima@{}",
+            cfg.substrates.haima.unix_socket.display()
+        ));
+    }
+    if !cfg.substrates.anima.unix_socket.exists() {
+        out.push(format!(
+            "anima@{}",
+            cfg.substrates.anima.unix_socket.display()
+        ));
+    }
+    out
 }
 
 fn all_substrate_sockets_present(cfg: &LifedConfig) -> bool {
@@ -220,6 +269,7 @@ pub async fn run_with_real_substrates(
     let idem = Arc::clone(&handles.idem);
     let saga_registry = Arc::clone(&handles.saga_registry);
     let approval_locks = Arc::clone(&handles.approval_locks);
+    let pools = Arc::clone(&handles.pools);
     let saga = build_saga_driver(Arc::clone(&saga_registry), Arc::clone(&lago));
     let admin_policy = build_admin_policy(cfg);
 
@@ -236,6 +286,7 @@ pub async fn run_with_real_substrates(
         Arc::clone(&admin_policy),
         Arc::clone(&ks),
         saga,
+        pools,
     );
 
     let jwks = if cfg.auth.jwks_path.exists() {
@@ -272,13 +323,41 @@ fn build_handles(cfg: &LifedConfig, lago: Arc<dyn LagoCall>) -> LifedHandles {
     };
     let saga_registry = Arc::new(SagaRegistry::new());
     let approval_locks = Arc::new(crate::services::agent::ApprovalLocks::new());
+    let pools = build_substrate_pools(cfg);
     LifedHandles {
         routing,
         revoked,
         idem,
         saga_registry,
         approval_locks,
+        pools,
     }
+}
+
+/// Sub-phase D: construct [`SubstratePools`] from the config-supplied
+/// per-substrate capacities. Each pool wraps a tonic Channel built
+/// against the substrate's UDS path — but the channel is built lazily
+/// (`connect_lazy`) so the pool exists even when the substrate is
+/// down. The breaker layer then trips fast on every dispatch attempt
+/// against an offline substrate.
+fn build_substrate_pools(cfg: &LifedConfig) -> Arc<SubstratePools> {
+    let chan = || {
+        // A dummy lazy channel; production deployments use the real
+        // proxy's tonic channel once Sub-phase E moves the pool inside
+        // the proxy. For pool-bracketing semantics the channel itself
+        // is unused — the breaker + semaphore are the load-bearing
+        // pieces.
+        tonic::transport::Endpoint::try_from("http://[::]:0")
+            .expect("static endpoint")
+            .connect_lazy()
+    };
+    Arc::new(SubstratePools::new(SubstratePoolsInitial {
+        arcan: Pool::new(chan(), cfg.pools.arcan_capacity, SubstrateKind::Arcan),
+        lago: Pool::new(chan(), cfg.pools.lago_capacity, SubstrateKind::Lago),
+        haima: Pool::new(chan(), cfg.pools.haima_capacity, SubstrateKind::Haima),
+        anima: Pool::new(chan(), cfg.pools.anima_capacity, SubstrateKind::Anima),
+        soma: Pool::new(chan(), cfg.pools.soma_capacity, SubstrateKind::Soma),
+    }))
 }
 
 fn build_saga_driver(registry: Arc<SagaRegistry>, lago: Arc<dyn LagoCall>) -> Arc<SagaDriver> {
@@ -338,6 +417,7 @@ fn build_services(
     admin_policy: Arc<AdminPolicy>,
     ks: Arc<Keystore>,
     saga: Arc<SagaDriver>,
+    pools: Arc<SubstratePools>,
 ) -> LifedServices {
     let agent = AgentService::new(
         Arc::clone(&arcan),
@@ -348,9 +428,10 @@ fn build_services(
         Arc::clone(&ks),
         Arc::clone(&saga),
         Arc::clone(&approval_locks),
+        Arc::clone(&pools),
     );
     let events = EventsService::new(Arc::clone(&lago));
-    let wallet = WalletService::new(Arc::clone(&haima), Arc::clone(&idem));
+    let wallet = WalletService::new(Arc::clone(&haima), Arc::clone(&idem), Arc::clone(&pools));
     let identity = IdentityService::new(
         Arc::clone(&anima),
         Arc::clone(&routing),
@@ -362,7 +443,8 @@ fn build_services(
         Arc::clone(&idem),
     );
     let saga_admin = SagaAdminService::new(Arc::clone(&admin_policy), saga_registry);
-    let routing_admin = RoutingCacheAdminService::new(Arc::clone(&admin_policy), routing);
+    let routing_admin =
+        RoutingCacheAdminService::new(Arc::clone(&admin_policy), routing, Arc::clone(&lago));
     LifedServices {
         agent,
         events,
@@ -390,17 +472,21 @@ async fn serve_planes(
         routing_admin,
     } = services;
 
-    // Public-plane router: AuthLayer + four life.v1 services.
+    // Public-plane router: TracePropagationLayer + AuthLayer + four life.v1 services.
+    // Spec C₂ §9.1: trace propagation is an outer layer so the per-request
+    // span begins before authentication runs.
     let public_router = Server::builder()
+        .layer(crate::observability::TracePropagationLayer)
         .layer(auth)
         .add_service(pb::agent_server::AgentServer::new(agent))
         .add_service(pb::events_server::EventsServer::new(events))
         .add_service(pb::wallet_server::WalletServer::new(wallet))
         .add_service(pb::identity_server::IdentityServer::new(identity));
 
-    // Admin-plane router: NO AuthLayer (peer-cred + AdminPolicy gates),
-    // three life.admin.v1 services.
+    // Admin-plane router: TracePropagationLayer (no AuthLayer — peer-cred
+    // + AdminPolicy gates), three life.admin.v1 services.
     let admin_router = Server::builder()
+        .layer(crate::observability::TracePropagationLayer)
         .add_service(adm::runtime_server::RuntimeServer::new(runtime_admin))
         .add_service(adm::saga_server::SagaServer::new(saga_admin))
         .add_service(adm::routing_cache_server::RoutingCacheServer::new(

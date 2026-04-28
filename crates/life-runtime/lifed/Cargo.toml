@@ -18,9 +18,12 @@ path = "src/main.rs"
 
 [features]
 default = []
-# Hand-rolled circuit breaker is the M5 default (Spec C₂ §7.2).
-# Enable `failsafe-breaker` to swap in the failsafe-rs crate as an experiment.
-failsafe-breaker = ["dep:failsafe"]
+# NOTE: The `failsafe-breaker` Cargo feature was removed in Sub-phase D
+# code-quality review cleanup — it was dead code (no `#[cfg(feature = ...)]`
+# anywhere). The hand-rolled breaker per Spec C₂ §7.2 is the M5 default and
+# remains the only implementation. Sub-phase E will revisit if/when an
+# alternative is wired in (likely via a separate `failsafe-rs` adapter crate
+# rather than a feature flag).
 
 [dependencies]
 # wire / ABI
@@ -48,13 +51,14 @@ async-trait.workspace = true
 futures.workspace = true
 
 # robustness
-failsafe = { workspace = true, optional = true }
+# (failsafe-rs experiment removed in Sub-phase D cleanup; see [features] note.)
 
 # observability
 life-vigil.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-opentelemetry.workspace = true
+opentelemetry.workspace = true
 
 # auth
 jsonwebtoken.workspace = true

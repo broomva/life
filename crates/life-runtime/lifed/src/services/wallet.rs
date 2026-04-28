@@ -3,6 +3,16 @@
 //! Each handler is ≤20 LOC. `Debit` is idempotent — replays the cached
 //! response when the same `(user, project, idempotency-key, "Wallet.Debit")`
 //! tuple is seen within the TTL.
+//!
+//! ## Pool bracketing — Sub-phase E scope
+//!
+//! Sub-phase D ships the `SubstratePools` machinery and brackets only the
+//! arcan dispatch sites in `services/agent.rs`. Wallet handlers do NOT
+//! yet bracket their `haima` calls through `pools.haima.load().acquire()`.
+//! Sub-phase E pushes pool bracketing inside the proxy crates so every
+//! substrate dispatch flows through the breaker uniformly. Until then,
+//! the haima breaker stays Closed in production. Tracked as Sub-phase E
+//! follow-up under BRO-934.
 
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -20,11 +30,19 @@ use crate::idempotency::{IdemKey, IdempotencyStore};
 pub struct WalletService {
     pub haima: Arc<dyn HaimaCall>,
     pub idem: Arc<dyn IdempotencyStore>,
+    /// Sub-phase D: per-substrate pools. Every haima dispatch brackets
+    /// `pools.haima.load().acquire().await?` so the haima circuit
+    /// breaker + bounded semaphore enforce backpressure.
+    pub pools: Arc<crate::routing::pools::SubstratePools>,
 }
 
 impl WalletService {
-    pub fn new(haima: Arc<dyn HaimaCall>, idem: Arc<dyn IdempotencyStore>) -> Self {
-        Self { haima, idem }
+    pub fn new(
+        haima: Arc<dyn HaimaCall>,
+        idem: Arc<dyn IdempotencyStore>,
+        pools: Arc<crate::routing::pools::SubstratePools>,
+    ) -> Self {
+        Self { haima, idem, pools }
     }
 
     fn claims<T>(req: &Request<T>) -> Result<&CapabilityClaims, Status> {
@@ -162,7 +180,18 @@ impl pb::wallet_server::Wallet for WalletService {
         &self,
         req: Request<pb::TransferReq>,
     ) -> Result<Response<pb::TransferReceipt>, Status> {
-        let _claims = Self::claims(&req)?;
+        let claims = Self::claims(&req)?.clone();
+        // Sub-phase D8 follow-up #3: Wallet.Transfer is now idempotent —
+        // same envelope as Debit. A retry with the same idempotency-key
+        // returns the cached TransferReceipt instead of double-transferring.
+        let key = Self::idem_key(&req, &claims, "Wallet.Transfer")
+            .ok_or_else(|| Status::failed_precondition("missing idempotency-key"))?;
+        if let Some(prev) = self.idem.lookup(&key).await? {
+            return Ok(Response::new(
+                pb::TransferReceipt::decode(&prev[..])
+                    .map_err(|e| Status::internal(format!("decode: {e}")))?,
+            ));
+        }
         let body = req.into_inner();
         let from = body.from.ok_or_else(|| Status::invalid_argument("from"))?;
         let to = body.to.ok_or_else(|| Status::invalid_argument("to"))?;
@@ -178,7 +207,7 @@ impl pb::wallet_server::Wallet for WalletService {
             )
             .await
             .map_err(Status::from)?;
-        Ok(Response::new(pb::TransferReceipt {
+        let receipt = pb::TransferReceipt {
             entry_id,
             from_balance: Some(pb::Balance {
                 micros: fbal.micros,
@@ -190,6 +219,12 @@ impl pb::wallet_server::Wallet for WalletService {
                 currency: tbal.currency,
                 as_of: Some(prost_types::Timestamp::from(SystemTime::now())),
             }),
-        }))
+        };
+        let mut buf = Vec::with_capacity(receipt.encoded_len());
+        receipt
+            .encode(&mut buf)
+            .map_err(|e| Status::internal(format!("encode: {e}")))?;
+        self.idem.persist(key, buf).await?;
+        Ok(Response::new(receipt))
     }
 }

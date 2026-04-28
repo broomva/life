@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use futures::Stream;
+use lago_proxy::LagoCall;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
@@ -24,11 +25,22 @@ use crate::services::admin::policy::{AdminOp, AdminPolicy};
 pub struct RoutingCacheAdminService {
     pub policy: Arc<AdminPolicy>,
     pub routing: Arc<RoutingCache>,
+    /// Sub-phase D2: lago handle so `RebuildFromLago` can issue
+    /// `lago.ListNamespaces` and warm the cache.
+    pub lago: Arc<dyn LagoCall>,
 }
 
 impl RoutingCacheAdminService {
-    pub fn new(policy: Arc<AdminPolicy>, routing: Arc<RoutingCache>) -> Self {
-        Self { policy, routing }
+    pub fn new(
+        policy: Arc<AdminPolicy>,
+        routing: Arc<RoutingCache>,
+        lago: Arc<dyn LagoCall>,
+    ) -> Self {
+        Self {
+            policy,
+            routing,
+            lago,
+        }
     }
 
     fn cred<T>(req: &Request<T>) -> Result<PeerCred, Status> {
@@ -97,19 +109,16 @@ impl adm::routing_cache_server::RoutingCache for RoutingCacheAdminService {
         let cred = Self::cred(&req)?;
         self.policy
             .check(&cred, AdminOp::RoutingCacheRebuildFromLago)?;
-        // Sub-phase C: documented carve-out. Returns 0 entries. The real
-        // implementation needs lago to expose a `ListNamespaces` RPC so
-        // we can enumerate `session/<sid>` namespaces and rebuild the
-        // cache by replaying their head events. That RPC lands in
-        // sub-phase D2 alongside cold-start replay (BRO-934).
-        tracing::warn!(
-            target: "lifed::admin::routing_cache",
-            "RebuildFromLago is a sub-phase C carve-out; returns 0 entries. \
-             Real impl needs lago.ListNamespaces RPC and ships in BRO-934 (sub-phase D2).",
-        );
+        // Sub-phase D2: cold-start replay via lago.ListNamespaces. When
+        // the wire RPC is available we enumerate `session/*` and warm
+        // the routing cache. Until lagod ships ListNamespaces the proxy
+        // returns an empty list and `loaded` is 0 — the cache populates
+        // lazily as live traffic arrives, the documented Spec C₂ §6.3
+        // fallback path.
+        let loaded = self.routing.cold_start(Arc::clone(&self.lago)).await?;
         Ok(Response::new(adm::RebuildResp {
-            sessions_loaded: 0,
-            lago_events_read: 0,
+            sessions_loaded: loaded,
+            lago_events_read: loaded as u64,
         }))
     }
 }

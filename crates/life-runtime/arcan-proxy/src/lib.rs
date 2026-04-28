@@ -7,4 +7,4 @@ pub mod conversions;
 pub mod error;
 
 pub use client::{ArcanCall, ArcanProxy};
-pub use error::{ArcanProxyError, ArcanProxyResult};
+pub use error::{ArcanProxyError, ArcanProxyResult, RetryClass};

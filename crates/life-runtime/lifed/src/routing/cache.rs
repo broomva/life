@@ -13,6 +13,7 @@ use dashmap::DashMap;
 use parking_lot::RwLock;
 
 use aios_proto::aios::v1 as aios_v1;
+use lago_proxy::LagoCall;
 
 use super::fanout::FanoutRegistry;
 
@@ -198,6 +199,46 @@ impl RoutingCache {
         }
     }
 
+    /// Sub-phase D2: warm the cache from lago by enumerating the
+    /// `session/*` namespace prefix. Each namespace `session/<sid>`
+    /// becomes a routing-cache entry minted with placeholder
+    /// `(user_id, project_id)` pairs derived from the namespace
+    /// — the live entry is fully populated on the next user-facing
+    /// `Agent.CreateSession` or `Agent.DescribeSession` call (which
+    /// re-runs the `OpenLagoNamespace` saga step idempotently).
+    ///
+    /// Returns the number of sessions warmed. When `lago.ListNamespaces`
+    /// is unavailable (the lago daemon predates Spec C₂ §4.1's typed
+    /// RPC), the call returns 0 and the cache populates lazily on
+    /// first traffic per session — which is the documented Spec C₂
+    /// §6.3 fallback path.
+    pub async fn cold_start(&self, lago: Arc<dyn LagoCall>) -> Result<u32, tonic::Status> {
+        let prefix = "session/";
+        let namespaces = lago
+            .list_namespaces(prefix)
+            .await
+            .map_err(tonic::Status::from)?;
+        let mut warmed = 0u32;
+        for ns in namespaces {
+            // namespace = "session/<sid>"
+            let Some(sid_value) = ns.strip_prefix(prefix) else {
+                continue;
+            };
+            if sid_value.is_empty() {
+                continue;
+            }
+            let sid = aios_v1::SessionId {
+                value: sid_value.to_string(),
+            };
+            // Placeholder fill — the live values land when the next
+            // CreateSession/Describe touches this entry.
+            self.insert_minimal(&sid, "<cold-start>", "<cold-start>");
+            self.mark_status(&sid, SessionStatus::Detached);
+            warmed = warmed.saturating_add(1);
+        }
+        Ok(warmed)
+    }
+
     /// LRU-evict until under `hard_cap`. Spec C₂ §6.3 — `hard_cap` is
     /// `cfg.routing.hard_cap`. Sorts by `last_touched`, evicts the oldest
     /// excess entries.
@@ -324,5 +365,55 @@ mod tests {
         }
         let summaries = cache.snapshot_summaries(3);
         assert_eq!(summaries.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn cold_start_warms_cache_from_seeded_lago() {
+        let cache = RoutingCache::new();
+        let mock_lago = crate::dev_mocks::MockLago::new();
+        mock_lago.seed_namespaces(vec![
+            "session/abc".to_string(),
+            "session/def".to_string(),
+            "system/lifed/saga/foo".to_string(), // filtered by prefix
+        ]);
+        let warmed = cache
+            .cold_start(Arc::new(mock_lago))
+            .await
+            .expect("cold start");
+        assert_eq!(warmed, 2, "two session/* namespaces");
+        assert_eq!(cache.size(), 2);
+        assert!(cache.lookup(&sid("abc")).is_some());
+        assert!(cache.lookup(&sid("def")).is_some());
+        // Detached so eviction sweeper can claim them once real traffic
+        // arrives (or `RebuildFromLago` is rerun).
+        assert_eq!(
+            cache.lookup(&sid("abc")).unwrap().status,
+            SessionStatus::Detached
+        );
+    }
+
+    #[tokio::test]
+    async fn cold_start_returns_zero_when_lago_returns_empty() {
+        let cache = RoutingCache::new();
+        let mock_lago = crate::dev_mocks::MockLago::new();
+        // No seed → empty list → 0 warmed.
+        let warmed = cache
+            .cold_start(Arc::new(mock_lago))
+            .await
+            .expect("cold start");
+        assert_eq!(warmed, 0);
+        assert_eq!(cache.size(), 0);
+    }
+
+    #[tokio::test]
+    async fn cold_start_propagates_lago_failure() {
+        let cache = RoutingCache::new();
+        let mock_lago = crate::dev_mocks::MockLago::new();
+        mock_lago.set_force_fail(true);
+        let err = cache
+            .cold_start(Arc::new(mock_lago))
+            .await
+            .expect_err("must fail");
+        assert_eq!(err.code(), tonic::Code::Unavailable);
     }
 }

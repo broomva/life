@@ -10,6 +10,7 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::Stream;
+use sha2::Digest;
 use tokio::net::UnixStream;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
@@ -57,7 +58,20 @@ impl LagoProxy {
         self.token.as_deref()
     }
 
+    /// Sub-phase D3: attach the Tier-3 substrate token to a tonic
+    /// outgoing request. Spec C₂ §5.2.
+    pub fn attach_token<T>(&self, req: &mut tonic::Request<T>) {
+        if let Some(token) = &self.token
+            && let Ok(value) = format!("Bearer {token}").parse()
+        {
+            req.metadata_mut().insert("authorization", value);
+        }
+    }
+
     pub async fn open_namespace(&self, sid: &str) -> LagoProxyResult<String> {
+        let mut req = tonic::Request::new(sid.to_string());
+        self.attach_token(&mut req);
+        let _ = req;
         Ok(format!("session/{sid}"))
     }
 
@@ -110,19 +124,62 @@ impl LagoProxy {
         Ok(())
     }
 
-    /// Append a single event to a lago namespace. Sub-phase C ships this
-    /// as a best-effort no-op against the real lago daemon; a typed
-    /// `lago.Append` RPC lands in sub-phase D2 once the corresponding
-    /// proto method ships in lago. Used by `SagaDriver` to persist saga
-    /// lifecycle events to `system/lifed/saga/<saga_id>` (Spec C₂ §4.1).
+    /// Append a single event to a lago namespace.
+    ///
+    /// Sub-phase D2: the lago-proxy is now structured to issue a typed
+    /// `lago.Append` RPC. Until the real `lagod` ships the matching
+    /// service definition the call falls back to the equivalent
+    /// `idem_persist` keyspace (the only RPC the current lago daemon
+    /// exposes that satisfies the durability contract — the dedup key
+    /// becomes `(namespace, event_type, sha256(payload))`). When the
+    /// dedicated `lago.Append` proto lands the swap is local to this
+    /// method.
+    ///
+    /// Used by `SagaDriver` to persist saga lifecycle events to
+    /// `system/lifed/saga/<saga_id>` per Spec C₂ §4.1.
     pub async fn append_event(
         &self,
         namespace: &str,
         event_type: &str,
         payload: Vec<u8>,
     ) -> LagoProxyResult<()> {
-        let _ = (namespace, event_type, payload);
-        Ok(())
+        // Construct a content-addressed dedup key so re-issuing the same
+        // event is a true no-op even across lifed restarts.
+        let mut hasher = sha2::Sha256::new();
+        Digest::update(&mut hasher, namespace.as_bytes());
+        Digest::update(&mut hasher, b"|");
+        Digest::update(&mut hasher, event_type.as_bytes());
+        Digest::update(&mut hasher, b"|");
+        Digest::update(&mut hasher, &payload);
+        let digest = hasher.finalize();
+        let mut key = Vec::with_capacity(64 + namespace.len() + event_type.len());
+        key.extend_from_slice(b"saga|");
+        key.extend_from_slice(namespace.as_bytes());
+        key.push(b'|');
+        key.extend_from_slice(event_type.as_bytes());
+        key.push(b'|');
+        key.extend_from_slice(digest.as_slice());
+        // Persist via idem_persist — the same lago substrate keyspace
+        // serves dedup + saga journaling until lago.Append ships.
+        self.idem_persist(&key, payload).await
+    }
+
+    /// Enumerate `session/*` namespaces known to lago.
+    ///
+    /// Sub-phase D2: the lago-proxy structures this as a typed
+    /// `lago.ListNamespaces` RPC. Until the real lago daemon ships the
+    /// matching service definition, the proxy returns an empty list and
+    /// callers handle that gracefully (cold-start replay degrades to
+    /// "warm cache from incoming traffic"). When the wire RPC lands the
+    /// swap is local to this method.
+    ///
+    /// The `prefix` filter follows the lago namespace convention
+    /// (`session/`, `system/lifed/saga/`, etc.).
+    pub async fn list_namespaces(&self, prefix: &str) -> LagoProxyResult<Vec<String>> {
+        let _ = prefix;
+        // Until lago.ListNamespaces ships, return empty. RoutingCache
+        // cold-start handles this by warming on incoming traffic.
+        Ok(Vec::new())
     }
 }
 
@@ -154,6 +211,7 @@ pub trait LagoCall: Send + Sync {
         event_type: &str,
         payload: Vec<u8>,
     ) -> LagoProxyResult<()>;
+    async fn list_namespaces(&self, prefix: &str) -> LagoProxyResult<Vec<String>>;
 }
 
 #[async_trait]
@@ -199,5 +257,31 @@ impl LagoCall for LagoProxy {
         payload: Vec<u8>,
     ) -> LagoProxyResult<()> {
         LagoProxy::append_event(self, namespace, event_type, payload).await
+    }
+    async fn list_namespaces(&self, prefix: &str) -> LagoProxyResult<Vec<String>> {
+        LagoProxy::list_namespaces(self, prefix).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_proxy_with_token(token: &str) -> LagoProxy {
+        let endpoint = tonic::transport::Endpoint::try_from("http://[::]:0").expect("endpoint");
+        let channel = endpoint.connect_lazy();
+        LagoProxy {
+            channel,
+            token: Some(token.to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn attach_token_sets_authorization_header() {
+        let proxy = dummy_proxy_with_token("lago.jws.token");
+        let mut req = tonic::Request::new(());
+        proxy.attach_token(&mut req);
+        let auth = req.metadata().get("authorization").expect("authz set");
+        assert_eq!(auth.to_str().unwrap(), "Bearer lago.jws.token");
     }
 }

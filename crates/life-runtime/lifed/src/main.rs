@@ -26,6 +26,12 @@ enum Cmd {
     Daemon {
         #[arg(long, env = "LIFED_CONFIG")]
         config: Option<PathBuf>,
+        /// Sub-phase D: opt into the dev mock-substrate fallback when
+        /// the real substrate UDS sockets are missing. Production
+        /// deployments leave this off; lifed fails fast on missing
+        /// sockets instead of silently running on mocks.
+        #[arg(long, env = "LIFED_ALLOW_MOCK_FALLBACK", default_value_t = false)]
+        allow_mock_fallback: bool,
     },
 
     /// Operator subcommand — list active sessions on the admin plane.
@@ -48,8 +54,11 @@ enum Cmd {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Daemon { config } => {
-            lifed::bootstrap::run_daemon(config.as_deref()).await?;
+        Cmd::Daemon {
+            config,
+            allow_mock_fallback,
+        } => {
+            lifed::bootstrap::run_daemon(config.as_deref(), allow_mock_fallback).await?;
             Ok(())
         }
         Cmd::SessionsLs(args) => lifed::cli::sessions::run_ls(args).await,
