@@ -200,4 +200,44 @@ impl TestEnv {
     pub fn inject_anima_fault(&self) {
         self.mocks.anima.inject_fault();
     }
+
+    /// Sub-phase D7 chaos-test helpers.
+
+    /// Read the current circuit-breaker state for the named substrate.
+    pub fn arcan_breaker_state(&self) -> lifed::routing::breaker::BreakerState {
+        self.handles.pools.arcan.load().breaker_state()
+    }
+
+    pub fn lago_breaker_state(&self) -> lifed::routing::breaker::BreakerState {
+        self.handles.pools.lago.load().breaker_state()
+    }
+
+    pub fn haima_breaker_state(&self) -> lifed::routing::breaker::BreakerState {
+        self.handles.pools.haima.load().breaker_state()
+    }
+
+    pub fn anima_breaker_state(&self) -> lifed::routing::breaker::BreakerState {
+        self.handles.pools.anima.load().breaker_state()
+    }
+
+    /// Drive a sustained outage for the named substrate. Used by chaos tests.
+    pub fn fail_lago(&self) {
+        self.mocks.lago.set_force_fail(true);
+    }
+    pub fn recover_lago(&self) {
+        self.mocks.lago.set_force_fail(false);
+    }
+
+    /// Sub-phase D7: directly bump the lago pool's breaker so the chaos
+    /// test doesn't depend on triggering 5 substrate calls through the
+    /// public-plane round-trip. The mock returns Unavailable — but the
+    /// pool guard sits at the lifed handler boundary, not the proxy
+    /// level. This helper closes the gap until D-stretch pushes pools
+    /// inside the proxy crates.
+    pub fn record_lago_failures(&self, n: u32) {
+        let pool = self.handles.pools.lago.load();
+        for _ in 0..n {
+            pool.breaker.record_failure();
+        }
+    }
 }
