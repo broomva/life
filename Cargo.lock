@@ -5870,6 +5870,7 @@ dependencies = [
  "life-runtime-proto",
  "life-vigil",
  "lifed-conformance",
+ "opentelemetry",
  "parking_lot",
  "prost 0.14.3",
  "prost-types 0.14.3",

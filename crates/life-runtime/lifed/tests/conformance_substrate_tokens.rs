@@ -101,3 +101,46 @@ async fn jwks_publish_includes_kid() {
     assert_eq!(jwks.keys[0].kty, "EC");
     assert_eq!(jwks.keys[0].crv, "P-256");
 }
+
+/// Sub-phase D follow-up #2: the published JWKS must include the PEM
+/// material so substrates can verify Tier-3 tokens using ONLY the
+/// JWKS file — no shared in-memory keystore state. The test rebuilds
+/// the substrate's verifier from the parsed JWKS and runs the standard
+/// conformance battery against it.
+#[tokio::test]
+async fn substrate_verifies_using_only_published_jwks_pem() {
+    let ks = Keystore::generate_dev();
+    let claims = make_claims("sid-jwks-pem");
+    let jws = mint_substrate_token(&claims, Audience::Arcan, &ks).expect("mint");
+
+    // Serialise the JWKS the way lifed publishes it on disk.
+    let jwks = ks.publish_jwks();
+    let jwks_json = serde_json::to_string_pretty(&jwks).expect("serialise");
+
+    // Parse it back as a substrate would, extract the PEM, and verify.
+    #[derive(serde::Deserialize)]
+    struct JwksFile {
+        keys: Vec<JwksFileKey>,
+    }
+    #[derive(serde::Deserialize)]
+    struct JwksFileKey {
+        #[allow(dead_code)]
+        kid: String,
+        pem: Option<String>,
+    }
+    let parsed: JwksFile = serde_json::from_str(&jwks_json).expect("parse");
+    let pem = parsed.keys[0]
+        .pem
+        .as_ref()
+        .expect("Sub-phase D requires `pem` in published JWKS so substrates can verify standalone")
+        .clone();
+
+    let sut = TestSubstrate("arcan");
+    let cases = vec![VerificationCase {
+        name: "jwks_pem_round_trip",
+        jws,
+        expected_aud: "arcan",
+        should_pass: true,
+    }];
+    run_battery(&sut, &pem, &cases).await.expect("verify");
+}

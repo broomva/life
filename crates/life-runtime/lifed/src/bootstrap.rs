@@ -430,17 +430,21 @@ async fn serve_planes(
         routing_admin,
     } = services;
 
-    // Public-plane router: AuthLayer + four life.v1 services.
+    // Public-plane router: TracePropagationLayer + AuthLayer + four life.v1 services.
+    // Spec C₂ §9.1: trace propagation is an outer layer so the per-request
+    // span begins before authentication runs.
     let public_router = Server::builder()
+        .layer(crate::observability::TracePropagationLayer)
         .layer(auth)
         .add_service(pb::agent_server::AgentServer::new(agent))
         .add_service(pb::events_server::EventsServer::new(events))
         .add_service(pb::wallet_server::WalletServer::new(wallet))
         .add_service(pb::identity_server::IdentityServer::new(identity));
 
-    // Admin-plane router: NO AuthLayer (peer-cred + AdminPolicy gates),
-    // three life.admin.v1 services.
+    // Admin-plane router: TracePropagationLayer (no AuthLayer — peer-cred
+    // + AdminPolicy gates), three life.admin.v1 services.
     let admin_router = Server::builder()
+        .layer(crate::observability::TracePropagationLayer)
         .add_service(adm::runtime_server::RuntimeServer::new(runtime_admin))
         .add_service(adm::saga_server::SagaServer::new(saga_admin))
         .add_service(adm::routing_cache_server::RoutingCacheServer::new(

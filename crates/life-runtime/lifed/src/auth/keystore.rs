@@ -73,6 +73,13 @@ impl Keystore {
 
     /// JWKS metadata published at `cfg.auth.substrate_jwks_publish_path`.
     /// Substrates poll the file (Spec C₂ §5.2) for verification keys.
+    ///
+    /// Sub-phase D includes the `pem` field so substrates can verify
+    /// without sharing in-memory keystore state. The `pem` form is the
+    /// most direct: substrates load the PEM-encoded SPKI public key and
+    /// pass it to their JWS verifier. Sub-phase E wires the alternate
+    /// `x` / `y` JWK component encoding alongside `pem` for clients
+    /// that prefer the canonical RFC 7517 shape.
     pub fn publish_jwks(&self) -> Jwks {
         Jwks {
             keys: vec![JwksKey {
@@ -81,6 +88,7 @@ impl Keystore {
                 crv: "P-256".to_string(),
                 alg: "ES256".to_string(),
                 use_: "sig".to_string(),
+                pem: Some(self.public_pem.clone()),
             }],
         }
     }
@@ -99,4 +107,9 @@ pub struct JwksKey {
     pub alg: String,
     #[serde(rename = "use")]
     pub use_: String,
+    /// Sub-phase D: the PEM-encoded SPKI public key. Substrates load
+    /// this directly into their JWS verifier — no shared in-memory
+    /// keystore state required.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pem: Option<String>,
 }

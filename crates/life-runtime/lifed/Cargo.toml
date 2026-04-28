@@ -55,6 +55,7 @@ life-vigil.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-opentelemetry.workspace = true
+opentelemetry.workspace = true
 
 # auth
 jsonwebtoken.workspace = true
