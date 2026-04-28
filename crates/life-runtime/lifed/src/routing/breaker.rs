@@ -6,10 +6,10 @@
 //! Closed ──5 consecutive failures or err-rate > 50% / 30s──▶ Open
 //!   ▲                                                          │
 //!   │                                              after 10s   │
-//!   │             one successful trial                         ▼
+//!   │           any successful trial → Closed                  ▼
 //!   └────────────────────────────────────────────────────── HalfOpen
 //!                                                              │
-//!                       failed trial                            │
+//!                       any failed trial → Open                 │
 //!                       ◀──────────────────────────────────────┘
 //! ```
 //!
@@ -17,10 +17,17 @@
 //! tracking uses a 30-second sliding window of `(success_count,
 //! failure_count)` packed into one `AtomicU64` so observers don't tear.
 //!
-//! When the optional `failsafe-breaker` feature is enabled, the lifed
-//! pool layer can swap in `failsafe-rs` instead — see
-//! `routing/pools.rs::Pool::new_with_breaker`. The hand-rolled
-//! implementation is the M5 default.
+//! ## HalfOpen semantics — Sub-phase D scope
+//!
+//! Spec C₂ §7.2 calls for a **single trial request** in HalfOpen.
+//! The Sub-phase D shipping implementation lazily flips Open→HalfOpen
+//! on read so under concurrent load multiple in-flight `acquire()`
+//! calls may all see HalfOpen and proceed in parallel. The breaker
+//! still closes on any success and opens on any failure, so
+//! load-shedding eventually converges, but the spec's "exactly one
+//! trial" invariant is not enforced. Tracked as a Sub-phase E
+//! follow-up: introduce a `half_open_trial_active: AtomicBool` whose
+//! CAS-acquire gates entry into HalfOpen.
 
 use std::sync::atomic::{AtomicI64, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
