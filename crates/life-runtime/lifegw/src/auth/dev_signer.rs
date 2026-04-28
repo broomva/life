@@ -38,25 +38,12 @@ pub fn install_tier1_verifier(cache: Arc<JwksCache>) {
     let _ = TIER1_VERIFIER.set(cache);
 }
 
-/// Test helper — override the verifier even if one was already
-/// installed. Cargo `cfg(test)` only.
-#[cfg(test)]
-pub(crate) fn set_tier1_verifier_for_tests(cache: Arc<JwksCache>) {
-    use std::sync::Mutex;
-    // Tests in the same process can install conflicting verifiers; we
-    // serialize with a mutex and overwrite via unsafe `OnceLock` reset
-    // through a side `Box::leak` — but that's fragile. Cleaner: tests
-    // use [`JwksCache::verify`] directly when they need fine control,
-    // and the global is set once per process. Most tests run in
-    // isolated processes via `cargo test`'s default model.
-    static SET_GUARD: Mutex<()> = Mutex::new(());
-    let _g = SET_GUARD.lock().expect("test lock");
-    // OnceLock provides no public reset; we accept that the FIRST
-    // installer wins per process. Tests that need a different verifier
-    // are run in separate processes (cargo test default) or call into
-    // the cache directly.
-    let _ = TIER1_VERIFIER.set(cache);
-}
+// OnceLock provides no public reset; we accept that the FIRST
+// installer wins per process. Tests that need a different verifier
+// instantiate `JwksCache` directly and exercise the verifier through
+// the `JwksCache::verify` API rather than the `dev_signer::verify`
+// global entry-point. Each integration test runs in its own process
+// (cargo test default), so global state is naturally isolated.
 
 /// Verify a Tier-1 bearer token. Returns synthesised Tier-1 claims on
 /// success; `LifegwError::Auth` otherwise.

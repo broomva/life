@@ -120,6 +120,9 @@ hyper-util = { version = "0.1", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rustls-pemfile = "2"
+# Sub-phase B integration test mounts a Vercel-style JWKS server at
+# 127.0.0.1:0 to verify the real JWKS path end-to-end.
+wiremock = { workspace = true }
 
 [lints]
 workspace = true

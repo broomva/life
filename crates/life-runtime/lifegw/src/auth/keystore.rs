@@ -141,6 +141,40 @@ pub struct JwksKey {
     pub pem: Option<String>,
 }
 
+impl JwksKey {
+    /// Build a JWKS entry for an EC P-256 + ES256 key with a PEM
+    /// convenience field.
+    pub fn ec_p256_pem(kid: impl Into<String>, pem: String) -> Self {
+        Self {
+            kid: kid.into(),
+            kty: "EC".to_string(),
+            crv: "P-256".to_string(),
+            alg: "ES256".to_string(),
+            use_: "sig".to_string(),
+            pem: Some(pem),
+        }
+    }
+
+    /// Build a JWKS entry for an arbitrary alg / kty — used by tests
+    /// that need to pollute the JWKS with non-ES256 entries to verify
+    /// readers filter correctly.
+    pub fn with_alg(
+        kid: impl Into<String>,
+        kty: impl Into<String>,
+        crv: impl Into<String>,
+        alg: impl Into<String>,
+    ) -> Self {
+        Self {
+            kid: kid.into(),
+            kty: kty.into(),
+            crv: crv.into(),
+            alg: alg.into(),
+            use_: "sig".to_string(),
+            pem: None,
+        }
+    }
+}
+
 fn der_to_pem(label: &str, der: &[u8]) -> String {
     let b64 = base64::engine::general_purpose::STANDARD.encode(der);
     let mut pem = format!("-----BEGIN {label}-----\n");

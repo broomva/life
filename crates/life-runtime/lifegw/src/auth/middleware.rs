@@ -132,18 +132,19 @@ where
                 .and_then(|h| h.strip_prefix("Bearer "))
                 .map(|t| t.to_string());
 
+            // `dev_signer_enabled` is informational here — both code
+            // paths route through `dev_signer::verify`, which delegates
+            // to the global `JwksCache`. Whether the cache accepts the
+            // dev shortcut or runs real ES256 / RS256 is decided by the
+            // cache type bootstrap installed (see
+            // `bootstrap::install_tier1_verifier`). We capture the flag
+            // for logging only.
+            let _ = dev_signer_enabled;
             let tier1 = match bearer {
-                Some(tok) if dev_signer_enabled => match dev_signer::verify(&tok) {
+                Some(tok) => match dev_signer::verify(&tok) {
                     Ok(c) => c,
-                    Err(_) => return Ok(unauth_response("invalid Tier-1 bearer (dev signer)")),
+                    Err(_) => return Ok(unauth_response("invalid Tier-1 bearer")),
                 },
-                Some(_) => {
-                    // Sub-phase B wires the real ES256 + JWKS verifier here.
-                    return Ok(unauth_response(
-                        "real Tier-1 verification not enabled in Sub-phase A; \
-                         set auth.dev_signer_enabled = true",
-                    ));
-                }
                 None => return Ok(unauth_response("missing Tier-1 bearer token")),
             };
 

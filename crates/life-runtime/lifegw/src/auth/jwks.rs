@@ -132,6 +132,59 @@ pub struct JwksEntry {
 }
 
 impl JwksEntry {
+    /// Build an EC P-256 + ES256 entry from a PEM-encoded public key.
+    /// Used by tests + lifegw's publish helper.
+    pub fn ec_p256_pem(kid: impl Into<String>, pem: String) -> Self {
+        Self {
+            kid: kid.into(),
+            kty: "EC".to_string(),
+            crv: "P-256".to_string(),
+            alg: "ES256".to_string(),
+            use_: "sig".to_string(),
+            x: String::new(),
+            y: String::new(),
+            n: String::new(),
+            e: String::new(),
+            pem: Some(pem),
+        }
+    }
+
+    /// Build an EC P-256 + ES256 entry from x/y components.
+    pub fn ec_p256_xy(kid: impl Into<String>, x: impl Into<String>, y: impl Into<String>) -> Self {
+        Self {
+            kid: kid.into(),
+            kty: "EC".to_string(),
+            crv: "P-256".to_string(),
+            alg: "ES256".to_string(),
+            use_: "sig".to_string(),
+            x: x.into(),
+            y: y.into(),
+            n: String::new(),
+            e: String::new(),
+            pem: None,
+        }
+    }
+
+    /// Build an RSA + RS256 entry from n/e components.
+    pub fn rsa_rs256_ne(
+        kid: impl Into<String>,
+        n: impl Into<String>,
+        e: impl Into<String>,
+    ) -> Self {
+        Self {
+            kid: kid.into(),
+            kty: "RSA".to_string(),
+            crv: String::new(),
+            alg: "RS256".to_string(),
+            use_: "sig".to_string(),
+            x: String::new(),
+            y: String::new(),
+            n: n.into(),
+            e: e.into(),
+            pem: None,
+        }
+    }
+
     fn parse_alg(&self) -> Option<Algorithm> {
         // Spec C₃ §5 + master spec §L4 invariant 1 — explicit allowlist.
         match self.alg.as_str() {
@@ -536,33 +589,55 @@ impl JwksCache {
     }
 }
 
-/// Synchronous JWKS fetch via reqwest's blocking client. The verifier
-/// runs from inside a tokio task, so we hop to a blocking thread to
-/// avoid deadlocking the async runtime. reqwest is already a transitive
-/// dependency of lifegw via life-vigil — see the module docs.
+/// Synchronous JWKS fetch hop. `JwksCache::verify` is called from
+/// inside a tonic handler running on a tokio worker; we cannot block
+/// that worker on a network round-trip. Two strategies, picked
+/// dynamically at call time:
+///
+/// 1. **Inside a multi-thread runtime**: use `tokio::task::block_in_place`
+///    to mark the worker thread as blocking + run `Handle::block_on` on
+///    the async reqwest client. The runtime upsizes its blocking thread
+///    pool transparently.
+/// 2. **Inside a current-thread runtime** OR **outside any runtime**:
+///    spawn a fresh single-thread runtime in a side thread and join it.
+///    This avoids the "cannot drop runtime in async context" panic
+///    `reqwest::blocking::Client` triggers.
+///
+/// Both paths execute the same async fetch body via [`do_async_fetch`].
 fn fetch_via_reqwest(url: &str) -> LifegwResult<JwksDoc> {
     let url_owned = url.to_string();
-    let result = match tokio::runtime::Handle::try_current() {
-        Ok(handle) => {
-            // Inside a tokio runtime — spawn a blocking task to run the
-            // reqwest blocking client without parking the async worker.
-            std::thread::scope(|s| {
-                let h = s.spawn(move || handle.block_on(do_async_fetch(&url_owned)));
-                h.join()
-                    .map_err(|_| LifegwError::Auth("jwks fetch thread panicked".to_string()))?
-            })
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        // Inside a runtime — try block_in_place (multi-thread only).
+        // If we're on a current-thread runtime, fall back to the side-
+        // thread + private-runtime path.
+        match handle.runtime_flavor() {
+            tokio::runtime::RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(|| handle.block_on(do_async_fetch(&url_owned)))
+            }
+            _ => fetch_in_side_thread(url_owned),
         }
-        Err(_) => {
-            // Outside a runtime (unlikely — verifier is always called
-            // from one) — build a private mini-runtime.
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| LifegwError::Auth(format!("build mini runtime: {e}")))?;
-            rt.block_on(do_async_fetch(url))
-        }
-    }?;
-    Ok(result)
+    } else {
+        fetch_in_side_thread(url_owned)
+    }
+}
+
+fn fetch_in_side_thread(url: String) -> LifegwResult<JwksDoc> {
+    // A dedicated thread builds a private current-thread runtime,
+    // runs the fetch, drops the runtime cleanly, then returns the
+    // bytes. The parent thread blocks via `join`. This is safe even if
+    // the caller is itself on an async runtime — we never block the
+    // caller's worker; we block only this side thread.
+    let url2 = url.clone();
+    let handle = std::thread::spawn(move || -> LifegwResult<JwksDoc> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| LifegwError::Auth(format!("build mini runtime: {e}")))?;
+        rt.block_on(do_async_fetch(&url2))
+    });
+    handle
+        .join()
+        .map_err(|_| LifegwError::Auth(format!("jwks fetch thread panicked: {url}")))?
 }
 
 async fn do_async_fetch(url: &str) -> LifegwResult<JwksDoc> {
