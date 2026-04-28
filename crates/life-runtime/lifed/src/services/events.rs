@@ -4,6 +4,14 @@
 //! directly. The mock lago substrate (in dev/tests) and the real
 //! `LagoProxy` (in production) both implement `LagoCall`, so the
 //! handler doesn't care which is wired in.
+//!
+//! ## Pool bracketing — Sub-phase E scope
+//!
+//! Events handlers call `lago` directly without acquiring a pool permit,
+//! so the lago breaker stays Closed in production until Sub-phase E
+//! pushes pool bracketing inside the proxy crates. Sub-phase D ships
+//! the `SubstratePools` shape; only `services/agent.rs` exercises it.
+//! Tracked under BRO-934.
 
 use std::pin::Pin;
 use std::sync::Arc;

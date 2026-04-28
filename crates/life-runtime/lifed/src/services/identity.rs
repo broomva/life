@@ -3,6 +3,13 @@
 //! Handlers ≤20 LOC each. `RevokeSession` updates the in-memory blocklist
 //! and evicts the routing entry; the snapshot publisher (run on a 30 s
 //! tick by bootstrap) writes `revoked_sids.json` for substrates to poll.
+//!
+//! ## Pool bracketing — Sub-phase E scope
+//!
+//! Sub-phase D ships pools but only `services/agent.rs` brackets through
+//! them. Identity handlers call `anima` directly without acquiring a pool
+//! permit, so the anima breaker stays Closed in production until Sub-phase E
+//! pushes pool bracketing inside the proxy crates. Tracked under BRO-934.
 
 use std::sync::Arc;
 

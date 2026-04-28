@@ -3,6 +3,16 @@
 //! Each handler is ≤20 LOC. `Debit` is idempotent — replays the cached
 //! response when the same `(user, project, idempotency-key, "Wallet.Debit")`
 //! tuple is seen within the TTL.
+//!
+//! ## Pool bracketing — Sub-phase E scope
+//!
+//! Sub-phase D ships the `SubstratePools` machinery and brackets only the
+//! arcan dispatch sites in `services/agent.rs`. Wallet handlers do NOT
+//! yet bracket their `haima` calls through `pools.haima.load().acquire()`.
+//! Sub-phase E pushes pool bracketing inside the proxy crates so every
+//! substrate dispatch flows through the breaker uniformly. Until then,
+//! the haima breaker stays Closed in production. Tracked as Sub-phase E
+//! follow-up under BRO-934.
 
 use std::sync::Arc;
 use std::time::SystemTime;
