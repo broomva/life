@@ -6,4 +6,4 @@ pub mod client;
 pub mod error;
 
 pub use client::{Account, AnimaCall, AnimaProxy, Profile, SessionDescriptor};
-pub use error::{AnimaProxyError, AnimaProxyResult};
+pub use error::{AnimaProxyError, AnimaProxyResult, RetryClass};
