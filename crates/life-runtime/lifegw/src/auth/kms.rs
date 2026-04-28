@@ -65,7 +65,11 @@ pub trait KmsSigner: Send + Sync + 'static {
 ///
 /// Wraps the existing [`Keystore`] for backwards compatibility with
 /// Sub-phase A tests. Sub-phase B's dev path constructs one via
-/// [`StaticKeystore::generate_dev`] and the conformance test rig uses it.
+/// [`StaticKeystore::generate_dev`] and the conformance test rig uses
+/// it. Marked `#[non_exhaustive]` so adding fields (e.g. a parent-key
+/// reference for hierarchical KMS bridging) does not break tests that
+/// construct via `from_keystore`.
+#[non_exhaustive]
 pub struct StaticKeystore {
     keystore: Keystore,
 }

@@ -19,8 +19,10 @@ use tonic::{Request, Response, Status};
 
 use life_runtime_proto::life::v1 as pb;
 
-/// Forwarder for `life.v1.Agent`. Holds an upstream tonic channel to lifed.
+/// Forwarder for `life.v1.Agent`. Holds an upstream tonic channel to
+/// lifed.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct AgentForwarder {
     channel: Channel,
 }
@@ -163,6 +165,7 @@ impl pb::agent_server::Agent for AgentForwarder {
 
 /// Forwarder for `life.v1.Events`.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct EventsForwarder {
     channel: Channel,
 }
@@ -219,6 +222,7 @@ impl pb::events_server::Events for EventsForwarder {
 
 /// Forwarder for `life.v1.Wallet`.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct WalletForwarder {
     channel: Channel,
 }
@@ -284,6 +288,7 @@ impl pb::wallet_server::Wallet for WalletForwarder {
 
 /// Forwarder for `life.v1.Identity`.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct IdentityForwarder {
     channel: Channel,
 }

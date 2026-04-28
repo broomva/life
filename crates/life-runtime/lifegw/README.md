@@ -7,29 +7,52 @@ is the canonical implementation reference; this README is a navigation aid.
 
 ## Sub-phase status
 
-- **Sub-phase A** (BRO-935, this PR): scaffolding + TLS bind + dev-mode JWT
+- **Sub-phase A** (BRO-935, merged): scaffolding + TLS bind + dev-mode JWT
   acceptance + Tier-2 mint via static dev keystore + `tonic-web` unary proxy
   passthrough to lifed UDS + `/healthz`.
-- **Sub-phase B** (BRO-936, planned): real Vercel JWKS + ES256 + KMS-backed
-  Tier-2 mint + scope intersection table.
-- **Sub-phase C** (BRO-937, planned): WebSocket upgrade + bidi pump + reconnect.
-- **Sub-phase D** (BRO-938, planned): per-user / per-IP token-bucket rate limit
-  + bounded backpressure + admin-plane UDS + cert-watch.
+- **Sub-phase B** (BRO-936, this PR): real Vercel JWKS + ES256/RS256 verifier
+  with kid lookup + 30 min rotation grace + algorithm allowlist; KMS-backed
+  Tier-2 mint via the new `KmsSigner` trait (StaticKeystore + VaultTransit
+  primary, AwsKms / GcpKms feature-gated); JWKS published atomically to
+  `/run/life/lifegw-jwks.json`; TLS 1.3-only listener.
+- **Sub-phase C** (BRO-937, planned): WebSocket upgrade + bidi pump +
+  reconnect.
+- **Sub-phase D** (BRO-938, planned): per-user / per-IP token-bucket rate
+  limit + bounded backpressure + admin-plane UDS + cert-watch.
 - **Sub-phase E** (BRO-939, planned): production KMS swap-in + chaos tests.
 
-## What ships in Sub-phase A
+## What ships in Sub-phase B
 
 | Subsystem | State |
 |---|---|
-| TLS bind via rustls (TLS 1.2/1.3 default) | shipped |
-| Dev-mode JWT acceptance (`Bearer dev-token-for-{user_id}`) | shipped |
-| Tier-2 capability token mint via in-process P-256 keystore | shipped |
+| TLS bind via rustls — **TLS 1.3 only** (Sub-phase B decision; see below) | shipped |
+| Dev-mode JWT acceptance (`Bearer dev-token-for-{user_id}`) | preserved behind `JwksCache::dev_only` |
+| Real Vercel JWKS Tier-1 verifier (ES256 + RS256, alg allowlist) | shipped |
+| Tier-2 mint via `KmsSigner` trait (Vault primary; Static dev) | shipped |
+| Atomic JWKS publish to `/run/life/lifegw-jwks.json` | shipped |
 | `tonic-web` Connect protocol layer | shipped |
 | `life.v1.{Agent, Events, Wallet, Identity}` unary proxy passthrough | shipped |
 | `/healthz` upstream-readiness check | shipped |
-| Real ES256 + Vercel JWKS | deferred to Sub-phase B |
 | WS upgrade + reconnect | deferred to Sub-phase C |
 | Rate limiting + bounded buffers | deferred to Sub-phase D |
+| AWS / GCP KMS provider bodies | deferred to Sub-phase E |
+
+## TLS feature audit (Sub-phase B decision)
+
+Per Spec C₃ §6 + master spec §L4, lifegw negotiates **TLS 1.3 only**. The
+rustls + tokio-rustls dependencies are pinned with `default-features = false,
+features = ["ring", "std"]` — the `tls12` feature is intentionally OFF.
+
+Rationale:
+- Modern clients (browsers, Vercel edge, mobile SDKs) support TLS 1.3.
+- TLS 1.2 carries CBC-mode + RSA key-exchange + downgrade (POODLE-class) risk.
+- Removing TLS 1.2 simplifies the audit surface — fewer cipher suites,
+  fewer code paths.
+- Aligns with the "asymmetric signing only" spirit of the master spec
+  invariant 1.
+
+If a future tenant requires TLS 1.2 fallback, that is an explicit policy
+decision tracked under a new ticket — not a default.
 
 ## Quick start
 

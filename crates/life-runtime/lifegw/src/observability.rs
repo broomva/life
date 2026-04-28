@@ -6,8 +6,11 @@
 use crate::config::ObservabilityConfig;
 use crate::error::LifegwResult;
 
-/// RAII guard returned by `init` — drops on daemon exit and flushes anything
-/// buffered. Sub-phase A is a no-op; Sub-phase D wires the real OTLP flush.
+/// RAII guard returned by `init` — drops on daemon exit and flushes
+/// anything buffered. Sub-phase A is a no-op; Sub-phase D wires the
+/// real OTLP flush. Marked `#[non_exhaustive]` so adding fields (e.g.
+/// the OTLP exporter handle in D) does not break consumers.
+#[non_exhaustive]
 pub struct VigilGuard;
 
 pub fn init(_cfg: &ObservabilityConfig) -> LifegwResult<VigilGuard> {

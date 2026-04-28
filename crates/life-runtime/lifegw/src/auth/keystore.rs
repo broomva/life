@@ -19,10 +19,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{LifegwError, LifegwResult};
 
-/// EC keypair (P-256) plus a key id used to sign Tier-2 capability tokens.
+/// EC keypair (P-256) plus a key id used to sign Tier-2 capability
+/// tokens.
 ///
-/// Cloning is cheap (the underlying jsonwebtoken types are `Arc`-backed).
+/// Cloning is cheap (the underlying jsonwebtoken types are
+/// `Arc`-backed). The struct is `#[non_exhaustive]` so future fields
+/// (creation timestamp for rotation hints, parent-key ref for
+/// hierarchical KMS) can be added without breaking downstream
+/// constructors — production builds construct via
+/// [`Keystore::generate_dev`] only.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct Keystore {
     pub kid: String,
     pub encoding: EncodingKey,
@@ -105,12 +112,20 @@ impl Keystore {
     }
 }
 
+/// Top-level JWKS document the gateway publishes. Sub-phase B writes
+/// a single key entry containing the active Tier-2 signing key;
+/// Sub-phase D may add retired-in-grace keys for rotation overlap.
 #[derive(Serialize, Deserialize, Clone)]
+#[non_exhaustive]
 pub struct Jwks {
     pub keys: Vec<JwksKey>,
 }
 
+/// A single JWKS key entry. RFC 7517 § 4 fields plus an optional `pem`
+/// convenience field used by lifed's reader to skip the x/y → key
+/// reconstruction.
 #[derive(Serialize, Deserialize, Clone)]
+#[non_exhaustive]
 pub struct JwksKey {
     pub kid: String,
     pub kty: String,
@@ -118,9 +133,10 @@ pub struct JwksKey {
     pub alg: String,
     #[serde(rename = "use")]
     pub use_: String,
-    /// Optional PEM-encoded public key. Sub-phase A writes this so consumers
-    /// (lifed) can decode the key without parsing JWK x/y components.
-    /// Sub-phase D will additionally publish x/y for browser-side verifiers.
+    /// Optional PEM-encoded public key. Sub-phase A writes this so
+    /// consumers (lifed) can decode the key without parsing JWK x/y
+    /// components. Sub-phase D will additionally publish x/y for
+    /// browser-side verifiers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pem: Option<String>,
 }
