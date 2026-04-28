@@ -181,6 +181,11 @@ impl TestEnv {
         lifegw_cfg.listen.http_redirect_addr = None;
         lifegw_cfg.upstream.lifed_uds_path = lifed_socket.clone();
         lifegw_cfg.auth.dev_signer_enabled = true;
+        // Sub-phase B's default publish_jwks_path = /run/life/lifegw-jwks.json
+        // is not writable in the unit-test sandbox; the rig shares
+        // keystore material in-memory through serve_with_listener_and_keystore
+        // so disabling the publish step is safe here.
+        lifegw_cfg.auth.publish_jwks_path = None;
         // Pre-bind so we can extract the resolved port.
         let bind = lifegw::listener::bind(&lifegw_cfg.tls, &lifegw_cfg.listen)
             .await

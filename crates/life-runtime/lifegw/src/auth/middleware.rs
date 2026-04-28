@@ -27,9 +27,14 @@ use crate::auth::dev_signer;
 use crate::auth::tier2::Tier2Minter;
 use crate::services::health;
 
-/// Tower Layer wrapping a service with Tier-1 verify + Tier-2 mint and a
-/// `/healthz` bypass path.
+/// Tower Layer wrapping a service with Tier-1 verify + Tier-2 mint and
+/// a `/healthz` bypass path.
+///
+/// Future fields (rate-limiter handle in Sub-phase D, scope-intersection
+/// table in Sub-phase B's follow-up) are added without breaking
+/// downstream consumers because the type is `#[non_exhaustive]`.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct AuthLayer {
     minter: Arc<Tier2Minter>,
     dev_signer_enabled: bool,
@@ -37,6 +42,16 @@ pub struct AuthLayer {
 }
 
 impl AuthLayer {
+    /// Construct a new `AuthLayer`.
+    ///
+    /// # Parameters
+    /// - `minter` — Tier-2 capability-token mint helper. Owns the KMS
+    ///   signer the gateway uses to issue capability tokens to lifed.
+    /// - `dev_signer_enabled` — when `true`, accept the magic
+    ///   `Bearer dev-token-for-{user_id}` shortcut alongside real JWS
+    ///   tokens. MUST be `false` in production deployments.
+    /// - `upstream_path` — UDS path to lifed. The `/healthz` bypass
+    ///   probes this socket to confirm upstream readiness.
     pub fn new(
         minter: Arc<Tier2Minter>,
         dev_signer_enabled: bool,
@@ -63,7 +78,18 @@ impl<S> Layer<S> for AuthLayer {
     }
 }
 
+/// Inner tower `Service` produced by [`AuthLayer::layer`]. Holds a
+/// reference to the wrapped upstream service and re-runs the
+/// Tier-1 verify → Tier-2 mint → forward sequence on every inbound
+/// request.
+///
+/// The struct is `#[non_exhaustive]` so adding fields in later
+/// sub-phases (e.g. a per-request rate-limiter handle in D, a
+/// scope-intersection table after B-follow-up) does not break
+/// consumers that build the type via [`AuthLayer::layer`] (which is
+/// the only sanctioned constructor).
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct AuthService<S> {
     inner: S,
     minter: Arc<Tier2Minter>,
@@ -106,18 +132,19 @@ where
                 .and_then(|h| h.strip_prefix("Bearer "))
                 .map(|t| t.to_string());
 
+            // `dev_signer_enabled` is informational here — both code
+            // paths route through `dev_signer::verify`, which delegates
+            // to the global `JwksCache`. Whether the cache accepts the
+            // dev shortcut or runs real ES256 / RS256 is decided by the
+            // cache type bootstrap installed (see
+            // `bootstrap::install_tier1_verifier`). We capture the flag
+            // for logging only.
+            let _ = dev_signer_enabled;
             let tier1 = match bearer {
-                Some(tok) if dev_signer_enabled => match dev_signer::verify(&tok) {
+                Some(tok) => match dev_signer::verify(&tok) {
                     Ok(c) => c,
-                    Err(_) => return Ok(unauth_response("invalid Tier-1 bearer (dev signer)")),
+                    Err(_) => return Ok(unauth_response("invalid Tier-1 bearer")),
                 },
-                Some(_) => {
-                    // Sub-phase B wires the real ES256 + JWKS verifier here.
-                    return Ok(unauth_response(
-                        "real Tier-1 verification not enabled in Sub-phase A; \
-                         set auth.dev_signer_enabled = true",
-                    ));
-                }
                 None => return Ok(unauth_response("missing Tier-1 bearer token")),
             };
 

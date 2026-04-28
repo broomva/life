@@ -20,9 +20,10 @@ use tonic::transport::server::{Connected, TcpConnectInfo};
 use crate::config::{ListenConfig, TlsConfig};
 use crate::error::{LifegwError, LifegwResult};
 
-/// Result of a successful TLS + TCP bind: the rustls acceptor and the bound
-/// listener. Bootstrap glues these together with the tonic Server's
-/// `serve_with_incoming_shutdown`.
+/// Result of a successful TLS + TCP bind: the rustls acceptor and the
+/// bound listener. Bootstrap glues these together with the tonic
+/// Server's `serve_with_incoming_shutdown`.
+#[non_exhaustive]
 pub struct TlsBind {
     pub acceptor: TlsAcceptor,
     pub listener: TcpListener,
@@ -60,11 +61,12 @@ pub fn build_acceptor(cert_path: &Path, key_path: &Path) -> LifegwResult<TlsAcce
     Ok(TlsAcceptor::from(Arc::new(server_config)))
 }
 
-/// Newtype wrapping `tokio_rustls::server::TlsStream<TcpStream>` so we can
-/// impl tonic's `Connected` trait. tonic 0.14 requires the IO type to expose
-/// `connect_info` for request extensions; the inner `TcpStream` carries the
-/// addresses, so we derive from there.
+/// Newtype wrapping `tokio_rustls::server::TlsStream<TcpStream>` so we
+/// can impl tonic's `Connected` trait. tonic 0.14 requires the IO type
+/// to expose `connect_info` for request extensions; the inner
+/// `TcpStream` carries the addresses, so we derive from there.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct LifegwTlsStream {
     inner: TlsStream<TcpStream>,
     local_addr: Option<SocketAddr>,
