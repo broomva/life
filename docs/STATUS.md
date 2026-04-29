@@ -564,6 +564,111 @@ Sub-phases B and C reviews. Sub-phase D ships:
   completions + integration + bake-in), BRO-938 (M7 Sub-phase C — WS
   upgrade + 3 Sub-phase B follow-ups bundled).
 
+### 2026-04-29 — M7 sub-phase C: lifegw — WebSocket upgrade + bidi pump + reconnect + 3 B follow-ups
+
+WebSocket transport for live agent streaming sessions + closes the 3
+M7-B follow-ups. Sub-phase C ships:
+
+- **WebSocket upgrade handler** at `/v1/agent/stream` with `?sid=` query
+  OR `X-Life-Sid` header (header takes precedence)
+- **Bidi pump** connecting client WS frames ↔ lifed
+  `Agent.StreamSession` over the same socket
+- **Reconnect-by-`last_seq_no`** via `?last_seq_no=` query OR
+  `X-Life-Last-Seq-No` header (resume cursor captured in gateway state;
+  proto extension to propagate to lifed deferred to a follow-up)
+- **Close-code policy** per Spec C₃ §6.5: 1000 normal, 1001 going away,
+  1008 policy_violation:token_expired, 1011 internal_error, 4001-4005
+  app-level codes (rate-limit, backpressure, ip-blocked,
+  lifed-unavailable, sequence-retired)
+- **Per-WS bounded mpsc(64)** backpressure with `STALLED_THRESHOLD=5`
+  consecutive Full returns triggering 4002 close
+- **5 integration + 16 unit + 13 scope module + 4 follow-up tests**
+  (38 new total)
+- **3 M7-B follow-ups closed:**
+  - `KmsProvider::Dev` fail-closed (Option B): rejects unless
+    `dev_signer_enabled=true` at signer build time
+  - `Tier1Claims.tier` propagates to `Tier2Claims.tier` with
+    `DEFAULT_TIER = "free"` back-compat default
+  - Route-scope intersection enforced before Tier-2 mint per Spec
+    C₃ §5.4: 16-RPC table at `auth/scope.rs`; empty intersection →
+    `Status::permission_denied`. D1 fix tightened
+    `Agent.StreamSession` to `agent:read` per spec line 468.
+- **Bootstrap refactor**: replaced `tonic Server::serve_with_incoming_shutdown`
+  with `hyper_util::server::conn::auto::Builder::serve_connection_with_upgrades`
+  (tonic 0.14 doesn't enable hyper upgrades). H1/H2 auto-detection
+  preserved.
+- Tests: 3640 → 3678 (+38).
+- Linear BRO-938 → Done (parent BRO-932). PR #1061 merged 2026-04-29
+  (commit `b73c098`). Spec compliance APPROVED_WITH_CONCERNS — D1 fix
+  applied (`a540641` tightened StreamSession scope per §5.4 line 468);
+  D2 deferred to follow-up (proto extension blocked by M5-E proto
+  ownership). Code-quality APPROVED_WITH_CONCERNS — 3 IMPORTANT items
+  resolved via in-PR doc clarifications (`a235e38`): WS-vs-gRPC scope
+  divergence rationale, heartbeat enforcement deferred to Sub-phase D
+  with TODO marker, attachment_blob_ref UTF-8-bytes encoding contract
+  documented.
+
+### 2026-04-29 — M5 sub-phase E: lifed facade — pool push-down + half-open CAS + RAII PumpGuard + OTLP
+
+Production hardening completion + 8 carry-forward body completions
+from Sub-phase D reviews. Sub-phase E ships:
+
+- **New `life-runtime-pool` shared crate** hosting `Pool` (semaphore +
+  circuit breaker + ArcSwap-able tonic Channel), `PoolGuard`,
+  `CircuitBreaker` (with HalfOpen single-trial CAS), `BreakerState`,
+  `SubstrateKind`, `SubstratePools` — dependency-isolation script
+  enumerates it explicitly per code-quality review D1 (`1ef05bd`)
+- **Pool push-down to all 4 proxy crates** via `Pooled<C>` adapter
+  pattern: each `*Proxy` owns `Arc<Pool>` via `with_pool(...)`; per-RPC
+  methods bracket internally. Wallet/Identity/Events services no
+  longer carry `pools` field. Chaos test now exercises real dispatch
+  boundary (the `TestEnv::record_lago_failures` direct-bump stopgap is
+  gone).
+- **HalfOpen single-trial CAS** via `AtomicBool::compare_exchange` —
+  100-concurrent stampede admits exactly 1 guard, 99 short-circuit.
+  I1 fix (`ab7d077`) ensures the trial slot is released if
+  `Pool::acquire`'s semaphore acquire fails after winning the CAS
+  (prevents breaker deadlock on shutdown).
+- **RAII `PumpGuard`** for fanout panic-safety: `Drop` impl releases
+  `pump_active` slot even if pump task panics. Verified by
+  `integration_pump_guard::pump_guard_releases_slot_on_panic`.
+- **OTLP exporter wired** behind `cfg.vigil.otlp_endpoint` via
+  `life_vigil::init_telemetry`. Logging-only fallback when endpoint
+  unset/unreachable. W3C `TraceContextPropagator` installed globally;
+  outbound substrate calls propagate `traceparent` per Spec C₂ §9.1.
+- **15 metric series incrementing from production code** (Spec C₂ §9.3):
+  pool guard owns `dispatch.count` / `dispatch.duration_ms` /
+  `semaphore.inflight` / `breaker_state`; routing cache owns
+  `session.{created,destroyed,active}_total` / `cache.{size,evictions_total}`
+  / `replay_seconds`; saga driver owns `saga.{inflight,completed_total,
+  compensation_failed_total}`; fanout owns `slow_stream_total`; new
+  `HandlerMetricsLayer` tower middleware owns `handler.duration_ms`.
+- **`#[non_exhaustive]`** on RetryClass (×4 proxies) + BreakerState +
+  SubstrateKind + SagaEventType. `SubstratePoolsInitial` +
+  `SubstrateKind` doc comments on every variant.
+- **Lago wire RPC swap (lago.Append + lago.ListNamespaces)** — DEFERRED
+  per documented decision: lagod hasn't shipped these typed RPCs yet
+  (only `IngestService.Ingest` / `CreateSession` / `GetSession` exist).
+  The lago-proxy shim (sha256-keyed `idem_persist` for `append_event`;
+  empty-vec fallback for `list_namespaces`) is production-correct.
+  `RoutingCache::cold_start` warms on incoming traffic. Tracked under
+  BRO-934.
+- Tests: 3640 → 3662 (+22 — 15 in `life-runtime-pool` including the
+  100-concurrent stampede test and I1 release-slot test, +7 lifed
+  including 3 pump-guard panic-safety + 4 substrate-breakers + handler
+  metrics tower).
+- Linear BRO-937 → Done. PR #1062 merged 2026-04-29 (commit `e2d3a6c`).
+  Spec compliance APPROVED_WITH_CONCERNS — all 7 implementer Spec C₂
+  decisions verified, 15/15 metric series confirmed, ZERO critical or
+  missing findings; 1 in-PR fix (`1ef05bd` adds life-runtime-pool to
+  verify script). Code-quality APPROVED_WITH_CONCERNS — 1 IMPORTANT
+  fix applied (`ab7d077` HalfOpen trial-slot release on semaphore-closed)
+  + 6 nice-to-have items deferred to follow-ups.
+- **M5 lifed is now technically 100% production-ready.** Plan tasks
+  E1 (`deploy/systemd/lifed.service`) + E3 (E2E smoke harness) remain
+  as M5-SHIPPED finalization work — tracked separately. Lago wire RPC
+  swap waits on lagod readiness.
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
