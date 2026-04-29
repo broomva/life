@@ -1,0 +1,149 @@
+# lifed — example configuration
+#
+# Reference TOML mirroring the `LifedConfig` struct at
+# `crates/life-runtime/lifed/src/config.rs`. Every field shown here
+# matches the in-code default exactly, so an empty config file would
+# behave the same as this one — the file exists primarily to document
+# the production knobs operators will tune.
+#
+# Production deploy: copy to `/etc/lifed/config.toml` and tune the
+# fields commented "OPERATOR ATTENTION" below. The systemd unit at
+# `deploy/systemd/lifed.service` reads `LIFED_CONFIG=/etc/lifed/config.toml`
+# by default; override via the unit's `Environment=` directive.
+
+# ── Public plane (apps + browsers via lifegw) ───────────────────────────────
+[public_plane]
+unix_socket = "/run/life/life.sock"
+unix_socket_mode = 0o660
+unix_socket_group = "life-runtime"
+
+# ── Admin plane (operator CLI + autonomic) ──────────────────────────────────
+[admin_plane]
+unix_socket = "/run/life/life-admin.sock"
+unix_socket_mode = 0o660
+# OPERATOR ATTENTION: members of `life-admin` group can call admin RPCs
+# (Runtime / Saga / RoutingCache services). Keep membership narrow.
+unix_socket_group = "life-admin"
+
+# ── Per-substrate UDS endpoints ─────────────────────────────────────────────
+# OPERATOR ATTENTION: these paths must match the systemd unit definitions
+# of soma / arcand / lagod / haimad / animad. The defaults below assume
+# every substrate uses `/run/life/<name>.sock`.
+[substrates.arcan]
+unix_socket = "/run/life/arcan.sock"
+
+[substrates.lago]
+unix_socket = "/run/life/lago.sock"
+
+[substrates.haima]
+unix_socket = "/run/life/haima.sock"
+
+[substrates.anima]
+unix_socket = "/run/life/anima.sock"
+
+[substrates.soma]
+unix_socket = "/run/life/soma.sock"
+
+# ── Authn / authz ───────────────────────────────────────────────────────────
+[auth]
+# OPERATOR ATTENTION: this MUST be `false` in production. When `true`,
+# lifed accepts the `Bearer test-token-for-{user_id}` dev signer for
+# integration tests. Setting `true` in production = open auth on the
+# public plane.
+dev_signer_enabled = false
+
+# Tier-2 capability tokens minted by lifegw and verified by lifed.
+# Audience must be `lifed`; issuer must match lifegw's mint config.
+tier2_audience = "lifed"
+tier2_issuer = "lifegw"
+
+# Path lifegw publishes its public JWKS to. lifed reads it on each
+# verify attempt; cached for 5 min, refetched on cache miss / kid
+# rotation. Set to the same path lifegw's `auth.publish_jwks_path`
+# writes to.
+jwks_path = "/run/life/lifegw-jwks.json"
+
+# Tier-3 substrate-derived tokens — lifed mints these per-RPC and
+# attaches as the `authorization` bearer on outgoing tonic metadata.
+# The signing key lives in the env var named below; falls back to a
+# generated dev key if unset (dev_signer_enabled MUST be true).
+tier3_signing_key_env = "LIFED_TIER3_SIGNING_KEY_PEM"
+
+# JWKS publish path for the Tier-3 verifier (substrates read this to
+# verify lifed-minted tokens). Default mirrors lifegw's pattern.
+substrate_jwks_publish_path = "/run/life/lifed-jwks.json"
+
+# ── Routing-cache ───────────────────────────────────────────────────────────
+[routing]
+# Hard cap on cached sessions before LRU eviction kicks in.
+max_sessions = 10000
+# Idle TTL — sessions with no traffic for this long get evicted.
+idle_ttl_secs = 3600
+# Sweeper tick frequency.
+sweeper_interval_secs = 60
+
+# ── Per-substrate connection pools (Spec C₂ §7.1 capacities) ────────────────
+[pools.arcan]
+capacity = 32
+
+[pools.lago]
+capacity = 64
+
+[pools.haima]
+capacity = 16
+
+[pools.anima]
+capacity = 16
+
+[pools.soma]
+capacity = 8
+
+# ── Idempotency store ──────────────────────────────────────────────────────
+[idempotency]
+# `lago` (production) or `in_memory` (dev/tests).
+backend = "lago"
+# 24h TTL — replay window for idempotent operations (Wallet.Debit etc.).
+ttl_secs = 86400
+# Sweeper tick frequency for in-memory backend.
+sweeper_interval_secs = 300
+
+# ── Observability (vigil → OpenTelemetry) ───────────────────────────────────
+[vigil]
+# Tracing log level: trace | debug | info | warn | error.
+level = "info"
+
+# OPERATOR ATTENTION: set this to your OTLP collector endpoint
+# (e.g., "http://otel-collector:4317") to enable trace + metric
+# export. Empty / unset = logging-only fallback.
+otlp_endpoint = ""
+
+# Service name used for trace + metric attribution.
+service_name = "lifed"
+
+# ── Graceful shutdown ───────────────────────────────────────────────────────
+[shutdown]
+# Time given to in-flight RPCs to drain on SIGTERM before forced kill.
+# Should match the systemd unit's `TimeoutStopSec=`.
+drain_secs = 30
+
+# ── Notes ───────────────────────────────────────────────────────────────────
+#
+# - `LIFED_ALLOW_MOCK_FALLBACK` env var: never set in production.
+#   When true, lifed boots with mock substrates if any UDS socket is
+#   missing. Useful for `cargo run -p lifed` in dev; a security
+#   foot-gun in production. The systemd unit explicitly omits it.
+#
+# - Tier-3 signing-key rotation: replace the PEM-encoded key in
+#   `LIFED_TIER3_SIGNING_KEY_PEM` and SIGHUP the daemon (or restart).
+#   30-min rotation grace gives substrates time to refetch
+#   `lifed-jwks.json` before the old key is retired.
+#
+# - Cold-start replay: at boot, lifed calls
+#   `lago.ListNamespaces` → enumerates `session/<sid>` namespaces →
+#   re-populates the routing cache. If lago is empty (or returns
+#   empty per the BRO-934 fallback while lago.ListNamespaces wire
+#   RPC ships), the cache lazily fills on incoming traffic.
+#
+# - For the full config schema (every field, every default, every
+#   `#[serde(deny_unknown_fields)]` constraint), see
+#   `crates/life-runtime/lifed/src/config.rs`.
