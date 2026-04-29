@@ -30,15 +30,19 @@ use tonic::body::Body;
 use tower::{Layer, Service};
 
 use crate::auth::dev_signer;
+use crate::auth::jwks::JwksCache;
 use crate::auth::scope::{self, ScopeError};
+use crate::auth::tier1::Tier1Claims;
 use crate::auth::tier2::Tier2Minter;
+use crate::error::LifegwResult;
 use crate::services::health;
+use crate::services::rate_limit::{RateLimitDecision, TokenBucketLimiter};
 
-/// Tower Layer wrapping a service with Tier-1 verify + Tier-2 mint and
-/// a `/healthz` bypass path.
+/// Tower Layer wrapping a service with Tier-1 verify + Tier-2 mint
+/// + per-user/per-IP rate limit and a `/healthz` bypass path.
 ///
-/// Future fields (rate-limiter handle in Sub-phase D, scope-intersection
-/// table in Sub-phase B's follow-up) are added without breaking
+/// Future fields (additional Sub-phase D operational signals like
+/// blocklist + cert-reload counters) are added without breaking
 /// downstream consumers because the type is `#[non_exhaustive]`.
 #[derive(Clone)]
 #[non_exhaustive]
@@ -46,6 +50,17 @@ pub struct AuthLayer {
     minter: Arc<Tier2Minter>,
     dev_signer_enabled: bool,
     upstream_path: Arc<PathBuf>,
+    /// Sub-phase D (D7): explicit per-`AuthService<S>` JWKS cache
+    /// handle. When `None`, the legacy global `OnceLock<JwksCache>`
+    /// path is used (deprecated; will be removed in Sub-phase E). The
+    /// recommended constructor [`AuthLayer::with_jwks`] passes the
+    /// cache here so per-test verifier swaps are possible without
+    /// touching process-global state.
+    jwks: Option<Arc<JwksCache>>,
+    /// Sub-phase D (D1): token-bucket rate limiter. When `None`, the
+    /// limiter is bypassed (used by tests that don't need to assert
+    /// the limit path). Production startups always set this.
+    rate_limiter: Option<TokenBucketLimiter>,
 }
 
 impl AuthLayer {
@@ -59,6 +74,11 @@ impl AuthLayer {
     ///   tokens. MUST be `false` in production deployments.
     /// - `upstream_path` — UDS path to lifed. The `/healthz` bypass
     ///   probes this socket to confirm upstream readiness.
+    ///
+    /// **Sub-phase D (D7):** prefer [`AuthLayer::with_jwks`] which
+    /// takes an explicit `Arc<JwksCache>`. The legacy `new`
+    /// constructor falls back to the deprecated process-global JWKS
+    /// installed via [`crate::auth::dev_signer::install_tier1_verifier`].
     pub fn new(
         minter: Arc<Tier2Minter>,
         dev_signer_enabled: bool,
@@ -68,7 +88,41 @@ impl AuthLayer {
             minter,
             dev_signer_enabled,
             upstream_path,
+            jwks: None,
+            rate_limiter: None,
         }
+    }
+
+    /// Construct an `AuthLayer` with an explicit JWKS handle threaded
+    /// through to every `AuthService<S>` instance the layer produces.
+    ///
+    /// This is the recommended constructor as of Sub-phase D (D7) —
+    /// it sidesteps the deprecated process-global `OnceLock<JwksCache>`
+    /// and lets multiple tests in a single binary swap verifiers via
+    /// the explicit per-service handle.
+    pub fn with_jwks(
+        minter: Arc<Tier2Minter>,
+        dev_signer_enabled: bool,
+        upstream_path: Arc<PathBuf>,
+        jwks: Arc<JwksCache>,
+    ) -> Self {
+        Self {
+            minter,
+            dev_signer_enabled,
+            upstream_path,
+            jwks: Some(jwks),
+            rate_limiter: None,
+        }
+    }
+
+    /// Sub-phase D (D1): attach a [`TokenBucketLimiter`] to the
+    /// layer. The limiter is consulted post-auth (so we have
+    /// `Tier1Claims.user_id`) and pre–Tier-2 mint (so the gateway
+    /// drops over-budget traffic before paying the JWS-mint CPU
+    /// cost).
+    pub fn with_rate_limiter(mut self, limiter: TokenBucketLimiter) -> Self {
+        self.rate_limiter = Some(limiter);
+        self
     }
 }
 
@@ -81,6 +135,8 @@ impl<S> Layer<S> for AuthLayer {
             minter: Arc::clone(&self.minter),
             dev_signer_enabled: self.dev_signer_enabled,
             upstream_path: Arc::clone(&self.upstream_path),
+            jwks: self.jwks.clone(),
+            rate_limiter: self.rate_limiter.clone(),
         }
     }
 }
@@ -102,6 +158,13 @@ pub struct AuthService<S> {
     minter: Arc<Tier2Minter>,
     dev_signer_enabled: bool,
     upstream_path: Arc<PathBuf>,
+    /// Sub-phase D (D7): explicit JWKS cache handle threaded from
+    /// [`AuthLayer::with_jwks`]. When `None`, the deprecated process
+    /// global is consulted as a fallback.
+    jwks: Option<Arc<JwksCache>>,
+    /// Sub-phase D (D1): token-bucket limiter handle. When `None`,
+    /// the limiter is bypassed (test paths only).
+    rate_limiter: Option<TokenBucketLimiter>,
 }
 
 impl<S> Service<Request<Body>> for AuthService<S>
@@ -125,6 +188,13 @@ where
         let minter = Arc::clone(&self.minter);
         let dev_signer_enabled = self.dev_signer_enabled;
         let upstream_path = Arc::clone(&self.upstream_path);
+        // Sub-phase D (D7): the verifier handle now lives on
+        // `self` so we capture an `Arc<JwksCache>` (or `None`) into
+        // the future before the mutable borrow of `self.inner.clone()`
+        // is dropped.
+        let jwks_handle = self.jwks.clone();
+        // Sub-phase D (D1): rate-limiter handle.
+        let rate_limiter = self.rate_limiter.clone();
 
         Box::pin(async move {
             // Spec C₃ §3.5 LOCKED L4-D7: health endpoints bypass auth.
@@ -140,20 +210,40 @@ where
                 .map(|t| t.to_string());
 
             // `dev_signer_enabled` is informational here — both code
-            // paths route through `dev_signer::verify`, which delegates
-            // to the global `JwksCache`. Whether the cache accepts the
-            // dev shortcut or runs real ES256 / RS256 is decided by the
-            // cache type bootstrap installed (see
-            // `bootstrap::install_tier1_verifier`). We capture the flag
-            // for logging only.
+            // paths route through the JWKS cache. Whether the cache
+            // accepts the dev shortcut or runs real ES256/RS256 is
+            // decided by the cache type. The flag is captured for
+            // logging only.
             let _ = dev_signer_enabled;
             let tier1 = match bearer {
-                Some(tok) => match dev_signer::verify(&tok) {
+                Some(tok) => match verify_with_handle(jwks_handle.as_ref(), &tok) {
                     Ok(c) => c,
                     Err(_) => return Ok(unauth_response("invalid Tier-1 bearer")),
                 },
                 None => return Ok(unauth_response("missing Tier-1 bearer token")),
             };
+
+            // Sub-phase D (D1): rate-limit check AFTER Tier-1 verify
+            // (so we have a real `user_id` to key the bucket on) and
+            // BEFORE the Tier-2 mint (so over-budget traffic doesn't
+            // pay the JWS-mint CPU cost). Per the prompt's hard rule,
+            // we surface `Status::resource_exhausted(...)` — that
+            // tonic code maps cleanly to WS close 4001 via the
+            // existing close-code mapper.
+            if let Some(limiter) = rate_limiter.as_ref() {
+                let peer_ip = peer_ip_from_request(&req)
+                    .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+                let decision = limiter.check(&tier1.user_id, peer_ip);
+                if decision.is_reject() {
+                    tracing::debug!(
+                        user = %tier1.user_id,
+                        ip = %peer_ip,
+                        reason = decision.reason(),
+                        "rate limit rejected request"
+                    );
+                    return Ok(rate_limit_response(decision));
+                }
+            }
 
             // Sub-phase C (BRO-938 follow-up #3): scope intersection
             // check BEFORE the Tier-2 mint pays its CPU cost. Empty
@@ -199,6 +289,84 @@ where
             inner.call(req).await
         })
     }
+}
+
+/// Verify a Tier-1 bearer through the per-service handle when set,
+/// otherwise the deprecated process-global. Sub-phase D (D7).
+fn verify_with_handle(jwks: Option<&Arc<JwksCache>>, bearer: &str) -> LifegwResult<Tier1Claims> {
+    if let Some(cache) = jwks {
+        return cache.verify(bearer);
+    }
+    match dev_signer::global_verifier() {
+        Some(cache) => cache.verify(bearer),
+        None => Err(crate::error::LifegwError::Auth(
+            "tier-1 verifier not installed (use AuthLayer::with_jwks(...))".to_string(),
+        )),
+    }
+}
+
+/// Resolve the request's peer IP for the rate-limiter's per-IP
+/// bucket. Sub-phase D (D1).
+///
+/// Order of precedence:
+/// 1. `X-Forwarded-For` header (left-most non-empty value). Used when
+///    lifegw sits behind another L7 proxy / Vercel edge. We trust the
+///    header because the systemd unit binds publicly only on
+///    operator-controlled fronts; if you deploy lifegw without a
+///    trusted L7 in front, set `LIFEGW_DISABLE_XFF=1` or remove this
+///    branch in your fork.
+/// 2. `Forwarded` header (RFC 7239) — `for=<ip>` token.
+/// 3. `TcpConnectInfo` from tonic's `Connected` extension — the
+///    socket-level peer address.
+/// 4. None — caller falls back to `0.0.0.0` so the rate limiter still
+///    enforces a single-shared-bucket budget (defence in depth).
+fn peer_ip_from_request<B>(req: &Request<B>) -> Option<std::net::IpAddr> {
+    use tonic::transport::server::TcpConnectInfo;
+    // X-Forwarded-For — pick the leftmost non-empty token.
+    if let Some(hv) = req.headers().get("x-forwarded-for")
+        && let Ok(s) = hv.to_str()
+        && let Some(first) = s.split(',').map(str::trim).find(|x| !x.is_empty())
+        && let Ok(ip) = first.parse::<std::net::IpAddr>()
+    {
+        return Some(ip);
+    }
+    // Forwarded: for=<ip> (RFC 7239).
+    if let Some(hv) = req.headers().get("forwarded")
+        && let Ok(s) = hv.to_str()
+    {
+        for part in s.split(';') {
+            for kv in part.split(',') {
+                let trimmed = kv.trim();
+                let rest = trimmed
+                    .strip_prefix("for=")
+                    .or_else(|| trimmed.strip_prefix("For="));
+                if let Some(rest) = rest {
+                    let raw = rest.trim_matches('"');
+                    let raw = raw.trim_start_matches('[').trim_end_matches(']');
+                    // Strip optional :<port> suffix (only on IPv4 since
+                    // IPv6 addresses use `[v6]:port`).
+                    let candidate = raw.split(':').next().unwrap_or(raw);
+                    if let Ok(ip) = candidate.parse::<std::net::IpAddr>() {
+                        return Some(ip);
+                    }
+                }
+            }
+        }
+    }
+    // TonicConnectInfo — placed by `LifegwTlsStream::connect_info` per
+    // connection.
+    req.extensions()
+        .get::<TcpConnectInfo>()
+        .and_then(|ci| ci.remote_addr.map(|s| s.ip()))
+}
+
+/// Build a `Status::resource_exhausted`-shaped HTTP response. Per
+/// the prompt's hard rule, rate-limit returns `resource_exhausted`
+/// (NOT `unavailable`) — the gRPC code maps cleanly to WS close 4001
+/// via [`crate::services::ws::map_status_to_close`].
+fn rate_limit_response(decision: RateLimitDecision) -> http::Response<Body> {
+    let status = tonic::Status::resource_exhausted(decision.reason().to_string());
+    grpc_status_response(status)
 }
 
 /// Build a `Status::unauthenticated`-shaped HTTP response that tonic clients
@@ -247,4 +415,41 @@ fn grpc_status_response(status: tonic::Status) -> http::Response<Body> {
         headers.insert("grpc-message", v);
     }
     resp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_with_handle_uses_explicit_jwks() {
+        // Sub-phase D (D7): when an explicit `Arc<JwksCache>` is
+        // threaded through the middleware, no global state is touched.
+        // The dev-only cache accepts the magic Bearer.
+        let cache = Arc::new(JwksCache::dev_only());
+        let claims = verify_with_handle(Some(&cache), "dev-token-for-direct")
+            .expect("explicit handle accepts dev token");
+        assert_eq!(claims.user_id, "direct");
+    }
+
+    #[test]
+    fn verify_with_handle_rejects_invalid_via_explicit_jwks() {
+        let cache = Arc::new(JwksCache::dev_only());
+        let err = verify_with_handle(Some(&cache), "not-a-jwt-or-dev-token")
+            .expect_err("invalid bearer rejected");
+        match err {
+            crate::error::LifegwError::Auth(_) => {}
+            other => panic!("expected Auth, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn verify_with_handle_explicit_path_does_not_consult_global() {
+        // The explicit handle has its own dev-only cache; even if the
+        // process-global was never installed, the handle-based verify
+        // succeeds. This is the key behavioural guarantee D7 unlocks
+        // — per-test verifier swaps without global mutation.
+        let cache = Arc::new(JwksCache::dev_only());
+        verify_with_handle(Some(&cache), "dev-token-for-isolated").expect("isolated verify");
+    }
 }

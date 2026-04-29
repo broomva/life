@@ -1,8 +1,11 @@
-//! Codegen for `life.v1.*` (public plane) + `life.admin.v1.*` (admin plane).
+//! Codegen for `life.v1.*` (public plane), `life.admin.v1.*` (lifed
+//! admin plane), and `life.admin.gw.v1.*` (M7 Sub-phase D — lifegw
+//! admin plane).
 //!
-//! Source proto files live under `core/life/proto/life/v1/` and
-//! `core/life/proto/life/admin/v1/`. Both subtrees import `aios.v1.*` from
-//! `core/life/proto/aios/v1/` (M3-shipped canonical vocabulary).
+//! Source proto files live under `core/life/proto/life/v1/`,
+//! `core/life/proto/life/admin/v1/`, and `core/life/proto/life/admin/gw/v1/`.
+//! All three subtrees import `aios.v1.*` from `core/life/proto/aios/v1/`
+//! (M3-shipped canonical vocabulary).
 
 use std::path::PathBuf;
 
@@ -17,6 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("proto");
     let life_v1 = proto_root.join("life/v1");
     let life_admin_v1 = proto_root.join("life/admin/v1");
+    let life_admin_gw_v1 = proto_root.join("life/admin/gw/v1");
 
     let inputs: Vec<PathBuf> = vec![
         life_v1.join("agent.proto"),
@@ -26,6 +30,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         life_admin_v1.join("runtime.proto"),
         life_admin_v1.join("saga.proto"),
         life_admin_v1.join("routing_cache.proto"),
+        // Sub-phase D (D2): lifegw admin plane.
+        life_admin_gw_v1.join("gateway.proto"),
     ];
 
     // Tell cargo to rerun on any proto change.

@@ -59,7 +59,10 @@ async fn stream_session_returns_canned_events() {
     let sid = session.sid.expect("sid");
 
     let mut client = env.agent_client().await;
-    let mut req = tonic::Request::new(SessionRef { sid: Some(sid) });
+    let mut req = tonic::Request::new(SessionRef {
+        sid: Some(sid),
+        from_sequence: None,
+    });
     req.metadata_mut().insert(
         "authorization",
         "Bearer test-token-for-alice".parse().unwrap(),
@@ -91,9 +94,11 @@ async fn multi_tab_fanout_emits_to_all_attached_streams() {
     let mut c2 = env.agent_client().await;
     let mut req1 = tonic::Request::new(SessionRef {
         sid: Some(sid.clone()),
+        from_sequence: None,
     });
     let mut req2 = tonic::Request::new(SessionRef {
         sid: Some(sid.clone()),
+        from_sequence: None,
     });
     req1.metadata_mut().insert(
         "authorization",

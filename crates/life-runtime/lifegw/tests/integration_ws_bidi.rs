@@ -314,6 +314,10 @@ impl TestEnv {
         lifegw_cfg.upstream.lifed_uds_path = lifed_socket.clone();
         lifegw_cfg.auth.dev_signer_enabled = true;
         lifegw_cfg.auth.publish_jwks_path = None;
+        // Sub-phase D (D2): admin plane bound to a tempdir UDS.
+        lifegw_cfg.admin_plane.unix_socket = tempdir.path().join("lifegw-admin.sock");
+        lifegw_cfg.admin_plane.unix_socket_group = None;
+        lifegw_cfg.admin_plane.unix_socket_mode = None;
 
         let bind = lifegw::listener::bind(&lifegw_cfg.tls, &lifegw_cfg.listen)
             .await

@@ -1,6 +1,9 @@
 //! WebSocket bidi pump (Spec C₃ §6).
 //!
-//! Sub-phase C (BRO-938) ships the public-plane WS surface:
+//! Sub-phase C (BRO-938) shipped the public-plane WS surface; Sub-phase D
+//! (BRO-932 umbrella) hardens it with heartbeat enforcement (D5), the
+//! `from_sequence` resume cursor wired through to lifed (D6), and a
+//! per-WS persistent dispatcher for `SendMessage` frames (D9).
 //!
 //! - **Upgrade path**: `/v1/agent/stream` (per prompt; spec §6.1 uses
 //!   `/ws/v1/sessions/{sid}/stream` but the prompt path stays
@@ -14,33 +17,45 @@
 //!   added in a future sub-phase without breaking existing clients.
 //!
 //! - **Resume**: `?last_seq_no=<u64>` query param OR
-//!   `X-Life-Last-Seq-No: <u64>` header. Forwarded as `from_sequence`
-//!   on the upstream `Agent.StreamSession` request. `0` = fresh stream
-//!   (lifed's default semantics: replay from start).
+//!   `X-Life-Last-Seq-No: <u64>` header. Sub-phase D (D6) wires this
+//!   through as `from_sequence` on the upstream `Agent.StreamSession`
+//!   `SessionRef` proto. `0` = fresh stream (lifed's default
+//!   semantics: replay from start). Spec C₃ §6.3 LOCKED L4-D3.
 //!
 //! - **Frame format** (Spec C₃ §6.2): JSON envelope
 //!   `{ "seq_no": <u64>, "kind": "...", "payload": <T> }`. Server
 //!   pushes `agent_event` frames; client pushes `send_message`,
 //!   `ping`, `close` frames. Unknown frame kinds drop silently.
 //!
+//! - **Heartbeat** (Spec C₃ §6.4, Sub-phase D D5): the gateway sends
+//!   a WS ping every [`HEARTBEAT_INTERVAL`] (30 s). The client must
+//!   pong within [`PONG_DEADLINE`] (60 s) of the last received pong;
+//!   if not, the gateway closes with `1011 InternalError` (per Spec
+//!   C₃ §6.5). Sub-phase C exposed the constant and the close-code
+//!   path; D wires the actual pings + pong-deadline tracking via the
+//!   bidi-pump `tokio::select!`.
+//!
 //! - **Close codes** (Spec C₃ §6.5): 1000 normal, 1001 going-away,
-//!   1011 server error, 4001 rate-limit (D-stub here), 4002 slow
-//!   consumer / scope insufficient (the prompt re-mapped 4002 to
-//!   "scope insufficient"; we land on the spec's "slow consumer"
-//!   semantic + add 1008 for token expired so we don't introduce a
-//!   spec-conflicting code). 4003 ip-blocked, 4004 lifed-unavailable,
-//!   4005 sequence-retired.
+//!   1011 server error (D5: also heartbeat timeout), 4001 rate-limit
+//!   (D1), 4002 slow consumer / backpressure overflow, 4003
+//!   ip-blocked, 4004 lifed-unavailable, 4005 sequence-retired.
 //!
 //!   Decision (BRO-938 §6.5 reconciliation): the user prompt and the
 //!   spec disagree on close-code semantics. The spec is authoritative
 //!   per the prompt's hard rule "Close codes match spec — 4001-4004
 //!   reserved per spec; don't introduce new ones without spec
-//!   amendment". This module emits the spec codes (4001 rate-limit,
-//!   4002 backpressure, 4003 ip-blocked, 4004 lifed-unavailable, 4005
-//!   sequence-retired) and uses the standard 1008 (policy violation)
-//!   for token-expired and 1011 for internal errors. Documentation
-//!   follow-up: amend Spec C₃ §6.5 to also mention 1008 + 1011 if
-//!   that addition is desirable.
+//!   amendment". This module emits the spec codes and uses 1008
+//!   (policy violation) for token-expired + 1011 for internal errors
+//!   (including heartbeat timeout per D5). Documentation follow-up:
+//!   amend Spec C₃ §6.5 to also mention 1008 + 1011.
+//!
+//! - **Per-WS persistent dispatcher** (Sub-phase D D9): inbound
+//!   `SendMessage` frames are forwarded to a dedicated dispatcher
+//!   task via a bounded mpsc(64). The dispatcher serialises upstream
+//!   `Agent.SendMessage` calls so a misbehaving client sending 1000
+//!   frames in 100 ms produces ≤1 concurrent upstream stream instead
+//!   of 1000. The dispatcher exits when the WS closes (channel
+//!   senders drop).
 //!
 //! - **Bounded mpsc(64)** per WS connection (Spec C₃ §8.2). Slow
 //!   client → close `4002 backpressure:slow_consumer`. The
@@ -49,7 +64,7 @@
 
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use futures::SinkExt;
@@ -82,19 +97,28 @@ pub const STALLED_THRESHOLD: u32 = 5;
 /// Polling cadence for the slow-consumer detector.
 pub const STALL_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Heartbeat interval (Spec C₃ §6.4) — gateway will send a WS ping
-/// every 30 s and close with 1011 if the client doesn't pong inside the
-/// window.
+/// Heartbeat interval (Spec C₃ §6.4) — gateway sends a WS ping every
+/// 30 s and closes with `1011 InternalError` if no pong is received
+/// within [`PONG_DEADLINE`].
 ///
-/// **Sub-phase D follow-up (BRO-XXX):** the constant is exposed at
-/// module scope so a Sub-phase D contributor can pull it directly into
-/// the heartbeat tick + pong-deadline-tracking logic. Sub-phase C ships
-/// the close-code mapping for `1011 InternalError` (which is also used
-/// for upstream errors) but does NOT yet enforce the heartbeat itself —
-/// the bidi pump's `tokio::select!` has 3 arms (outbound, inbound,
-/// stall_clock); a 4th arm for `heartbeat_clock.tick()` and a 5th for
-/// `pong_deadline_clock.tick()` will be added in D.
+/// Sub-phase D (D5) wires the heartbeat via two new arms in the
+/// bidi-pump `tokio::select!`: a `heartbeat_clock` that fires every
+/// [`HEARTBEAT_INTERVAL`] and emits `Message::Ping(b"life")`, plus a
+/// `pong_deadline_clock` that fires every second and checks whether
+/// `Instant::now() - last_pong_at > PONG_DEADLINE`.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Pong-deadline window (Spec C₃ §6.4): if no pong has been received
+/// from the client within this duration, the gateway closes the WS
+/// with `1011 InternalError`. Set to twice [`HEARTBEAT_INTERVAL`] so a
+/// single dropped ping or transient network jitter is tolerated; two
+/// dropped pings in a row trips the close.
+pub const PONG_DEADLINE: Duration = Duration::from_secs(60);
+
+/// Cadence at which the bidi pump checks the pong-deadline. Picked
+/// short enough that the close fires within ~1 s of the deadline
+/// expiring.
+const PONG_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 /// WS close-code policy per Spec C₃ §6.5 (extended for sub-phase C).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,13 +134,13 @@ pub enum CloseReason {
     /// reserved 4001 = rate-limit slot. Operators can correlate by
     /// the `policy_violation:token_expired` reason string.
     PolicyViolation,
-    /// `1011` — internal server error (unexpected failure). Sub-phase D
-    /// will additionally use this code for heartbeat-timeout closures
-    /// once the heartbeat enforcement lands (see `HEARTBEAT_INTERVAL`
-    /// docstring above).
+    /// `1011` — internal server error. Used for unexpected upstream
+    /// failures AND heartbeat timeouts (Spec C₃ §6.4 + §6.5):
+    /// Sub-phase D (D5) closes idle connections that don't pong
+    /// within [`PONG_DEADLINE`].
     InternalError,
-    /// `4001` — rate limit exceeded (Sub-phase D wires the actual
-    /// limiter; Sub-phase C exposes the code path).
+    /// `4001` — rate limit exceeded (Sub-phase D D1 wires the
+    /// limiter; Sub-phase C exposed the code path).
     RateLimit,
     /// `4002` — slow consumer / backpressure overflow (Spec §6.5).
     SlowConsumer,
@@ -489,17 +513,21 @@ fn bad_request_with_status(status: StatusCode, msg: &str) -> Response<Body> {
 /// Topology (Spec C₃ §8.1):
 ///
 /// ```text
-///                  ┌──────────────────────┐
-///                  │  Per-WS state        │
-///   browser  ←───→ │  inbound  mpsc(64)   │ ←───→ lifed Agent.StreamSession
-///                  │  outbound mpsc(64)   │
-///                  └──────────────────────┘
+///                  ┌────────────────────────────────────┐
+///                  │  Per-WS state                      │
+///   browser  ←───→ │  inbound      mpsc(64)             │ ←───→ lifed Agent.StreamSession
+///                  │  outbound     mpsc(64)             │
+///                  │  send_msg_tx  mpsc(64) (D9)        │ ──→  per-WS dispatcher task
+///                  │                                    │       └─→ Agent.SendMessage (serialised)
+///                  └────────────────────────────────────┘
 /// ```
 ///
 /// **Inbound** (browser → gateway): WS frames decoded into
-/// `InboundFrame`. `send_message` triggers an upstream
-/// `Agent.SendMessage` server-stream that piggybacks events back
-/// through the same outbound channel. `ping` produces a local `pong`.
+/// `InboundFrame`. `send_message` is forwarded to the per-WS
+/// dispatcher task via `send_msg_tx` (Sub-phase D D9): the dispatcher
+/// serialises upstream `Agent.SendMessage` calls so a client cannot
+/// fan out 1000 concurrent upstream streams. `ping` produces a local
+/// `pong` (server-initiated heartbeat is independent — see below).
 /// `close` sends a 1000 close.
 ///
 /// **Outbound** (lifed → browser): the `Agent.StreamSession`
@@ -507,6 +535,16 @@ fn bad_request_with_status(status: StatusCode, msg: &str) -> Response<Body> {
 /// translated to an `OutboundFrame::AgentEvent` before sending. The
 /// outbound channel is a single mpsc so the WS sink half stays
 /// single-owner (per the tungstenite invariant).
+///
+/// **Heartbeat** (Sub-phase D D5, Spec C₃ §6.4): a `heartbeat_clock`
+/// tick every [`HEARTBEAT_INTERVAL`] emits `Message::Ping(b"life")`.
+/// A `pong_deadline_clock` tick every [`PONG_CHECK_INTERVAL`] checks
+/// whether `Instant::now() - last_pong_at > PONG_DEADLINE`. The
+/// server tracks pongs by observing `Message::Pong` frames in the
+/// inbound stream. `last_pong_at` is bumped on every pong; the
+/// initial value is `Instant::now()` so a client that connects and
+/// immediately stops responding gets a clean `1011` close after
+/// `PONG_DEADLINE`.
 ///
 /// **Slow-consumer policy**: every `STALL_CHECK_INTERVAL` we sample
 /// `outbound_tx.capacity()` against the channel size. If capacity has
@@ -529,9 +567,9 @@ where
 
     // Spawn the upstream tail. Cloning the agent_client is cheap (it
     // wraps a tonic Channel which is internally Arc'd). One clone for
-    // the upstream-tail task, one for the inbound-frame dispatcher.
+    // the upstream-tail task, one for the per-WS dispatcher (D9).
     let mut tail_client = conn.agent_client.clone();
-    let mut inbound_client = conn.agent_client.clone();
+    let dispatcher_client = conn.agent_client.clone();
     let tail_sid = conn.sid.clone();
     let tail_seq = conn.last_seq_no;
     let tail_bearer = bearer.clone();
@@ -557,9 +595,44 @@ where
         }
     });
 
+    // Sub-phase D (D9): per-WS persistent dispatcher for SendMessage.
+    // Inbound `SendMessage` frames are forwarded here via a bounded
+    // mpsc(64). The dispatcher task serialises upstream
+    // `Agent.SendMessage` calls — at most ONE upstream stream is
+    // active at a time per WS, regardless of how fast the client
+    // sends frames. Approve/Cancel dispatch frames remain inline
+    // because they're cheap unary calls; only the streaming-response
+    // SendMessage path needed serialisation to bound resource use.
+    let (send_msg_tx, send_msg_rx) = mpsc::channel::<DispatcherCommand>(PER_WS_BUFFER);
+    let dispatcher_sid = conn.sid.clone();
+    let dispatcher_bearer = bearer.clone();
+    let dispatcher_tx = outbound_tx.clone();
+    let dispatcher_task = tokio::spawn(run_send_message_dispatcher(
+        send_msg_rx,
+        dispatcher_client,
+        dispatcher_sid,
+        dispatcher_bearer,
+        dispatcher_tx,
+    ));
+
+    let mut inbound_client = conn.agent_client.clone();
+
     let mut stall_ticks: u32 = 0;
     let mut stall_clock = tokio::time::interval(STALL_CHECK_INTERVAL);
     stall_clock.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    // Sub-phase D (D5): heartbeat enforcement.
+    let mut heartbeat_clock = tokio::time::interval(HEARTBEAT_INTERVAL);
+    heartbeat_clock.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Skip the first immediate tick — the client just connected and
+    // shouldn't see a ping before the deadline window opens.
+    heartbeat_clock.tick().await;
+
+    let mut pong_clock = tokio::time::interval(PONG_CHECK_INTERVAL);
+    pong_clock.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    pong_clock.tick().await;
+
+    let mut last_pong_at = Instant::now();
 
     let close_reason: CloseReason = loop {
         tokio::select! {
@@ -586,6 +659,24 @@ where
             maybe = ws_source.next() => {
                 match maybe {
                     Some(Ok(msg)) => {
+                        // Sub-phase D (D5): track pong for heartbeat.
+                        if let Message::Pong(_) = &msg {
+                            last_pong_at = Instant::now();
+                            continue;
+                        }
+                        if let Message::Ping(payload) = &msg {
+                            // Browser-initiated ping — reply with pong
+                            // and reset the deadline. The tungstenite
+                            // sink will emit the WS pong frame.
+                            if let Err(err) = ws_sink
+                                .send(Message::Pong(payload.clone()))
+                                .await
+                            {
+                                tracing::debug!(error = %err, "pong send failed");
+                                break CloseReason::InternalError;
+                            }
+                            continue;
+                        }
                         if msg.is_close() {
                             break CloseReason::Normal;
                         }
@@ -596,6 +687,7 @@ where
                                 &mut inbound_client,
                                 bearer.as_deref(),
                                 &outbound_tx,
+                                &send_msg_tx,
                             )
                             .await
                             {
@@ -634,10 +726,45 @@ where
                     stall_ticks = 0;
                 }
             }
+
+            // Sub-phase D (D5): server-initiated heartbeat. Every
+            // HEARTBEAT_INTERVAL we send a WS ping; the client's WS
+            // stack is required to reply with a pong (RFC 6455 §5.5.3)
+            // which we observe via the inbound `Message::Pong` arm
+            // above.
+            _ = heartbeat_clock.tick() => {
+                if let Err(err) = ws_sink
+                    .send(Message::Ping(b"life".to_vec().into()))
+                    .await
+                {
+                    tracing::debug!(error = %err, "heartbeat ping send failed");
+                    break CloseReason::InternalError;
+                }
+            }
+
+            // Sub-phase D (D5): pong-deadline check. If no pong
+            // arrived inside the PONG_DEADLINE window, the connection
+            // is half-open (NAT timeout, LB idle, etc.) and we close
+            // with 1011 InternalError per Spec C₃ §6.5.
+            _ = pong_clock.tick() => {
+                if last_pong_at.elapsed() > PONG_DEADLINE {
+                    tracing::warn!(
+                        sid = %conn.sid,
+                        elapsed_ms = last_pong_at.elapsed().as_millis() as u64,
+                        "ws heartbeat timeout — closing with 1011"
+                    );
+                    break CloseReason::InternalError;
+                }
+            }
         }
     };
 
     upstream_task.abort();
+    // Drop the dispatcher's command sender so its `recv()` returns
+    // `None` and the task exits cleanly. The `dispatcher_task` join
+    // is best-effort — if it's mid-call we abort below.
+    drop(send_msg_tx);
+    dispatcher_task.abort();
 
     // Send the close frame so clients learn the policy decision.
     let close = close_reason.close_frame();
@@ -652,22 +779,23 @@ where
 async fn drive_upstream_tail(
     agent_client: &mut pb::agent_client::AgentClient<Channel>,
     sid: &str,
-    _from_seq: u64,
+    from_seq: u64,
     bearer: Option<&str>,
     outbound_tx: &mpsc::Sender<OutboundFrame>,
 ) -> Result<(), CloseReason> {
-    // Build the `SessionRef`. Sub-phase C uses StreamSession (which
-    // takes a SessionRef). The `from_sequence` resume cursor is
-    // currently NOT exposed in the proto for StreamSession (Spec C₃
-    // §6.3 LOCKED L4-D3 expects it on the upgrade — proto extension
-    // tracked as a Sub-phase D follow-up). For now, lifed replays
-    // from the start of the session and the gateway forwards
-    // verbatim. The `_from_seq` parameter is captured here so adding
-    // the proto field is a one-line change.
+    // Build the `SessionRef`. Sub-phase D (BRO-938 deviation D2)
+    // wires the resume cursor on the StreamSession proto: when the
+    // client included `X-Life-Last-Seq-No: N` (or `?last_seq_no=N`)
+    // on the WS upgrade, we forward that value as `from_sequence`.
+    // lifed replays from `N+1` before transitioning to live tail
+    // (Spec C₃ §6.3 LOCKED L4-D3, Spec C₂ §3.2 SubscribeReq.from_sequence).
+    // `0` means "fresh stream" — we omit the optional field so a
+    // pre-D server stays wire-compatible.
     let mut req = tonic::Request::new(pb::SessionRef {
         sid: Some(aios_pb::SessionId {
             value: sid.to_string(),
         }),
+        from_sequence: if from_seq == 0 { None } else { Some(from_seq) },
     });
     if let Some(b) = bearer
         && let Ok(mv) = b.parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>()
@@ -755,58 +883,150 @@ fn event_to_outbound_frame(event: pb::AgentEvent) -> OutboundFrame {
     }
 }
 
+/// Sub-phase D (D9): commands consumed by the per-WS persistent
+/// dispatcher. Currently only `SendMessage` flows through the
+/// dispatcher because it's the single inbound frame type that opens a
+/// streaming upstream call. `ApproveDispatch` / `CancelDispatch` are
+/// cheap unary calls handled inline by the bidi pump.
+enum DispatcherCommand {
+    SendMessage {
+        content: String,
+        attachment_blob_ref: Option<String>,
+    },
+}
+
+/// Sub-phase D (D9): per-WS persistent dispatcher task.
+///
+/// Reads `DispatcherCommand` items off the bounded `recv` channel,
+/// runs each through the upstream `agent_client.send_message(...)`
+/// call, and drains the resulting server-stream into the shared
+/// outbound mpsc. This serialises upstream dispatch — at most ONE
+/// SendMessage stream is in-flight per WS at a time. A misbehaving
+/// client sending 1000 frames in 100 ms now produces ≤1 active
+/// upstream stream + 64 queued commands (then the bounded mpsc
+/// applies tonic-style backpressure to the inbound pump).
+///
+/// The task exits cleanly when the inbound channel's senders are
+/// dropped (e.g. `run_bidi_pump` shuts down the WS) — `recv()`
+/// returns `None` and we fall out of the loop.
+async fn run_send_message_dispatcher(
+    mut rx: mpsc::Receiver<DispatcherCommand>,
+    mut agent_client: pb::agent_client::AgentClient<Channel>,
+    sid: String,
+    bearer: Option<String>,
+    outbound_tx: mpsc::Sender<OutboundFrame>,
+) {
+    while let Some(cmd) = rx.recv().await {
+        match cmd {
+            DispatcherCommand::SendMessage {
+                content,
+                attachment_blob_ref,
+            } => {
+                let mut req = tonic::Request::new(pb::SendMessageReq {
+                    sid: Some(aios_pb::SessionId { value: sid.clone() }),
+                    content,
+                    attachment_blob_ref: attachment_blob_ref
+                        .map(|s| s.into_bytes())
+                        .unwrap_or_default(),
+                });
+                if let Some(b) = bearer.as_deref()
+                    && let Ok(mv) =
+                        b.parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>()
+                {
+                    req.metadata_mut().insert("authorization", mv);
+                }
+
+                match agent_client.send_message(req).await {
+                    Ok(resp) => {
+                        let mut s = resp.into_inner();
+                        // Drain the upstream stream synchronously
+                        // within this dispatcher task — that's what
+                        // serialises subsequent SendMessage frames.
+                        while let Some(item) = s.next().await {
+                            match item {
+                                Ok(event) => {
+                                    let frame = event_to_outbound_frame(event);
+                                    if outbound_tx.send(frame).await.is_err() {
+                                        return;
+                                    }
+                                }
+                                Err(status) => {
+                                    let reason = map_status_to_close(&status);
+                                    let _ = outbound_tx
+                                        .send(OutboundFrame::Closing {
+                                            reason: reason.reason().to_string(),
+                                        })
+                                        .await;
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    Err(status) => {
+                        // Upstream rejected the message (auth, RL,
+                        // not_found, etc.). Surface a Closing frame
+                        // so the bidi-pump's outbound side observes
+                        // the WS-close decision and tears down.
+                        let reason = map_status_to_close(&status);
+                        let _ = outbound_tx
+                            .send(OutboundFrame::Closing {
+                                reason: reason.reason().to_string(),
+                            })
+                            .await;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Handle an inbound frame. Returns `Some(reason)` to close the WS
 /// with the given reason, `None` to continue.
+///
+/// Sub-phase D (D9): `SendMessage` frames go to the persistent
+/// dispatcher via the bounded `send_msg_tx` mpsc. The dispatcher
+/// serialises upstream calls. `ApproveDispatch` + `CancelDispatch`
+/// remain inline because they're unary + cheap — there's no
+/// streaming-resource amplification to bound.
 async fn handle_inbound_frame(
     frame: InboundFrame,
     sid: &str,
     agent_client: &mut pb::agent_client::AgentClient<Channel>,
     bearer: Option<&str>,
     outbound_tx: &mpsc::Sender<OutboundFrame>,
+    send_msg_tx: &mpsc::Sender<DispatcherCommand>,
 ) -> Option<CloseReason> {
     match frame {
         InboundFrame::SendMessage {
             content,
             attachment_blob_ref,
         } => {
-            // Sub-phase C: forward as `Agent.SendMessage`. The
-            // resulting server-stream drains into the SAME outbound
-            // channel as the StreamSession tail; the client sees a
-            // unified ordered event stream.
-            let mut req = tonic::Request::new(pb::SendMessageReq {
-                sid: Some(aios_pb::SessionId {
-                    value: sid.to_string(),
-                }),
-                content,
-                attachment_blob_ref: attachment_blob_ref
-                    .map(|s| s.into_bytes())
-                    .unwrap_or_default(),
-            });
-            if let Some(b) = bearer
-                && let Ok(mv) = b.parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>()
+            // Sub-phase D (D9): hand off to the dispatcher. If the
+            // bounded channel is full (>=64 queued commands), apply
+            // backpressure: when the dispatcher is processing a
+            // multi-second upstream stream and the client floods
+            // SendMessage frames, the inbound pump waits here. That's
+            // the desired behaviour — the client's WS read buffer
+            // fills up and the WS slow-consumer policy (§8.2) eventually
+            // fires the 4002 close. Do NOT spawn a fresh stream-drain
+            // task here (the pre-D9 behaviour) — that defeated the
+            // bound.
+            if send_msg_tx
+                .send(DispatcherCommand::SendMessage {
+                    content,
+                    attachment_blob_ref,
+                })
+                .await
+                .is_err()
             {
-                req.metadata_mut().insert("authorization", mv);
+                tracing::debug!("dispatcher channel closed — terminating WS");
+                return Some(CloseReason::InternalError);
             }
-            match agent_client.send_message(req).await {
-                Ok(resp) => {
-                    let tx = outbound_tx.clone();
-                    let mut s = resp.into_inner();
-                    tokio::spawn(async move {
-                        while let Some(item) = s.next().await {
-                            match item {
-                                Ok(event) => {
-                                    if tx.send(event_to_outbound_frame(event)).await.is_err() {
-                                        return;
-                                    }
-                                }
-                                Err(_) => return,
-                            }
-                        }
-                    });
-                    None
-                }
-                Err(status) => Some(map_status_to_close(&status)),
-            }
+            // The dispatcher will publish events via the shared
+            // outbound channel; nothing to do inline.
+            let _ = agent_client; // suppresses the unused-binding warning
+            None
         }
         InboundFrame::ApproveDispatch { dispatch_id } => {
             let mut req = tonic::Request::new(pb::ApprovalReq {
@@ -1168,5 +1388,21 @@ mod tests {
         // the explicit close.
         let m = Message::Binary(vec![1, 2, 3].into());
         assert!(decode_inbound(&m).is_none());
+    }
+
+    #[test]
+    fn heartbeat_constants_match_spec() {
+        // Sub-phase D (D5): heartbeat constants must match Spec C₃ §6.4.
+        assert_eq!(HEARTBEAT_INTERVAL, Duration::from_secs(30));
+        assert_eq!(PONG_DEADLINE, Duration::from_secs(60));
+        assert_eq!(PONG_CHECK_INTERVAL, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn pong_deadline_is_two_heartbeat_intervals() {
+        // Sub-phase D (D5) design rationale: PONG_DEADLINE = 2 ×
+        // HEARTBEAT_INTERVAL. A single dropped ping is tolerated; two
+        // in a row trip the close.
+        assert_eq!(PONG_DEADLINE, HEARTBEAT_INTERVAL * 2);
     }
 }

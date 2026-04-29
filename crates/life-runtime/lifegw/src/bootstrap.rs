@@ -19,6 +19,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as HyperConnBuilder;
@@ -30,18 +31,23 @@ use tower::ServiceExt;
 
 use life_runtime_proto::life::v1 as pb;
 
-use crate::auth::dev_signer;
+use crate::admin::{
+    AdminPolicy, Blocklist, CertReloadHook, GatewayAdminService, listener as admin_listener,
+};
 use crate::auth::jwks::{JwksCache, JwksCacheConfig, JwksSource};
 use crate::auth::kms::{KmsSigner, StaticKeystore};
 use crate::auth::middleware::AuthLayer;
 use crate::auth::tier2::Tier2Minter;
-use crate::config::{AuthConfig, KmsProvider, LifegwConfig};
+use crate::config::{AdminPlaneConfig, AuthConfig, KmsProvider, LifegwConfig};
 use crate::error::{LifegwError, LifegwResult};
 use crate::listener::{self, TlsBind};
 use crate::proxy::{
     AgentForwarder, EventsForwarder, IdentityForwarder, WalletForwarder, connect_uds,
 };
+use crate::services::cert_watch::CertReloader;
+use crate::services::rate_limit::TokenBucketLimiter;
 use crate::services::ws::WsLayer;
+use life_runtime_proto::life::admin::gw::v1 as admin_pb;
 
 /// Production daemon entrypoint. Reads the config (or defaults), installs
 /// the signal handler, binds TLS, dials upstream, and serves until SIGTERM.
@@ -54,10 +60,28 @@ pub async fn run_daemon(config_path: Option<&Path>) -> LifegwResult<()> {
         https_addr = %cfg.listen.https_addr,
         upstream = %cfg.upstream.lifed_uds_path.display(),
         dev_signer = cfg.auth.dev_signer_enabled,
-        "lifegw starting (Sub-phase B)",
+        "lifegw starting (Sub-phase D)",
     );
 
     let shutdown_rx = crate::shutdown::install_signal_handler();
+
+    // Sub-phase D (D3): install SIGHUP handler driving the cert
+    // reloader. The reloader is built optimistically — failures are
+    // logged but don't block startup (production deploys may have
+    // misconfigured paths during rollout; the gateway falls back to
+    // the static `bind()` cert in that case).
+    if let Ok(reloader) = CertReloader::load(&cfg.tls.cert_path, &cfg.tls.key_path) {
+        // Drop the JoinHandle — the SIGHUP task lives for the
+        // process lifetime; tokio will reap it on shutdown.
+        std::mem::drop(crate::shutdown::install_sighup_handler(Arc::new(reloader)));
+    } else {
+        tracing::warn!(
+            cert = %cfg.tls.cert_path.display(),
+            key = %cfg.tls.key_path.display(),
+            "cert-watch reloader could not load initial config; SIGHUP will be a no-op"
+        );
+    }
+
     let bind = listener::bind(&cfg.tls, &cfg.listen).await?;
     serve_with_listener(cfg, bind, shutdown_rx).await
 }
@@ -103,8 +127,12 @@ pub async fn serve_with_listener_and_signer(
 ) -> LifegwResult<()> {
     install_default_crypto_provider();
 
-    // Tier-1 verifier — install before the auth Layer goes live.
-    install_tier1_verifier(&cfg.auth)?;
+    // Sub-phase D (D7): build the JWKS cache once and thread it
+    // explicitly through `AuthLayer::with_jwks`. The legacy
+    // process-global `dev_signer::install_tier1_verifier` shim is
+    // kept in place for tests that still reach the deprecated entry
+    // point; production code stops touching that global.
+    let jwks = build_jwks_cache(&cfg.auth)?;
 
     // JWKS publish — write the signer's public key set to the
     // configured path atomically so downstream verifiers (lifed) can
@@ -118,10 +146,90 @@ pub async fn serve_with_listener_and_signer(
     let upstream_channel = connect_uds(&cfg.upstream.lifed_uds_path).await?;
 
     let minter = Arc::new(Tier2Minter::new(signer, &cfg.auth));
-    let auth_layer = AuthLayer::new(
+    // Sub-phase D (D1): build the rate limiter from config and
+    // attach it to the auth layer. Production deploys ALWAYS run
+    // with the limiter wired; tests can opt-out by constructing
+    // `AuthLayer::with_jwks(...)` directly.
+    let rate_limiter = TokenBucketLimiter::from_config(&cfg.rate_limit);
+    let auth_layer = AuthLayer::with_jwks(
         minter,
         cfg.auth.dev_signer_enabled,
         Arc::clone(&upstream_path),
+        Arc::clone(&jwks),
+    )
+    .with_rate_limiter(rate_limiter.clone());
+
+    // Sub-phase D (D3): construct the cert reloader from the same
+    // cert + key paths the bind step used. The reloader holds an
+    // ArcSwap<ServerConfig> so the listener path can swap configs
+    // atomically without disrupting in-flight TLS connections.
+    //
+    // Note: in Sub-phase D the gateway's bind path uses the
+    // `bind()` helper which synthesises a one-shot TlsAcceptor —
+    // the reloader exists but the per-connection TlsAcceptor is
+    // already cloned + held by the accept loop. Wiring the reloader
+    // into the per-connection acceptor is a Sub-phase E refinement
+    // (it requires plumbing the reloader through `serve_connections`).
+    // For now the reloader's value is twofold: (1) the admin-plane
+    // `CertReload` RPC routes here so operators have an RPC handle
+    // for ad-hoc reloads, and (2) the SIGHUP handler bumps the
+    // reload counter so dashboards observe rotations even before the
+    // per-connection swap lands.
+    let cert_reloader = CertReloader::load(&cfg.tls.cert_path, &cfg.tls.key_path)
+        .ok()
+        .map(Arc::new);
+    if cert_reloader.is_none() {
+        tracing::warn!(
+            cert = %cfg.tls.cert_path.display(),
+            key = %cfg.tls.key_path.display(),
+            "cert-watch reloader could not load initial config; \
+             admin-plane CertReload will return a no-op success"
+        );
+    }
+    let cert_hook = match cert_reloader.as_ref() {
+        Some(rel) => {
+            let rel = Arc::clone(rel);
+            CertReloadHook::new(move |_force| match rel.reload() {
+                Ok(n) => crate::admin::service::CertReloadOutcome::reloaded(n as u32),
+                Err(e) => crate::admin::service::CertReloadOutcome::rejected(e.to_string()),
+            })
+        }
+        None => CertReloadHook::noop(),
+    };
+
+    // Sub-phase D (D2): admin plane. Bind the admin UDS in parallel
+    // with the public plane. The admin server runs on its own
+    // tonic::transport::Server::builder() driven by the AdminAcceptor
+    // (which yields AdminConn carrying SO_PEERCRED). Tests that don't
+    // need admin can ignore this — the `serve_with_listener_*` paths
+    // always start it (mirroring lifed) so the admin RPCs land in
+    // every test rig.
+    let blocklist = Blocklist::new();
+    let admin_policy = build_admin_policy(&cfg.admin_plane);
+    let admin_service = GatewayAdminService::new(
+        Arc::new(admin_policy),
+        blocklist.clone(),
+        rate_limiter.clone(),
+        Arc::clone(&jwks),
+        cert_hook,
+    );
+    let admin_acceptor = admin_listener::bind(&cfg.admin_plane).await?;
+    let (admin_shutdown_tx, admin_shutdown_rx) = oneshot::channel::<()>();
+    let admin_handle = tokio::spawn(async move {
+        let svc = admin_pb::gateway_admin_server::GatewayAdminServer::new(admin_service);
+        let res = tonic::transport::Server::builder()
+            .add_service(svc)
+            .serve_with_incoming_shutdown(admin_acceptor, async {
+                let _ = admin_shutdown_rx.await;
+            })
+            .await;
+        if let Err(err) = res {
+            tracing::warn!(error = %err, "admin plane server exited with error");
+        }
+    });
+    tracing::info!(
+        admin_socket = %cfg.admin_plane.unix_socket.display(),
+        "lifegw admin plane bound"
     );
 
     let agent = AgentForwarder::new(upstream_channel.clone());
@@ -170,7 +278,37 @@ pub async fn serve_with_listener_and_signer(
 
     tracing::info!(addr = %local_addr, "lifegw listening");
 
-    serve_connections(listener, acceptor, service, shutdown_rx).await
+    // Run the public plane until shutdown. When it exits (graceful
+    // drain or accept error), tear down the admin plane too so we
+    // don't leak the bound socket.
+    let result = serve_connections(listener, acceptor, service, shutdown_rx).await;
+    let _ = admin_shutdown_tx.send(());
+    let _ = tokio::time::timeout(Duration::from_secs(5), admin_handle).await;
+    result
+}
+
+fn build_admin_policy(cfg: &AdminPlaneConfig) -> AdminPolicy {
+    // Resolve the admin GID — fall back to permissive mode if the
+    // group isn't configured OR the lookup fails (matches the lifed
+    // pattern; the systemd unit enforces FS-level access in the
+    // group-unconfigured case).
+    let (admin_gid, permissive) = match cfg.unix_socket_group.as_deref() {
+        Some(name) => match crate::admin::peercred::group_gid(name) {
+            Ok(Some(gid)) => (gid, false),
+            _ => {
+                tracing::warn!(
+                    group = name,
+                    "unix_socket_group not found in /etc/group; admin plane is in permissive mode"
+                );
+                (0, true)
+            }
+        },
+        None => (0, true),
+    };
+    AdminPolicy {
+        admin_gid,
+        permissive,
+    }
 }
 
 /// Box up an error into the dyn StdError shape hyper expects. Used
@@ -352,7 +490,7 @@ pub(crate) fn build_signer(cfg: &AuthConfig) -> LifegwResult<Arc<dyn KmsSigner>>
             "auth.kms_provider = vault but lifegw built without `kms-vault` feature".to_string(),
         )),
         #[cfg(feature = "kms-aws")]
-        KmsProvider::Aws => Err(LifegwError::Auth(
+        KmsProvider::Aws => Err(LifegwError::Config(
             "kms-aws provider configured but body deferred to Sub-phase E".to_string(),
         )),
         #[cfg(not(feature = "kms-aws"))]
@@ -360,7 +498,7 @@ pub(crate) fn build_signer(cfg: &AuthConfig) -> LifegwResult<Arc<dyn KmsSigner>>
             "auth.kms_provider = aws but lifegw built without `kms-aws` feature".to_string(),
         )),
         #[cfg(feature = "kms-gcp")]
-        KmsProvider::Gcp => Err(LifegwError::Auth(
+        KmsProvider::Gcp => Err(LifegwError::Config(
             "kms-gcp provider configured but body deferred to Sub-phase E".to_string(),
         )),
         #[cfg(not(feature = "kms-gcp"))]
@@ -370,8 +508,11 @@ pub(crate) fn build_signer(cfg: &AuthConfig) -> LifegwResult<Arc<dyn KmsSigner>>
     }
 }
 
-/// Install the global Tier-1 verifier from `cfg.auth`.
-fn install_tier1_verifier(cfg: &AuthConfig) -> LifegwResult<()> {
+/// Build a Tier-1 JWKS cache from `cfg.auth`. Sub-phase D (D7) stops
+/// installing this into the deprecated process-global; instead the
+/// returned `Arc<JwksCache>` is threaded into `AuthLayer::with_jwks`
+/// so each `AuthService<S>` instance owns its own handle.
+fn build_jwks_cache(cfg: &AuthConfig) -> LifegwResult<Arc<JwksCache>> {
     let cache = if cfg.dev_signer_enabled {
         // Dev path — accept the magic Bearer shortcut for tests / CI.
         Arc::new(JwksCache::dev_only())
@@ -386,8 +527,7 @@ fn install_tier1_verifier(cfg: &AuthConfig) -> LifegwResult<()> {
         jwks_cfg.rotation_grace = cfg.jwks_rotation_grace;
         Arc::new(JwksCache::new(jwks_cfg))
     };
-    dev_signer::install_tier1_verifier(cache);
-    Ok(())
+    Ok(cache)
 }
 
 /// Atomic JWKS publish — write to a temporary file then rename into

@@ -264,6 +264,11 @@ impl TestEnv {
         lifegw_cfg.auth.tier1_audience = "lifegw".to_string();
         lifegw_cfg.auth.tier1_issuer = jwks_issuer.clone();
         lifegw_cfg.auth.publish_jwks_path = None;
+        // Sub-phase D (D2): admin plane bound to a tempdir UDS so the
+        // test rig doesn't try to write `/run/life/lifegw-admin.sock`.
+        lifegw_cfg.admin_plane.unix_socket = tempdir.path().join("lifegw-admin.sock");
+        lifegw_cfg.admin_plane.unix_socket_group = None;
+        lifegw_cfg.admin_plane.unix_socket_mode = None;
         // Short refetch grace so kid-rotation tests don't have to wait
         // out the default 5 min TTL — but the unknown-kid refetch path
         // doesn't depend on TTL, so the test still demonstrates the

@@ -8,12 +8,26 @@
 //! preserved so the auth `Layer` above doesn't change — see
 //! `auth/middleware.rs::AuthService::call`.
 //!
-//! ## Wiring
+//! ## Wiring (Sub-phase D, D7)
 //!
-//! `bootstrap` installs an [`Arc<JwksCache>`] into the global
-//! [`TIER1_VERIFIER`] cell at daemon startup. All subsequent
-//! `verify(bearer)` calls route through the cache. Tests can override
-//! the global via [`set_tier1_verifier_for_tests`].
+//! As of Sub-phase D the per-`AuthService<S>` middleware carries an
+//! explicit `Arc<JwksCache>` handle, threaded through
+//! `AuthLayer::with_jwks(cache)`. The legacy process-global
+//! `TIER1_VERIFIER` `OnceLock` survives behind a deprecated shim so
+//! existing tests that called `install_tier1_verifier` keep passing,
+//! but the production hot path (the Tower middleware in
+//! [`crate::auth::middleware`]) reads the JWKS via the explicit
+//! per-service `Arc` first and only falls back to the global as a
+//! transition convenience. The global will be removed in Sub-phase E.
+//!
+//! Threading the JWKS explicitly through `AuthService` unblocks
+//! per-test verifier swaps: previously, a single test process could
+//! install only one verifier (OnceLock semantics — first set wins),
+//! so the Sub-phase B integration test `integration_jwks_round_trip`
+//! had to bundle three sub-suites into a single `#[tokio::test]`
+//! function. With D7 each `AuthLayer::with_jwks(...)` instance owns
+//! its cache, so the sub-suites can run as separate `#[tokio::test]`
+//! functions inside the same test binary.
 //!
 //! When the cache is constructed via [`JwksCache::dev_only`], the
 //! `Bearer dev-token-for-{user_id}` shortcut still works — preserving
@@ -29,11 +43,30 @@ use crate::error::{LifegwError, LifegwResult};
 /// Process-global Tier-1 verifier. Set by `bootstrap` (or by a test
 /// helper) before any RPC is served. Reads are lock-free after the
 /// initial set.
+///
+/// **Deprecated as of Sub-phase D (D7):** the production hot path now
+/// uses the explicit per-`AuthService<S>` `Arc<JwksCache>` handle
+/// installed via `AuthLayer::with_jwks(cache)`. This global remains as
+/// a transition convenience so the legacy `dev_signer::verify(bearer)`
+/// entry-point keeps working for tests + the Sub-phase B initial
+/// wiring path. It will be removed in Sub-phase E.
 static TIER1_VERIFIER: OnceLock<Arc<JwksCache>> = OnceLock::new();
 
 /// Install the Tier-1 verifier. Idempotent: subsequent calls after a
 /// successful set are silent no-ops (we don't reset auth wiring during
 /// daemon runtime — restart for that).
+///
+/// **Deprecated as of Sub-phase D (D7).** Production callers should
+/// instead pass `Arc<JwksCache>` to `AuthLayer::with_jwks(cache)`,
+/// which threads the cache through to the middleware without touching
+/// process-global state. This shim remains for tests that exercise the
+/// legacy `dev_signer::verify(bearer)` entry-point.
+#[deprecated(
+    since = "0.3.0",
+    note = "Use `AuthLayer::with_jwks(cache)` instead — the global \
+            `OnceLock<JwksCache>` handle is being removed in Sub-phase E. \
+            Existing test wiring continues to work via this shim."
+)]
 pub fn install_tier1_verifier(cache: Arc<JwksCache>) {
     let _ = TIER1_VERIFIER.set(cache);
 }
@@ -45,11 +78,30 @@ pub fn install_tier1_verifier(cache: Arc<JwksCache>) {
 // global entry-point. Each integration test runs in its own process
 // (cargo test default), so global state is naturally isolated.
 
+/// Read the process-global Tier-1 verifier (if installed). Returns
+/// `None` when no verifier was installed via the deprecated
+/// `install_tier1_verifier` shim — the middleware fast-path uses the
+/// explicit per-service handle in that case.
+pub(crate) fn global_verifier() -> Option<Arc<JwksCache>> {
+    TIER1_VERIFIER.get().cloned()
+}
+
 /// Verify a Tier-1 bearer token. Returns synthesised Tier-1 claims on
 /// success; `LifegwError::Auth` otherwise.
 ///
+/// **Deprecated as of Sub-phase D (D7).** Production callers should
+/// invoke `cache.verify(bearer)` directly via the per-`AuthService<S>`
+/// handle. This shim reads the legacy process-global so existing tests
+/// and the documented Sub-phase B startup flow keep working.
+///
 /// # Panics
 /// Never. Returns `LifegwError::Auth` if no verifier was installed.
+#[deprecated(
+    since = "0.3.0",
+    note = "Use `cache.verify(bearer)` against the explicit \
+            `Arc<JwksCache>` carried by `AuthLayer::with_jwks(cache)`. \
+            The global verifier is being removed in Sub-phase E."
+)]
 pub fn verify(bearer: &str) -> LifegwResult<Tier1Claims> {
     match TIER1_VERIFIER.get() {
         Some(cache) => cache.verify(bearer),
@@ -61,6 +113,7 @@ pub fn verify(bearer: &str) -> LifegwResult<Tier1Claims> {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use crate::auth::jwks::{JwksCache, JwksCacheConfig, JwksDoc, JwksSource};
