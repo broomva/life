@@ -25,6 +25,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod admin;
 pub mod auth;
 pub mod bootstrap;
 pub mod cli;

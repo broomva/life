@@ -19,6 +19,12 @@ pub mod life {
         pub mod v1 {
             tonic::include_proto!("life.admin.v1");
         }
+        // Sub-phase D (D2): lifegw admin plane.
+        pub mod gw {
+            pub mod v1 {
+                tonic::include_proto!("life.admin.gw.v1");
+            }
+        }
     }
 }
 

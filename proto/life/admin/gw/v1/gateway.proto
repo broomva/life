@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+// life.admin.gw.v1 — operator + autonomic introspection of the
+// lifegw edge gateway. New proto namespace introduced by Spec C₃ §3.6
+// in M7 Sub-phase D (BRO-932 umbrella). Mounted on the admin UDS
+// (`/run/life/lifegw-admin.sock`, group `life-admin`, mode `0660`),
+// NEVER on the public TCP listener.
+//
+// Authn: SO_PEERCRED + group membership (`life-admin` group) — same
+// pattern as lifed's life.admin.v1.Runtime service. NO bearer tokens
+// on admin (the prompt's hard rule "Admin plane authn is SO_PEERCRED
+// + group membership; NO bearer tokens").
+
+package life.admin.gw.v1;
+
+import "google/protobuf/timestamp.proto";
+
+service GatewayAdmin {
+  // Liveness check. Anyone who can connect to the admin socket may
+  // call this — it returns the daemon version.
+  rpc HealthCheck(HealthReq) returns (HealthResp);
+
+  // Sub-phase D D3: triggers SIGHUP-equivalent cert reload over RPC.
+  // Operator (cert-manager / certbot) writes new cert files; calling
+  // this RPC triggers an immediate ArcSwap-based reload of the rustls
+  // ServerConfig. life-admin or root only.
+  rpc CertReload(CertReloadReq) returns (CertReloadResp);
+
+  // Sub-phase D D2: dump the current JWKS cache contents (kid + alg +
+  // retired_at). Read-only — life-admin / autonomic / root.
+  rpc JwksDump(JwksDumpReq) returns (JwksDumpResp);
+
+  // Sub-phase D D2: in-memory IP/user blocklist management. Separate
+  // from the rate limiter — the blocklist denies outright; the rate
+  // limiter throttles. life-admin / root only.
+  rpc Blocklist_Add(BlocklistAddReq) returns (BlocklistEmpty);
+  rpc Blocklist_Remove(BlocklistRemoveReq) returns (BlocklistEmpty);
+  rpc Blocklist_List(BlocklistListReq) returns (BlocklistListResp);
+
+  // Sub-phase D D2: runtime override of per-user QPS for a specific
+  // user (e.g. throttle abusive caller without restart). Overrides
+  // are in-process; restart resets to the configured defaults.
+  // life-admin / root only.
+  rpc RateLimit_Override(RateLimitOverrideReq) returns (BlocklistEmpty);
+}
+
+message BlocklistEmpty {}
+
+message HealthReq {}
+
+message HealthResp {
+  bool ok = 1;
+  string version = 2;
+  // Best-effort reachability check on the lifed UDS — same shape as
+  // /healthz returns to public-plane probes.
+  bool lifed_reachable = 3;
+  uint32 active_ws_connections = 4;
+  uint32 jwks_cached_kids = 5;
+}
+
+message CertReloadReq {
+  // Force re-read even if mtime unchanged (useful when the cert
+  // rotation tool replaces files atomically with the same mtime).
+  bool force = 1;
+}
+
+message CertReloadResp {
+  bool reloaded = 1;
+  // Number of certs in the freshly loaded chain. `0` indicates a
+  // rejected reload (parse failed); the previous config stays live.
+  uint32 cert_count = 2;
+  // Human-readable reason on failure; empty on success.
+  string reason = 3;
+}
+
+message JwksDumpReq {}
+message JwksDumpResp {
+  repeated JwksKey keys = 1;
+}
+message JwksKey {
+  string kid = 1;
+  string alg = 2;
+  // `true` when the entry has been retired by a later refetch but is
+  // still inside the rotation-grace window (Spec C₃ §5.3).
+  bool retired = 3;
+  google.protobuf.Timestamp retired_at = 4;
+}
+
+message BlocklistAddReq {
+  // IPv4 / IPv6 literal (no CIDR yet; that's a Sub-phase E scope
+  // expansion) OR `user:<user_id>` to block by Tier-1 sub claim.
+  string subject = 1;
+  string reason = 2;
+}
+message BlocklistRemoveReq { string subject = 1; }
+message BlocklistListReq {}
+message BlocklistListResp { repeated BlocklistEntry entries = 1; }
+message BlocklistEntry {
+  string subject = 1;
+  string reason = 2;
+  google.protobuf.Timestamp added_at = 3;
+}
+
+message RateLimitOverrideReq {
+  // Subject keyed in the limiter's user_id bucket, e.g. `user:abc123`
+  // or just `abc123` (the gateway accepts both forms).
+  string user_id = 1;
+  // New token-bucket capacity; capacity 0 effectively blocks the
+  // user (every request rejects until cleared via a subsequent call
+  // with capacity > 0).
+  uint32 capacity = 2;
+  // Refill rate in tokens / second.
+  uint32 refill_per_sec = 3;
+}

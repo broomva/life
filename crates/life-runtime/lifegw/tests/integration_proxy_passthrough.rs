@@ -186,6 +186,13 @@ impl TestEnv {
         // keystore material in-memory through serve_with_listener_and_keystore
         // so disabling the publish step is safe here.
         lifegw_cfg.auth.publish_jwks_path = None;
+        // Sub-phase D (D2): admin plane bound to a tempdir UDS so the
+        // test rig doesn't try to write `/run/life/lifegw-admin.sock`
+        // (read-only on the macOS sandbox + collision-prone with a
+        // running production daemon).
+        lifegw_cfg.admin_plane.unix_socket = tempdir.path().join("lifegw-admin.sock");
+        lifegw_cfg.admin_plane.unix_socket_group = None;
+        lifegw_cfg.admin_plane.unix_socket_mode = None;
         // Pre-bind so we can extract the resolved port.
         let bind = lifegw::listener::bind(&lifegw_cfg.tls, &lifegw_cfg.listen)
             .await

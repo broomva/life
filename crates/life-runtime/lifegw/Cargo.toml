@@ -94,6 +94,13 @@ tokio-stream = { workspace = true }
 arc-swap = "1"
 async-trait.workspace = true
 futures.workspace = true
+# parking_lot — fast non-poisoning Mutex/Condvar used by:
+# - JWKS single-flight coalescing (Sub-phase D, D4) so 100 concurrent
+#   misses on the same `kid` produce 1 upstream HTTP fetch instead of N.
+# - Token-bucket rate limiter (Sub-phase D, D1).
+# - Admin-plane in-memory blocklist + rate-limit override registry
+#   (Sub-phase D, D2).
+parking_lot = { workspace = true }
 
 # observability
 life-vigil.workspace = true
@@ -112,6 +119,10 @@ uuid = { workspace = true }
 base64 = { workspace = true }
 # Atomic JWKS publish (write-tmp + rename) — see auth/bootstrap.rs.
 tempfile = { workspace = true }
+# libc — Sub-phase D (D2) admin plane uses raw SO_PEERCRED + getgrnam
+# syscalls. The `admin/peercred.rs` module is the only `unsafe`
+# pocket inside lifegw (the rest of the crate is `#![deny(unsafe_code)]`).
+libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true

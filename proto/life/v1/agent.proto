@@ -58,6 +58,16 @@ message Session {
 
 message SessionRef {
   aios.v1.SessionId sid = 1;
+  // Sub-phase D (BRO-938 deviation D2): resume cursor for
+  // `Agent.StreamSession`. Browsers reconnect via the WS upgrade with
+  // `X-Life-Last-Seq-No: N`; lifegw forwards the value here so lifed
+  // can replay from `N+1` before transitioning to live tail. Spec C₃
+  // §6.3 LOCKED L4-D3.
+  //
+  // `0` (or unset) means "fresh stream": lifed replays from the start
+  // of the session per its default semantics. Field is `optional` so a
+  // pre-D client/server pair stays wire-compatible.
+  optional uint64 from_sequence = 2;
 }
 
 message SendMessageReq {

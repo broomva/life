@@ -2,8 +2,10 @@
 //!
 //! Sub-phase A ships only `/healthz`.
 //! Sub-phase C adds `ws` (WebSocket bidi pump for `Agent.StreamSession`).
-//! Sub-phase D adds `/readyz`, `/version`, `/metrics`, and the admin-
-//! plane UDS listener.
+//! Sub-phase D adds `rate_limit` (token-bucket limiter), the admin
+//! plane UDS, plus a `cert_watch` reloader.
 
+pub mod cert_watch;
 pub mod health;
+pub mod rate_limit;
 pub mod ws;

@@ -401,13 +401,30 @@ impl pb::agent_server::Agent for AgentService {
         req: Request<pb::SessionRef>,
     ) -> Result<Response<Self::StreamSessionStream>, Status> {
         let _claims = Self::claims(&req)?;
-        let sid_value = req
-            .get_ref()
+        let body = req.get_ref();
+        let sid_value = body
             .sid
             .as_ref()
             .ok_or_else(|| Status::invalid_argument("missing sid"))?
             .value
             .clone();
+        // M7 Sub-phase D (BRO-938 deviation D2): the WS upgrade carries
+        // a resume cursor as `X-Life-Last-Seq-No: N`; lifegw forwards
+        // that as `from_sequence` here. Spec C₃ §6.3 LOCKED L4-D3 +
+        // Spec C₂ §3.2 SubscribeReq.from_sequence. The current mock
+        // arcan / lago substrate wiring streams the live tail without
+        // a replay window — propagating the cursor at the lifed seam
+        // closes the wire-shape gap so the substrate-side replay pass
+        // (Sub-phase E) is a one-line change. We log the cursor for
+        // operator visibility into reconnect behaviour.
+        let from_sequence = body.from_sequence.unwrap_or(0);
+        if from_sequence > 0 {
+            tracing::debug!(
+                sid = %sid_value,
+                from_sequence,
+                "stream_session resume cursor received (lago tail replay deferred to E)"
+            );
+        }
         let fanout = self
             .routing
             .lookup_fanout(&aios_v1::SessionId {

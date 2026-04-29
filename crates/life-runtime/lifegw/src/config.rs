@@ -37,12 +37,66 @@ pub struct LifegwConfig {
     /// Authn / authz plumbing.
     #[serde(default)]
     pub auth: AuthConfig,
-    /// Rate-limit defaults (Sub-phase D fills this in).
+    /// Sub-phase D (D2): admin-plane UDS configuration.
+    #[serde(default)]
+    pub admin_plane: AdminPlaneConfig,
+    /// Rate-limit defaults (Sub-phase D D1).
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
     /// Vigil OTLP exporter wiring (Sub-phase D fills this in).
     #[serde(default)]
     pub observability: ObservabilityConfig,
+}
+
+/// Admin-plane UDS configuration. Sub-phase D (D2).
+///
+/// The admin plane is a separate UDS (default `/run/life/lifegw-admin.sock`)
+/// hosting `life.admin.gw.v1.GatewayAdmin`. Authn is SO_PEERCRED +
+/// group membership — `unix_socket_group = "life-admin"` gives that
+/// group's members admin authority. Setting `unix_socket_group` to
+/// `None` (e.g. for tests) places the policy table in permissive
+/// mode — every connecting peer is granted admin authority. That
+/// matches the lifed convention and is safe in tests because the
+/// socket path is in a tempdir only the test owner can reach.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct AdminPlaneConfig {
+    /// Path to the admin UDS. Default `/run/life/lifegw-admin.sock`.
+    #[serde(default = "default_admin_socket")]
+    pub unix_socket: PathBuf,
+    /// Group that owns the admin socket. Production deploys set this
+    /// to `life-admin`; tests may set it to `None` for permissive
+    /// access.
+    #[serde(default = "default_admin_group")]
+    pub unix_socket_group: Option<String>,
+    /// File mode (default `0o660`). Combined with the group, this
+    /// gives `life-admin` members read+write but other users no
+    /// access.
+    #[serde(default = "default_admin_mode")]
+    pub unix_socket_mode: Option<u32>,
+}
+
+fn default_admin_socket() -> PathBuf {
+    PathBuf::from("/run/life/lifegw-admin.sock")
+}
+
+fn default_admin_group() -> Option<String> {
+    Some("life-admin".to_string())
+}
+
+fn default_admin_mode() -> Option<u32> {
+    Some(0o660)
+}
+
+impl Default for AdminPlaneConfig {
+    fn default() -> Self {
+        Self {
+            unix_socket: default_admin_socket(),
+            unix_socket_group: default_admin_group(),
+            unix_socket_mode: default_admin_mode(),
+        }
+    }
 }
 
 /// TLS termination configuration.
