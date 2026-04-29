@@ -4,12 +4,11 @@
 //! and evicts the routing entry; the snapshot publisher (run on a 30 s
 //! tick by bootstrap) writes `revoked_sids.json` for substrates to poll.
 //!
-//! ## Pool bracketing — Sub-phase E scope
+//! ## Pool bracketing — Sub-phase E
 //!
-//! Sub-phase D ships pools but only `services/agent.rs` brackets through
-//! them. Identity handlers call `anima` directly without acquiring a pool
-//! permit, so the anima breaker stays Closed in production until Sub-phase E
-//! pushes pool bracketing inside the proxy crates. Tracked under BRO-934.
+//! Sub-phase E pushes pool bracketing inside each proxy crate's
+//! `Pooled<C>` adapter (Spec C₂ §7). Identity handlers no longer need a
+//! `pools` field — every `self.anima.<rpc>()` call brackets internally.
 
 use std::sync::Arc;
 

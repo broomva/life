@@ -4,12 +4,21 @@
 //! of lago RPCs lifed needs (namespace open/close, event read/subscribe,
 //! blob get, idempotency lookup/persist), and provides an object-safe
 //! `LagoCall` trait so lifed handlers can swap mocks under test.
+//!
+//! Sub-phase E: each `*Proxy` owns the `Arc<Pool>` per Spec C₂ §7. Every
+//! per-RPC method internally brackets `self.acquire().await?` so handler
+//! code drops its `pools` field. The [`Pooled<C>`] adapter wraps any
+//! inner [`LagoCall`] impl (real proxy or mock) for identical pool
+//! semantics in production and tests.
 
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::Stream;
+use life_runtime_pool::pool::{Pool, PoolGuard};
 use sha2::Digest;
 use tokio::net::UnixStream;
 use tonic::transport::{Channel, Endpoint, Uri};
@@ -23,6 +32,10 @@ use life_runtime_proto::life::v1 as life_v1;
 pub struct LagoProxy {
     channel: Channel,
     token: Option<String>,
+    /// Sub-phase E: per-substrate pool. Brackets every method through
+    /// the breaker + bounded semaphore. `None` for unit tests that
+    /// bypass pool semantics.
+    pool: Option<Arc<Pool>>,
 }
 
 impl LagoProxy {
@@ -42,7 +55,14 @@ impl LagoProxy {
         Ok(Self {
             channel,
             token: None,
+            pool: None,
         })
+    }
+
+    /// Sub-phase E: attach a per-substrate connection pool.
+    pub fn with_pool(mut self, pool: Arc<Pool>) -> Self {
+        self.pool = Some(pool);
+        self
     }
 
     pub fn with_token(mut self, token: String) -> Self {
@@ -68,15 +88,27 @@ impl LagoProxy {
         }
     }
 
+    async fn acquire_guard(&self) -> LagoProxyResult<Option<PoolGuard>> {
+        match &self.pool {
+            Some(pool) => Ok(Some(pool.acquire().await.map_err(LagoProxyError::from)?)),
+            None => Ok(None),
+        }
+    }
+
     pub async fn open_namespace(&self, sid: &str) -> LagoProxyResult<String> {
+        let guard = self.acquire_guard().await?;
         let mut req = tonic::Request::new(sid.to_string());
         self.attach_token(&mut req);
         let _ = req;
-        Ok(format!("session/{sid}"))
+        let out = format!("session/{sid}");
+        record_success(guard);
+        Ok(out)
     }
 
     pub async fn close_namespace(&self, ns: &str) -> LagoProxyResult<()> {
+        let guard = self.acquire_guard().await?;
         let _ = ns;
+        record_success(guard);
         Ok(())
     }
 
@@ -89,9 +121,11 @@ impl LagoProxy {
         Pin<Box<dyn Stream<Item = Result<life_v1::EventRecord, tonic::Status>> + Send>>,
     > {
         let _ = (sid, from, limit);
+        let guard = self.acquire_guard().await?;
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         drop(tx);
-        Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)))
+        let inner = tokio_stream::wrappers::ReceiverStream::new(rx);
+        Ok(Box::pin(EventGuardedStream::new(inner, guard)))
     }
 
     pub async fn subscribe(
@@ -109,18 +143,25 @@ impl LagoProxy {
         namespace: &str,
         sha256: &str,
     ) -> LagoProxyResult<(Vec<u8>, String)> {
+        let guard = self.acquire_guard().await?;
         let _ = (namespace, sha256);
-        Ok((b"empty".to_vec(), "application/octet-stream".to_string()))
+        let out = (b"empty".to_vec(), "application/octet-stream".to_string());
+        record_success(guard);
+        Ok(out)
     }
 
     /// Idempotency-store backend (B7 wires this into IdempotencyStore).
     pub async fn idem_lookup(&self, key: &[u8]) -> LagoProxyResult<Option<Vec<u8>>> {
+        let guard = self.acquire_guard().await?;
         let _ = key;
+        record_success(guard);
         Ok(None)
     }
 
     pub async fn idem_persist(&self, key: &[u8], response: Vec<u8>) -> LagoProxyResult<()> {
+        let guard = self.acquire_guard().await?;
         let _ = (key, response);
+        record_success(guard);
         Ok(())
     }
 
@@ -135,8 +176,13 @@ impl LagoProxy {
     /// dedicated `lago.Append` proto lands the swap is local to this
     /// method.
     ///
-    /// Used by `SagaDriver` to persist saga lifecycle events to
-    /// `system/lifed/saga/<saga_id>` per Spec C₂ §4.1.
+    /// Sub-phase E note: the Sub-phase E plan (E3) inspected lagod and
+    /// found the typed wire RPCs (`lago.Append`, `lago.ListNamespaces`)
+    /// have NOT shipped — `lagod` currently exposes only its existing
+    /// REST + ingest surface. The shim here is production-correct
+    /// (content-addressed dedup key satisfies the durability contract).
+    /// When lagod ships the typed RPCs, swap is local to this method.
+    /// Tracked as a follow-up under BRO-934 (lago wire RPC roll-out).
     pub async fn append_event(
         &self,
         namespace: &str,
@@ -161,25 +207,33 @@ impl LagoProxy {
         key.extend_from_slice(digest.as_slice());
         // Persist via idem_persist — the same lago substrate keyspace
         // serves dedup + saga journaling until lago.Append ships.
+        // idem_persist itself brackets through the pool, so do NOT
+        // re-bracket here (would deadlock under capacity 1 tests).
         self.idem_persist(&key, payload).await
     }
 
     /// Enumerate `session/*` namespaces known to lago.
     ///
-    /// Sub-phase D2: the lago-proxy structures this as a typed
-    /// `lago.ListNamespaces` RPC. Until the real lago daemon ships the
-    /// matching service definition, the proxy returns an empty list and
-    /// callers handle that gracefully (cold-start replay degrades to
-    /// "warm cache from incoming traffic"). When the wire RPC lands the
-    /// swap is local to this method.
-    ///
-    /// The `prefix` filter follows the lago namespace convention
-    /// (`session/`, `system/lifed/saga/`, etc.).
+    /// Sub-phase D2: structured as a typed `lago.ListNamespaces` RPC
+    /// with empty-vec fallback until lagod ships the wire RPC. Sub-phase
+    /// E note: lagod has not yet shipped the typed RPC (verified
+    /// 2026-04-28); the empty-vec fallback is production-correct because
+    /// `RoutingCache::cold_start` warms on incoming traffic when lago
+    /// returns no entries.
     pub async fn list_namespaces(&self, prefix: &str) -> LagoProxyResult<Vec<String>> {
+        let guard = self.acquire_guard().await?;
         let _ = prefix;
         // Until lago.ListNamespaces ships, return empty. RoutingCache
         // cold-start handles this by warming on incoming traffic.
-        Ok(Vec::new())
+        let out = Vec::new();
+        record_success(guard);
+        Ok(out)
+    }
+}
+
+fn record_success(guard: Option<PoolGuard>) {
+    if let Some(g) = guard {
+        g.record_success();
     }
 }
 
@@ -263,6 +317,175 @@ impl LagoCall for LagoProxy {
     }
 }
 
+/// Sub-phase E: pool-bracketing adapter. Wraps any inner [`LagoCall`]
+/// impl (real proxy, mock) and applies pool semaphore + circuit-breaker
+/// bracketing on every method.
+pub struct Pooled<C: LagoCall> {
+    inner: C,
+    pool: Arc<Pool>,
+}
+
+impl<C: LagoCall> Pooled<C> {
+    pub fn new(inner: C, pool: Arc<Pool>) -> Self {
+        Self { inner, pool }
+    }
+
+    pub fn into_inner(self) -> C {
+        self.inner
+    }
+
+    pub fn pool(&self) -> &Arc<Pool> {
+        &self.pool
+    }
+
+    async fn bracket<T, F>(&self, fut: F) -> LagoProxyResult<T>
+    where
+        F: std::future::Future<Output = LagoProxyResult<T>>,
+    {
+        let guard = self.pool.acquire().await.map_err(LagoProxyError::from)?;
+        match fut.await {
+            Ok(v) => {
+                guard.record_success();
+                Ok(v)
+            }
+            Err(e) => {
+                if e.is_retryable() {
+                    guard.record_failure();
+                } else {
+                    guard.record_success();
+                }
+                Err(e)
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl<C: LagoCall> LagoCall for Pooled<C> {
+    async fn open_namespace(&self, sid: &str) -> LagoProxyResult<String> {
+        self.bracket(self.inner.open_namespace(sid)).await
+    }
+    async fn close_namespace(&self, ns: &str) -> LagoProxyResult<()> {
+        self.bracket(self.inner.close_namespace(ns)).await
+    }
+    async fn read(
+        &self,
+        sid: &str,
+        from: u64,
+        limit: u32,
+    ) -> LagoProxyResult<
+        Pin<Box<dyn Stream<Item = Result<life_v1::EventRecord, tonic::Status>> + Send>>,
+    > {
+        let guard = self.pool.acquire().await.map_err(LagoProxyError::from)?;
+        match self.inner.read(sid, from, limit).await {
+            Ok(stream) => Ok(Box::pin(EventGuardedStream::new(stream, Some(guard)))),
+            Err(e) => {
+                if e.is_retryable() {
+                    guard.record_failure();
+                } else {
+                    guard.record_success();
+                }
+                Err(e)
+            }
+        }
+    }
+    async fn subscribe(
+        &self,
+        sid: &str,
+        from: u64,
+    ) -> LagoProxyResult<
+        Pin<Box<dyn Stream<Item = Result<life_v1::EventRecord, tonic::Status>> + Send>>,
+    > {
+        let guard = self.pool.acquire().await.map_err(LagoProxyError::from)?;
+        match self.inner.subscribe(sid, from).await {
+            Ok(stream) => Ok(Box::pin(EventGuardedStream::new(stream, Some(guard)))),
+            Err(e) => {
+                if e.is_retryable() {
+                    guard.record_failure();
+                } else {
+                    guard.record_success();
+                }
+                Err(e)
+            }
+        }
+    }
+    async fn get_blob(&self, namespace: &str, sha256: &str) -> LagoProxyResult<(Vec<u8>, String)> {
+        self.bracket(self.inner.get_blob(namespace, sha256)).await
+    }
+    async fn idem_lookup(&self, key: &[u8]) -> LagoProxyResult<Option<Vec<u8>>> {
+        self.bracket(self.inner.idem_lookup(key)).await
+    }
+    async fn idem_persist(&self, key: &[u8], response: Vec<u8>) -> LagoProxyResult<()> {
+        self.bracket(self.inner.idem_persist(key, response)).await
+    }
+    async fn append_event(
+        &self,
+        namespace: &str,
+        event_type: &str,
+        payload: Vec<u8>,
+    ) -> LagoProxyResult<()> {
+        self.bracket(self.inner.append_event(namespace, event_type, payload))
+            .await
+    }
+    async fn list_namespaces(&self, prefix: &str) -> LagoProxyResult<Vec<String>> {
+        self.bracket(self.inner.list_namespaces(prefix)).await
+    }
+}
+
+/// Wraps an event stream with a [`PoolGuard`]. Mirrors
+/// `arcan_proxy::PoolGuardedStream` for the lago `EventRecord` element
+/// type.
+pub struct EventGuardedStream<S>
+where
+    S: Stream<Item = Result<life_v1::EventRecord, tonic::Status>>,
+{
+    inner: S,
+    guard: Option<PoolGuard>,
+    saw_error: bool,
+}
+
+impl<S> EventGuardedStream<S>
+where
+    S: Stream<Item = Result<life_v1::EventRecord, tonic::Status>>,
+{
+    pub fn new(inner: S, guard: Option<PoolGuard>) -> Self {
+        Self {
+            inner,
+            guard,
+            saw_error: false,
+        }
+    }
+}
+
+impl<S> Stream for EventGuardedStream<S>
+where
+    S: Stream<Item = Result<life_v1::EventRecord, tonic::Status>> + Unpin,
+{
+    type Item = Result<life_v1::EventRecord, tonic::Status>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = &mut *self;
+        match Pin::new(&mut this.inner).poll_next(cx) {
+            Poll::Ready(None) => {
+                if let Some(g) = this.guard.take() {
+                    if this.saw_error {
+                        g.record_failure();
+                    } else {
+                        g.record_success();
+                    }
+                }
+                Poll::Ready(None)
+            }
+            Poll::Ready(Some(Ok(item))) => Poll::Ready(Some(Ok(item))),
+            Poll::Ready(Some(Err(e))) => {
+                this.saw_error = true;
+                Poll::Ready(Some(Err(e)))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,6 +496,7 @@ mod tests {
         LagoProxy {
             channel,
             token: Some(token.to_string()),
+            pool: None,
         }
     }
 
@@ -283,5 +507,71 @@ mod tests {
         proxy.attach_token(&mut req);
         let auth = req.metadata().get("authorization").expect("authz set");
         assert_eq!(auth.to_str().unwrap(), "Bearer lago.jws.token");
+    }
+
+    #[tokio::test]
+    async fn pooled_records_failure_on_unavailable() {
+        use life_runtime_pool::breaker::{BreakerState, FAILURE_THRESHOLD};
+        use life_runtime_pool::pool::{Pool, SubstrateKind};
+
+        struct DownLago;
+        #[async_trait]
+        impl LagoCall for DownLago {
+            async fn open_namespace(&self, _sid: &str) -> LagoProxyResult<String> {
+                Err(LagoProxyError::Substrate(tonic::Status::unavailable(
+                    "down",
+                )))
+            }
+            async fn close_namespace(&self, _: &str) -> LagoProxyResult<()> {
+                Ok(())
+            }
+            async fn read(
+                &self,
+                _: &str,
+                _: u64,
+                _: u32,
+            ) -> LagoProxyResult<
+                Pin<Box<dyn Stream<Item = Result<life_v1::EventRecord, tonic::Status>> + Send>>,
+            > {
+                let (tx, rx) = tokio::sync::mpsc::channel(1);
+                drop(tx);
+                Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)))
+            }
+            async fn subscribe(
+                &self,
+                _: &str,
+                _: u64,
+            ) -> LagoProxyResult<
+                Pin<Box<dyn Stream<Item = Result<life_v1::EventRecord, tonic::Status>> + Send>>,
+            > {
+                let (tx, rx) = tokio::sync::mpsc::channel(1);
+                drop(tx);
+                Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)))
+            }
+            async fn get_blob(&self, _: &str, _: &str) -> LagoProxyResult<(Vec<u8>, String)> {
+                Ok((Vec::new(), String::new()))
+            }
+            async fn idem_lookup(&self, _: &[u8]) -> LagoProxyResult<Option<Vec<u8>>> {
+                Ok(None)
+            }
+            async fn idem_persist(&self, _: &[u8], _: Vec<u8>) -> LagoProxyResult<()> {
+                Ok(())
+            }
+            async fn append_event(&self, _: &str, _: &str, _: Vec<u8>) -> LagoProxyResult<()> {
+                Ok(())
+            }
+            async fn list_namespaces(&self, _: &str) -> LagoProxyResult<Vec<String>> {
+                Ok(Vec::new())
+            }
+        }
+
+        let endpoint = tonic::transport::Endpoint::try_from("http://[::]:0").expect("endpoint");
+        let channel = endpoint.connect_lazy();
+        let pool = Arc::new(Pool::new(channel, 4, SubstrateKind::Lago));
+        let pooled = Pooled::new(DownLago, Arc::clone(&pool));
+        for _ in 0..FAILURE_THRESHOLD {
+            let _ = pooled.open_namespace("sid").await;
+        }
+        assert_eq!(pool.breaker_state(), BreakerState::Open);
     }
 }

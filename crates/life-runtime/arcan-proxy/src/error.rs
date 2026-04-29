@@ -23,7 +23,11 @@ pub enum ArcanProxyError {
 /// Retry classification for the lifed pool layer. `Retryable` faults
 /// trip the circuit breaker on accumulation but the pool retries on
 /// transient hiccups; `Permanent` faults fail fast.
+///
+/// `#[non_exhaustive]` — additional classes (e.g., `RetryWithBackoff`
+/// for ResourceExhausted) may be added without a breaking change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RetryClass {
     Retryable,
     Permanent,

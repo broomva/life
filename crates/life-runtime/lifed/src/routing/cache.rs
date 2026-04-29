@@ -93,6 +93,10 @@ impl RoutingCache {
             .entry(user_id.to_string())
             .or_default()
             .push(sid.value.clone());
+        // Sub-phase E: metric series wiring per Spec C₂ §9.3.
+        crate::observability::metrics::record_session_created("Tier-2");
+        crate::observability::metrics::set_cache_size(self.by_sid.len() as i64);
+        crate::observability::metrics::set_session_active(self.by_sid.len() as i64, "Tier-2");
     }
 
     /// Return the per-session fan-out registry. Sub-phase B's
@@ -109,11 +113,22 @@ impl RoutingCache {
     }
 
     pub fn evict(&self, sid: &aios_v1::SessionId) {
+        self.evict_with_reason(sid, "explicit");
+    }
+
+    /// Sub-phase E: internal eviction with metric label. The
+    /// `cache.evictions_total{reason}` series distinguishes
+    /// `explicit` / `idle` / `lru` / `revoked` per Spec C₂ §9.3.
+    fn evict_with_reason(&self, sid: &aios_v1::SessionId, reason: &str) {
         if let Some((_, entry)) = self.by_sid.remove(&sid.value) {
             let user_id = entry.read().user_id.clone();
             if let Some(mut sids) = self.by_user.get_mut(&user_id) {
                 sids.retain(|s| s != &sid.value);
             }
+            crate::observability::metrics::record_session_destroyed("Tier-2");
+            crate::observability::metrics::record_cache_eviction(reason);
+            crate::observability::metrics::set_cache_size(self.by_sid.len() as i64);
+            crate::observability::metrics::set_session_active(self.by_sid.len() as i64, "Tier-2");
         }
     }
 
@@ -195,7 +210,7 @@ impl RoutingCache {
             })
             .collect();
         for sid in to_evict {
-            self.evict(&aios_v1::SessionId { value: sid });
+            self.evict_with_reason(&aios_v1::SessionId { value: sid }, "idle");
         }
     }
 
@@ -213,6 +228,7 @@ impl RoutingCache {
     /// first traffic per session — which is the documented Spec C₂
     /// §6.3 fallback path.
     pub async fn cold_start(&self, lago: Arc<dyn LagoCall>) -> Result<u32, tonic::Status> {
+        let started = std::time::Instant::now();
         let prefix = "session/";
         let namespaces = lago
             .list_namespaces(prefix)
@@ -236,6 +252,8 @@ impl RoutingCache {
             self.mark_status(&sid, SessionStatus::Detached);
             warmed = warmed.saturating_add(1);
         }
+        // Sub-phase E: cold-start replay duration metric per Spec C₂ §9.3.
+        crate::observability::metrics::record_replay_seconds(started.elapsed().as_secs_f64());
         Ok(warmed)
     }
 
@@ -257,7 +275,7 @@ impl RoutingCache {
         entries.sort_by_key(|(_, t)| *t);
         let to_evict = self.by_sid.len() - hard_cap;
         for (sid, _) in entries.into_iter().take(to_evict) {
-            self.evict(&aios_v1::SessionId { value: sid });
+            self.evict_with_reason(&aios_v1::SessionId { value: sid }, "lru");
         }
     }
 }

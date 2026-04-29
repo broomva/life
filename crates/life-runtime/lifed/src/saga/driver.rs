@@ -241,6 +241,11 @@ impl SagaDriver {
 
         // Open the in-memory record + persist the start event.
         self.registry.open(&ctx.saga_id, kind, &ctx.sid);
+        // Sub-phase E: saga.inflight gauge per Spec C₂ §9.3.
+        crate::observability::metrics::set_saga_inflight(
+            kind,
+            self.registry.inflight_count() as i64,
+        );
         self.persist(
             &ctx.saga_id,
             SagaEvent {
@@ -321,10 +326,23 @@ impl SagaDriver {
                                     error = %e,
                                     "compensation failed (logged, NOT retried — see Spec C₂ §4.1)",
                                 );
+                                // Sub-phase E: compensation_failed_total
+                                // counter per Spec C₂ §9.3.
+                                crate::observability::metrics::record_saga_compensation_failed(
+                                    kind, prev_name,
+                                );
                             }
                         }
                     }
                     self.registry.close(&ctx.saga_id, SagaStatus::Compensated);
+                    // Sub-phase E: saga lifecycle metrics — outcome label
+                    // is `compensated` because forward failed and prior
+                    // steps were rolled back. Spec C₂ §9.3.
+                    crate::observability::metrics::record_saga_completed(kind, "compensated");
+                    crate::observability::metrics::set_saga_inflight(
+                        kind,
+                        self.registry.inflight_count() as i64,
+                    );
                     self.persist(
                         &ctx.saga_id,
                         SagaEvent {
@@ -342,6 +360,12 @@ impl SagaDriver {
             }
         }
         self.registry.close(&ctx.saga_id, SagaStatus::Succeeded);
+        // Sub-phase E: saga succeeded — completed counter + inflight gauge.
+        crate::observability::metrics::record_saga_completed(kind, "succeeded");
+        crate::observability::metrics::set_saga_inflight(
+            kind,
+            self.registry.inflight_count() as i64,
+        );
         self.persist(
             &ctx.saga_id,
             SagaEvent {

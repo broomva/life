@@ -105,19 +105,54 @@ pub async fn run_with_mocks_handles(
     };
     let auth = AuthLayer::new(Arc::clone(&jwks));
 
-    let arcan: Arc<dyn ArcanCall> = Arc::new(mocks.arcan.clone());
-    let lago: Arc<dyn LagoCall> = Arc::new(mocks.lago.clone());
-    let haima: Arc<dyn HaimaCall> = Arc::new(mocks.haima.clone());
-    let anima: Arc<dyn AnimaCall> = Arc::new(mocks.anima.clone());
+    // Sub-phase E: build pools first so we can wrap each substrate impl
+    // in its proxy crate's `Pooled<C>` adapter — the same pool lives on
+    // the trait object handlers consume AND on the `LifedHandles::pools`
+    // exposed to admin/integration tests.
+    let skel = build_handles_skeleton(cfg);
+    let pools_for_handlers = Arc::clone(&skel.pools);
 
-    let handles = build_handles(cfg, Arc::clone(&lago));
+    let arcan: Arc<dyn ArcanCall> = Arc::new(arcan_proxy::Pooled::new(
+        mocks.arcan.clone(),
+        pools_for_handlers.arcan.load_full(),
+    ));
+    let lago: Arc<dyn LagoCall> = Arc::new(lago_proxy::Pooled::new(
+        mocks.lago.clone(),
+        pools_for_handlers.lago.load_full(),
+    ));
+    let haima: Arc<dyn HaimaCall> = Arc::new(haima_proxy::Pooled::new(
+        mocks.haima.clone(),
+        pools_for_handlers.haima.load_full(),
+    ));
+    let anima: Arc<dyn AnimaCall> = Arc::new(anima_proxy::Pooled::new(
+        mocks.anima.clone(),
+        pools_for_handlers.anima.load_full(),
+    ));
+
+    // Idempotency store sees the already-Pooled lago so its persists
+    // bracket through the breaker uniformly.
+    let idem: Arc<dyn IdempotencyStore> = match cfg.idempotency.backend {
+        crate::config::IdempotencyBackend::Lago => {
+            Arc::new(LagoBackedStore::new(Arc::clone(&lago)))
+        }
+        crate::config::IdempotencyBackend::InMemory => {
+            boxed_in_memory(std::time::Duration::from_secs(cfg.idempotency.ttl_secs))
+        }
+    };
+
+    let handles = LifedHandles {
+        routing: skel.routing,
+        revoked: skel.revoked,
+        idem: Arc::clone(&idem),
+        saga_registry: skel.saga_registry,
+        approval_locks: skel.approval_locks,
+        pools: skel.pools,
+    };
 
     let routing = Arc::clone(&handles.routing);
     let revoked = Arc::clone(&handles.revoked);
-    let idem = Arc::clone(&handles.idem);
     let saga_registry = Arc::clone(&handles.saga_registry);
     let approval_locks = Arc::clone(&handles.approval_locks);
-    let pools = Arc::clone(&handles.pools);
 
     let ks = Arc::new(Keystore::generate_dev());
     let saga = build_saga_driver(Arc::clone(&saga_registry), Arc::clone(&lago));
@@ -137,7 +172,6 @@ pub async fn run_with_mocks_handles(
         Arc::clone(&admin_policy),
         Arc::clone(&ks),
         saga,
-        pools,
     );
 
     if let Some(tx) = handles_tx {
@@ -231,25 +265,18 @@ pub async fn run_with_real_substrates(
         "lifed starting (sub-phase C — real substrates)",
     );
 
-    let arcan: Arc<dyn ArcanCall> = Arc::new(
-        ArcanProxy::connect(cfg.substrates.arcan.unix_socket.clone())
-            .await
-            .map_err(|e| LifedError::Substrate(format!("arcan dial: {e}")))?,
-    );
-    let lago_proxy = LagoProxy::connect(cfg.substrates.lago.unix_socket.clone())
+    let arcan_proxy_real = ArcanProxy::connect(cfg.substrates.arcan.unix_socket.clone())
+        .await
+        .map_err(|e| LifedError::Substrate(format!("arcan dial: {e}")))?;
+    let lago_proxy_real = LagoProxy::connect(cfg.substrates.lago.unix_socket.clone())
         .await
         .map_err(|e| LifedError::Substrate(format!("lago dial: {e}")))?;
-    let lago: Arc<dyn LagoCall> = Arc::new(lago_proxy);
-    let haima: Arc<dyn HaimaCall> = Arc::new(
-        HaimaProxy::connect(cfg.substrates.haima.unix_socket.clone())
-            .await
-            .map_err(|e| LifedError::Substrate(format!("haima dial: {e}")))?,
-    );
-    let anima: Arc<dyn AnimaCall> = Arc::new(
-        AnimaProxy::connect(cfg.substrates.anima.unix_socket.clone())
-            .await
-            .map_err(|e| LifedError::Substrate(format!("anima dial: {e}")))?,
-    );
+    let haima_proxy_real = HaimaProxy::connect(cfg.substrates.haima.unix_socket.clone())
+        .await
+        .map_err(|e| LifedError::Substrate(format!("haima dial: {e}")))?;
+    let anima_proxy_real = AnimaProxy::connect(cfg.substrates.anima.unix_socket.clone())
+        .await
+        .map_err(|e| LifedError::Substrate(format!("anima dial: {e}")))?;
 
     // Substrate-token signing keystore + JWKS publish.
     let ks = Arc::new(if cfg.auth.substrate_signing_key_path.exists() {
@@ -263,13 +290,40 @@ pub async fn run_with_real_substrates(
     });
     publish_jwks(&ks, &cfg.auth.substrate_jwks_publish_path)?;
 
-    let handles = build_handles(cfg, Arc::clone(&lago));
+    // Sub-phase E: pool ownership pushed inside each `*Proxy` via
+    // `with_pool`. Handlers no longer bracket — every call through the
+    // trait object brackets internally per Spec C₂ §7.
+    let skel = build_handles_skeleton(cfg);
+    let arcan: Arc<dyn ArcanCall> =
+        Arc::new(arcan_proxy_real.with_pool(skel.pools.arcan.load_full()));
+    let lago: Arc<dyn LagoCall> = Arc::new(lago_proxy_real.with_pool(skel.pools.lago.load_full()));
+    let haima: Arc<dyn HaimaCall> =
+        Arc::new(haima_proxy_real.with_pool(skel.pools.haima.load_full()));
+    let anima: Arc<dyn AnimaCall> =
+        Arc::new(anima_proxy_real.with_pool(skel.pools.anima.load_full()));
+
+    let idem: Arc<dyn IdempotencyStore> = match cfg.idempotency.backend {
+        crate::config::IdempotencyBackend::Lago => {
+            Arc::new(LagoBackedStore::new(Arc::clone(&lago)))
+        }
+        crate::config::IdempotencyBackend::InMemory => {
+            boxed_in_memory(std::time::Duration::from_secs(cfg.idempotency.ttl_secs))
+        }
+    };
+
+    let handles = LifedHandles {
+        routing: skel.routing,
+        revoked: skel.revoked,
+        idem: Arc::clone(&idem),
+        saga_registry: skel.saga_registry,
+        approval_locks: skel.approval_locks,
+        pools: skel.pools,
+    };
+
     let routing = Arc::clone(&handles.routing);
     let revoked = Arc::clone(&handles.revoked);
-    let idem = Arc::clone(&handles.idem);
     let saga_registry = Arc::clone(&handles.saga_registry);
     let approval_locks = Arc::clone(&handles.approval_locks);
-    let pools = Arc::clone(&handles.pools);
     let saga = build_saga_driver(Arc::clone(&saga_registry), Arc::clone(&lago));
     let admin_policy = build_admin_policy(cfg);
 
@@ -286,7 +340,6 @@ pub async fn run_with_real_substrates(
         Arc::clone(&admin_policy),
         Arc::clone(&ks),
         saga,
-        pools,
     );
 
     let jwks = if cfg.auth.jwks_path.exists() {
@@ -312,26 +365,32 @@ pub async fn run_with_real_substrates(
     serve_planes(cfg, auth, services, shutdown_rx).await
 }
 
-fn build_handles(cfg: &LifedConfig, lago: Arc<dyn LagoCall>) -> LifedHandles {
+/// Sub-phase E: pre-Pooled handle constructor. Builds everything except
+/// the lago-backed idempotency store; the caller wraps lago in
+/// `lago_proxy::Pooled<...>` (using the `pools.lago` from these handles)
+/// then calls [`LifedHandles::with_idem_from_lago`] to attach the
+/// final idem store.
+fn build_handles_skeleton(cfg: &LifedConfig) -> LifedHandlesSkeleton {
     let routing = Arc::new(RoutingCache::new());
     let revoked = Arc::new(RevokedSidSet::new());
-    let idem: Arc<dyn IdempotencyStore> = match cfg.idempotency.backend {
-        crate::config::IdempotencyBackend::Lago => Arc::new(LagoBackedStore::new(lago)),
-        crate::config::IdempotencyBackend::InMemory => {
-            boxed_in_memory(std::time::Duration::from_secs(cfg.idempotency.ttl_secs))
-        }
-    };
     let saga_registry = Arc::new(SagaRegistry::new());
     let approval_locks = Arc::new(crate::services::agent::ApprovalLocks::new());
     let pools = build_substrate_pools(cfg);
-    LifedHandles {
+    LifedHandlesSkeleton {
         routing,
         revoked,
-        idem,
         saga_registry,
         approval_locks,
         pools,
     }
+}
+
+struct LifedHandlesSkeleton {
+    routing: Arc<RoutingCache>,
+    revoked: Arc<RevokedSidSet>,
+    saga_registry: Arc<SagaRegistry>,
+    approval_locks: Arc<crate::services::agent::ApprovalLocks>,
+    pools: Arc<SubstratePools>,
 }
 
 /// Sub-phase D: construct [`SubstratePools`] from the config-supplied
@@ -417,8 +476,9 @@ fn build_services(
     admin_policy: Arc<AdminPolicy>,
     ks: Arc<Keystore>,
     saga: Arc<SagaDriver>,
-    pools: Arc<SubstratePools>,
 ) -> LifedServices {
+    // Sub-phase E: handlers no longer accept a `pools` field — pool
+    // bracketing happens inside each proxy crate's `Pooled<C>` adapter.
     let agent = AgentService::new(
         Arc::clone(&arcan),
         Arc::clone(&lago),
@@ -428,10 +488,9 @@ fn build_services(
         Arc::clone(&ks),
         Arc::clone(&saga),
         Arc::clone(&approval_locks),
-        Arc::clone(&pools),
     );
     let events = EventsService::new(Arc::clone(&lago));
-    let wallet = WalletService::new(Arc::clone(&haima), Arc::clone(&idem), Arc::clone(&pools));
+    let wallet = WalletService::new(Arc::clone(&haima), Arc::clone(&idem));
     let identity = IdentityService::new(
         Arc::clone(&anima),
         Arc::clone(&routing),
@@ -472,21 +531,26 @@ async fn serve_planes(
         routing_admin,
     } = services;
 
-    // Public-plane router: TracePropagationLayer + AuthLayer + four life.v1 services.
-    // Spec C₂ §9.1: trace propagation is an outer layer so the per-request
-    // span begins before authentication runs.
+    // Public-plane router: TracePropagationLayer + HandlerMetricsLayer +
+    // AuthLayer + four life.v1 services. Spec C₂ §9.1: trace propagation
+    // is an outer layer so the per-request span begins before
+    // authentication runs. Spec C₂ §9.3: HandlerMetricsLayer records
+    // `life.daemon.handler.duration_ms{namespace,method}`.
     let public_router = Server::builder()
         .layer(crate::observability::TracePropagationLayer)
+        .layer(crate::observability::HandlerMetricsLayer)
         .layer(auth)
         .add_service(pb::agent_server::AgentServer::new(agent))
         .add_service(pb::events_server::EventsServer::new(events))
         .add_service(pb::wallet_server::WalletServer::new(wallet))
         .add_service(pb::identity_server::IdentityServer::new(identity));
 
-    // Admin-plane router: TracePropagationLayer (no AuthLayer — peer-cred
-    // + AdminPolicy gates), three life.admin.v1 services.
+    // Admin-plane router: TracePropagationLayer + HandlerMetricsLayer
+    // (no AuthLayer — peer-cred + AdminPolicy gates), three life.admin.v1
+    // services.
     let admin_router = Server::builder()
         .layer(crate::observability::TracePropagationLayer)
+        .layer(crate::observability::HandlerMetricsLayer)
         .add_service(adm::runtime_server::RuntimeServer::new(runtime_admin))
         .add_service(adm::saga_server::SagaServer::new(saga_admin))
         .add_service(adm::routing_cache_server::RoutingCacheServer::new(

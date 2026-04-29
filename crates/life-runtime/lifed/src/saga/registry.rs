@@ -115,6 +115,15 @@ impl SagaRegistry {
             .collect()
     }
 
+    /// Sub-phase E: count of in-flight (not-yet-closed) sagas. Used by
+    /// the `life.saga.inflight{kind}` gauge per Spec C₂ §9.3.
+    pub fn inflight_count(&self) -> usize {
+        self.map
+            .iter()
+            .filter(|e| e.value().status == SagaStatus::Inflight)
+            .count()
+    }
+
     /// Total record count (inflight + completed). Used by tests.
     pub fn len(&self) -> usize {
         self.map.len()

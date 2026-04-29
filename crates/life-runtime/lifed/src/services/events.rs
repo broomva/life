@@ -5,13 +5,11 @@
 //! `LagoProxy` (in production) both implement `LagoCall`, so the
 //! handler doesn't care which is wired in.
 //!
-//! ## Pool bracketing — Sub-phase E scope
+//! ## Pool bracketing — Sub-phase E
 //!
-//! Events handlers call `lago` directly without acquiring a pool permit,
-//! so the lago breaker stays Closed in production until Sub-phase E
-//! pushes pool bracketing inside the proxy crates. Sub-phase D ships
-//! the `SubstratePools` shape; only `services/agent.rs` exercises it.
-//! Tracked under BRO-934.
+//! Sub-phase E pushes pool bracketing inside each proxy crate's
+//! `Pooled<C>` adapter (Spec C₂ §7). Events handlers no longer need a
+//! `pools` field — every `self.lago.<rpc>()` call brackets internally.
 
 use std::pin::Pin;
 use std::sync::Arc;

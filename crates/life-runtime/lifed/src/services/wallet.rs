@@ -4,15 +4,13 @@
 //! response when the same `(user, project, idempotency-key, "Wallet.Debit")`
 //! tuple is seen within the TTL.
 //!
-//! ## Pool bracketing — Sub-phase E scope
+//! ## Pool bracketing — Sub-phase E
 //!
-//! Sub-phase D ships the `SubstratePools` machinery and brackets only the
-//! arcan dispatch sites in `services/agent.rs`. Wallet handlers do NOT
-//! yet bracket their `haima` calls through `pools.haima.load().acquire()`.
-//! Sub-phase E pushes pool bracketing inside the proxy crates so every
-//! substrate dispatch flows through the breaker uniformly. Until then,
-//! the haima breaker stays Closed in production. Tracked as Sub-phase E
-//! follow-up under BRO-934.
+//! Sub-phase E pushes pool bracketing inside each proxy crate's
+//! `Pooled<C>` adapter (Spec C₂ §7). Wallet handlers no longer carry a
+//! `pools` field — every `self.haima.<rpc>()` call brackets internally.
+//! The haima breaker tracks every wallet round-trip uniformly with
+//! arcan/lago/anima.
 
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -30,19 +28,11 @@ use crate::idempotency::{IdemKey, IdempotencyStore};
 pub struct WalletService {
     pub haima: Arc<dyn HaimaCall>,
     pub idem: Arc<dyn IdempotencyStore>,
-    /// Sub-phase D: per-substrate pools. Every haima dispatch brackets
-    /// `pools.haima.load().acquire().await?` so the haima circuit
-    /// breaker + bounded semaphore enforce backpressure.
-    pub pools: Arc<crate::routing::pools::SubstratePools>,
 }
 
 impl WalletService {
-    pub fn new(
-        haima: Arc<dyn HaimaCall>,
-        idem: Arc<dyn IdempotencyStore>,
-        pools: Arc<crate::routing::pools::SubstratePools>,
-    ) -> Self {
-        Self { haima, idem, pools }
+    pub fn new(haima: Arc<dyn HaimaCall>, idem: Arc<dyn IdempotencyStore>) -> Self {
+        Self { haima, idem }
     }
 
     fn claims<T>(req: &Request<T>) -> Result<&CapabilityClaims, Status> {

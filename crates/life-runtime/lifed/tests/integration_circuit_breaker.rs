@@ -1,15 +1,18 @@
-//! Sub-phase D7: chaos test for the per-substrate circuit breaker.
+//! Sub-phase D7 / E1: chaos test for the per-substrate circuit breaker.
 //!
-//! The acceptance criterion (Spec C₂ §7.2 + sub-phase D9):
+//! The acceptance criterion (Spec C₂ §7.2 + sub-phase E acceptance):
 //!
 //! > Killing lago does not cascade to arcan calls; the lago breaker
 //! > opens within 30 s; recovers when lago returns.
 //!
 //! In the test harness we don't actually kill a process; we set
 //! `MockLago::force_fail = true` so every lago RPC returns
-//! `Unavailable`. Using the `record_lago_failures` accessor we drive
-//! the pool's hand-rolled breaker to Open after 5 failures and assert
-//! the rest of the daemon (and other substrates) keep working.
+//! `Unavailable`. Sub-phase E removed the `TestEnv::record_lago_failures`
+//! stopgap — pool bracketing now lives inside `lago_proxy::Pooled<...>`
+//! so every `Agent.CreateSession` call drives the lago breaker through
+//! the real saga round-trip. After `FAILURE_THRESHOLD` failed
+//! `Agent.CreateSession` attempts the lago breaker observably trips
+//! Open without touching the arcan breaker.
 
 #[path = "_support/mod.rs"]
 mod _support;
@@ -32,15 +35,21 @@ async fn lago_failure_opens_breaker_without_cascading_to_arcan() {
         "arcan breaker starts Closed",
     );
 
-    // Simulate a sustained lago outage: every RPC fails. Then drive the
-    // pool's breaker to Open by recording 5 consecutive failures.
+    // Simulate a sustained lago outage: every RPC returns Unavailable.
+    // Sub-phase E: pool bracketing is inside `lago_proxy::Pooled<...>`,
+    // so every saga's `lago.open_namespace` call records a failure on
+    // the lago breaker. After FAILURE_THRESHOLD attempts the breaker
+    // trips Open. Each attempt also touches arcan.create_agent — but
+    // arcan keeps returning Ok, so its breaker stays Closed.
     env.fail_lago();
-    env.record_lago_failures(lifed::routing::breaker::FAILURE_THRESHOLD);
+    for _ in 0..lifed::routing::breaker::FAILURE_THRESHOLD {
+        let _ = env.create_session_dev("alice", "p", "chaos").await;
+    }
 
     assert_eq!(
         env.lago_breaker_state(),
         lifed::routing::breaker::BreakerState::Open,
-        "lago breaker Open after threshold failures",
+        "lago breaker Open after threshold failed dispatches",
     );
 
     // The arcan breaker is unaffected — no cascade.
@@ -50,7 +59,10 @@ async fn lago_failure_opens_breaker_without_cascading_to_arcan() {
         "arcan breaker stayed Closed during lago outage",
     );
 
-    // Recover: lago returns, future arcan dispatches should still work.
+    // Recover: the lago breaker remains Open until the 10 s window
+    // elapses (Spec C₂ §7.2). Force the open window past via the
+    // life-runtime-pool test-support helper so we don't sleep in CI.
+    env.force_lago_open_window_elapsed();
     env.recover_lago();
     let _ok = env
         .create_session_dev("alice", "p", "post-recovery")
@@ -68,11 +80,14 @@ async fn lago_failure_opens_breaker_without_cascading_to_arcan() {
 #[tokio::test]
 async fn breaker_state_is_observable_for_metric_export() {
     let env = TestEnv::start_with_mocks().await;
-    // Each substrate must expose a numeric metric value (0/1/2 for
-    // Closed/HalfOpen/Open) for the `life.daemon.breaker_state` series.
     use lifed::routing::breaker::BreakerState;
     assert_eq!(env.lago_breaker_state().as_metric_value(), 0);
-    env.record_lago_failures(lifed::routing::breaker::FAILURE_THRESHOLD);
+    // Sub-phase E: drive the breaker through real handler traffic
+    // rather than the removed `record_lago_failures` stopgap.
+    env.fail_lago();
+    for _ in 0..lifed::routing::breaker::FAILURE_THRESHOLD {
+        let _ = env.create_session_dev("alice", "p", "metric").await;
+    }
     assert_eq!(env.lago_breaker_state().as_metric_value(), 2);
     let _ = BreakerState::Open;
     env.shutdown().await;
