@@ -41,10 +41,14 @@ pub enum RequiredScope {
     /// `agent:dispatch` — Agent.{CreateSession, SendMessage}.
     AgentDispatch,
     /// `agent:read` — Agent.{DescribeSession, CloseSession, StreamSession}.
-    /// Per Spec C₃ §5.4 line 468, `StreamSession` requires `agent:read`
-    /// (read-side), not `agent:dispatch`. The WebSocket upgrade path at
-    /// `/v1/agent/stream` initiates a `StreamSession` RPC, so browsers
-    /// tailing a session need `agent:read` (or a wildcard `agent:*`).
+    /// Per Spec C₃ §5.4 line 468, the gRPC `StreamSession` RPC requires
+    /// `agent:read` (read-side), not `agent:dispatch`. Note: the WebSocket
+    /// upgrade path at `/v1/agent/stream` requires `agent:dispatch`
+    /// because the bidi WS protocol allows clients to dispatch
+    /// `SendMessage` frames over the same socket. Read-only viewers
+    /// should use the gRPC server-streaming `StreamSession` path; bidi
+    /// callers use the WS path. The asymmetry is intentional and
+    /// documented at the WS upgrade scope mapping below.
     AgentRead,
     /// `agent:approve` — Agent.{ApproveDispatch, CancelDispatch}.
     AgentApprove,
@@ -164,6 +168,19 @@ pub fn required_scope(path: &str) -> Option<RequiredScope> {
     }
 
     // ── WS upgrade (Sub-phase C public surface) ──
+    //
+    // The `/v1/agent/stream` WebSocket upgrade requires `agent:dispatch`
+    // (NOT `agent:read`, which is what the gRPC `StreamSession` RPC
+    // requires per Spec C₃ §5.4 line 468). The asymmetry is intentional:
+    // the bidi WS pump allows clients to dispatch `SendMessage` frames
+    // over the same socket, so the upgrade itself MUST require dispatch
+    // power upfront. Read-only viewers should use the gRPC
+    // server-streaming `StreamSession` path with `agent:read` only.
+    //
+    // Sub-phase D may revisit per-frame scope re-checking (so the WS
+    // upgrade could downgrade to `agent:read` and frame-level dispatch
+    // would re-check `agent:dispatch`), but for sub-phase C the
+    // upfront-dispatch model keeps the auth seam simple.
     if trimmed == "v1/agent/stream" {
         return Some(RequiredScope::AgentDispatch);
     }

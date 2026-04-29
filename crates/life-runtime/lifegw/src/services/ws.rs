@@ -82,9 +82,18 @@ pub const STALLED_THRESHOLD: u32 = 5;
 /// Polling cadence for the slow-consumer detector.
 pub const STALL_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Heartbeat interval (Spec C₃ §6.4) — gateway sends a WS ping every
-/// 30 s and closes with 1011 if the client doesn't pong inside the
+/// Heartbeat interval (Spec C₃ §6.4) — gateway will send a WS ping
+/// every 30 s and close with 1011 if the client doesn't pong inside the
 /// window.
+///
+/// **Sub-phase D follow-up (BRO-XXX):** the constant is exposed at
+/// module scope so a Sub-phase D contributor can pull it directly into
+/// the heartbeat tick + pong-deadline-tracking logic. Sub-phase C ships
+/// the close-code mapping for `1011 InternalError` (which is also used
+/// for upstream errors) but does NOT yet enforce the heartbeat itself —
+/// the bidi pump's `tokio::select!` has 3 arms (outbound, inbound,
+/// stall_clock); a 4th arm for `heartbeat_clock.tick()` and a 5th for
+/// `pong_deadline_clock.tick()` will be added in D.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 
 /// WS close-code policy per Spec C₃ §6.5 (extended for sub-phase C).
@@ -101,7 +110,10 @@ pub enum CloseReason {
     /// reserved 4001 = rate-limit slot. Operators can correlate by
     /// the `policy_violation:token_expired` reason string.
     PolicyViolation,
-    /// `1011` — internal server error (unexpected failure / heartbeat timeout).
+    /// `1011` — internal server error (unexpected failure). Sub-phase D
+    /// will additionally use this code for heartbeat-timeout closures
+    /// once the heartbeat enforcement lands (see `HEARTBEAT_INTERVAL`
+    /// docstring above).
     InternalError,
     /// `4001` — rate limit exceeded (Sub-phase D wires the actual
     /// limiter; Sub-phase C exposes the code path).
@@ -190,6 +202,18 @@ pub enum InboundFrame {
     /// query / header.
     SendMessage {
         content: String,
+        /// Optional reference to a previously-uploaded blob (e.g.
+        /// `"sha256:<hex>"`). The string's UTF-8 bytes are forwarded
+        /// verbatim to lifed as the `attachment_blob_ref` field — lifed
+        /// interprets them as an opaque content-addressed identifier.
+        ///
+        /// **Encoding contract:** the WS surface only supports ASCII
+        /// string identifiers (the JSON envelope can't carry raw
+        /// bytes). Clients needing raw byte refs must use the gRPC
+        /// unary `Agent.SendMessage` path with the `bytes` field. This
+        /// asymmetry with outbound payload encoding (which is base64)
+        /// is intentional: blob refs are typed identifiers, not opaque
+        /// payloads.
         #[serde(default)]
         attachment_blob_ref: Option<String>,
     },
@@ -395,9 +419,11 @@ pub struct WsConnection {
 ///   - a fresh tonic `AgentClient` cloned from the upstream pool.
 ///
 /// The spawned task drives the bidi pump until the client closes,
-/// the upstream errors, the heartbeat times out, or the slow-consumer
-/// detector trips. The task ALWAYS sends a final close frame before
-/// dropping the WS stream so clients learn the policy decision.
+/// the upstream errors, or the slow-consumer detector trips. The task
+/// ALWAYS sends a final close frame before dropping the WS stream so
+/// clients learn the policy decision. Heartbeat enforcement (server-
+/// initiated ping + pong-deadline tracking → `CloseReason::InternalError`
+/// on timeout) lands in Sub-phase D — see `HEARTBEAT_INTERVAL`.
 pub fn handle_upgrade(
     mut req: Request<Body>,
     agent_client: pb::agent_client::AgentClient<Channel>,
