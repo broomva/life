@@ -156,6 +156,24 @@ impl CircuitBreaker {
         self.half_open_trial_active.load(Ordering::SeqCst)
     }
 
+    /// Release the HalfOpen trial slot WITHOUT recording a result.
+    ///
+    /// Used when a caller has won the trial CAS via
+    /// [`Self::try_acquire_half_open_trial`] but cannot proceed (e.g.
+    /// `Pool::acquire`'s semaphore close on shutdown). Without this
+    /// release, `half_open_trial_active` would remain `true` forever
+    /// and every future HalfOpen attempt would short-circuit — the
+    /// breaker would deadlock in HalfOpen.
+    ///
+    /// Per Spec C₂ §7.2, this preserves the "single trial" invariant:
+    /// no trial actually ran, so the slot is freed for the next caller.
+    /// Callers should NOT call `record_success` / `record_failure`
+    /// after this; that contract is enforced by the `PoolGuard` Drop
+    /// impl, which only feeds the breaker if a permit was acquired.
+    pub fn release_half_open_trial(&self) {
+        self.half_open_trial_active.store(false, Ordering::SeqCst);
+    }
+
     /// Record a successful call. Resets consecutive-failures, slides
     /// the window forward, and transitions HalfOpen→Closed (releasing
     /// the trial slot).
@@ -380,5 +398,36 @@ mod tests {
         cb.record_failure();
         assert_eq!(cb.state(), BreakerState::Open);
         assert!(!cb.half_open_trial_in_flight());
+    }
+
+    /// I1 fix (PR #1062 code-quality review): explicit `release_half_open_trial`
+    /// frees the CAS slot WITHOUT recording success or failure. Used by
+    /// `Pool::acquire` when the semaphore acquire fails AFTER winning
+    /// the HalfOpen trial CAS — without the release the breaker would
+    /// deadlock in HalfOpen.
+    #[test]
+    fn release_half_open_trial_frees_slot_without_recording() {
+        let cb = CircuitBreaker::new();
+        for _ in 0..FAILURE_THRESHOLD {
+            cb.record_failure();
+        }
+        cb.force_open_window_elapsed();
+        let _ = cb.state(); // promote to HalfOpen
+        assert!(cb.try_acquire_half_open_trial(), "first acquire wins");
+        assert!(cb.half_open_trial_in_flight());
+        // Release WITHOUT recording — simulates the semaphore-closed
+        // path in `Pool::acquire`.
+        cb.release_half_open_trial();
+        assert!(
+            !cb.half_open_trial_in_flight(),
+            "slot released; subsequent callers can re-acquire"
+        );
+        // Slot is freed: a new caller can acquire the trial.
+        assert!(
+            cb.try_acquire_half_open_trial(),
+            "next caller acquires the freed slot"
+        );
+        // Breaker stays HalfOpen because no result was recorded.
+        assert_eq!(cb.state(), BreakerState::HalfOpen);
     }
 }

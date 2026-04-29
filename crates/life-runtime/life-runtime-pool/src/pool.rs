@@ -213,12 +213,22 @@ impl Pool {
             }
             BreakerState::Closed => false,
         };
-        let permit = self
-            .semaphore
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| tonic::Status::unavailable("semaphore closed"))?;
+        let permit = match self.semaphore.clone().acquire_owned().await {
+            Ok(p) => p,
+            Err(_) => {
+                // I1 fix (PR #1062 code-quality review): if the semaphore is
+                // closed AFTER we won the HalfOpen trial CAS, release the
+                // trial slot before erroring out so the breaker doesn't
+                // deadlock in HalfOpen. Without this, `half_open_trial_active`
+                // would stay `true` forever and every future HalfOpen call
+                // would short-circuit. In practice this only fires during
+                // shutdown but the contract must be sound.
+                if is_half_open_trial {
+                    self.breaker.release_half_open_trial();
+                }
+                return Err(tonic::Status::unavailable("semaphore closed"));
+            }
+        };
         let new_inflight = self
             .inflight
             .fetch_add(1, Ordering::SeqCst)
