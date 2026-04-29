@@ -233,8 +233,10 @@ struct Tier1Body {
     project_id: Option<String>,
     #[serde(default)]
     scopes: Option<Vec<String>>,
+    /// Sub-phase C (BRO-938 follow-up #2): propagated into `Tier1Claims.tier`
+    /// so the Tier-2 mint can stamp the right tier on capability tokens.
+    /// Without this projection the rate limiter saw every user as `free`.
     #[serde(default)]
-    #[allow(dead_code)]
     tier: Option<String>,
 }
 
@@ -367,6 +369,10 @@ impl JwksCache {
                 user_id: user_id.to_string(),
                 project_id: "default-project".to_string(),
                 scopes: vec!["agent:dispatch".to_string()],
+                // Dev path defaults to `free` so per-tier rate-limit
+                // tests don't have to thread a special bearer to land
+                // on the default budget.
+                tier: crate::auth::tier1::DEFAULT_TIER.to_string(),
             });
         }
 
@@ -434,6 +440,12 @@ impl JwksCache {
             scopes: body
                 .scopes
                 .unwrap_or_else(|| vec!["agent:dispatch".to_string()]),
+            // Sub-phase C: propagate the issuer-supplied tier (or fall
+            // back to `free` for tokens minted before the schema added
+            // the claim).
+            tier: body
+                .tier
+                .unwrap_or_else(|| crate::auth::tier1::DEFAULT_TIER.to_string()),
         })
     }
 

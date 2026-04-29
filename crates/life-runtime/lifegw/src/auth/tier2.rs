@@ -104,7 +104,10 @@ impl Tier2Minter {
             sid: String::new(),
             project_id: t1.project_id.clone(),
             scopes: t1.scopes.clone(),
-            tier: "free".to_string(),
+            // Sub-phase C (BRO-938 follow-up #2): propagate `tier` from
+            // Tier-1. Sub-phase B hardcoded `"free"` so rate-limit code
+            // (Sub-phase D) saw every user as free.
+            tier: t1.tier.clone(),
         };
         let body = serde_json::to_value(&claims)
             .map_err(|e| LifegwError::Auth(format!("encode tier-2 claims: {e}")))?;
@@ -137,6 +140,7 @@ mod tests {
             user_id: "user-1".to_string(),
             project_id: "demo".to_string(),
             scopes: vec!["agent:dispatch".to_string()],
+            tier: "free".to_string(),
         };
         let jws = minter.mint(&t1).expect("mint");
         let header = decode_header(&jws).expect("decode_header");
@@ -177,6 +181,7 @@ mod tests {
             user_id: "u".to_string(),
             project_id: "p".to_string(),
             scopes: vec![],
+            tier: "free".to_string(),
         };
         let jws = m.mint(&t1).expect("mint");
         let jwks = signer.publish_jwks();
@@ -191,12 +196,57 @@ mod tests {
     }
 
     #[test]
+    fn mint_propagates_tier_from_tier1_claims() {
+        // Sub-phase C (BRO-938 follow-up #2): Tier-2 reflects the
+        // Tier-1 issuer-supplied tier instead of always "free". A
+        // `paid` user must land on a `paid` Tier-2 so the rate
+        // limiter (Sub-phase D) applies the correct budget.
+        let (signer, minter) = dev_minter();
+        let t1 = Tier1Claims {
+            user_id: "paid-user".to_string(),
+            project_id: "demo".to_string(),
+            scopes: vec!["agent:dispatch".to_string()],
+            tier: "paid".to_string(),
+        };
+        let jws = minter.mint(&t1).expect("mint paid");
+        let jwks = signer.publish_jwks();
+        let pem = jwks.keys[0].pem.as_ref().expect("pem");
+        let dk = DecodingKey::from_ec_pem(pem.as_bytes()).expect("decode");
+        let mut v = Validation::new(Algorithm::ES256);
+        v.set_audience(&["lifed"]);
+        v.set_issuer(&["lifegw"]);
+        v.validate_nbf = true;
+        let body = decode::<Tier2Claims>(&jws, &dk, &v).expect("verify");
+        assert_eq!(body.claims.tier, "paid", "Tier-2 reflects Tier-1 tier");
+    }
+
+    #[test]
+    fn mint_round_trip_default_tier_is_free() {
+        // Default `Tier1Claims::new` lands on `free`. Confirm the
+        // Tier-2 mint reflects that without operator intervention.
+        let (signer, minter) = dev_minter();
+        let t1 = Tier1Claims::new("u", "p", vec![]);
+        assert_eq!(t1.tier, "free");
+        let jws = minter.mint(&t1).expect("mint default");
+        let jwks = signer.publish_jwks();
+        let pem = jwks.keys[0].pem.as_ref().expect("pem");
+        let dk = DecodingKey::from_ec_pem(pem.as_bytes()).expect("decode");
+        let mut v = Validation::new(Algorithm::ES256);
+        v.set_audience(&["lifed"]);
+        v.set_issuer(&["lifegw"]);
+        v.validate_nbf = true;
+        let body = decode::<Tier2Claims>(&jws, &dk, &v).expect("verify");
+        assert_eq!(body.claims.tier, "free");
+    }
+
+    #[test]
     fn nbf_is_in_the_past() {
         let (_, minter) = dev_minter();
         let t1 = Tier1Claims {
             user_id: "u".to_string(),
             project_id: "p".to_string(),
             scopes: vec![],
+            tier: "free".to_string(),
         };
         let jws = minter.mint(&t1).expect("mint");
         // Decode body without verifying signature to inspect raw nbf.

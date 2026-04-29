@@ -83,6 +83,9 @@ mod tests {
         assert_eq!(claims.user_id, "user-1");
         assert_eq!(claims.project_id, "default-project");
         assert_eq!(claims.scopes, vec!["agent:dispatch".to_string()]);
+        // Sub-phase C: dev verifier defaults `tier` to `free` so the
+        // rate-limit tests can rely on a non-empty value.
+        assert_eq!(claims.tier, crate::auth::tier1::DEFAULT_TIER);
     }
 
     #[test]

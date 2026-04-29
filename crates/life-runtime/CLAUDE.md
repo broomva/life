@@ -23,6 +23,16 @@ The `life-runtime` crate cluster ships the **public-facing** surface of the Life
 
 ## Phase status
 
+### M7 lifegw (edge gateway, BRO-935..939)
+
+- **M7 sub-phase A** ✅ SHIPPED — TLS bind + dev-mode JWT + tonic-web unary proxy + `/healthz`.
+- **M7 sub-phase B** ✅ SHIPPED 2026-04-28 — Real Vercel JWKS verifier + KMS provider abstraction + atomic JWKS publish + TLS 1.3-only listener (BRO-936, PR #1057 → main `37b89a3`).
+- **M7 sub-phase C** ✅ SHIPPED — WebSocket upgrade at `/v1/agent/stream` + bidi pump (browser ↔ lifed `Agent.StreamSession`) + reconnect-by-`last_seq_no` (header / query) + close-code policy per Spec C₃ §6.5 + per-WS bounded mpsc(64) backpressure + 3 B-phase follow-ups closed (`KmsProvider::Dev` fail-closed, `Tier1Claims.tier` propagation, route-scope intersection enforcement). Refactor: bootstrap now drives connections via `hyper_util::server::conn::auto::Builder::serve_connection_with_upgrades` since tonic 0.14's `Server::serve_with_incoming_shutdown` doesn't enable hyper upgrades (BRO-938).
+- **M7 sub-phase D** — Rate limit + admin plane + cert-watch + JWKS single-flight (planned).
+- **M7 sub-phase E** — Production KMS swap-in + chaos tests (planned).
+
+### M5 lifed (facade, BRO-930..934)
+
 - **M5 sub-phase A** ✅ SHIPPED 2026-04-26 — Agent + Events with mock substrates (BRO-930, PR #1047 → main `7f91f40`).
 - **M5 sub-phase B** ✅ SHIPPED 2026-04-26 — Real substrate proxies (shape) + ES256/JWKS + real `SagaDriver` with reverse compensation + lago-backed idempotency + routing-cache eviction + full Wallet + Identity service bodies + multi-tab fanout registry + conformance battery body (BRO-931, PR #1050).
 - **M5 sub-phase C** — Admin plane (`life.admin.v1.{Runtime, Saga, RoutingCache}`): pending. Will land lago-backed saga-state persistence (Spec C₂ §4.1) + per-sid `Agent.ApproveDispatch` lock (Spec C₂ §6.4) + the `TestEnv` accessor refactor that widens `integration_identity::revoke_session_propagates_to_anima` to assert both the local blocklist insert and the routing-cache eviction.
