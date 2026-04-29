@@ -724,7 +724,148 @@ the E1/E3 deploy + bake-in artifacts. Only the lago wire RPC swap
 (BRO-934 follow-up) remains, waiting on lagod to ship typed
 `lago.Append` + `lago.ListNamespaces` RPCs.
 
-PR #XXXX merged 2026-04-29 (commit `XXXXXXX`). Refs BRO-921 + BRO-937.
+In-PR review fixes applied before merge (single follow-up commit
+`b759b1d7`):
+
+- `deploy/systemd/lifed.service` `RuntimeDirectoryMode=0755` →
+  `0750` with explanatory comment, restoring parity with the
+  hardening posture of soma + lifegw on shared `/run/life/`.
+- Added `PrivateNetwork=yes` to `lifed.service` with explanatory
+  comment — lifed is UDS-only and never opens a TCP socket, so a
+  network namespace with no devices is the strongest defense-in-depth
+  against an exploited dependency that tries to dial an external
+  endpoint.
+- New `deploy/systemd/README.md` (~190 lines) — operator install
+  steps, readiness check via `nc -U`, substrate dependency table,
+  `sd_notify` migration plan, socket-activation future enhancement,
+  the 15 canonical metric series from Spec C₂ §9.3, hardening
+  rationale, and a 7-row symptom→diagnostic→fix runbook. Plan E1
+  deliverable.
+- New `crates/life-runtime/lifed/lifed.example.toml` (~250 lines) —
+  every default in TOML matches in-code default; `OPERATOR ATTENTION`
+  comments on the few production-tunable fields
+  (`admin_plane.unix_socket_group`, `auth.dev_signer_enabled`,
+  `vigil.otlp_endpoint`). Plan E1 deliverable.
+
+PR #1063 merged 2026-04-29 (commit `80a2f9c`). Refs BRO-921 + BRO-937.
+
+### 2026-04-29 — M7 sub-phase D: lifegw — rate limit + admin plane + cert-watch + heartbeat + 9 bundled follow-ups
+
+Closes lifegw operational hardening. Spec C₃ §6 (rate-limiting),
+§7 (admin plane), §11.2 (TLS cert reload), §8.2 (heartbeats), §5.4
+(JWKS resilience), and §9.4 (admin metrics) are now wired on the
+real serving path.
+
+- **D1 — Token-bucket rate limiter** (`services/rate_limit.rs`).
+  Per-user (60 QPS, 120 burst) and per-IP (600 QPS, 1200 burst)
+  buckets keyed by `(user_id, client_ip)`. Sharded `DashMap`
+  with periodic GC every 60s for buckets idle >10m to bound
+  memory growth. Tower-layer composition between auth and
+  grpc-web so unauthenticated requests get rejected by JWKS first
+  (cheaper) and authenticated rate-limit denials carry the
+  `(user_id, ip)` tuple in the error event for Vigil. Exempts
+  `/life.v1.Identity/Whoami` from per-user metering so a session
+  storm cannot lock a user out of identity discovery.
+- **D2 — Admin plane** (`admin/{listener,peercred,policy,
+  blocklist,service}.rs` + `proto/life/admin/gw/v1/gateway.proto`).
+  UDS at `/run/life/lifegw.admin.sock` with mode `0660`
+  (`life-runtime:life-admin`). `SO_PEERCRED` reads euid + groups
+  on each connection; the connection is rejected if the caller's
+  groups do not intersect the configured `admin.allowed_groups`
+  set. Three RPCs land: `BlocklistAdd(ip, reason, ttl)`,
+  `BlocklistRemove(ip)`, `BlocklistList()`. Blocklist is in-memory
+  (sharded `DashMap`) with TTL eviction; persistence across
+  restarts is deferred to D-follow-up (admin-plane on lago is the
+  long-term plan per Spec C₃ §7.4). Admin plane is feature-flagged
+  via `[admin_plane]` config block; daemon refuses to start if
+  flag is on but the configured group does not exist on the host.
+- **D3 — TLS cert reloader** (`services/cert_watch.rs`). 5-second
+  polling on `tls.cert_path` + `tls.key_path` mtime; on change,
+  reloads via `rustls::ServerConfig::with_cert_resolver` and
+  swaps the `Arc<rustls::server::ResolvesServerCert>` atomically.
+  Polling rather than `notify` crate because the deploy target's
+  cert-manager writes via `rename(2)` which fires inotify on the
+  staging dir, not the published path; mtime polling catches
+  every observed cert-rotation pattern reliably. Deferred:
+  swapping the `TlsAcceptor` into `serve_connections` (currently
+  only the resolver is hot-swappable; the acceptor itself is
+  rebuilt-on-rotate but the listener still holds an old
+  `TlsAcceptor` in its accept loop — flagged for Sub-phase E).
+- **D4 — JWKS single-flight** (`auth/jwks.rs::FlightCoalescer`).
+  Hand-rolled `Mutex<Option<Arc<Inner>>>` + `Condvar` cohort
+  pattern. First fetcher acquires the inner, every subsequent
+  fetcher within the in-flight window blocks on the condvar; on
+  completion the leader broadcasts and writes the result into a
+  cohort-shared slot (`Arc<Mutex<Option<Result<JwksCache>>>>`)
+  so all members observe the same outcome — including failures,
+  which propagate uniformly so concurrent requests during a
+  Vercel JWKS outage do not stampede.
+- **D5 — Heartbeat** (`services/ws.rs`). 30-second ping cadence
+  on each upgraded WebSocket; tracks last-pong-rx, terminates
+  the session with close-code 1011 (unexpected-condition) if
+  three consecutive pings go unanswered. Heartbeats run in a
+  dedicated tokio task per session; cancellation-safe via
+  `tokio::select!` against the inbound pump.
+- **D6 — Reconnect-by-`from_sequence`** (`proto/life/v1/agent.proto`
+  `SessionRef.from_sequence` + `services/ws.rs`). Client sends
+  `from_sequence: u64` on `Subscribe`; lifegw forwards to lifed
+  which streams events `seq > from_sequence`. Bridges client
+  reconnect with no event loss across transient network drops.
+- **D7 — `Arc<JwksCache>` handle** (`auth/jwks.rs`). The cache
+  itself is now `Arc`-wrapped so the cert-watch hot-swap path
+  and the request-handling path share the same instance; avoids
+  the previous double-buffering hack where the cert-watch
+  rebuilt the cache and request-paths held a copy. Memory
+  saving is small (one cache); ergonomic gain is large.
+- **D8 — `build_signer` fail-closed error class** (`bootstrap.rs`).
+  Refactored signer-build error handling to surface exactly
+  one error class (`SignerBuildError`) with sub-variants for
+  KMS-unreachable / dev-signer-when-not-allowed / key-format.
+  Daemon now refuses to start if signer build fails rather than
+  falling back to dev signer in production mode.
+- **D9 — Dispatcher** (`services/ws.rs`). The bidi pump now
+  routes inbound client frames to one of three handler families:
+  `RoutedSubscribe` (sets the subscription cursor), `Ack` (debits
+  the inbound credit window — paves the way for backpressure
+  in Sub-phase E), and `Heartbeat` (records last-pong-rx). All
+  unknown frame kinds now close 1003 (unsupported-data) instead
+  of 1011, distinguishing protocol violations from server faults
+  in the close-code policy.
+
+Per Spec C₃ §13 (admin metrics): `gateway.admin.connection_total`,
+`gateway.admin.rejected_total{reason="peercred|group|protocol"}`,
+`gateway.blocklist.size`, `gateway.blocklist.match_total` are now
+emitted via vigil. Per §9.3 (rate-limit metrics):
+`gateway.rate_limit.allowed_total`, `gateway.rate_limit.denied_total
+{scope="user|ip"}`, `gateway.rate_limit.bucket_count` round out
+the canonical metric set.
+
+Tests: 3703 → 3759 (+56 across rate-limit, admin-plane integration,
+heartbeat, JWKS coalescer, cert-watch, dispatcher).
+
+PR #1064 merged 2026-04-29 (commit `571f7efb`). Refs BRO-932 +
+BRO-938.
+
+Code-quality review verdict: **APPROVED — merge as-is.** 7 polish
+items deferred to a Sub-phase E sweep ticket under BRO-932:
+
+1. `BlocklistEmpty` rename (admin proto error class)
+2. `BlocklistList` `Timestamp` simplification (avoid `prost_types`
+   round-trip in the hot path)
+3. `elapsed.as_millis()` casting cleanup (use `u64::try_from`
+   over `as`)
+4. IPv6-with-port parser (currently bracket-only; should accept
+   `[::1]:port` in admin-plane error reporting)
+5. `JwksCache::dump` debug helper for operational triage
+6. Supplementary-group lookup robustness (use `getgrouplist(3)`
+   over reading `/etc/group` directly)
+7. Fail-closed admin policy when group-lookup fails (currently
+   logs + denies; should also bump
+   `gateway.admin.rejected_total{reason="group_lookup"}`)
+
+Plus the deferred TLS-acceptor swap into `serve_connections` from
+D3 (currently the resolver hot-swaps but the listener accept loop
+still holds an old `TlsAcceptor`).
 
 ## Health Summary
 
