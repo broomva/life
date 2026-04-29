@@ -25,6 +25,7 @@ pub mod jwks;
 pub mod keystore;
 pub mod kms;
 pub mod middleware;
+pub mod scope;
 pub mod tier1;
 pub mod tier2;
 
@@ -32,5 +33,6 @@ pub use jwks::{JwksCache, JwksCacheConfig, JwksDoc, JwksEntry, JwksSource};
 pub use keystore::Keystore;
 pub use kms::{KmsSigner, StaticKeystore};
 pub use middleware::AuthLayer;
-pub use tier1::Tier1Claims;
+pub use scope::{RequiredScope, ScopeError, enforce as enforce_scope, required_scope};
+pub use tier1::{DEFAULT_TIER, Tier1Claims};
 pub use tier2::Tier2Claims;

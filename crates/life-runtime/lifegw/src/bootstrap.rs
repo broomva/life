@@ -72,6 +72,23 @@ pub async fn serve_with_listener(
     serve_with_listener_and_signer(cfg, bind, signer, shutdown_rx).await
 }
 
+// Decision (M7 Sub-phase C, BRO-938 follow-up #1, Option B):
+//
+// `KmsProvider::Dev` is now **fail-closed** unless `dev_signer_enabled`
+// is also `true`. The Sub-phase B default flowed `Dev` through silently
+// even in production deployments, defeating the §5.4 KMS isolation
+// invariant. We mirror the lifed pattern ("production startup with
+// `--no-kms` is rejected unless `--dev-mode` is also set"): operators
+// must set BOTH `auth.kms_provider = "dev"` AND
+// `auth.dev_signer_enabled = true` to opt into the in-process
+// keystore. Either alone is rejected. Production builds use
+// Vault/AWS/GCP — the `kms-vault` feature ships as the default in
+// `Cargo.toml`. Option A (flip `KmsProvider::default()` to `Vault`)
+// was considered and rejected: a config with no `[auth]` block would
+// silently land on Vault and crash at startup with a non-obvious
+// "vault not configured" error. Option B fails fast at signer-build
+// time with a clear invariant message.
+
 /// Serve atop an already-bound `TlsBind` with a pre-constructed signer.
 /// Used by integration tests that need the gateway and the conformance
 /// reader to share key material via the published JWKS file.
@@ -151,9 +168,26 @@ pub async fn serve_with_listener_and_keystore(
 
 /// Resolve the configured KMS provider into a concrete [`KmsSigner`]
 /// trait object.
-fn build_signer(cfg: &AuthConfig) -> LifegwResult<Arc<dyn KmsSigner>> {
+///
+/// **Sub-phase C hardening (Option B, BRO-938 follow-up #1)**:
+/// `KmsProvider::Dev` is gated behind `dev_signer_enabled = true`. The
+/// only way to land on the in-process `StaticKeystore` signer is to
+/// explicitly opt in via BOTH config fields. This mirrors the lifed
+/// rule ("production startup with `--no-kms` is rejected unless
+/// `--dev-mode` is also set") and prevents a silent
+/// `KmsProvider::default()` → `Dev` foot-gun in production deployments.
+pub(crate) fn build_signer(cfg: &AuthConfig) -> LifegwResult<Arc<dyn KmsSigner>> {
     match cfg.kms_provider {
-        KmsProvider::Dev => Ok(Arc::new(StaticKeystore::generate_dev()?)),
+        KmsProvider::Dev => {
+            if !cfg.dev_signer_enabled {
+                return Err(LifegwError::Config(
+                    "auth.kms_provider = dev requires auth.dev_signer_enabled = true \
+                     (Sub-phase C hardening — production deploys must use a real KMS provider)"
+                        .to_string(),
+                ));
+            }
+            Ok(Arc::new(StaticKeystore::generate_dev()?))
+        }
         #[cfg(feature = "kms-vault")]
         KmsProvider::Vault => match cfg.vault.as_ref() {
             Some(v) => Ok(Arc::new(crate::auth::kms::VaultTransit::new(
@@ -305,6 +339,40 @@ mod tests {
         assert_eq!(keys.len(), 1);
         assert_eq!(keys[0]["alg"], serde_json::json!("ES256"));
         assert_eq!(keys[0]["kid"], serde_json::json!(signer.active_kid()));
+    }
+
+    #[test]
+    fn build_signer_dev_requires_dev_signer_enabled() {
+        // Sub-phase C hardening (BRO-938 follow-up #1, Option B):
+        // KmsProvider::Dev with dev_signer_enabled = false is rejected.
+        let cfg = AuthConfig {
+            kms_provider: KmsProvider::Dev,
+            dev_signer_enabled: false,
+            ..AuthConfig::default()
+        };
+        match build_signer(&cfg) {
+            Ok(_) => panic!("must reject Dev kms_provider without dev_signer_enabled"),
+            Err(LifegwError::Config(m)) => {
+                assert!(
+                    m.contains("dev_signer_enabled"),
+                    "rejection mentions dev_signer_enabled: {m}"
+                );
+            }
+            Err(other) => panic!("expected Config error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_signer_dev_accepted_when_dev_signer_enabled() {
+        // Sub-phase C hardening: Dev provider IS allowed when the
+        // operator explicitly opts in via dev_signer_enabled = true.
+        let cfg = AuthConfig {
+            kms_provider: KmsProvider::Dev,
+            dev_signer_enabled: true,
+            ..AuthConfig::default()
+        };
+        let signer = build_signer(&cfg).expect("Dev + dev_signer_enabled is allowed");
+        assert!(!signer.active_kid().is_empty());
     }
 
     #[test]

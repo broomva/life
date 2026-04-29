@@ -5,10 +5,16 @@
 //! 1. Reads the `authorization` header → strips `Bearer `.
 //! 2. Validates the bearer via the dev signer (Sub-phase A) or the real
 //!    Vercel JWKS verifier (Sub-phase B).
-//! 3. Mints a Tier-2 capability JWS via the in-process keystore (A) or KMS
+//! 3. **Sub-phase C (BRO-938 follow-up #3)**: enforces
+//!    `(Tier-1 scopes) ∩ (route required scope) ≠ ∅`
+//!    *before* Tier-2 is minted (Spec C₃ §5.4). Empty intersection →
+//!    `Status::permission_denied("scope insufficient")`. Unknown routes
+//!    → `Status::not_found` (don't leak route existence to forged-scope
+//!    probes).
+//! 4. Mints a Tier-2 capability JWS via the in-process keystore (A) or KMS
 //!    (E). Audience `lifed`, issuer `lifegw`, lifetime ≤ 15 min.
-//! 4. Replaces the inbound `authorization` header with the Tier-2 JWS.
-//! 5. Forwards to the proxy service.
+//! 5. Replaces the inbound `authorization` header with the Tier-2 JWS.
+//! 6. Forwards to the proxy service.
 //!
 //! Health endpoints (`/healthz`, `/readyz`, `/version`, `/metrics`) bypass
 //! this layer per Spec C₃ §3.5 LOCKED L4-D7. Sub-phase A handles `/healthz`
@@ -24,6 +30,7 @@ use tonic::body::Body;
 use tower::{Layer, Service};
 
 use crate::auth::dev_signer;
+use crate::auth::scope::{self, ScopeError};
 use crate::auth::tier2::Tier2Minter;
 use crate::services::health;
 
@@ -148,6 +155,34 @@ where
                 None => return Ok(unauth_response("missing Tier-1 bearer token")),
             };
 
+            // Sub-phase C (BRO-938 follow-up #3): scope intersection
+            // check BEFORE the Tier-2 mint pays its CPU cost. Empty
+            // intersection means a forbidden route never gets a usable
+            // capability token — the attacker stops at the gateway
+            // boundary instead of churning JWS work.
+            let path = req.uri().path().to_string();
+            match scope::enforce(&path, &tier1) {
+                Ok(()) => {}
+                Err(ScopeError::Insufficient {
+                    required,
+                    available,
+                    ..
+                }) => {
+                    tracing::debug!(
+                        route = %path,
+                        required = %required,
+                        available = ?available,
+                        user = %tier1.user_id,
+                        "scope insufficient — denying before Tier-2 mint"
+                    );
+                    return Ok(permission_denied_response("scope insufficient"));
+                }
+                Err(ScopeError::UnknownRoute(p)) => {
+                    tracing::debug!(route = %p, "unknown route — returning Status::not_found");
+                    return Ok(not_found_response("unknown route"));
+                }
+            }
+
             let tier2 = match minter.mint(&tier1) {
                 Ok(t) => t,
                 Err(e) => return Ok(internal_response(&format!("tier-2 mint: {e}"))),
@@ -176,6 +211,22 @@ fn unauth_response(msg: &str) -> http::Response<Body> {
 
 fn internal_response(msg: &str) -> http::Response<Body> {
     let status = tonic::Status::internal(msg.to_string());
+    grpc_status_response(status)
+}
+
+/// Build a `Status::permission_denied`-shaped HTTP response. Used by
+/// the scope intersection enforcement: an authenticated bearer that
+/// fails the route's scope check stops here.
+fn permission_denied_response(msg: &str) -> http::Response<Body> {
+    let status = tonic::Status::permission_denied(msg.to_string());
+    grpc_status_response(status)
+}
+
+/// Build a `Status::not_found`-shaped HTTP response. Used when the
+/// inbound path doesn't match any known route — keeps scope-forgery
+/// probes from learning which routes exist.
+fn not_found_response(msg: &str) -> http::Response<Body> {
+    let status = tonic::Status::not_found(msg.to_string());
     grpc_status_response(status)
 }
 
