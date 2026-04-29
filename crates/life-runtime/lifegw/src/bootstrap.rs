@@ -20,11 +20,13 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use futures::Stream;
-use futures::stream::unfold;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto::Builder as HyperConnBuilder;
 use tokio::sync::oneshot;
-use tonic::transport::Server;
+use tonic::service::Routes;
 use tonic_web::GrpcWebLayer;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 use life_runtime_proto::life::v1 as pb;
 
@@ -35,10 +37,11 @@ use crate::auth::middleware::AuthLayer;
 use crate::auth::tier2::Tier2Minter;
 use crate::config::{AuthConfig, KmsProvider, LifegwConfig};
 use crate::error::{LifegwError, LifegwResult};
-use crate::listener::{self, LifegwTlsStream, TlsBind};
+use crate::listener::{self, TlsBind};
 use crate::proxy::{
     AgentForwarder, EventsForwarder, IdentityForwarder, WalletForwarder, connect_uds,
 };
+use crate::services::ws::WsLayer;
 
 /// Production daemon entrypoint. Reads the config (or defaults), installs
 /// the signal handler, binds TLS, dials upstream, and serves until SIGTERM.
@@ -126,14 +129,38 @@ pub async fn serve_with_listener_and_signer(
     let wallet = WalletForwarder::new(upstream_channel.clone());
     let identity = IdentityForwarder::new(upstream_channel.clone());
 
-    let router = Server::builder()
-        .accept_http1(true)
+    // Sub-phase C (BRO-938 C1): wire the WebSocket dispatcher Layer
+    // BELOW AuthLayer so the Tier-1 verify + Tier-2 mint + scope
+    // check still run before the upgrade response is sent. The
+    // WsLayer holds an Arc'd `AgentClient<Channel>` for the bidi
+    // pump's upstream calls (`Agent.StreamSession`,
+    // `Agent.SendMessage`, `Agent.{Approve,Cancel}Dispatch`). The
+    // Layer falls through to the tonic stack for non-WS paths.
+    let ws_upstream = pb::agent_client::AgentClient::new(upstream_channel.clone());
+    let ws_layer = WsLayer::new(ws_upstream);
+
+    // Sub-phase C refactor (BRO-938): we need WS upgrade support, but
+    // tonic 0.14's `Server::serve_with_incoming_shutdown` does not
+    // wire `hyper::upgrade::on(req)` through to the underlying hyper
+    // connection. We therefore build the tonic `Routes` (the same
+    // axum-router-backed dispatcher tonic uses internally), wrap it
+    // in our tower stack (auth → ws-dispatch → grpc-web → routes),
+    // and drive each TLS-accepted connection through
+    // `hyper_util::server::conn::auto::Builder::serve_connection_with_upgrades`.
+    // That preserves H1+H2 auto-detection for native gRPC + Connect,
+    // and enables WS upgrades for `/v1/agent/stream`.
+    let mut routes_builder = Routes::builder();
+    routes_builder.add_service(pb::agent_server::AgentServer::new(agent));
+    routes_builder.add_service(pb::events_server::EventsServer::new(events));
+    routes_builder.add_service(pb::wallet_server::WalletServer::new(wallet));
+    routes_builder.add_service(pb::identity_server::IdentityServer::new(identity));
+    let routes = routes_builder.routes().prepare();
+
+    let service = ServiceBuilder::new()
         .layer(auth_layer)
+        .layer(ws_layer)
         .layer(GrpcWebLayer::new())
-        .add_service(pb::agent_server::AgentServer::new(agent))
-        .add_service(pb::events_server::EventsServer::new(events))
-        .add_service(pb::wallet_server::WalletServer::new(wallet))
-        .add_service(pb::identity_server::IdentityServer::new(identity));
+        .service(routes);
 
     let TlsBind {
         acceptor,
@@ -143,13 +170,133 @@ pub async fn serve_with_listener_and_signer(
 
     tracing::info!(addr = %local_addr, "lifegw listening");
 
-    let incoming = tls_incoming_stream(listener, acceptor);
-    router
-        .serve_with_incoming_shutdown(incoming, async move {
-            let _ = shutdown_rx.await;
-        })
-        .await
-        .map_err(|e| LifegwError::Server(format!("serve_with_incoming_shutdown: {e}")))
+    serve_connections(listener, acceptor, service, shutdown_rx).await
+}
+
+/// Box up an error into the dyn StdError shape hyper expects. Used
+/// inside the per-connection `service_fn` to keep the closure body
+/// concise and pin the lifetime to `'static`.
+#[inline]
+fn boxed_err<E>(err: E) -> Box<dyn std::error::Error + Send + Sync>
+where
+    E: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    err.into()
+}
+
+/// 500-shaped response for inner-service failures. Caller logs the
+/// underlying error before invoking this. Used by the per-connection
+/// `service_fn` to keep hyper's service Infallible.
+fn internal_error_response() -> http::Response<tonic::body::Body> {
+    let mut resp = http::Response::new(tonic::body::Body::empty());
+    *resp.status_mut() = http::StatusCode::INTERNAL_SERVER_ERROR;
+    resp
+}
+
+/// Drive each accepted connection through hyper-util's auto Builder
+/// with `serve_connection_with_upgrades` so WS upgrades reach
+/// [`crate::services::ws::handle_upgrade`]. The `service` is cloned
+/// per-connection (cheap — it's a tower stack of `Arc`/`Channel`
+/// handles).
+///
+/// The body-type bridge: hyper feeds the inbound service
+/// `Request<hyper::body::Incoming>`. Tonic's auth + ws + grpc-web
+/// stack expects `Request<tonic::body::Body>`. The per-connection
+/// `service_fn` maps `Incoming → tonic::body::Body` via
+/// `Body::new(incoming)` before calling the tower stack.
+async fn serve_connections<S>(
+    listener: tokio::net::TcpListener,
+    acceptor: tokio_rustls::TlsAcceptor,
+    service: S,
+    mut shutdown_rx: oneshot::Receiver<()>,
+) -> LifegwResult<()>
+where
+    S: tower::Service<
+            http::Request<tonic::body::Body>,
+            Response = http::Response<tonic::body::Body>,
+        > + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>> + Send + 'static,
+{
+    loop {
+        tokio::select! {
+            _ = &mut shutdown_rx => {
+                tracing::info!("lifegw shutdown signal received");
+                return Ok(());
+            }
+            accept = listener.accept() => {
+                match accept {
+                    Ok((sock, _peer)) => {
+                        let acceptor = acceptor.clone();
+                        let service = service.clone();
+                        tokio::spawn(async move {
+                            let tls = match acceptor.accept(sock).await {
+                                Ok(t) => t,
+                                Err(e) => {
+                                    tracing::debug!(error = %e, "tls handshake failed");
+                                    return;
+                                }
+                            };
+                            // Per-connection hyper service. Maps
+                            // hyper::body::Incoming → tonic::body::Body
+                            // before delegating to the tower stack.
+                            // Errors from the inner service are
+                            // surfaced as `500 Internal Server Error`
+                            // responses (logged) rather than
+                            // propagated to hyper — this keeps the
+                            // service `Infallible` from hyper's
+                            // perspective and dodges the HRTB
+                            // constraint on `Box<dyn StdError + 'static>`
+                            // that arises when service_fn captures a
+                            // generic-error tower stack.
+                            let svc = hyper::service::service_fn(
+                                move |req: http::Request<hyper::body::Incoming>| {
+                                    let mut s = service.clone();
+                                    let req = req.map(tonic::body::Body::new);
+                                    async move {
+                                        if let Err(err) = ServiceExt::ready(&mut s).await {
+                                            tracing::warn!(
+                                                error = %boxed_err(err),
+                                                "inner service not ready"
+                                            );
+                                            return Ok::<_, std::convert::Infallible>(
+                                                internal_error_response(),
+                                            );
+                                        }
+                                        match s.call(req).await {
+                                            Ok(resp) => Ok(resp),
+                                            Err(err) => {
+                                                tracing::warn!(
+                                                    error = %boxed_err(err),
+                                                    "inner service error"
+                                                );
+                                                Ok(internal_error_response())
+                                            }
+                                        }
+                                    }
+                                },
+                            );
+                            let builder = HyperConnBuilder::new(TokioExecutor::new());
+                            if let Err(err) = builder
+                                .serve_connection_with_upgrades(TokioIo::new(tls), svc)
+                                .await
+                            {
+                                tracing::debug!(error = %err, "connection terminated");
+                            }
+                        });
+                    }
+                    Err(err) => {
+                        tracing::warn!(error = %err, "accept failed");
+                        // Brief backoff so a flapping listener doesn't
+                        // pin the CPU.
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Sub-phase A back-compat wrapper. Accepts a [`Keystore`] and wraps it
@@ -276,39 +423,6 @@ fn publish_jwks_atomic(path: &Path, signer: &dyn KmsSigner) -> LifegwResult<()> 
     tmp.persist(path)
         .map_err(|e| LifegwError::Auth(format!("persist jwks {}: {e}", path.display())))?;
     Ok(())
-}
-
-/// Convert a TCP listener + TLS acceptor into a `Stream` of accepted
-/// TLS connections that tonic's `serve_with_incoming_shutdown` can
-/// consume.
-///
-/// Each yielded item is a `LifegwTlsStream` so tonic 0.14's `Connected`
-/// trait bound is satisfied. Errors during TCP accept or TLS handshake
-/// are logged and skipped — a single misbehaving client never tears
-/// down the listener.
-fn tls_incoming_stream(
-    listener: tokio::net::TcpListener,
-    acceptor: tokio_rustls::TlsAcceptor,
-) -> impl Stream<Item = Result<LifegwTlsStream, std::io::Error>> {
-    unfold((listener, acceptor), |(listener, acceptor)| async move {
-        loop {
-            match listener.accept().await {
-                Ok((sock, _peer)) => match acceptor.accept(sock).await {
-                    Ok(tls) => {
-                        return Some((Ok(LifegwTlsStream::new(tls)), (listener, acceptor)));
-                    }
-                    Err(e) => {
-                        tracing::debug!(error = %e, "tls handshake failed");
-                        continue;
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!(error = %e, "tcp accept failed");
-                    return Some((Err(e), (listener, acceptor)));
-                }
-            }
-        }
-    })
 }
 
 /// Install the rustls default crypto provider exactly once. rustls 0.23

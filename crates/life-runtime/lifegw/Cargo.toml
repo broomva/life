@@ -53,6 +53,17 @@ bytes = { workspace = true }
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 
+# WebSocket support — Sub-phase C public-plane Agent.StreamSession bidi
+# pump. tokio-tungstenite 0.26 (workspace pin) drives the upgrade dance
+# atop a hyper::upgrade::Upgraded stream wrapped in TokioIo. We disable
+# the workspace `native-tls` feature: lifegw terminates TLS itself via
+# rustls (the WS lives on top of an already-decrypted socket), so the
+# tungstenite-side TLS feature is unused. The `handshake` feature
+# turns on `tungstenite::handshake::derive_accept_key` which we use to
+# build the 101 Switching Protocols response without re-implementing
+# the SHA-1 + base64 dance.
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["handshake"] }
+
 # TLS + (future) WS
 #
 # Sub-phase B decision (Spec C₃ §6, master spec §L4 invariant 1):
@@ -123,6 +134,15 @@ rustls-pemfile = "2"
 # Sub-phase B integration test mounts a Vercel-style JWKS server at
 # 127.0.0.1:0 to verify the real JWKS path end-to-end.
 wiremock = { workspace = true }
+# Sub-phase C integration test runs a tokio-tungstenite client over a
+# pre-established rustls stream against the gateway's
+# `/v1/agent/stream` endpoint to validate the bidi pump,
+# reconnect-by-`last_seq_no`, and slow-consumer policy. The TLS
+# handshake is performed by the test rig (matching the existing
+# integration_proxy_passthrough.rs pattern); tungstenite's `handshake`
+# feature provides `client_async` which consumes the established
+# stream + builds the WebSocket framing on top.
+futures-util = { workspace = true }
 
 [lints]
 workspace = true
