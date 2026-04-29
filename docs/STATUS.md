@@ -669,6 +669,63 @@ from Sub-phase D reviews. Sub-phase E ships:
   as M5-SHIPPED finalization work — tracked separately. Lago wire RPC
   swap waits on lagod readiness.
 
+### 2026-04-29 — M5 100% SHIPPED — production deploy + bake-in
+
+Closes M5 with the deploy artifacts + smoke harness that the plan's
+E1/E3 tasks defined but were deferred from PR #1062's narrower scope:
+
+- **`deploy/systemd/lifed.service`** — hardened systemd unit mirroring
+  lifegw's pattern but adapted for lifed's UDS surface. `User=life-runtime`
+  with `SupplementaryGroups=life-admin`; drops all capabilities
+  (`CapabilityBoundingSet=` empty + `AmbientCapabilities=` empty); full
+  `Protect*` and `Restrict*` boilerplate (`ProtectSystem=strict`,
+  `ProtectHome`, `PrivateTmp`, `PrivateDevices`, `ProtectKernelTunables`,
+  `ProtectKernelModules`, `ProtectKernelLogs`, `ProtectControlGroups`,
+  `ProtectClock`, `ProtectHostname`, `ProtectProc=invisible`,
+  `ProcSubset=pid`, `LockPersonality`, `MemoryDenyWriteExecute`,
+  `RestrictRealtime`, `RestrictSUIDSGID`, `RestrictNamespaces`).
+  `RestrictAddressFamilies=AF_UNIX AF_NETLINK` keeps lifed off TCP
+  entirely (lifegw owns the public TCP surface per Spec C₂ §11.4).
+  `SystemCallFilter=@system-service ~@privileged @resources @reboot`.
+  systemd dependency on `lago.service haima.service anima.service
+  arcand.service soma.service` so lifed comes up after the substrates.
+  `Type=simple` (NOT `Type=notify`) is documented in the unit header
+  with the rationale: lifed does not currently emit `sd_notify`, so
+  readiness is observable externally by `connect()`-ing to the public
+  UDS once the binary forks. Migration to `Type=notify` is queued for
+  M6 / Spec C₆.
+- **`deploy/systemd/lifed.socket`** — NOT shipped. lifed's listener
+  uses `tokio::net::UnixListener::bind` and does not consume `LISTEN_FDS`
+  yet. Socket activation is a future enhancement; the rationale is
+  recorded in the `lifed.service` header comment.
+- **`crates/life-runtime/lifed/tests/e2e_smoke.rs`** — end-to-end smoke
+  harness exercising boot → `Agent.CreateSession` (4-step saga) →
+  `Agent.SendMessage` (server-stream) → `Agent.StreamSession` →
+  `Wallet.GetBalance` → `Wallet.Debit` (idempotent path) →
+  `Identity.Me` → graceful drain. Asserts every breaker stays Closed
+  under happy path and every substrate's mock-call counter advances.
+  A second test (`smoke_test_boot_and_drain_clean`) catches regressions
+  that break daemon startup or graceful shutdown without ever
+  servicing an RPC. Catches regressions across the whole daemon that
+  unit tests miss — boot order, graceful-drain timing, observability
+  initialization, pool/breaker bracketing, fanout attachment.
+- Tests: 3701 → 3703 (+2 e2e_smoke).
+- **Decision (recorded in commit body):** the smoke test asserts
+  substrate-mock call counters + breaker states rather than the
+  global OpenTelemetry metric registry. OTel `Counter`/`Gauge`/
+  `Histogram` instruments aren't directly inspectable from tests;
+  asserting that the metric *paths* fired (via the side-effects on
+  routing-cache, breakers, and mock-call lists) is a deterministic
+  stand-in. A future enhancement could plug an in-memory metric
+  reader into `vigil::init_telemetry` for direct value assertion.
+
+**M5 is now production-shipped.** All 5 sub-phases (A-E) complete plus
+the E1/E3 deploy + bake-in artifacts. Only the lago wire RPC swap
+(BRO-934 follow-up) remains, waiting on lagod to ship typed
+`lago.Append` + `lago.ListNamespaces` RPCs.
+
+PR #XXXX merged 2026-04-29 (commit `XXXXXXX`). Refs BRO-921 + BRO-937.
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |

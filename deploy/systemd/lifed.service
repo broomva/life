@@ -1,0 +1,137 @@
+[Unit]
+Description=Life Runtime — lifed facade-aggregator daemon
+Documentation=https://github.com/broomva/life/tree/main/crates/life-runtime/lifed
+# lifed proxies all four substrate namespaces (life.v1.{Agent, Events, Wallet,
+# Identity}) plus the admin plane. It MUST come up after every substrate it
+# fans out to: lago/haima/anima/arcand. soma is the kernel daemon and is
+# additionally a dependency of arcand's spawn-child saga (Spec C₂ §4.5 /
+# Spec C₇ post-MVS).
+After=network-online.target lago.service haima.service anima.service arcand.service soma.service
+Wants=lago.service haima.service anima.service arcand.service soma.service
+
+[Service]
+# NOTE: Type=simple is used because lifed does not currently emit
+# sd_notify(STATE_READY). The daemon's bootstrap.rs (`run_with_real_substrates`,
+# `run_with_mocks`) does not link libsystemd / `sd_notify`. Readiness is
+# observable externally by `connect()`-ing to the configured public-plane
+# UDS once the binary forks. M6 / Spec C₆ may flip this to `Type=notify`
+# once a `notify_systemd_ready()` hook lands in bootstrap.rs after the
+# admin + public planes finish binding.
+Type=simple
+ExecStart=/usr/local/bin/lifed daemon
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+
+# Allow up to 30 s for graceful drain on SIGTERM / SIGHUP. The graceful path
+# unwinds the public-plane router via tonic's `serve_with_incoming_shutdown`,
+# stops accepting new sessions, allows in-flight RPCs to finish, then drains
+# fanout-pump tasks held by the routing cache (Spec C₂ §6.2).
+TimeoutStopSec=30s
+
+# ── Environment ─────────────────────────────────────────────────────────────
+Environment=LIFED_CONFIG=/etc/lifed/config.toml
+Environment=RUST_LOG=info,lifed=info
+# Production deployments do NOT set LIFED_ALLOW_MOCK_FALLBACK — lifed must
+# fail fast on missing substrate sockets so systemd re-launches it once the
+# After= dependencies are actually serving (Spec C₂ §11.4).
+
+# ── Identity ────────────────────────────────────────────────────────────────
+# `life-runtime` is unprivileged. It owns the public-plane UDS at
+# /run/life/life.sock and the admin UDS at /run/life/life-admin.sock; no
+# additional capabilities are required.
+#
+# Operator install steps (one-time, before `systemctl enable lifed`):
+#
+#     groupadd --system life-runtime
+#     groupadd --system life-admin
+#     useradd  --system --gid life-runtime --no-create-home \
+#              --shell /usr/sbin/nologin life-runtime
+#     # Operators wishing to call the admin plane must be in life-admin
+#     # (verified via SO_PEERCRED + supplementary-group lookup, Spec C₂ §5.3).
+#     usermod  -aG life-admin <operator-user>
+#
+User=life-runtime
+Group=life-runtime
+SupplementaryGroups=life-admin
+
+# ── Capabilities (drop everything) ──────────────────────────────────────────
+# lifed never binds privileged ports, never opens raw sockets, never touches
+# kernel modules. Drop all capabilities — there is no syscall in the lifed
+# code path that needs CAP_*.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+
+# ── Filesystem hardening ────────────────────────────────────────────────────
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+
+# ── Runtime / state / log directories (auto-created by systemd) ─────────────
+# /run/life/         — UDS sockets (`life.sock`, `life-admin.sock`); shared
+#                       with soma (kernel daemon) and lifegw (edge gateway).
+# /var/lib/lifed/    — JWKS publish path, idempotency cache spill (when not
+#                       backed by lago), routing-cache snapshots.
+# /var/log/lifed/    — structured log files (journald is the primary sink).
+# /etc/lifed/        — read-only config + ES256 signing keys for Tier-3
+#                       substrate-token mint.
+RuntimeDirectory=life
+RuntimeDirectoryMode=0755
+StateDirectory=lifed
+StateDirectoryMode=0750
+LogsDirectory=lifed
+LogsDirectoryMode=0750
+ConfigurationDirectory=lifed
+ConfigurationDirectoryMode=0750
+WorkingDirectory=/var/lib/lifed
+
+ReadWritePaths=/run/life /var/lib/lifed /var/log/lifed
+ReadOnlyPaths=/etc/lifed
+
+# ── Process hardening ───────────────────────────────────────────────────────
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+
+# ── Network / address-family policy ─────────────────────────────────────────
+# lifed is a *facade* daemon: every public-facing TCP listener lives in
+# lifegw (Spec C₃). lifed only ever listens / dials over Unix-domain sockets
+# (its own public + admin planes, plus per-substrate UDS in /run/life/).
+# AF_NETLINK stays in the allow-list because tokio's UDS poller occasionally
+# uses NETLINK_ROUTE for interface discovery on certain kernels, and to
+# leave room for a future sd_notify migration (libsystemd uses NETLINK).
+# AF_INET / AF_INET6 are NOT in the allow-list — lifegw owns the public TCP
+# surface; lifed must never open one (Spec C₂ §11.4).
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+# ── Syscall filter ──────────────────────────────────────────────────────────
+# Default allow-list for service daemons. Block privileged, resource-control,
+# and reboot syscalls explicitly.
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @reboot
+
+# ── File descriptor limits ──────────────────────────────────────────────────
+# Each active session holds a fanout-pump fd plus per-attached-stream
+# tonic channels; routing cache + admin plane add roughly 1 fd per active
+# session. 65k headroom matches lifegw + soma.
+LimitNOFILE=65536
+
+# ── Restart limits ──────────────────────────────────────────────────────────
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target
