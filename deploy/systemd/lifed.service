@@ -68,6 +68,13 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
+# Defense-in-depth: lifed only ever listens / dials over Unix-domain sockets,
+# so we drop the network namespace entirely. `RestrictAddressFamilies=AF_UNIX
+# AF_NETLINK` already blocks new INET sockets, but `PrivateNetwork=yes` is a
+# stronger invariant — it means even a future code-path bug that calls into
+# a tonic transport with a TCP target physically can't open the socket.
+# (lifegw cannot use this directive because it owns the public TCP surface.)
+PrivateNetwork=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -86,7 +93,12 @@ ProcSubset=pid
 # /etc/lifed/        — read-only config + ES256 signing keys for Tier-3
 #                       substrate-token mint.
 RuntimeDirectory=life
-RuntimeDirectoryMode=0755
+# `0750` matches soma + lifegw on the shared /run/life/ directory. Whichever
+# unit creates the directory first defines the mode, but parity here
+# ensures lifed-first boots (e.g. dev hosts without soma) don't widen the
+# directory to world-traversable. Under `0750`, members of the
+# `life-runtime` group can list the directory; everyone else gets EACCES.
+RuntimeDirectoryMode=0750
 StateDirectory=lifed
 StateDirectoryMode=0750
 LogsDirectory=lifed
