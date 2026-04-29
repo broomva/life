@@ -53,7 +53,7 @@ check_no_transitive_dep() {
 echo "=== lifed + life-runtime-* dependency rules (Spec C₂ §11) ==="
 
 # lifed itself + every proxy must avoid every substrate runtime crate.
-for crate in lifed arcan-proxy lago-proxy haima-proxy anima-proxy life-runtime-proto lifed-conformance; do
+for crate in lifed arcan-proxy lago-proxy haima-proxy anima-proxy life-runtime-proto lifed-conformance life-runtime-pool; do
     # Skip with a quiet message if the crate hasn't landed yet (sub-phase B
     # introduces the real proxy bodies).
     if ! (cd "$ROOT_DIR" && cargo metadata --no-deps --format-version 1 \
