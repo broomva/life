@@ -33,15 +33,20 @@ service GatewayAdmin {
   // Sub-phase D D2: in-memory IP/user blocklist management. Separate
   // from the rate limiter — the blocklist denies outright; the rate
   // limiter throttles. life-admin / root only.
-  rpc Blocklist_Add(BlocklistAddReq) returns (BlocklistEmpty);
-  rpc Blocklist_Remove(BlocklistRemoveReq) returns (BlocklistEmpty);
-  rpc Blocklist_List(BlocklistListReq) returns (BlocklistListResp);
+  //
+  // RPC names use PascalCase per buf-lint conventions (the prompt's
+  // `Blocklist_Add` style is illegal under `RPC_PASCAL_CASE`). The
+  // generated Rust client methods are still `blocklist_add` etc. so
+  // call-site ergonomics are unchanged.
+  rpc BlocklistAdd(BlocklistAddReq) returns (BlocklistEmpty);
+  rpc BlocklistRemove(BlocklistRemoveReq) returns (BlocklistEmpty);
+  rpc BlocklistList(BlocklistListReq) returns (BlocklistListResp);
 
   // Sub-phase D D2: runtime override of per-user QPS for a specific
   // user (e.g. throttle abusive caller without restart). Overrides
   // are in-process; restart resets to the configured defaults.
   // life-admin / root only.
-  rpc RateLimit_Override(RateLimitOverrideReq) returns (BlocklistEmpty);
+  rpc RateLimitOverride(RateLimitOverrideReq) returns (BlocklistEmpty);
 }
 
 message BlocklistEmpty {}
