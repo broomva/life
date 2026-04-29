@@ -17,7 +17,11 @@ pub enum AnimaProxyError {
 }
 
 /// Retry classification for the lifed pool layer.
+///
+/// `#[non_exhaustive]` — additional classes may be added without a
+/// breaking change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RetryClass {
     Retryable,
     Permanent,

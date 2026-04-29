@@ -1,0 +1,27 @@
+[package]
+name = "life-runtime-pool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Per-substrate pool + circuit-breaker primitives shared between lifed and the *-proxy crates (Spec C₂ §7)."
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# Exposes test-only helpers for downstream crates' integration tests
+# (e.g. `CircuitBreaker::force_open_window_elapsed`).
+test-support = []
+
+[dependencies]
+arc-swap = "1"
+tokio = { workspace = true, features = ["sync", "time"] }
+tonic = "0.14"
+# Sub-phase E: emit `life.daemon.dispatch.*`, `life.daemon.semaphore.*`,
+# `life.daemon.breaker_state{}` to the global OTel meter so every
+# substrate dispatch is observable end-to-end (Spec C₂ §9.3).
+opentelemetry.workspace = true
+
+[lints]
+workspace = true

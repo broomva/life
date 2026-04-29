@@ -114,6 +114,9 @@ impl FanoutRegistry {
                     Err(mpsc::error::TrySendError::Full(_)) => {
                         let n = entry.full_count.fetch_add(1, Ordering::SeqCst) + 1;
                         self.slow_stream_total.fetch_add(1, Ordering::SeqCst);
+                        // Sub-phase E: emit `life.daemon.slow_stream_total`
+                        // per Spec C₂ §9.3.
+                        crate::observability::metrics::record_slow_stream("agent_event_stream");
                         entry
                             .last_full_at_unix_nanos
                             .store(unix_nanos_now(), Ordering::SeqCst);

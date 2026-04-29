@@ -228,16 +228,16 @@ impl TestEnv {
         self.mocks.lago.set_force_fail(false);
     }
 
-    /// Sub-phase D7: directly bump the lago pool's breaker so the chaos
-    /// test doesn't depend on triggering 5 substrate calls through the
-    /// public-plane round-trip. The mock returns Unavailable — but the
-    /// pool guard sits at the lifed handler boundary, not the proxy
-    /// level. This helper closes the gap until D-stretch pushes pools
-    /// inside the proxy crates.
-    pub fn record_lago_failures(&self, n: u32) {
-        let pool = self.handles.pools.lago.load();
-        for _ in 0..n {
-            pool.breaker.record_failure();
-        }
+    /// Sub-phase E: force the lago breaker's `open_until` anchor into the
+    /// past so the next state read flips Open→HalfOpen lazily without
+    /// the chaos test sleeping for the full 10 s open window. Backed by
+    /// `life-runtime-pool`'s `test-support` feature.
+    pub fn force_lago_open_window_elapsed(&self) {
+        self.handles
+            .pools
+            .lago
+            .load()
+            .breaker
+            .force_open_window_elapsed();
     }
 }

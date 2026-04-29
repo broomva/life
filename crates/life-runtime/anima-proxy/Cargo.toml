@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 aios-protocol.workspace = true
 aios-proto.workspace = true
+life-runtime-pool.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 prost = "0.14"

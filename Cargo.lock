@@ -256,6 +256,7 @@ dependencies = [
  "chrono",
  "futures",
  "hyper-util",
+ "life-runtime-pool",
  "prost 0.14.3",
  "serde",
  "thiserror 2.0.18",
@@ -728,6 +729,7 @@ dependencies = [
  "async-trait",
  "futures",
  "hyper-util",
+ "life-runtime-pool",
  "life-runtime-proto",
  "prost 0.14.3",
  "thiserror 2.0.18",
@@ -3839,6 +3841,7 @@ dependencies = [
  "async-trait",
  "futures",
  "hyper-util",
+ "life-runtime-pool",
  "prost 0.14.3",
  "thiserror 2.0.18",
  "tokio",
@@ -4893,6 +4896,7 @@ dependencies = [
  "async-trait",
  "futures",
  "hyper-util",
+ "life-runtime-pool",
  "life-runtime-proto",
  "prost 0.14.3",
  "serde",
@@ -5802,6 +5806,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "life-runtime-pool"
+version = "0.3.0"
+dependencies = [
+ "arc-swap",
+ "opentelemetry",
+ "tokio",
+ "tonic 0.14.5",
+]
+
+[[package]]
 name = "life-runtime-proto"
 version = "0.3.0"
 dependencies = [
@@ -5856,10 +5870,12 @@ dependencies = [
  "lago-proxy",
  "libc",
  "life-kernel-proto",
+ "life-runtime-pool",
  "life-runtime-proto",
  "life-vigil",
  "lifed-conformance",
  "opentelemetry",
+ "opentelemetry_sdk",
  "parking_lot",
  "prost 0.14.3",
  "prost-types 0.14.3",

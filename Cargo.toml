@@ -135,6 +135,7 @@ members = [
     "crates/life-runtime/lago-proxy",
     "crates/life-runtime/haima-proxy",
     "crates/life-runtime/anima-proxy",
+    "crates/life-runtime/life-runtime-pool",
     "crates/life-runtime/life-runtime-proto",
     # M7 — lifegw edge gateway (see Spec C₃ at docs/superpowers/specs/2026-04-27-spec-c3-lifegw-design.md)
     "crates/life-runtime/lifegw",
@@ -239,6 +240,7 @@ arcan-proxy        = { path = "crates/life-runtime/arcan-proxy",        version 
 lago-proxy         = { path = "crates/life-runtime/lago-proxy",         version = "0.3.0" }
 haima-proxy        = { path = "crates/life-runtime/haima-proxy",        version = "0.3.0" }
 anima-proxy        = { path = "crates/life-runtime/anima-proxy",        version = "0.3.0" }
+life-runtime-pool  = { path = "crates/life-runtime/life-runtime-pool",  version = "0.3.0" }
 life-runtime-proto = { path = "crates/life-runtime/life-runtime-proto", version = "0.3.0" }
 lifed-conformance  = { path = "crates/life-runtime/lifed-conformance",  version = "0.3.0" }
 # Workspace-level tooling for lifed (used only by the lifed crate behind a feature)

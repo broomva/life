@@ -5,5 +5,5 @@
 pub mod client;
 pub mod error;
 
-pub use client::{LagoCall, LagoProxy};
+pub use client::{EventGuardedStream, LagoCall, LagoProxy, Pooled};
 pub use error::{LagoProxyError, LagoProxyResult, RetryClass};
