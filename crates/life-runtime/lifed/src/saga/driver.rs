@@ -100,8 +100,13 @@ pub struct SagaEvent {
 }
 
 /// The five saga lifecycle event types per Spec C₂ §4.1.
+///
+/// `#[non_exhaustive]` — additional event types (e.g., `Suspended` for
+/// admin-plane saga pause/resume in Spec C₆) may be added without a
+/// breaking change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum SagaEventType {
     Started,
     StepForward,
