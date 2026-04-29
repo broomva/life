@@ -38,12 +38,13 @@ use crate::auth::tier1::Tier1Claims;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RequiredScope {
-    /// `agent:dispatch` — Agent.{CreateSession, SendMessage, StreamSession}.
+    /// `agent:dispatch` — Agent.{CreateSession, SendMessage}.
     AgentDispatch,
-    /// `agent:read` — Agent.{DescribeSession, CloseSession, StreamSession}
-    /// (read-side; spec uses `agent:read` for StreamSession but the
-    /// prompt's table maps StreamSession to `agent:dispatch`. We follow
-    /// the prompt's mapping — operators can tighten via config later).
+    /// `agent:read` — Agent.{DescribeSession, CloseSession, StreamSession}.
+    /// Per Spec C₃ §5.4 line 468, `StreamSession` requires `agent:read`
+    /// (read-side), not `agent:dispatch`. The WebSocket upgrade path at
+    /// `/v1/agent/stream` initiates a `StreamSession` RPC, so browsers
+    /// tailing a session need `agent:read` (or a wildcard `agent:*`).
     AgentRead,
     /// `agent:approve` — Agent.{ApproveDispatch, CancelDispatch}.
     AgentApprove,
@@ -127,7 +128,7 @@ pub fn required_scope(path: &str) -> Option<RequiredScope> {
     if let Some(rest) = trimmed.strip_prefix("life.v1.Agent/") {
         return Some(match rest {
             "CreateSession" | "SendMessage" => RequiredScope::AgentDispatch,
-            "DescribeSession" | "CloseSession" | "StreamSession" => RequiredScope::AgentDispatch,
+            "DescribeSession" | "CloseSession" | "StreamSession" => RequiredScope::AgentRead,
             "ApproveDispatch" | "CancelDispatch" => RequiredScope::AgentApprove,
             "ListSkills" | "ListModels" | "ListTools" => RequiredScope::AgentCatalog,
             "SpawnChild" => RequiredScope::AgentSpawn,
@@ -255,7 +256,7 @@ mod tests {
         );
         assert_eq!(
             required_scope("/life.v1.Agent/StreamSession"),
-            Some(RequiredScope::AgentDispatch)
+            Some(RequiredScope::AgentRead)
         );
         assert_eq!(
             required_scope("/life.v1.Agent/ApproveDispatch"),
