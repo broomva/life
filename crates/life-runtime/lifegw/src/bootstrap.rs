@@ -499,6 +499,14 @@ pub async fn serve_with_listener_and_keystore(
     serve_with_listener_and_signer(cfg, bind, signer, shutdown_rx).await
 }
 
+/// Test-visible wrapper around [`build_signer`]. Sub-phase E chaos
+/// battery exercises the fail-closed paths from a `tests/` integration
+/// test which can't reach the `pub(crate)` symbol.
+#[doc(hidden)]
+pub fn build_signer_for_test(cfg: &AuthConfig) -> LifegwResult<Arc<dyn KmsSigner>> {
+    build_signer(cfg)
+}
+
 /// Resolve the configured KMS provider into a concrete [`KmsSigner`]
 /// trait object.
 ///

@@ -919,21 +919,24 @@ mod tests {
     /// covers the conversion AWS/GCP KMS need to produce JWS-shaped
     /// signatures.
     #[cfg(any(feature = "kms-aws", feature = "kms-gcp"))]
+    fn build_der_sig(r_bytes: &[u8], s_bytes: &[u8]) -> Vec<u8> {
+        let total = r_bytes.len() + s_bytes.len() + 4;
+        let mut der = vec![0x30, total as u8, 0x02, r_bytes.len() as u8];
+        der.extend_from_slice(r_bytes);
+        der.push(0x02);
+        der.push(s_bytes.len() as u8);
+        der.extend_from_slice(s_bytes);
+        der
+    }
+
+    #[cfg(any(feature = "kms-aws", feature = "kms-gcp"))]
     #[test]
     fn der_ecdsa_to_raw_p256_decodes_minimal_signature() {
         // Hand-built DER sig: SEQUENCE { INTEGER 32-bytes-r, INTEGER 32-bytes-s }
         // r = 32 bytes of 0x01, s = 32 bytes of 0x02.
         let r_bytes: Vec<u8> = vec![0x01; 32];
         let s_bytes: Vec<u8> = vec![0x02; 32];
-        let mut der = Vec::new();
-        der.push(0x30); // SEQUENCE
-        der.push(((r_bytes.len() + 2) + (s_bytes.len() + 2)) as u8);
-        der.push(0x02);
-        der.push(r_bytes.len() as u8);
-        der.extend_from_slice(&r_bytes);
-        der.push(0x02);
-        der.push(s_bytes.len() as u8);
-        der.extend_from_slice(&s_bytes);
+        let der = build_der_sig(&r_bytes, &s_bytes);
         let raw = super::der_ecdsa_to_raw_p256(&der).expect("decode minimal");
         assert_eq!(raw.len(), 64);
         assert_eq!(&raw[..32], &r_bytes[..]);
@@ -949,15 +952,7 @@ mod tests {
         // DER will require r to be prefixed with 0x00 because high bit is set.
         r_bytes.insert(0, 0x00);
         let s_bytes: Vec<u8> = vec![0x02; 32];
-        let mut der = Vec::new();
-        der.push(0x30);
-        der.push(((r_bytes.len() + 2) + (s_bytes.len() + 2)) as u8);
-        der.push(0x02);
-        der.push(r_bytes.len() as u8);
-        der.extend_from_slice(&r_bytes);
-        der.push(0x02);
-        der.push(s_bytes.len() as u8);
-        der.extend_from_slice(&s_bytes);
+        let der = build_der_sig(&r_bytes, &s_bytes);
         let raw = super::der_ecdsa_to_raw_p256(&der).expect("decode");
         assert_eq!(raw.len(), 64);
         // The decoded r drops the 0x00 prefix.
@@ -971,15 +966,7 @@ mod tests {
     fn der_ecdsa_to_raw_p256_pads_short_integers() {
         let r_bytes: Vec<u8> = vec![0x42; 16]; // only 16 bytes
         let s_bytes: Vec<u8> = vec![0x77; 16];
-        let mut der = Vec::new();
-        der.push(0x30);
-        der.push(((r_bytes.len() + 2) + (s_bytes.len() + 2)) as u8);
-        der.push(0x02);
-        der.push(r_bytes.len() as u8);
-        der.extend_from_slice(&r_bytes);
-        der.push(0x02);
-        der.push(s_bytes.len() as u8);
-        der.extend_from_slice(&s_bytes);
+        let der = build_der_sig(&r_bytes, &s_bytes);
         let raw = super::der_ecdsa_to_raw_p256(&der).expect("decode");
         assert_eq!(raw.len(), 64);
         // First 16 bytes of r are zero-padded.
@@ -996,14 +983,9 @@ mod tests {
         assert!(super::der_ecdsa_to_raw_p256(&[]).is_err());
         assert!(super::der_ecdsa_to_raw_p256(&[0x00]).is_err());
         assert!(super::der_ecdsa_to_raw_p256(&[0x30, 0x00]).is_err());
-        // SEQUENCE length present but wrong content type.
-        let mut bad = Vec::new();
-        bad.push(0x30);
-        bad.push(0x04);
-        bad.push(0x05); // not 0x02 INTEGER
-        bad.push(0x02);
-        bad.push(0x01);
-        bad.push(0xff);
+        // SEQUENCE length present but wrong content type
+        // (not 0x02 INTEGER).
+        let bad = vec![0x30, 0x04, 0x05, 0x02, 0x01, 0xff];
         assert!(super::der_ecdsa_to_raw_p256(&bad).is_err());
     }
 
