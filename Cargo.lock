@@ -446,6 +446,7 @@ name = "arcan-anima"
 version = "0.3.0"
 dependencies = [
  "anima-core",
+ "anima-identity",
  "anima-lago",
  "arcan-core",
  "chrono",
@@ -3881,6 +3882,7 @@ name = "haima-x402"
 version = "0.3.0"
 dependencies = [
  "aios-protocol",
+ "anima-identity",
  "async-trait",
  "base64",
  "chrono",
@@ -4740,6 +4742,7 @@ name = "lago-auth"
 version = "0.3.0"
 dependencies = [
  "axum 0.8.8",
+ "base64",
  "http-body-util",
  "jsonwebtoken",
  "lago-core",
