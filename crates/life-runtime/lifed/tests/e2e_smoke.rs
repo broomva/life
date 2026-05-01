@@ -117,6 +117,7 @@ async fn smoke_test_full_daemon_lifecycle() {
         let mut client = env.agent_client().await;
         let mut req = tonic::Request::new(SessionRef {
             sid: Some(sid.clone()),
+            from_sequence: None,
         });
         req.metadata_mut().insert(
             "authorization",
