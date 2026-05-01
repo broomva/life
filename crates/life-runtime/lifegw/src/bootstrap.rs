@@ -32,7 +32,8 @@ use tower::ServiceExt;
 use life_runtime_proto::life::v1 as pb;
 
 use crate::admin::{
-    AdminPolicy, Blocklist, CertReloadHook, GatewayAdminService, listener as admin_listener,
+    AdminMetrics, AdminPolicy, Blocklist, CertReloadHook, GatewayAdminService,
+    listener as admin_listener,
 };
 use crate::auth::jwks::{JwksCache, JwksCacheConfig, JwksSource};
 use crate::auth::kms::{KmsSigner, StaticKeystore};
@@ -159,22 +160,19 @@ pub async fn serve_with_listener_and_signer(
     )
     .with_rate_limiter(rate_limiter.clone());
 
-    // Sub-phase D (D3): construct the cert reloader from the same
-    // cert + key paths the bind step used. The reloader holds an
-    // ArcSwap<ServerConfig> so the listener path can swap configs
-    // atomically without disrupting in-flight TLS connections.
+    // Sub-phase D (D3) + Sub-phase E sweep (item #14): construct the
+    // cert reloader from the same cert + key paths the bind step
+    // used. The reloader holds an ArcSwap<ServerConfig> so the
+    // listener path can swap configs atomically without disrupting
+    // in-flight TLS connections.
     //
-    // Note: in Sub-phase D the gateway's bind path uses the
-    // `bind()` helper which synthesises a one-shot TlsAcceptor —
-    // the reloader exists but the per-connection TlsAcceptor is
-    // already cloned + held by the accept loop. Wiring the reloader
-    // into the per-connection acceptor is a Sub-phase E refinement
-    // (it requires plumbing the reloader through `serve_connections`).
-    // For now the reloader's value is twofold: (1) the admin-plane
-    // `CertReload` RPC routes here so operators have an RPC handle
-    // for ad-hoc reloads, and (2) the SIGHUP handler bumps the
-    // reload counter so dashboards observe rotations even before the
-    // per-connection swap lands.
+    // Sub-phase E sweep (item #14) closes the previously-deferred
+    // hot-swap into `serve_connections` — see the AcceptorSource
+    // construction below where the reloader is wired into the accept
+    // loop. The admin-plane `CertReload` RPC routes through the
+    // reloader so operators retain the ad-hoc reload handle; the
+    // SIGHUP handler installed at startup also bumps the reload
+    // counter for dashboards.
     let cert_reloader = CertReloader::load(&cfg.tls.cert_path, &cfg.tls.key_path)
         .ok()
         .map(Arc::new);
@@ -183,7 +181,8 @@ pub async fn serve_with_listener_and_signer(
             cert = %cfg.tls.cert_path.display(),
             key = %cfg.tls.key_path.display(),
             "cert-watch reloader could not load initial config; \
-             admin-plane CertReload will return a no-op success"
+             admin-plane CertReload will return a no-op success and \
+             the listener will hold the bind() acceptor for the daemon's life"
         );
     }
     let cert_hook = match cert_reloader.as_ref() {
@@ -205,7 +204,11 @@ pub async fn serve_with_listener_and_signer(
     // always start it (mirroring lifed) so the admin RPCs land in
     // every test rig.
     let blocklist = Blocklist::new();
-    let admin_policy = build_admin_policy(&cfg.admin_plane);
+    // Sub-phase E sweep (item #13): admin metrics handle threaded into
+    // the policy so group-lookup fail-closed denials advance the
+    // `gateway.admin.rejected_total{reason="group_lookup"}` counter.
+    let admin_metrics = AdminMetrics::new();
+    let admin_policy = build_admin_policy(&cfg.admin_plane, admin_metrics.clone());
     let admin_service = GatewayAdminService::new(
         Arc::new(admin_policy),
         blocklist.clone(),
@@ -278,36 +281,47 @@ pub async fn serve_with_listener_and_signer(
 
     tracing::info!(addr = %local_addr, "lifegw listening");
 
+    // Sub-phase E sweep (item #14): if the cert reloader successfully
+    // loaded above, route accepts through it so cert rotations reach
+    // the per-connection handshake. The reloader's bg watcher already
+    // updates the underlying ArcSwap<ServerConfig>; wiring the source
+    // here ensures the listener consumes the swap. When the reloader
+    // failed to load (e.g. tests with disposable certs), fall back to
+    // the bind result's static acceptor.
+    let acceptor_source = match cert_reloader.as_ref() {
+        Some(r) => AcceptorSource::Reloader((**r).clone()),
+        None => AcceptorSource::Static(acceptor),
+    };
+
     // Run the public plane until shutdown. When it exits (graceful
     // drain or accept error), tear down the admin plane too so we
     // don't leak the bound socket.
-    let result = serve_connections(listener, acceptor, service, shutdown_rx).await;
+    let result = serve_connections(listener, acceptor_source, service, shutdown_rx).await;
     let _ = admin_shutdown_tx.send(());
     let _ = tokio::time::timeout(Duration::from_secs(5), admin_handle).await;
     result
 }
 
-fn build_admin_policy(cfg: &AdminPlaneConfig) -> AdminPolicy {
+fn build_admin_policy(cfg: &AdminPlaneConfig, metrics: AdminMetrics) -> AdminPolicy {
     // Resolve the admin GID — fall back to permissive mode if the
     // group isn't configured OR the lookup fails (matches the lifed
     // pattern; the systemd unit enforces FS-level access in the
-    // group-unconfigured case).
-    let (admin_gid, permissive) = match cfg.unix_socket_group.as_deref() {
+    // group-unconfigured case). Sub-phase E sweep (item #13): the
+    // policy is built with a metric handle so group-lookup
+    // fail-closed denials advance the
+    // `gateway.admin.rejected_total{reason="group_lookup"}` counter.
+    match cfg.unix_socket_group.as_deref() {
         Some(name) => match crate::admin::peercred::group_gid(name) {
-            Ok(Some(gid)) => (gid, false),
+            Ok(Some(gid)) => AdminPolicy::strict(gid).with_metrics(metrics),
             _ => {
                 tracing::warn!(
                     group = name,
                     "unix_socket_group not found in /etc/group; admin plane is in permissive mode"
                 );
-                (0, true)
+                AdminPolicy::permissive().with_metrics(metrics)
             }
         },
-        None => (0, true),
-    };
-    AdminPolicy {
-        admin_gid,
-        permissive,
+        None => AdminPolicy::permissive().with_metrics(metrics),
     }
 }
 
@@ -320,6 +334,29 @@ where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     err.into()
+}
+
+/// Sub-phase E sweep (item #14): hot-swappable source of TLS acceptors.
+///
+/// The accept loop calls [`AcceptorSource::current`] on every new
+/// connection so cert rotations reach the per-connection handshake.
+/// In production this wraps a [`CertReloader`] which holds an
+/// `ArcSwap<rustls::ServerConfig>`; under test (or when the reloader
+/// failed to load initial config) it wraps a single static
+/// `TlsAcceptor` and behaves like Sub-phase D's pre-rotate path.
+#[derive(Clone)]
+enum AcceptorSource {
+    Static(tokio_rustls::TlsAcceptor),
+    Reloader(CertReloader),
+}
+
+impl AcceptorSource {
+    fn current(&self) -> tokio_rustls::TlsAcceptor {
+        match self {
+            AcceptorSource::Static(a) => a.clone(),
+            AcceptorSource::Reloader(r) => r.acceptor(),
+        }
+    }
 }
 
 /// 500-shaped response for inner-service failures. Caller logs the
@@ -337,6 +374,14 @@ fn internal_error_response() -> http::Response<tonic::body::Body> {
 /// per-connection (cheap — it's a tower stack of `Arc`/`Channel`
 /// handles).
 ///
+/// Sub-phase E sweep (item #14): the `acceptor` parameter is now an
+/// `AcceptorSource` rather than a single static `TlsAcceptor`. Each
+/// new accept reads a fresh `TlsAcceptor` from the source so cert
+/// rotations reach the listener accept loop, not just the cert
+/// reloader's `current()` accessor. Pre-existing TLS connections keep
+/// the config they handshook with via rustls's `Arc<ServerConfig>`
+/// semantics — this is non-disruptive to in-flight traffic.
+///
 /// The body-type bridge: hyper feeds the inbound service
 /// `Request<hyper::body::Incoming>`. Tonic's auth + ws + grpc-web
 /// stack expects `Request<tonic::body::Body>`. The per-connection
@@ -344,7 +389,7 @@ fn internal_error_response() -> http::Response<tonic::body::Body> {
 /// `Body::new(incoming)` before calling the tower stack.
 async fn serve_connections<S>(
     listener: tokio::net::TcpListener,
-    acceptor: tokio_rustls::TlsAcceptor,
+    acceptor: AcceptorSource,
     service: S,
     mut shutdown_rx: oneshot::Receiver<()>,
 ) -> LifegwResult<()>
@@ -367,7 +412,10 @@ where
             accept = listener.accept() => {
                 match accept {
                     Ok((sock, _peer)) => {
-                        let acceptor = acceptor.clone();
+                        // Sub-phase E sweep (item #14): refresh the
+                        // TlsAcceptor on each new accept so cert
+                        // rotations reach the per-connection handshake.
+                        let acceptor = acceptor.current();
                         let service = service.clone();
                         tokio::spawn(async move {
                             let tls = match acceptor.accept(sock).await {
