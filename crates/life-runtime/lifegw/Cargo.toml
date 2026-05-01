@@ -29,7 +29,7 @@ kms-vault = []
 # pull heavy SDK chains (aws-sdk-kms + aws-config; google-cloud-kms +
 # google-cloud-auth) so they ship opt-in only.
 kms-aws = ["dep:aws-sdk-kms", "dep:aws-config"]
-kms-gcp = ["dep:google-cloud-kms", "dep:google-cloud-auth"]
+kms-gcp = ["dep:google-cloud-kms", "dep:google-cloud-auth", "dep:sha2"]
 # Enables the in-process `Bearer dev-token-for-{user_id}` shortcut.
 # OFF in production. Enabled in CI / unit tests via the
 # integration_proxy_passthrough.rs rig.
@@ -146,6 +146,9 @@ aws-sdk-kms = { version = "1", optional = true, default-features = false, featur
 # feature aligns with the gateway's no-native-tls posture.
 google-cloud-kms = { version = "0.6", optional = true, features = ["rustls-tls", "auth"], default-features = false }
 google-cloud-auth = { version = "0.17", optional = true, default-features = false, features = ["rustls-tls"] }
+# sha2 for the GCP KMS body's pre-hash of the JWS signing input
+# (asymmetric_sign expects a digest, not raw bytes).
+sha2 = { workspace = true, optional = true }
 
 # nix — Sub-phase E sweep (item #12): proper `getgrouplist(3)` +
 # `User::from_uid` via the safe wrappers in `nix::unistd`. Needed for

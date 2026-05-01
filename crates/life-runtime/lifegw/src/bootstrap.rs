@@ -523,12 +523,38 @@ pub(crate) fn build_signer(cfg: &AuthConfig) -> LifegwResult<Arc<dyn KmsSigner>>
         }
         #[cfg(feature = "kms-vault")]
         KmsProvider::Vault => match cfg.vault.as_ref() {
-            Some(v) => Ok(Arc::new(crate::auth::kms::VaultTransit::new(
-                v.addr.clone(),
-                v.token.clone(),
-                v.key_name.clone(),
-                v.kid.clone(),
-            )?)),
+            Some(v) => {
+                let mtls = v.mtls.as_ref().map(|m| crate::auth::kms::VaultMtls {
+                    cert_path: m.cert_path.clone(),
+                    key_path: m.key_path.clone(),
+                });
+                let signer = crate::auth::kms::VaultTransit::with_mtls(
+                    v.addr.clone(),
+                    v.token.clone(),
+                    v.key_name.clone(),
+                    v.kid.clone(),
+                    mtls,
+                )?;
+                // Sub-phase E (item #5): optional token renewal task.
+                // We spawn it with the token + addr but NOT a borrow
+                // of the signer — the renewal is independent of the
+                // sign path and we don't currently rotate the token
+                // value back into the signer (Vault tokens stay the
+                // same across renewals; only the underlying lease
+                // gets extended).
+                if let Some(interval) = v.renew_interval {
+                    let _handle = crate::auth::kms::VaultTransit::spawn_token_renewal(
+                        v.addr.clone(),
+                        v.token.clone(),
+                        interval,
+                    );
+                    tracing::info!(
+                        interval_secs = interval.as_secs(),
+                        "vault token renewal task spawned"
+                    );
+                }
+                Ok(Arc::new(signer))
+            }
             None => Err(LifegwError::Config(
                 "auth.kms_provider = vault but [auth.vault] missing".to_string(),
             )),

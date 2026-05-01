@@ -258,6 +258,13 @@ pub struct AuthConfig {
 
 /// HashiCorp Vault Transit configuration (Sub-phase B production
 /// primary). Loaded only when `auth.kms_provider = "vault"`.
+///
+/// Sub-phase E adds:
+/// - `[mtls]` — optional client-cert + client-key paths for
+///   peer-authenticated TLS to Vault.
+/// - `renew_interval` — optional cadence for the background
+///   `auth/token/renew-self` task. Vault tokens with `renewable: true`
+///   require periodic renewal to stay live.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -274,6 +281,22 @@ pub struct VaultConfig {
     /// JWS `kid` value embedded in token headers + the published JWKS.
     /// Convention: same as `key_name`.
     pub kid: String,
+    /// Sub-phase E (item #5): optional mTLS to Vault.
+    #[serde(default)]
+    pub mtls: Option<VaultMtlsConfig>,
+    /// Sub-phase E (item #5): optional renewal cadence. `None`
+    /// disables the background renewal task. Recommend half the
+    /// token's TTL.
+    #[serde(default, with = "humantime_serde_opt")]
+    pub renew_interval: Option<Duration>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct VaultMtlsConfig {
+    pub cert_path: PathBuf,
+    pub key_path: PathBuf,
 }
 
 fn default_jwks_url() -> String {
@@ -509,6 +532,46 @@ mod humantime_serde {
             .parse()
             .map_err(|e| D::Error::custom(format!("parse duration: {e}")))?;
         Ok(Duration::from_secs(n))
+    }
+}
+
+/// Sub-phase E: `Option<Duration>` round-trip via humantime. Used for
+/// `[auth.vault].renew_interval` which is optional.
+mod humantime_serde_opt {
+    use std::time::Duration;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
+
+    pub fn serialize<S>(d: &Option<Duration>, ser: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match d {
+            None => ser.serialize_none(),
+            Some(dur) => format!("{}s", dur.as_secs()).serialize(ser),
+        }
+    }
+
+    pub fn deserialize<'de, D>(de: D) -> Result<Option<Duration>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = Option::<String>::deserialize(de)?;
+        match s {
+            None => Ok(None),
+            Some(s) => {
+                if let Some(stripped) = s.strip_suffix('s') {
+                    let n: u64 = stripped
+                        .parse()
+                        .map_err(|e| D::Error::custom(format!("parse seconds: {e}")))?;
+                    return Ok(Some(Duration::from_secs(n)));
+                }
+                let n: u64 = s
+                    .parse()
+                    .map_err(|e| D::Error::custom(format!("parse duration: {e}")))?;
+                Ok(Some(Duration::from_secs(n)))
+            }
+        }
     }
 }
 
