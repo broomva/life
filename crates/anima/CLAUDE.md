@@ -3,6 +3,8 @@
 > *Anima* (Latin: soul, inner self) — the crate that answers **who the agent is**,
 > while every other crate answers what the agent does.
 
+**Spec ground truth**: `docs/superpowers/specs/2026-04-29-spec-d-anima-custody.md` (Spec D — production custody design; sibling of Spec C₃ §5 lifegw KMS). The current `AnimaKeystore` + `Ed25519Identity` is the dev/in-process backend; Spec D defines the trait abstraction and the six production backends (Vault, WebCrypto+passkey, TPM, soma, hardware wallet, remote anima).
+
 ## Architecture
 
 ```

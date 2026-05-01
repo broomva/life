@@ -7,6 +7,7 @@ The `life-runtime` crate cluster ships the **public-facing** surface of the Life
 - **Master spec:** `docs/superpowers/specs/2026-04-25-life-runtime-architecture-spec.md` §L0–§L14
 - **Spec C₂ (lifed facade):** `docs/superpowers/specs/2026-04-26-spec-c2-lifed-facade.md`
 - **Spec C₃ (lifegw edge gateway):** `docs/superpowers/specs/2026-04-27-spec-c3-lifegw-design.md`
+- **Spec D (anima production custody):** `docs/superpowers/specs/2026-04-29-spec-d-anima-custody.md` — user-scoped sibling of Spec C₃ §5; defines `AnimaCustody` trait + 6 backends (P-256 auth, secp256k1 wallet, split-custody for browser).
 - **M5 implementation plan:** `docs/superpowers/plans/2026-04-26-m5-lifed-build.md`
 
 ## Crates
