@@ -279,6 +279,7 @@ infer = "0.16"
 json-patch = "4"
 jsonwebtoken = "9"
 k256 = { version = "0.13", features = ["ecdsa", "sha256"] }
+p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 opentelemetry = "0.29"

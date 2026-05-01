@@ -24,6 +24,11 @@ use anima_core::error::{AnimaError, AnimaResult};
 /// Domain separation strings for HKDF key derivation.
 const ED25519_DOMAIN: &[u8] = b"anima/ed25519/v1";
 const SECP256K1_DOMAIN: &[u8] = b"anima/secp256k1/v1";
+/// Spec D L4-D6 — P-256 (ES256) auth keypair derivation domain. Independent
+/// from `ED25519_DOMAIN` so an existing seed produces independent keys for
+/// the two algorithms (relevant for the migration window where verifiers
+/// may need to validate both old Ed25519 events and new P-256 ones).
+const P256_DOMAIN: &[u8] = b"anima/p256/v1";
 
 /// A 32-byte master seed from which all identity keys are derived.
 ///
@@ -68,6 +73,24 @@ impl MasterSeed {
         let hk = Hkdf::<Sha256>::new(None, &self.bytes);
         let mut okm = Zeroizing::new([0u8; 32]);
         hk.expand(SECP256K1_DOMAIN, okm.as_mut())
+            .expect("HKDF expand should not fail for 32-byte output");
+        okm
+    }
+
+    /// Derive the P-256 (ES256) private key bytes from this seed.
+    ///
+    /// Spec D L4-D6 — anima auth keypair migrated from Ed25519 to P-256.
+    /// Uses HKDF-SHA256 with domain `"anima/p256/v1"` to ensure independence
+    /// from both the Ed25519 and secp256k1 keys.
+    ///
+    /// The 32-byte output is interpreted as a big-endian P-256 private
+    /// scalar. The `p256` crate's `SigningKey::from_bytes` rejects scalars
+    /// outside `[1, n-1]`, but the probability of HKDF producing such a
+    /// scalar is < 2^-128.
+    pub fn derive_p256_key(&self) -> Zeroizing<[u8; 32]> {
+        let hk = Hkdf::<Sha256>::new(None, &self.bytes);
+        let mut okm = Zeroizing::new([0u8; 32]);
+        hk.expand(P256_DOMAIN, okm.as_mut())
             .expect("HKDF expand should not fail for 32-byte output");
         okm
     }
@@ -139,9 +162,23 @@ mod tests {
         let seed = MasterSeed::generate();
         let ed25519_key = seed.derive_ed25519_key();
         let secp256k1_key = seed.derive_secp256k1_key();
+        let p256_key = seed.derive_p256_key();
 
         // Keys derived with different domain separators must differ
         assert_ne!(ed25519_key.as_ref(), secp256k1_key.as_ref());
+        assert_ne!(ed25519_key.as_ref(), p256_key.as_ref());
+        assert_ne!(secp256k1_key.as_ref(), p256_key.as_ref());
+    }
+
+    #[test]
+    fn p256_derivation_is_deterministic() {
+        let bytes = [42u8; 32];
+        let seed1 = MasterSeed::from_bytes(bytes);
+        let seed2 = MasterSeed::from_bytes(bytes);
+        assert_eq!(
+            seed1.derive_p256_key().as_ref(),
+            seed2.derive_p256_key().as_ref()
+        );
     }
 
     #[test]

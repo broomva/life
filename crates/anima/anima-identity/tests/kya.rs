@@ -27,32 +27,28 @@ use chrono::Utc;
 /// Full KYA lifecycle — from seed to identity document.
 #[test]
 fn kya_full_lifecycle() {
-    // Step 1: Generate keystore
+    // Step 1: Generate keystore (post-Spec-D — uses P-256 auth key)
     let keystore = AnimaKeystore::generate().unwrap();
 
-    // Step 2: Derive DID
-    let pubkey_bytes: [u8; 32] = keystore
-        .ed25519()
-        .public_key_bytes()
-        .as_slice()
-        .try_into()
-        .unwrap();
-    let did = generate_did_key(&pubkey_bytes);
-    assert!(did.starts_with("did:key:z6Mk"));
+    // Step 2: Derive DID — current path uses P-256 (Spec D L4-D6).
+    let pubkey_bytes_p256: [u8; 33] = keystore.p256().public_key_bytes();
+    let did = anima_identity::generate_did_key_p256(&pubkey_bytes_p256);
+    assert!(did.starts_with("did:key:zDn"));
 
     // Step 3: Verify DID resolves back to the same key
     let resolved = resolve_did_key(&did).unwrap();
-    assert_eq!(resolved, pubkey_bytes);
+    assert_eq!(resolved.algorithm, anima_identity::AuthAlg::P256);
+    assert_eq!(resolved.public_key, pubkey_bytes_p256.to_vec());
 
     // Step 4: Build AgentIdentity (keystore already sets DID)
     let identity = keystore.build_identity("agt_kya_test_001", "host_arcan");
     assert_eq!(identity.did.as_ref().unwrap(), &did);
 
-    // Step 5: Create soul and AgentSelf
+    // Step 5: Create soul and AgentSelf — soul's root key is the P-256 key.
     let soul = SoulBuilder::new(
         "kya-test-agent",
         "Test KYA identity lifecycle",
-        keystore.ed25519().public_key_bytes(),
+        pubkey_bytes_p256.to_vec(),
     )
     .build();
 
@@ -71,9 +67,9 @@ fn kya_full_lifecycle() {
     assert_eq!(doc.mission, "Test KYA identity lifecycle");
     assert_eq!(doc.verification_methods.len(), 1);
 
-    // Verify the verification method
+    // Verify the verification method (post-Spec-D uses JsonWebKey2020 for ES256)
     let vm = &doc.verification_methods[0];
-    assert_eq!(vm.method_type, "Ed25519VerificationKey2020");
+    assert_eq!(vm.method_type, "JsonWebKey2020");
     assert!(vm.id.ends_with("#key-1"));
     assert!(vm.public_key_multibase.starts_with('z'));
 
@@ -96,21 +92,16 @@ fn kya_did_deterministic_from_seed() {
     let ks1 = AnimaKeystore::from_seed(MasterSeed::from_bytes(seed_bytes)).unwrap();
     let ks2 = AnimaKeystore::from_seed(MasterSeed::from_bytes(seed_bytes)).unwrap();
 
-    let did1 = ks1.ed25519().did_key();
-    let did2 = ks2.ed25519().did_key();
+    let did1 = ks1.p256().did_key();
+    let did2 = ks2.p256().did_key();
     assert_eq!(did1, did2, "same seed must produce same DID");
 
     // Also verify via the standalone function
-    let pubkey: [u8; 32] = ks1
-        .ed25519()
-        .public_key_bytes()
-        .as_slice()
-        .try_into()
-        .unwrap();
-    let did3 = generate_did_key(&pubkey);
+    let pubkey = ks1.p256().public_key_bytes();
+    let did3 = anima_identity::generate_did_key_p256(&pubkey);
     assert_eq!(
         did1, did3,
-        "Ed25519Identity::did_key and generate_did_key must agree"
+        "EcdsaP256Identity::did_key and generate_did_key_p256 must agree"
     );
 }
 
@@ -120,18 +111,13 @@ fn kya_delegated_agent_with_controller() {
     let human_keystore = AnimaKeystore::generate().unwrap();
     let agent_keystore = AnimaKeystore::generate().unwrap();
 
-    let human_pubkey: [u8; 32] = human_keystore
-        .ed25519()
-        .public_key_bytes()
-        .as_slice()
-        .try_into()
-        .unwrap();
-    let human_did = generate_did_key(&human_pubkey);
+    let human_pubkey = human_keystore.p256().public_key_bytes();
+    let human_did = anima_identity::generate_did_key_p256(&human_pubkey);
 
     let soul = SoulBuilder::new(
         "delegated-agent",
         "Acts on behalf of a human",
-        agent_keystore.ed25519().public_key_bytes(),
+        agent_keystore.p256().public_key_bytes().to_vec(),
     )
     .build();
 
@@ -153,26 +139,37 @@ fn kya_delegated_agent_with_controller() {
 #[test]
 fn kya_did_verification() {
     let ks = AnimaKeystore::generate().unwrap();
-    let pubkey: [u8; 32] = ks
-        .ed25519()
-        .public_key_bytes()
-        .as_slice()
-        .try_into()
-        .unwrap();
+    let pubkey = ks.p256().public_key_bytes();
 
-    let did = generate_did_key(&pubkey);
+    let did = anima_identity::generate_did_key_p256(&pubkey);
 
     // Correct key verifies
-    assert!(verify_did_key(&did, &pubkey));
+    assert!(anima_identity::verify_did_key_p256(&did, &pubkey));
 
     // Wrong key fails
-    let wrong_key = [99u8; 32];
-    assert!(!verify_did_key(&did, &wrong_key));
+    let wrong_key = [0x02u8; 33];
+    assert!(!anima_identity::verify_did_key_p256(&did, &wrong_key));
 }
 
 /// Verification method ID follows did:key spec.
 #[test]
 fn kya_verification_method_id() {
+    let ks = AnimaKeystore::generate().unwrap();
+    let pubkey = ks.p256().public_key_bytes();
+
+    let did = anima_identity::generate_did_key_p256(&pubkey);
+    let vm_id = verification_method_id(&did);
+
+    assert!(vm_id.starts_with("did:key:z"));
+    assert!(vm_id.ends_with("#key-1"));
+    assert_eq!(vm_id, format!("{did}#key-1"));
+}
+
+/// Legacy Ed25519 DID resolution must still work for verifying historical
+/// events signed before the Spec D L4-D6 cutover.
+#[test]
+fn kya_did_ed25519_legacy_resolves() {
+    use anima_identity::AuthAlg;
     let ks = AnimaKeystore::generate().unwrap();
     let pubkey: [u8; 32] = ks
         .ed25519()
@@ -180,13 +177,12 @@ fn kya_verification_method_id() {
         .as_slice()
         .try_into()
         .unwrap();
-
     let did = generate_did_key(&pubkey);
-    let vm_id = verification_method_id(&did);
-
-    assert!(vm_id.starts_with("did:key:z"));
-    assert!(vm_id.ends_with("#key-1"));
-    assert_eq!(vm_id, format!("{did}#key-1"));
+    let resolved = resolve_did_key(&did).unwrap();
+    assert_eq!(resolved.algorithm, AuthAlg::Ed25519);
+    assert_eq!(resolved.public_key, pubkey.to_vec());
+    // Round-trip via verify_did_key (the Ed25519-specific helper).
+    assert!(verify_did_key(&did, &pubkey));
 }
 
 /// Identity events round-trip through Lago projection.
@@ -308,7 +304,7 @@ fn kya_document_reflects_active_capabilities() {
     let soul = SoulBuilder::new(
         "cap-test",
         "Test capabilities in KYA doc",
-        ks.ed25519().public_key_bytes(),
+        ks.p256().public_key_bytes().to_vec(),
     )
     .build();
 

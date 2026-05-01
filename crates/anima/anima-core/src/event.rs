@@ -10,6 +10,25 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// Custody backend identifier — used in `anima.custody_migrated` events.
+///
+/// Spec D §"Event additions" — `BackendKind` (the enum behind the same
+/// name on the `AnimaCustody` trait). `#[non_exhaustive]` so adding new
+/// backends in D-Sub-B…F doesn't break match exhaustiveness on
+/// downstream verifiers.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendKind {
+    InProcess,
+    Vault,
+    WebCrypto,
+    Tpm,
+    Soma,
+    HardwareWallet,
+    Remote,
+}
+
 /// All event types that Anima emits to the Lago journal.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -130,6 +149,53 @@ pub enum AnimaEventKind {
         /// Whether verification succeeded.
         verified: bool,
     },
+
+    /// Spec D §"Event additions" — the agent's auth identity rotated.
+    ///
+    /// Verifiers use this to walk the rotation chain: any signature by
+    /// `old_did` for a seq < `rotated_at_seq` (recorded at the lago
+    /// envelope level) is considered valid; any signature by `old_did`
+    /// for a later seq is rejected.
+    IdentityRotated {
+        /// The DID that was rotated away from.
+        old_did: String,
+        /// The DID that signing now flows through.
+        new_did: String,
+        /// JWS signed by the *old* key over the *new* DID, proving the
+        /// rotation was authorised.
+        rotation_proof_jws: String,
+        /// Wall-clock rotation timestamp (`Lago` envelope already carries
+        /// the seq + microsecond timestamp — this is the operator-facing
+        /// human-readable wall clock).
+        rotated_at: DateTime<Utc>,
+    },
+
+    /// Spec D §"Event additions" — custody backend migrated.
+    ///
+    /// Documents that custody moved between backends (e.g. user upgraded
+    /// from `InProcessAnima` to `TpmAnima`). Doesn't change the keys —
+    /// just records the move so verifiers can audit the lineage and so
+    /// operators can spot e.g. a downgrade from `Vault` back to
+    /// `InProcess` (which would be a regression).
+    CustodyMigrated {
+        from_backend: BackendKind,
+        to_backend: BackendKind,
+        /// Backend-specific attestation (optional; e.g. a Vault token
+        /// receipt or a TPM attestation quote).
+        attestation: Option<String>,
+        migrated_at: DateTime<Utc>,
+    },
+
+    /// Spec D §"Event additions" — identity revoked.
+    ///
+    /// After this event, no signature signed by the revoked DID is
+    /// accepted regardless of seq. Used for e.g. a stolen device or a
+    /// compromised passkey.
+    IdentityRevoked {
+        did: String,
+        reason: String,
+        revoked_at: DateTime<Utc>,
+    },
 }
 
 impl AnimaEventKind {
@@ -154,6 +220,10 @@ impl AnimaEventKind {
             Self::LineageVerified { .. } => "lineage_verified",
             Self::IdentityAttested { .. } => "identity_attested",
             Self::IdentityVerified { .. } => "identity_verified",
+            // Spec D §"Event additions"
+            Self::IdentityRotated { .. } => "identity_rotated",
+            Self::CustodyMigrated { .. } => "custody_migrated",
+            Self::IdentityRevoked { .. } => "identity_revoked",
         };
 
         format!("{}.{}", Self::NAMESPACE, variant)
@@ -214,5 +284,57 @@ mod tests {
     fn non_anima_events_return_none() {
         let data = serde_json::json!({"amount": 100});
         assert!(AnimaEventKind::from_custom("finance.payment_settled", &data).is_none());
+    }
+
+    #[test]
+    fn identity_rotated_event_type() {
+        let event = AnimaEventKind::IdentityRotated {
+            old_did: "did:key:z6MkOld".into(),
+            new_did: "did:key:zDnNew".into(),
+            rotation_proof_jws: "h.b.s".into(),
+            rotated_at: chrono::Utc::now(),
+        };
+        assert_eq!(event.event_type(), "anima.identity_rotated");
+
+        let data = event.to_custom_data();
+        let parsed = AnimaEventKind::from_custom("anima.identity_rotated", &data);
+        assert_eq!(parsed, Some(event));
+    }
+
+    #[test]
+    fn custody_migrated_event_type() {
+        let event = AnimaEventKind::CustodyMigrated {
+            from_backend: BackendKind::InProcess,
+            to_backend: BackendKind::Vault,
+            attestation: Some("vault-token-123".into()),
+            migrated_at: chrono::Utc::now(),
+        };
+        assert_eq!(event.event_type(), "anima.custody_migrated");
+
+        let data = event.to_custom_data();
+        let parsed = AnimaEventKind::from_custom("anima.custody_migrated", &data);
+        assert_eq!(parsed, Some(event));
+    }
+
+    #[test]
+    fn identity_revoked_event_type() {
+        let event = AnimaEventKind::IdentityRevoked {
+            did: "did:key:zDnRevoked".into(),
+            reason: "device lost".into(),
+            revoked_at: chrono::Utc::now(),
+        };
+        assert_eq!(event.event_type(), "anima.identity_revoked");
+
+        let data = event.to_custom_data();
+        let parsed = AnimaEventKind::from_custom("anima.identity_revoked", &data);
+        assert_eq!(parsed, Some(event));
+    }
+
+    #[test]
+    fn backend_kind_serialises_snake_case() {
+        let json = serde_json::to_string(&BackendKind::InProcess).unwrap();
+        assert_eq!(json, "\"in_process\"");
+        let json = serde_json::to_string(&BackendKind::HardwareWallet).unwrap();
+        assert_eq!(json, "\"hardware_wallet\"");
     }
 }
