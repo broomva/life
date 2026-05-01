@@ -18,11 +18,27 @@
 //!   `AnimaError::Crypto("eip712: only EIP-3009 transferWithAuthorization is
 //!   supported in D-Sub-A")`.
 //!
-//! - `rotate()` returns a `DidRotationEvent` payload but does NOT itself
-//!   write to the Lago journal — that is the caller's responsibility (the
-//!   anima-lago bridge). This keeps the trait pure (no I/O) and matches the
-//!   lifegw `KmsSigner::publish_jwks` shape (returns the data; the caller
-//!   atomically swaps it).
+//! - `rotate()` returns `(DidRotationEvent, Arc<dyn AnimaCustody>)` but does
+//!   NOT itself write to the Lago journal — that is the caller's
+//!   responsibility (the anima-lago bridge). This keeps the trait pure (no
+//!   I/O) and matches the lifegw `KmsSigner::publish_jwks` shape (returns
+//!   the data; the caller atomically swaps it). The Arc handle returned is
+//!   the NEW post-rotation custody; the original handle remains a valid
+//!   snapshot of pre-rotation state for verifying historical signatures.
+//!
+//! - **`sign_evm_tx` is currently a stub for D-Sub-A**: the implementation
+//!   in `InProcessAnima` Keccak-256-hashes a JSON canonicalisation of the
+//!   `TxRequest` rather than computing the EIP-155 RLP digest. Signatures
+//!   produced by `sign_evm_tx` will NOT verify as valid Ethereum/Base
+//!   transactions. This is acceptable in D-Sub-A only because the sole
+//!   production hot path that signs EVM transactions is haima-x402's
+//!   EIP-3009 `transferWithAuthorization` flow, which goes through
+//!   `sign_eip712` (which IS production-grade — it delegates to
+//!   `haima_wallet::sign_transfer_authorization`). A proper RLP-based
+//!   `sign_evm_tx` is deferred to a follow-up PR (likely D-Sub-B's Vault
+//!   backend will need it for transit-signed Base transactions). Callers
+//!   that need broadcast-ready EIP-155 signatures TODAY MUST go through
+//!   haima-wallet directly until this is fixed.
 //!
 //! - `export_identity_document()` returns the `AgentIdentityDocument` shape
 //!   from `anima-core`. The `rotation_chain` field is added in this PR
@@ -222,15 +238,36 @@ pub trait AnimaCustody: Send + Sync + 'static {
         message: &Value,
     ) -> AnimaResult<EvmSignature>;
 
-    /// Mint a new auth keypair, write a rotation event, and return the
-    /// rotation payload. Each backend implements this differently — Vault
-    /// rotates the underlying transit key version; in-process backends
-    /// generate a fresh seed; soma forwards the call to its admin RPC.
+    /// Mint a new auth keypair, sign a rotation proof with the *old* key,
+    /// and return both the rotation event and a fresh custody handle that
+    /// reflects the new key.
     ///
-    /// After a successful rotation, `user_did()` and `auth_pubkey()` MUST
-    /// reflect the new key. The rotation proof embedded in the returned
-    /// event is signed by the *old* key.
-    fn rotate(&self) -> AnimaResult<DidRotationEvent>;
+    /// Semantics:
+    /// - The returned `DidRotationEvent` carries the rotation proof JWS
+    ///   signed by the OLD key over the NEW key (Spec D L4-D10).
+    /// - The returned `Arc<dyn AnimaCustody>` is a NEW handle whose
+    ///   `user_did()` / `auth_pubkey()` reflect the NEW key.
+    /// - The original handle is NOT mutated and remains valid as a
+    ///   snapshot of pre-rotation state — useful for verifiers walking
+    ///   historical signatures.
+    /// - Wallet half (secp256k1) is preserved across rotation per L4-D7;
+    ///   the new handle has the same `wallet_address()`.
+    ///
+    /// Each backend implements this differently — Vault rotates the
+    /// underlying transit key version + returns a Vault-backed handle for
+    /// the new version; in-process backends generate a fresh seed; soma
+    /// forwards the call to its admin RPC and returns a soma-backed
+    /// handle for the new key.
+    ///
+    /// Why a tuple return rather than `&mut self`-style in-place mutation:
+    /// the trait method `user_did(&self) -> &str` requires referential
+    /// transparency. To support both browser passkey backends (where the
+    /// active credential is a non-extractable handle that can't be
+    /// "swapped" in place) and Vault/HSM backends (where rotation produces
+    /// a new key version), the cleanest contract is "return the new
+    /// handle". Callers then `Arc::clone` the new handle into wherever
+    /// they were holding the old one.
+    fn rotate(&self) -> AnimaResult<(DidRotationEvent, Arc<dyn AnimaCustody>)>;
 
     /// Identify which backend produced this custody handle. Used for the
     /// `anima.custody_migrated` event and for diagnostic logging.

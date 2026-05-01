@@ -63,6 +63,16 @@ struct InProcessInner {
     #[allow(dead_code)]
     secp256k1_bytes: Zeroizing<Vec<u8>>,
     secp256k1_signing: Secp256k1SigningKey,
+    /// True if this handle was constructed by `rotate()`. After rotation the
+    /// handle's `seed` is the new auth-derivable seed, but `secp256k1_bytes`
+    /// is preserved from the original (per L4-D7 — wallet curve doesn't
+    /// rotate). Calling `encrypt_seed()` on such a handle would silently
+    /// corrupt the wallet on reload because `from_encrypted` re-derives BOTH
+    /// halves from the seed. To avoid that footgun, `encrypt_seed` returns
+    /// an error when this is true. Dual-seed encryption that captures both
+    /// the auth seed AND the wallet bytes is deferred to a follow-up
+    /// sub-phase (see I5 in the D-Sub-A code-quality review).
+    is_post_rotation: bool,
 }
 
 impl InProcessAnima {
@@ -102,6 +112,7 @@ impl InProcessAnima {
             auth,
             secp256k1_bytes: Zeroizing::new(secp256k1_key.to_vec()),
             secp256k1_signing,
+            is_post_rotation: false,
         };
         Ok(Self {
             inner: Mutex::new(inner),
@@ -119,12 +130,79 @@ impl InProcessAnima {
         Self::from_seed_arc(seed)
     }
 
+    /// Concrete-type rotation helper. Same semantics as the trait
+    /// `rotate()` but returns `(DidRotationEvent, InProcessAnima)` so
+    /// callers that need access to concrete-only methods (e.g.
+    /// `encrypt_seed`) on the post-rotation handle can use them.
+    ///
+    /// The trait `rotate()` wraps this in `Arc::new(...)` and erases to
+    /// `Arc<dyn AnimaCustody>`.
+    pub fn rotate_concrete(&self) -> AnimaResult<(DidRotationEvent, InProcessAnima)> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| AnimaError::Crypto("custody mutex poisoned".into()))?;
+
+        let old_did = inner.auth.did_key();
+        let new_seed = MasterSeed::generate();
+        let new_p256_key = new_seed.derive_p256_key();
+        let new_auth = EcdsaP256Identity::from_key_bytes(&new_p256_key)?;
+        let new_did = new_auth.did_key();
+
+        let proof_claims = serde_json::json!({
+            "iss": old_did,
+            "sub": &new_did,
+            "type": "anima.rotation_proof",
+            "iat": Utc::now().timestamp(),
+        });
+        let rotation_proof_jws = inner.auth.sign_jws(&proof_claims)?;
+
+        let new_inner = InProcessInner {
+            seed: new_seed,
+            auth: new_auth,
+            secp256k1_bytes: inner.secp256k1_bytes.clone(),
+            secp256k1_signing: inner.secp256k1_signing.clone(),
+            is_post_rotation: true,
+        };
+
+        let new_concrete = InProcessAnima {
+            inner: Mutex::new(new_inner),
+            current_did: new_did.clone(),
+            wallet_address: self.wallet_address.clone(),
+        };
+
+        let event = DidRotationEvent {
+            old_did,
+            new_did,
+            rotation_proof_jws,
+            rotated_at: Utc::now(),
+        };
+
+        Ok((event, new_concrete))
+    }
+
     /// Encrypt the master seed for at-rest storage.
+    ///
+    /// Returns `Err(AnimaError::Crypto(...))` if this handle was constructed
+    /// by `rotate()`, because round-tripping such a handle through
+    /// `encrypt_seed` → `from_encrypted` would silently re-derive the wallet
+    /// half from the new auth seed instead of preserving the original
+    /// wallet bytes (per L4-D7 the wallet curve doesn't rotate).
+    /// Dual-seed encryption that captures both the auth seed and the wallet
+    /// bytes is deferred to a follow-up sub-phase.
     pub fn encrypt_seed(&self, encryption_key: &[u8; 32]) -> AnimaResult<EncryptedSeed> {
         let inner = self
             .inner
             .lock()
             .map_err(|_| AnimaError::Crypto("custody mutex poisoned".into()))?;
+        if inner.is_post_rotation {
+            return Err(AnimaError::Crypto(
+                "encrypt_seed: cannot persist a post-rotation InProcessAnima handle in D-Sub-A; \
+                 a future sub-phase will introduce dual-seed encryption that captures both the \
+                 new auth seed and the inherited wallet bytes."
+                    .into(),
+            ));
+        }
         inner.seed.encrypt(encryption_key)
     }
 
@@ -285,70 +363,9 @@ impl AnimaCustody for InProcessAnima {
         ))
     }
 
-    fn rotate(&self) -> AnimaResult<DidRotationEvent> {
-        // Generate the new key in a separate identity, sign a rotation proof
-        // with the *old* auth key, then mutate `self` in place to adopt the
-        // new key. The lock scope holds for the entire swap.
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|_| AnimaError::Crypto("custody mutex poisoned".into()))?;
-
-        let old_did = inner.auth.did_key();
-
-        // Mint a fresh seed + auth key. Wallet half stays the same per
-        // L4-D7 (haima/x402/Base assume secp256k1 EOA throughout — rotating
-        // the wallet key would change the on-chain address).
-        let new_seed = MasterSeed::generate();
-        let new_p256_key = new_seed.derive_p256_key();
-        let new_auth = EcdsaP256Identity::from_key_bytes(&new_p256_key)?;
-        let new_did = new_auth.did_key();
-
-        // Sign the rotation proof with the *old* auth key.
-        let proof_claims = serde_json::json!({
-            "iss": old_did,
-            "sub": &new_did,
-            "type": "anima.rotation_proof",
-            "iat": Utc::now().timestamp(),
-        });
-        let rotation_proof_jws = inner.auth.sign_jws(&proof_claims)?;
-
-        // Now swap the auth key in place. Wallet half preserved.
-        // We DON'T also overwrite `seed` because that's used to derive
-        // both halves; instead we keep the *original* secp256k1 key and
-        // overlay the new auth key. This is intentional for L4-D7 (wallet
-        // doesn't rotate).
-        inner.auth = new_auth;
-        // Note: we do NOT update `inner.seed` to the new seed because the
-        // wallet key is still derived from the original seed. A future
-        // sub-phase might want a separate "auth seed" vs "wallet seed" — for
-        // D-Sub-A we keep things simple: rotation only changes auth, and
-        // the new auth key is held directly (not re-derived).
-        // The `seed` field on `inner` is therefore the "wallet seed" after
-        // first rotation; this is documented behaviour.
-        let _ = new_seed; // wallet half stays at original seed; new_seed dropped/zeroized
-
-        // CAVEAT: `current_did` on `self` is `String` (immutable through &self
-        // because the field is not behind `Mutex`). To avoid breaking the
-        // trait's `&str` return contract while supporting in-place rotation
-        // we need interior mutability for `current_did` too. We work around
-        // this by NOT mutating `current_did` in place — the rotation event
-        // is returned, and the CALLER is expected to construct a fresh
-        // `InProcessAnima` from the rotation event payload (Spec D L4-D10:
-        // rotation is documented in the journal; verifiers re-resolve via
-        // the chain). The next session reconstruction will pick up the new
-        // DID.
-        //
-        // For tests / immediate-use scenarios we provide
-        // `apply_rotation_in_place` below which mutates `current_did` via
-        // `&mut self`.
-
-        Ok(DidRotationEvent {
-            old_did,
-            new_did,
-            rotation_proof_jws,
-            rotated_at: Utc::now(),
-        })
+    fn rotate(&self) -> AnimaResult<(DidRotationEvent, Arc<dyn AnimaCustody>)> {
+        let (event, new_concrete) = self.rotate_concrete()?;
+        Ok((event, Arc::new(new_concrete)))
     }
 
     fn backend_kind(&self) -> BackendKind {
@@ -465,7 +482,8 @@ mod tests {
     fn rotation_proof_jws_signed_by_old_key() {
         let custody = InProcessAnima::generate_dev().unwrap();
         let old_did = custody.user_did().to_string();
-        let evt = custody.rotate().unwrap();
+        let old_pubkey = custody.auth_pubkey();
+        let (evt, new_handle) = custody.rotate().unwrap();
         assert_eq!(evt.old_did, old_did);
         assert_ne!(evt.new_did, old_did);
         // Both DIDs should be P-256 (zDn… prefix)
@@ -473,6 +491,95 @@ mod tests {
         assert!(evt.new_did.starts_with("did:key:zDn"));
         // Proof JWS has 3 parts
         assert_eq!(evt.rotation_proof_jws.split('.').count(), 3);
+
+        // B1 fix verification: the NEW handle reflects the new key.
+        // user_did() and auth_pubkey() must be internally consistent on
+        // the new handle (this is what the trait contract requires).
+        assert_eq!(new_handle.user_did(), evt.new_did);
+        assert_ne!(new_handle.auth_pubkey(), old_pubkey);
+
+        // The original handle remains a snapshot of pre-rotation state
+        // (NOT mutated). Verifiers walking historical signatures still
+        // resolve via the old DID.
+        assert_eq!(custody.user_did(), old_did);
+        assert_eq!(custody.auth_pubkey(), old_pubkey);
+
+        // Wallet half is preserved across rotation per L4-D7.
+        assert_eq!(
+            new_handle.wallet_address().map(|w| w.address.clone()),
+            custody.wallet_address().map(|w| w.address.clone()),
+        );
+    }
+
+    #[test]
+    fn encrypt_seed_rejects_post_rotation_handle() {
+        // I5 fix verification — calling encrypt_seed on a handle produced
+        // by rotation returns an error rather than silently corrupting the
+        // wallet half on reload.
+        let original = InProcessAnima::from_seed(MasterSeed::generate()).unwrap();
+        let encryption_key = [42u8; 32];
+
+        // Pre-rotation: encrypt_seed succeeds. Original holds a single seed
+        // that deterministically derives both auth and wallet, so the
+        // round-trip through encrypt_seed → from_encrypted is correct.
+        assert!(original.encrypt_seed(&encryption_key).is_ok());
+
+        // Rotate via the concrete helper to access encrypt_seed on the
+        // returned post-rotation handle.
+        let (_evt, post_rotation) = original.rotate_concrete().unwrap();
+
+        // Post-rotation: encrypt_seed must error. The post-rotation handle's
+        // seed slot is the new auth seed; round-tripping through
+        // encrypt_seed → from_encrypted would re-derive the wallet from
+        // this seed, producing a DIFFERENT wallet address (per L4-D7 the
+        // wallet curve doesn't rotate, so the original wallet bytes were
+        // inherited and aren't recoverable from the new seed alone).
+        let err = post_rotation.encrypt_seed(&encryption_key).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("post-rotation"),
+            "encrypt_seed should reject post-rotation handle (got: {msg})"
+        );
+    }
+
+    #[test]
+    fn rotation_proof_jws_cryptographically_verifies() {
+        // I4 follow-up — verify the rotation proof JWS actually validates
+        // against the OLD DID's public key, with the NEW DID embedded in
+        // the body claims. Without this, a malformed rotation proof could
+        // not be distinguished from a valid one.
+        use crate::did::{AuthAlg, DidResolution, resolve_did_key};
+        use crate::p256::verify_jws_with_pubkey;
+
+        let custody = InProcessAnima::generate_dev().unwrap();
+        let old_did = custody.user_did().to_string();
+        let (evt, _new_handle) = custody.rotate().unwrap();
+
+        // Resolve the old DID to get the OLD public key.
+        let DidResolution {
+            algorithm,
+            public_key,
+        } = resolve_did_key(&old_did).unwrap();
+        assert_eq!(algorithm, AuthAlg::P256);
+        let old_pub: [u8; 33] = public_key.try_into().expect("P-256 SEC1 compressed");
+
+        // Verify the JWS using the old pubkey.
+        let claims: serde_json::Value = verify_jws_with_pubkey(&evt.rotation_proof_jws, &old_pub)
+            .expect("rotation proof JWS verifies against old key");
+
+        // Body must claim the new DID as `sub` and the old DID as `iss`.
+        assert_eq!(
+            claims["iss"],
+            serde_json::Value::String(evt.old_did.clone())
+        );
+        assert_eq!(
+            claims["sub"],
+            serde_json::Value::String(evt.new_did.clone())
+        );
+        assert_eq!(
+            claims["type"],
+            serde_json::Value::String("anima.rotation_proof".into())
+        );
     }
 
     #[test]

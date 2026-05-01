@@ -211,6 +211,66 @@ impl EcdsaP256Identity {
     }
 }
 
+/// Verify a JWS produced by `EcdsaP256Identity::sign_jws` against a SEC1
+/// compressed public key. Returns the decoded claims body on success.
+///
+/// Used by:
+/// - `InProcessAnima::rotate` regression test (verifies the rotation_proof_jws)
+/// - lago-auth's full verifier path (resolves the DID, looks up the pubkey
+///   from JWKS / journal, calls this to validate the signature)
+/// - broomva.tech AAP verifier (when D-Sub-A's coordination TODO lands)
+pub fn verify_jws_with_pubkey(
+    jws: &str,
+    pubkey_sec1_compressed: &[u8; 33],
+) -> AnimaResult<serde_json::Value> {
+    use p256::PublicKey;
+    use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+
+    let mut parts = jws.split('.');
+    let header_b64 = parts
+        .next()
+        .ok_or_else(|| AnimaError::Jwt("jws missing header".into()))?;
+    let body_b64 = parts
+        .next()
+        .ok_or_else(|| AnimaError::Jwt("jws missing body".into()))?;
+    let sig_b64 = parts
+        .next()
+        .ok_or_else(|| AnimaError::Jwt("jws missing signature".into()))?;
+    if parts.next().is_some() {
+        return Err(AnimaError::Jwt("jws has extra dot-separated parts".into()));
+    }
+
+    // Decode signature (raw 64-byte r||s).
+    let sig_bytes = URL_SAFE_NO_PAD
+        .decode(sig_b64)
+        .map_err(|e| AnimaError::Jwt(format!("jws signature base64: {e}")))?;
+    if sig_bytes.len() != 64 {
+        return Err(AnimaError::Jwt(format!(
+            "jws signature wrong length (expected 64, got {})",
+            sig_bytes.len()
+        )));
+    }
+    let signature = Signature::from_slice(&sig_bytes)
+        .map_err(|e| AnimaError::Jwt(format!("jws signature parse: {e}")))?;
+
+    // Rebuild verifying key from SEC1 compressed bytes.
+    let public_key = PublicKey::from_sec1_bytes(pubkey_sec1_compressed)
+        .map_err(|e| AnimaError::Crypto(format!("pubkey from_sec1_bytes: {e}")))?;
+    let verifying_key = VerifyingKey::from(&public_key);
+
+    // Verify signature over the signing input.
+    let signing_input = format!("{header_b64}.{body_b64}");
+    verifying_key
+        .verify(signing_input.as_bytes(), &signature)
+        .map_err(|e| AnimaError::Jwt(format!("jws signature verify failed: {e}")))?;
+
+    // Decode and return body claims.
+    let body_json = URL_SAFE_NO_PAD
+        .decode(body_b64)
+        .map_err(|e| AnimaError::Jwt(format!("jws body base64: {e}")))?;
+    serde_json::from_slice(&body_json).map_err(|e| AnimaError::Jwt(format!("jws body json: {e}")))
+}
+
 /// JWT header for Agent Auth Protocol — ES256 era.
 #[derive(Debug, Serialize, Deserialize)]
 struct AgentJwtHeader {
