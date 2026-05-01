@@ -722,6 +722,82 @@ impl JwksCache {
             Err(_) => 0,
         }
     }
+
+    /// Sub-phase E sweep (item #11): public debug helper that returns
+    /// the kid + algorithm + retired flag for every cache entry.
+    ///
+    /// **Operational triage signal — does NOT expose key material.**
+    /// The admin-plane `JwksDump` RPC threads through this so operators
+    /// can answer "is the cache holding the kid the gateway just
+    /// minted against?" without shelling onto the host. Per Spec C₃
+    /// §3.6 the admin plane is closed-by-default + `life-admin`-only;
+    /// even with that gate, the dump intentionally omits raw `x`/`y`
+    /// coordinates and PEM bodies so a leaked dump never compromises
+    /// rotation key material.
+    pub fn dump(&self) -> Vec<JwksKeyDump> {
+        let now = Instant::now();
+        let now_unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+            .unwrap_or(0);
+        match self.state.read() {
+            Err(_) => Vec::new(),
+            Ok(g) => g
+                .keys
+                .iter()
+                .map(|k| JwksKeyDump {
+                    kid: k.kid.clone(),
+                    alg: format!("{:?}", k.alg),
+                    crv: alg_to_curve(&k.alg),
+                    retired: k.retired_at.is_some(),
+                    // Convert `Instant`-based `retired_at` into an
+                    // approximate epoch-millis stamp by anchoring to
+                    // `SystemTime::now()`. The deadline lives in
+                    // `Instant` for monotonicity but `Instant` doesn't
+                    // expose a wall-clock conversion; the admin plane
+                    // only needs operator-readable wall time so we
+                    // approximate via the elapsed delta.
+                    retired_at_epoch_millis: match k.retired_at {
+                        None => 0,
+                        Some(deadline) => {
+                            // `deadline` is `Instant::now() + grace` at
+                            // retire-time. Approximate a wall-clock
+                            // timestamp by computing the offset from
+                            // `now` and adding to the current epoch.
+                            let until = deadline.saturating_duration_since(now);
+                            let until_ms = u64::try_from(until.as_millis()).unwrap_or(u64::MAX);
+                            now_unix.saturating_add(until_ms)
+                        }
+                    },
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Sub-phase E sweep (item #11): operational triage signal for the
+/// admin-plane `JwksDump` RPC. Carries `kid` + alg + curve + retired
+/// metadata only — never raw key material.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct JwksKeyDump {
+    pub kid: String,
+    pub alg: String,
+    pub crv: String,
+    pub retired: bool,
+    /// Approximate wall-clock epoch-millis at which the retirement
+    /// grace expires. `0` when the entry is not retired.
+    pub retired_at_epoch_millis: u64,
+}
+
+/// Map jsonwebtoken's `Algorithm` to a JWK `crv` field. Empty for
+/// non-EC algorithms.
+fn alg_to_curve(alg: &Algorithm) -> String {
+    match alg {
+        Algorithm::ES256 => "P-256".to_string(),
+        Algorithm::ES384 => "P-384".to_string(),
+        _ => String::new(),
+    }
 }
 
 /// Synchronous JWKS fetch hop. `JwksCache::verify` is called from
@@ -1315,6 +1391,58 @@ mod tests {
         // herd but the precise number is timing-dependent. The above
         // per-thread `assert_eq!(c.active_key_count(), 1)` already
         // proves cache consistency under the coalescer.
+    }
+
+    // Sub-phase E sweep (item #11): JwksCache::dump returns kid + alg +
+    // crv + retired flag without exposing raw key material.
+    #[test]
+    fn jwks_cache_dump_returns_metadata_no_keys() {
+        let (_encoding, entry) = make_es256_kid("k1");
+        let cfg = JwksCacheConfig::new(
+            JwksSource::Inline(JwksDoc {
+                keys: vec![entry.clone()],
+            }),
+            "lifegw",
+            "https://broomva.tech",
+        );
+        let cache = JwksCache::new(cfg);
+        cache.force_refetch().expect("warmup");
+        let dump = cache.dump();
+        assert_eq!(dump.len(), 1);
+        let entry = &dump[0];
+        assert_eq!(entry.kid, "k1");
+        assert_eq!(entry.alg, "ES256");
+        assert_eq!(entry.crv, "P-256");
+        assert!(!entry.retired);
+        assert_eq!(entry.retired_at_epoch_millis, 0);
+    }
+
+    #[test]
+    fn jwks_cache_dump_marks_retired_entries() {
+        let (_encoding_old, entry_old) = make_es256_kid("k_old");
+        let (_encoding_new, entry_new) = make_es256_kid("k_new");
+        let cfg = JwksCacheConfig::new(
+            JwksSource::Inline(JwksDoc {
+                keys: vec![entry_old.clone()],
+            }),
+            "lifegw",
+            "https://broomva.tech",
+        );
+        let cache = JwksCache::new(cfg);
+        cache.force_refetch().expect("initial");
+        // Rotate: drop k_old, add k_new.
+        cache
+            .merge_doc(JwksDoc {
+                keys: vec![entry_new],
+            })
+            .expect("merge");
+        let dump = cache.dump();
+        assert_eq!(dump.len(), 2);
+        let old = dump.iter().find(|d| d.kid == "k_old").expect("k_old");
+        let new = dump.iter().find(|d| d.kid == "k_new").expect("k_new");
+        assert!(old.retired);
+        assert!(old.retired_at_epoch_millis > 0);
+        assert!(!new.retired);
     }
 
     #[test]

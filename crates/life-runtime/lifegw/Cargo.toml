@@ -25,9 +25,11 @@ default = ["kms-vault"]
 # Activates the `VaultTransit` signer which uses reqwest's blocking
 # HTTP client (already a dep for JWKS fetch).
 kms-vault = []
-# Sub-phase E completes the body of these providers.
-kms-aws = []
-kms-gcp = []
+# Sub-phase E (item #1, #2): production AWS / GCP KMS bodies. Both
+# pull heavy SDK chains (aws-sdk-kms + aws-config; google-cloud-kms +
+# google-cloud-auth) so they ship opt-in only.
+kms-aws = ["dep:aws-sdk-kms", "dep:aws-config"]
+kms-gcp = ["dep:google-cloud-kms", "dep:google-cloud-auth"]
 # Enables the in-process `Bearer dev-token-for-{user_id}` shortcut.
 # OFF in production. Enabled in CI / unit tests via the
 # integration_proxy_passthrough.rs rig.
@@ -123,6 +125,43 @@ tempfile = { workspace = true }
 # syscalls. The `admin/peercred.rs` module is the only `unsafe`
 # pocket inside lifegw (the rest of the crate is `#![deny(unsafe_code)]`).
 libc = "0.2"
+
+# Sub-phase E (item #1): production AWS KMS body. Gated behind the
+# `kms-aws` feature so a default build doesn't pull the heavy SDK chain
+# (aws-sdk-kms transitively brings in tens of crates). `aws-config`
+# builds an SDK config from the standard AWS credential chain (env
+# vars, IMDSv2, etc.); `aws-sdk-kms::Client` wraps that and exposes
+# `Sign` + `GetPublicKey`. We pin `behavior-version-latest` so a future
+# SDK behaviour change (e.g. retry policy) is explicit. `rustls` aligns
+# with the rest of the gateway's TLS posture (no native-tls).
+aws-config = { version = "1", optional = true, default-features = false, features = ["rustls", "rt-tokio", "behavior-version-latest"] }
+aws-sdk-kms = { version = "1", optional = true, default-features = false, features = ["rustls", "rt-tokio", "behavior-version-latest"] }
+
+# Sub-phase E (item #2): production GCP Cloud KMS body. Gated behind
+# the `kms-gcp` feature. `google-cloud-kms` v0.6 from the
+# `google-cloud-rust` family signs against an `AsymmetricSign` request
+# and bundles its own auth backend (`auth` feature on by default; we
+# keep the default features for simplicity since this is a heavy SDK
+# already and turning off auth defeats the point). The `rustls-tls`
+# feature aligns with the gateway's no-native-tls posture.
+google-cloud-kms = { version = "0.6", optional = true, features = ["rustls-tls", "auth"], default-features = false }
+google-cloud-auth = { version = "0.17", optional = true, default-features = false, features = ["rustls-tls"] }
+
+# nix — Sub-phase E sweep (item #12): proper `getgrouplist(3)` +
+# `User::from_uid` via the safe wrappers in `nix::unistd`. Needed for
+# supplementary-group membership checks (admin authn no longer relies
+# on the *primary* GID alone). Linux-only: `getgrouplist` is gated to
+# Linux/BSD by nix; macOS dev boxes fall back to the existing
+# primary-gid path. The `user` feature enables `User::from_uid` /
+# `User::from_name` (`getpwuid_r` / `getpwnam_r`).
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.31", default-features = false, features = ["user"] }
+
+# Sub-phase E sweep (item #14): wrap the rustls `TlsAcceptor` itself
+# in `arc_swap::ArcSwap` so cert rotation reaches the listener
+# accept loop, not just the resolver. arc-swap is already a runtime
+# dep above; this comment documents why D3's deferred work is
+# resolvable without a new crate.
 
 [dev-dependencies]
 tempfile.workspace = true

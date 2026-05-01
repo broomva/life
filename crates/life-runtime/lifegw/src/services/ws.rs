@@ -748,9 +748,14 @@ where
             // with 1011 InternalError per Spec C₃ §6.5.
             _ = pong_clock.tick() => {
                 if last_pong_at.elapsed() > PONG_DEADLINE {
+                    // Sub-phase E sweep (item #9): saturating cast so a
+                    // pathological elapsed `u128` cannot wrap into a
+                    // small bogus log value.
+                    let elapsed_ms = u64::try_from(last_pong_at.elapsed().as_millis())
+                        .unwrap_or(u64::MAX);
                     tracing::warn!(
                         sid = %conn.sid,
-                        elapsed_ms = last_pong_at.elapsed().as_millis() as u64,
+                        elapsed_ms,
                         "ws heartbeat timeout — closing with 1011"
                     );
                     break CloseReason::InternalError;

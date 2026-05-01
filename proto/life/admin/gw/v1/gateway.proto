@@ -13,7 +13,12 @@ syntax = "proto3";
 
 package life.admin.gw.v1;
 
-import "google/protobuf/timestamp.proto";
+// Sub-phase E sweep (items #7, #8, #11): the original Sub-phase D proto
+// imported `google/protobuf/timestamp.proto` for two `Timestamp` fields
+// (BlocklistEntry.added_at + JwksKey.retired_at). Both have been
+// simplified to direct u64 epoch-millis on the wire so the hot path
+// doesn't round-trip through `prost_types::Timestamp`. The import is
+// no longer needed.
 
 service GatewayAdmin {
   // Liveness check. Anyone who can connect to the admin socket may
@@ -38,18 +43,23 @@ service GatewayAdmin {
   // `Blocklist_Add` style is illegal under `RPC_PASCAL_CASE`). The
   // generated Rust client methods are still `blocklist_add` etc. so
   // call-site ergonomics are unchanged.
-  rpc BlocklistAdd(BlocklistAddReq) returns (BlocklistEmpty);
-  rpc BlocklistRemove(BlocklistRemoveReq) returns (BlocklistEmpty);
+  rpc BlocklistAdd(BlocklistAddReq) returns (AdminAck);
+  rpc BlocklistRemove(BlocklistRemoveReq) returns (AdminAck);
   rpc BlocklistList(BlocklistListReq) returns (BlocklistListResp);
 
   // Sub-phase D D2: runtime override of per-user QPS for a specific
   // user (e.g. throttle abusive caller without restart). Overrides
   // are in-process; restart resets to the configured defaults.
   // life-admin / root only.
-  rpc RateLimitOverride(RateLimitOverrideReq) returns (BlocklistEmpty);
+  rpc RateLimitOverride(RateLimitOverrideReq) returns (AdminAck);
 }
 
-message BlocklistEmpty {}
+// Sub-phase E sweep (item #7): renamed from `BlocklistEmpty` →
+// `AdminAck`. The original name conflated "empty body" (the actual
+// semantics — every mutating admin op acknowledges with no payload)
+// with "blocklist is empty". The new name is op-agnostic so future
+// non-blocklist mutating ops can reuse it without further renames.
+message AdminAck {}
 
 message HealthReq {}
 
@@ -88,7 +98,16 @@ message JwksKey {
   // `true` when the entry has been retired by a later refetch but is
   // still inside the rotation-grace window (Spec C₃ §5.3).
   bool retired = 3;
-  google.protobuf.Timestamp retired_at = 4;
+  // Sub-phase E sweep (item #8): `retired_at` aligned with the rest of
+  // the admin proto wire format — u64 epoch-millis, no `prost_types`
+  // round-trip. `0` means "not retired" (the `retired` bool is the
+  // authoritative flag; this field is debug-aid metadata).
+  uint64 retired_at_epoch_millis = 4;
+  // Sub-phase E sweep (item #11): EC curve name (`P-256` for ES256,
+  // `P-384` etc.). Empty for non-EC keys (RSA, etc.). Operational
+  // triage signal — answers "is the cache holding the right curve for
+  // the active alg?" without exposing key material.
+  string crv = 5;
 }
 
 message BlocklistAddReq {
@@ -103,7 +122,12 @@ message BlocklistListResp { repeated BlocklistEntry entries = 1; }
 message BlocklistEntry {
   string subject = 1;
   string reason = 2;
-  google.protobuf.Timestamp added_at = 3;
+  // Sub-phase E sweep (item #8): `added_at` is now wire u64 epoch-millis
+  // instead of `google.protobuf.Timestamp` so the hot path no longer
+  // round-trips through `prost_types::Timestamp` for every entry on
+  // every list call. The value is computed against
+  // `SystemTime::UNIX_EPOCH` and serialised directly.
+  uint64 added_at_epoch_millis = 3;
 }
 
 message RateLimitOverrideReq {

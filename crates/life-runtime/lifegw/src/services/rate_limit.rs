@@ -92,7 +92,12 @@ impl Bucket {
         let elapsed = now.saturating_duration_since(self.last_refill);
         // Tokens to add = elapsed_secs × refill_per_sec_milli (fixed
         // point). Use millis to avoid float for sub-second elapsed.
-        let elapsed_ms = elapsed.as_millis() as u64;
+        // Sub-phase E sweep (item #9): saturating-cast `u128` to `u64`
+        // via `try_from(...).unwrap_or(u64::MAX)` so very-long-elapsed
+        // refills (after a freeze, sleep-resume, etc.) do not silently
+        // wrap. The bucket caps at `capacity` anyway so a saturating
+        // accumulator is the correct behaviour.
+        let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
         let added_milli = elapsed_ms.saturating_mul(self.refill_per_sec_milli) / 1000;
         let cap_milli = i64::from(self.capacity) * 1000;
         self.tokens_milli = self
