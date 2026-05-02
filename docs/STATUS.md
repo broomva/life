@@ -1100,6 +1100,143 @@ trait; can land in parallel with M8.
 - Critical-path next: M8 SDK (was M7-blocked, now unblocked).
 - D-Sub-C is M9-blocking (browser path).
 
+### 2026-05-01 — Wave 2A: D-Sub-B (Vault custody) + M8 SDK shipped
+
+Two parallel streams merged 2026-05-01 on the foundation laid by Wave 1
+(M7-FINAL + D-Sub-A). Both required substantive in-PR review fixes
+before merge.
+
+**D-Sub-B — `VaultTransitAnima` (PR #1073, commit `bf409af5`):**
+Spec D's first production-grade `AnimaCustody` backend — HashiCorp
+Vault Transit per-user namespaces (`anima-{user_id}-auth-v{n}` +
+`anima-{user_id}-wallet-v{n}`). Auth half: P-256 (ES256, JWS via
+`marshaling_algorithm: "jws"`); wallet half: secp256k1 with EIP-1559
+RLP digest computed via the new shared `crate::rlp` module + Vault
+`prehashed: true` signing. New crate-level `rlp.rs` (471 LOC, 18 unit
+tests) closes D-Sub-A's `sign_evm_tx` SPEC-D-DEVIATION — both
+`InProcessAnima` and `VaultTransitAnima` now produce identical
+signed-over digests for the same `TxRequest`.
+
+Highlights:
+- Per-user namespace pattern with strict `validate_user_id` (B1
+  review fix) — alphanumeric + `_-` only, 1..=64 chars; rejects
+  path-traversal vectors like `"alice/../admin"`.
+- Cross-backend digest equivalence test (B2 review fix) — locks the
+  L4-D7 invariant that whichever backend signs, the signed-over
+  bytes are byte-for-byte identical.
+- `parse_data_hex` strict-prefix enforcement (I2 review fix) —
+  rejects ambiguous unprefixed hex strings to prevent silent calldata
+  corruption.
+- `compute_v_byte` ecrecover loop (Vault doesn't return `v` for
+  secp256k1 sigs — try both 27 + 28 + match against cached
+  uncompressed wallet pubkey).
+- `key_version: latest-1` rotation-proof signing — Vault's
+  `transit/sign` defaults to latest, so post-rotate the proof needs
+  explicit pin to the OLD version. Solves the L4-D10 rotation-proof
+  contract for Vault.
+- `kms-vault` feature gate (default off; mirrors lifegw's pattern).
+- mTLS forward-compat scaffolding (warning + ignored at runtime;
+  full plumbing deferred to Sub-phase F when reqwest TLS-feature
+  workspace bump lands).
+- `spawn_token_renewal` returns `AbortHandle` (matches lifegw's I1
+  fix from M7-FINAL).
+- 5 wiremock-backed integration tests + 1 `#[ignore]`-gated live
+  Vault dev-server test + 18 RLP unit tests + 6 vault-internal unit
+  tests + 3 user_id validation tests + 1 cross-backend digest test.
+  anima-identity 113 → 131 (+18).
+
+Deferred follow-ups (per code-quality reviewer triage):
+- Live `vault server -dev` USDC end-to-end on Base fork — Vault
+  v1.15 doesn't support secp256k1 transit keys natively; achievable
+  when Vault patches land or HSM sidecar lands.
+- Generic EIP-712 encoder — D-Sub-A's EIP-3009-only limitation
+  retained; defer to D-Sub-E (SomaCustody) when typed-data signing
+  of arbitrary payloads becomes a real workflow.
+- Full mTLS feature plumbing (workspace reqwest pin).
+- Rotation race-condition documentation (multi-writer concurrent
+  rotates; documented as single-writer assumption for now).
+
+**M8 SDK — `@broomva/life-sdk` v0.1.0-pre (PR #1072, commit
+`e6106cdb`):** the public-facing TypeScript SDK at
+`sdks/life-sdk-ts/`. Hand-curated proto-type wrappers (no
+`@bufbuild/protobuf` runtime — kept the bundle slim) + Connect
+protocol JSON over fetch + WS state machine for `Agent.StreamSession`
+with reconnect-by-`from_sequence` + close-code → typed-error mapping
+matching the Spec C₃ §6.5 amendment. 50 vitest tests across 6 files;
+4 user-facing services (Agent / Events / Wallet / Identity); 9 typed
+error classes; 2 examples (quickstart + streaming).
+
+Highlights:
+- 4 services + 13+ RPCs map 1-to-1 with `proto/life/v1/*`.
+- WS reconnect logic with permanent-vs-transient close-code
+  discrimination (post-merge I-3 fix correctly handles
+  close-before-open on retry).
+- Stream reader leak fix (post-merge I-2): `try/finally` +
+  `releaseLock()` + outer `controller.abort()` so consumer
+  early-break frees the HTTP connection.
+- Proto type honesty (post-merge I-1): proto3-JSON canonical
+  encoding for `int64`/`uint64` is `string` and `bytes` is base64
+  string. Pre-fix the SDK declared these as `bigint` /
+  `Uint8Array` but the JSON reviver was a no-op so consumers
+  calling `bal.micros - 1n` would have crashed.
+- New `src/codec.ts` exports `microsToBigInt` / `bigIntToMicros` /
+  `sequenceToBigInt` / `bigIntToSequence` / `bytesFromBase64` /
+  `bytesToBase64` for callers that need bigint arithmetic or raw
+  bytes.
+- Backpressure-error coverage test (post-merge I-4): added a
+  companion test to the auto-reconnect test that disables
+  reconnect and asserts `BackpressureError` reaches `onError`.
+- README invocation fix (post-merge I-6): replaced the
+  `pnpm --filter` command (which fails without a workspace
+  config) with a `cd sdks/life-sdk-ts && pnpm run example:quickstart`
+  flow.
+- Wallet idempotency doc (post-merge spec I2): clarified
+  `TransferReq.memo` is the M5 Sub-phase D idempotency key for
+  `Wallet.Transfer` per Spec C₂ §3.3 — the proto schema doesn't
+  carry a dedicated idempotency field, so memo serves the role.
+
+**Marked v0.1.0-pre with `KNOWN_LIMITATIONS.md` documenting two
+deferred wire-protocol gaps** (B1 + B2 from spec-compliance review):
+
+- **B1 — Connect-vs-grpc-web wire mismatch:** the SDK speaks
+  Connect-protocol JSON (`application/json`,
+  `application/connect+json`) but lifegw mounts
+  `tonic_web::GrpcWebLayer` which only accepts
+  `application/grpc-web*`. v0.1.0-pre will NOT successfully complete
+  real calls against a production lifegw. Tests pass against the
+  in-tree FakeGateway because it accepts both. Resolution path A:
+  switch SDK transport to grpc-web binary framing with
+  `@bufbuild/protobuf` codec (Connect-ES already supports grpc-web
+  mode; only Transport's internal framing changes). Tracked as
+  v0.2.0 follow-up "M8.1".
+- **B2 — Browser WS auth via subprotocol unsupported by gateway:**
+  browsers can't set `Authorization` on WS upgrades. SDK forwards
+  bearer via `Sec-WebSocket-Protocol: bearer.<token>`; lifegw's
+  `parse_upgrade_request` reads only `Authorization` header. Browser
+  WS path will fail Tier-1 auth on production deployments.
+  Resolution path A: add subprotocol-bearer parsing to lifegw's
+  `parse_upgrade_request` + `AuthLayer` (gateway-side change).
+  Tracked as follow-up "M8.2".
+
+The SDK's structural foundation (services, errors, WS state machine,
+proto types, codec helpers, 50 tests) IS solid and reusable — only
+the wire-codec layer needs replacement in v0.2.0.
+
+**Wave 2A summary:**
+- Spec D = 33% complete (2/6 sub-phases shipped; D-Sub-A
+  `InProcessAnima` + D-Sub-B `VaultTransitAnima`).
+- M8 SDK = scaffolding shipped as v0.1.0-pre; v0.2.0 transport
+  rework (M8.1) + lifegw browser-auth subprotocol support (M8.2)
+  are the path-to-production tickets.
+- Tests delta: ~3842 + ~18 (D-Sub-B) + 50 (M8 SDK vitest) =
+  ~3860 Rust workspace + 50 TypeScript SDK.
+- Critical-path next: D-Sub-C (WebCryptoAnima + RemoteAnima for
+  browser, M9-blocking) — depends on D-Sub-B's `RemoteAnima`
+  pattern. Could parallelize with D-Sub-D (TpmAnima) + D-Sub-E
+  (SomaCustody + rotation/revocation flow).
+
+PR #1072 + #1073 merged 2026-05-01.
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
