@@ -17,22 +17,30 @@
 //! | POST | `/anima/custody/mint_session_cap` | `{ user_id, passkey_assertion_b64, client_data_json_b64 }` | `{ token, expires_at_unix }` |
 //! | POST | `/anima/custody/enroll_passkey` | `{ user_id, attestation_object_b64, client_data_json_b64 }` | `{ token, expires_at_unix, did }` |
 //!
-//! ## Authn
+//! ## Authn (Spec D D-Sub-C review fixes — B1, B2, I1)
 //!
 //! All routes require `Authorization: Bearer <jwt>` where the JWT is
 //! either:
-//! - a Tier-2 capability (`aud=lifed`) from the standard public-plane
-//!   AuthLayer, OR
-//! - a Tier-User capability (`aud=anima.user-cap`) minted by the
-//!   `TierUserMinter` below.
+//! - a Tier-2 capability (`aud=lifed`) — server-side caller, full access
+//! - a Tier-User capability (`aud=anima.user-cap`) — browser/RemoteAnima
+//!   caller, per-route scope-gated access
 //!
 //! Both shapes verify against the SAME published JWKS (single signing
-//! key per gateway). The route handlers extract the `Authorization`
-//! header directly so they can accept both audiences uniformly. The
-//! `mint_session_cap` and `enroll_passkey` routes additionally accept
-//! their first request without a Tier-User cap (the cap doesn't exist
-//! yet) — those routes only require a Tier-2 OR Tier-User bearer that
-//! authorises issuance.
+//! key per gateway). The route handlers verify the bearer's signature +
+//! audience + nbf/exp via [`crate::auth::jwks::JwksCache::verify_capability_token`]
+//! and additionally enforce:
+//!
+//! - **B2 (per-route scope intersection)** — Tier-User caps must carry
+//!   the route's required scope (`anima.user.sign_auth`,
+//!   `anima.user.sign_wallet`, `anima.user.get_pubkey`). Tier-2 caps
+//!   bypass this check (server-side callers have implicit full access).
+//! - **I1 (sub/user_id binding)** — `claims.sub` MUST match the
+//!   user_id carried in the request body or path. Without this binding
+//!   a Tier-User cap minted for user X could be replayed to sign for
+//!   user Y.
+//! - **B2 (privilege escalation)** — `mint_session_cap` and
+//!   `enroll_passkey` require Tier-2 audience. Tier-User caps cannot
+//!   mint themselves; first-time provisioning is a server-side action.
 //!
 //! ## Soma proxy
 //!
@@ -84,6 +92,7 @@ use life_kernel_proto::custody as oracle_pb;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
 
+use crate::auth::jwks::{JwksCache, VerifiedCapClaims};
 use crate::auth::tier_user::TierUserMinter;
 
 /// Default scopes minted into Tier-User caps. The current routes
@@ -96,6 +105,25 @@ const DEFAULT_SCOPES: &[&str] = &[
     "anima.user.get_pubkey",
 ];
 
+/// Audience for Tier-2 capability tokens (server-side caller, full
+/// access). Spec C₃ §5.4.
+const TIER2_AUDIENCE: &str = "lifed";
+
+/// Audience for Tier-User capability tokens (browser / RemoteAnima,
+/// per-user scope-gated access). Spec D D-Sub-C.
+const TIER_USER_AUDIENCE: &str = "anima.user-cap";
+
+/// Issuer of all capability tokens minted by lifegw.
+const CAPABILITY_ISSUER: &str = "lifegw";
+
+/// Per-route required scope for Tier-User caps. Spec D D-Sub-C
+/// review fix (B2): each route enforces `claims.scope` ⊇ {required}
+/// for Tier-User caps. Tier-2 caps bypass the scope check (server-side
+/// callers have implicit full access).
+const SCOPE_SIGN_AUTH: &str = "anima.user.sign_auth";
+const SCOPE_SIGN_WALLET: &str = "anima.user.sign_wallet";
+const SCOPE_GET_PUBKEY: &str = "anima.user.get_pubkey";
+
 /// Shared state threaded into the axum Router.
 ///
 /// `soma_uds_path` is the path to soma's admin custody-oracle UDS
@@ -107,16 +135,27 @@ pub struct AnimaCustodyState {
     pub soma_uds_path: Option<Arc<String>>,
     /// Tier-User minter — same KMS signer as Tier-2.
     pub tier_user_minter: Arc<TierUserMinter>,
+    /// JWKS cache used to verify inbound bearer tokens. Spec D D-Sub-C
+    /// review fix (B1): every route validates the bearer's signature +
+    /// audience + nbf/exp instead of accepting any non-empty string.
+    /// The cache holds the lifegw signer's published keys (Tier-2 +
+    /// Tier-User audiences ride the same kid).
+    pub jwks: Arc<JwksCache>,
 }
 
 impl AnimaCustodyState {
-    /// Construct the state from a UDS path + minter. `uds_path = None`
-    /// degrades the proxy routes gracefully (501) — useful when the
-    /// operator hasn't enabled soma's custody-oracle yet.
-    pub fn new(soma_uds_path: Option<String>, tier_user_minter: Arc<TierUserMinter>) -> Self {
+    /// Construct the state from a UDS path + minter + JWKS verifier.
+    /// `uds_path = None` degrades the proxy routes gracefully (501) —
+    /// useful when the operator hasn't enabled soma's custody-oracle yet.
+    pub fn new(
+        soma_uds_path: Option<String>,
+        tier_user_minter: Arc<TierUserMinter>,
+        jwks: Arc<JwksCache>,
+    ) -> Self {
         Self {
             soma_uds_path: soma_uds_path.map(Arc::new),
             tier_user_minter,
+            jwks,
         }
     }
 }
@@ -209,11 +248,17 @@ pub struct EnrollPasskeyBody {
 }
 
 /// Error type — produces a JSON body with a structured `error` field.
+///
+/// Spec D D-Sub-C review fix: scope + sub-binding errors carry extra
+/// structured fields beyond `code`/`message`. The `extras` map is
+/// merged into the JSON body without leaking verifier internals (the
+/// bearer claims are NEVER included).
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
     code: &'static str,
     message: String,
+    extras: Vec<(&'static str, serde_json::Value)>,
 }
 
 impl ApiError {
@@ -222,6 +267,7 @@ impl ApiError {
             status: StatusCode::UNAUTHORIZED,
             code: "unauthorized",
             message: msg.into(),
+            extras: Vec::new(),
         }
     }
     fn bad_request(code: &'static str, msg: impl Into<String>) -> Self {
@@ -229,6 +275,7 @@ impl ApiError {
             status: StatusCode::BAD_REQUEST,
             code,
             message: msg.into(),
+            extras: Vec::new(),
         }
     }
     fn not_implemented(msg: impl Into<String>) -> Self {
@@ -236,6 +283,7 @@ impl ApiError {
             status: StatusCode::NOT_IMPLEMENTED,
             code: "soma_uds_not_configured",
             message: msg.into(),
+            extras: Vec::new(),
         }
     }
     fn upstream(msg: impl Into<String>) -> Self {
@@ -243,6 +291,7 @@ impl ApiError {
             status: StatusCode::BAD_GATEWAY,
             code: "soma_upstream",
             message: msg.into(),
+            extras: Vec::new(),
         }
     }
     fn internal(msg: impl Into<String>) -> Self {
@@ -250,17 +299,68 @@ impl ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "internal",
             message: msg.into(),
+            extras: Vec::new(),
+        }
+    }
+
+    /// Spec D D-Sub-C review fix (B2): per-route Tier-User scope check
+    /// failure. Returns 403 + structured payload so the browser/SDK
+    /// can surface the missing scope without leaking the cap claims.
+    fn scope_insufficient(required: &str, present: &[String]) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "scope_insufficient",
+            message: format!("Tier-User cap missing required scope `{required}`"),
+            extras: vec![
+                ("required", serde_json::Value::String(required.to_string())),
+                (
+                    "present",
+                    serde_json::Value::Array(
+                        present
+                            .iter()
+                            .map(|s| serde_json::Value::String(s.clone()))
+                            .collect(),
+                    ),
+                ),
+            ],
+        }
+    }
+
+    /// Spec D D-Sub-C review fix (I1): cross-user binding violation.
+    /// Returns 403 + structured payload. The body shows the requester's
+    /// asserted user_id (from the JSON body / path) and the cap's
+    /// `claims.sub` so the operator can audit cross-user attempts.
+    fn user_id_mismatch(claimed: &str, requested: &str) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "user_id_mismatch",
+            message: "bearer subject does not match requested user_id".to_string(),
+            extras: vec![
+                ("claimed", serde_json::Value::String(claimed.to_string())),
+                (
+                    "requested",
+                    serde_json::Value::String(requested.to_string()),
+                ),
+            ],
         }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let body = serde_json::json!({
-            "error": self.code,
-            "message": self.message,
-        });
-        (self.status, Json(body)).into_response()
+        let mut body = serde_json::Map::new();
+        body.insert(
+            "error".to_string(),
+            serde_json::Value::String(self.code.to_string()),
+        );
+        body.insert(
+            "message".to_string(),
+            serde_json::Value::String(self.message),
+        );
+        for (k, v) in self.extras {
+            body.insert(k.to_string(), v);
+        }
+        (self.status, Json(serde_json::Value::Object(body))).into_response()
     }
 }
 
@@ -272,7 +372,8 @@ async fn sign_auth_handler(
     headers: HeaderMap,
     Json(body): Json<SignBody>,
 ) -> Result<Json<SignResp>, ApiError> {
-    require_bearer(&headers)?;
+    let claims = verify_bearer(&headers, &state.jwks)?;
+    check_scope_and_subject(&claims, Some(SCOPE_SIGN_AUTH), &body.user_id)?;
     let uds = soma_uds(&state)?;
     let digest = decode_digest_32(&body.digest_b64)?;
     let mut client = connect_oracle(&uds).await?;
@@ -301,7 +402,8 @@ async fn sign_wallet_handler(
     headers: HeaderMap,
     Json(body): Json<SignBody>,
 ) -> Result<Json<SignResp>, ApiError> {
-    require_bearer(&headers)?;
+    let claims = verify_bearer(&headers, &state.jwks)?;
+    check_scope_and_subject(&claims, Some(SCOPE_SIGN_WALLET), &body.user_id)?;
     let uds = soma_uds(&state)?;
     let digest = decode_digest_32(&body.digest_b64)?;
     let mut client = connect_oracle(&uds).await?;
@@ -335,7 +437,8 @@ async fn get_auth_pubkey_handler(
     headers: HeaderMap,
     Path(user_id): Path<String>,
 ) -> Result<Json<PubkeyResp>, ApiError> {
-    require_bearer(&headers)?;
+    let claims = verify_bearer(&headers, &state.jwks)?;
+    check_scope_and_subject(&claims, Some(SCOPE_GET_PUBKEY), &user_id)?;
     let uds = soma_uds(&state)?;
     let mut client = connect_oracle(&uds).await?;
     let resp = client
@@ -360,7 +463,8 @@ async fn get_wallet_pubkey_handler(
     headers: HeaderMap,
     Path(user_id): Path<String>,
 ) -> Result<Json<PubkeyResp>, ApiError> {
-    require_bearer(&headers)?;
+    let claims = verify_bearer(&headers, &state.jwks)?;
+    check_scope_and_subject(&claims, Some(SCOPE_GET_PUBKEY), &user_id)?;
     let uds = soma_uds(&state)?;
     let mut client = connect_oracle(&uds).await?;
     let resp = client
@@ -391,7 +495,14 @@ async fn mint_session_cap_handler(
     headers: HeaderMap,
     Json(body): Json<MintSessionCapBody>,
 ) -> Result<Json<CapResp>, ApiError> {
-    require_bearer(&headers)?;
+    let claims = verify_bearer(&headers, &state.jwks)?;
+    // Spec D D-Sub-C review fix (B2): mint is a privileged operation —
+    // it MUST come from a Tier-2 (server-side) caller. A Tier-User cap
+    // for user X cannot mint a fresh cap for user X (or anyone else).
+    require_tier2(&claims)?;
+    // I1: even Tier-2 callers must mint for the user_id they're acting
+    // on behalf of — `claims.sub` MUST match the body's user_id.
+    check_scope_and_subject(&claims, None, &body.user_id)?;
 
     // Spec D D-Sub-C: when a passkey assertion is provided, verify it
     // against the user's enrolled auth pubkey via soma's custody-oracle.
@@ -427,7 +538,13 @@ async fn enroll_passkey_handler(
     headers: HeaderMap,
     Json(body): Json<EnrollPasskeyBody>,
 ) -> Result<Json<EnrollResp>, ApiError> {
-    require_bearer(&headers)?;
+    let claims = verify_bearer(&headers, &state.jwks)?;
+    // Spec D D-Sub-C review fix (B2): enroll is a privileged
+    // operation — first-time passkey provisioning MUST come from a
+    // server-side (Tier-2) caller, not a browser-side Tier-User cap.
+    require_tier2(&claims)?;
+    // I1: bind enrollment to the user_id `claims.sub` belongs to.
+    check_scope_and_subject(&claims, None, &body.user_id)?;
 
     // Decode the attestation object and extract the COSE_Key public-key
     // from authData.attestedCredentialData.credentialPublicKey.
@@ -460,7 +577,26 @@ async fn enroll_passkey_handler(
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
-fn require_bearer(headers: &HeaderMap) -> Result<String, ApiError> {
+/// Spec D D-Sub-C review fix (B1): every `/anima/custody/*` route
+/// MUST verify the bearer's signature + audience + nbf/exp before
+/// running the handler. Previously the routes only checked for
+/// `Authorization: Bearer <something>` presence — any string was
+/// accepted, allowing arbitrary callers to mint Tier-User caps and
+/// proxy auth/wallet-sign calls through the soma admin UDS.
+///
+/// Returns the verified claims so handlers can additionally enforce:
+///   - per-route scope intersection (B2 — Tier-User caps only)
+///   - `claims.sub == body.user_id` (I1 — every route)
+///
+/// Both Tier-2 (`aud=lifed`) and Tier-User (`aud=anima.user-cap`)
+/// audiences are accepted. Tier-2 caps come from server-side callers
+/// and bypass the per-route scope check; Tier-User caps come from
+/// browser/RemoteAnima callers and must carry the per-route required
+/// scope.
+fn verify_bearer(
+    headers: &HeaderMap,
+    jwks: &Arc<JwksCache>,
+) -> Result<VerifiedCapClaims, ApiError> {
     let auth = headers
         .get("authorization")
         .ok_or_else(|| ApiError::unauthorized("missing Authorization header"))?
@@ -472,7 +608,62 @@ fn require_bearer(headers: &HeaderMap) -> Result<String, ApiError> {
     if token.is_empty() {
         return Err(ApiError::unauthorized("empty bearer token"));
     }
-    Ok(token.to_string())
+    jwks.verify_capability_token(
+        token,
+        &[TIER2_AUDIENCE, TIER_USER_AUDIENCE],
+        CAPABILITY_ISSUER,
+    )
+    .map_err(|e| ApiError::unauthorized(format!("invalid bearer: {e}")))
+}
+
+/// Spec D D-Sub-C review fixes (B2 + I1): centralized check for
+/// per-route scope intersection + sub/user_id binding. Tier-2 caps
+/// bypass the scope check (server-side callers have implicit full
+/// access); Tier-User caps must carry `required_scope` in their
+/// `claims.scope` vector.
+///
+/// `expected_user_id` is the user_id from the request body or path —
+/// the verified `claims.sub` MUST match it, otherwise a Tier-User cap
+/// for user X could be used to sign for user Y.
+fn check_scope_and_subject(
+    claims: &VerifiedCapClaims,
+    required_scope: Option<&str>,
+    expected_user_id: &str,
+) -> Result<(), ApiError> {
+    // I1: subject binding applies to every route, every audience.
+    if claims.sub != expected_user_id {
+        return Err(ApiError::user_id_mismatch(&claims.sub, expected_user_id));
+    }
+    // B2: scope check only applies to Tier-User caps; Tier-2 implies
+    // full access.
+    if claims.aud == TIER_USER_AUDIENCE
+        && let Some(required) = required_scope
+        && !claims.scope.iter().any(|s| s == required)
+    {
+        return Err(ApiError::scope_insufficient(required, &claims.scope));
+    }
+    Ok(())
+}
+
+/// Spec D D-Sub-C review fix (B2): privileged routes (`mint_session_cap`,
+/// `enroll_passkey`) require Tier-2 audience. Tier-User caps cannot
+/// mint themselves.
+fn require_tier2(claims: &VerifiedCapClaims) -> Result<(), ApiError> {
+    if claims.aud != TIER2_AUDIENCE {
+        return Err(ApiError {
+            status: StatusCode::FORBIDDEN,
+            code: "tier2_required",
+            message: format!(
+                "route requires Tier-2 audience `{TIER2_AUDIENCE}`, got `{}`",
+                claims.aud
+            ),
+            extras: vec![
+                ("required_aud", serde_json::Value::String(TIER2_AUDIENCE.to_string())),
+                ("present_aud", serde_json::Value::String(claims.aud.clone())),
+            ],
+        });
+    }
+    Ok(())
 }
 
 fn soma_uds(state: &AnimaCustodyState) -> Result<String, ApiError> {
@@ -715,33 +906,99 @@ mod tests {
         assert_eq!(bytes.len(), 32);
     }
 
+    fn dev_jwks() -> Arc<JwksCache> {
+        Arc::new(JwksCache::dev_only())
+    }
+
     #[test]
-    fn require_bearer_rejects_missing() {
+    fn verify_bearer_rejects_missing() {
         let h = HeaderMap::new();
-        let err = require_bearer(&h).expect_err("must reject missing");
+        let err = verify_bearer(&h, &dev_jwks()).expect_err("must reject missing");
         assert_eq!(err.status, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
-    fn require_bearer_accepts_well_formed() {
-        let mut h = HeaderMap::new();
-        h.insert("authorization", "Bearer abc".parse().unwrap());
-        let token = require_bearer(&h).unwrap();
-        assert_eq!(token, "abc");
-    }
-
-    #[test]
-    fn require_bearer_rejects_empty() {
+    fn verify_bearer_rejects_empty() {
         let mut h = HeaderMap::new();
         h.insert("authorization", "Bearer ".parse().unwrap());
-        assert!(require_bearer(&h).is_err());
+        let err = verify_bearer(&h, &dev_jwks()).expect_err("must reject empty");
+        assert_eq!(err.status, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
-    fn require_bearer_rejects_non_bearer() {
+    fn verify_bearer_rejects_non_bearer() {
         let mut h = HeaderMap::new();
         h.insert("authorization", "Basic xyz".parse().unwrap());
-        assert!(require_bearer(&h).is_err());
+        let err = verify_bearer(&h, &dev_jwks()).expect_err("must reject non-bearer");
+        assert_eq!(err.status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn verify_bearer_rejects_unverifiable_token() {
+        // Spec D D-Sub-C review fix (B1): a well-formed `Bearer <something>`
+        // header with an unverifiable token MUST be rejected with 401.
+        // Previously `require_bearer` accepted any non-empty string here.
+        let mut h = HeaderMap::new();
+        h.insert("authorization", "Bearer not-a-real-jwt".parse().unwrap());
+        let err = verify_bearer(&h, &dev_jwks()).expect_err("must reject unverifiable");
+        assert_eq!(err.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(err.code, "unauthorized");
+    }
+
+    #[test]
+    fn check_scope_and_subject_rejects_user_id_mismatch() {
+        // I1: a Tier-User cap minted for `alice` cannot be used to sign
+        // for `bob`.
+        let claims = VerifiedCapClaims {
+            aud: TIER_USER_AUDIENCE.to_string(),
+            sub: "alice".to_string(),
+            scope: vec![SCOPE_SIGN_AUTH.to_string()],
+        };
+        let err = check_scope_and_subject(&claims, Some(SCOPE_SIGN_AUTH), "bob")
+            .expect_err("mismatch must reject");
+        assert_eq!(err.status, StatusCode::FORBIDDEN);
+        assert_eq!(err.code, "user_id_mismatch");
+    }
+
+    #[test]
+    fn check_scope_and_subject_rejects_insufficient_scope() {
+        // B2: a Tier-User cap with `sign_wallet` scope cannot call a
+        // route that requires `sign_auth`.
+        let claims = VerifiedCapClaims {
+            aud: TIER_USER_AUDIENCE.to_string(),
+            sub: "alice".to_string(),
+            scope: vec![SCOPE_SIGN_WALLET.to_string()],
+        };
+        let err = check_scope_and_subject(&claims, Some(SCOPE_SIGN_AUTH), "alice")
+            .expect_err("scope mismatch must reject");
+        assert_eq!(err.status, StatusCode::FORBIDDEN);
+        assert_eq!(err.code, "scope_insufficient");
+    }
+
+    #[test]
+    fn check_scope_and_subject_tier2_bypasses_scope_check() {
+        // B2: Tier-2 caps come from server-side callers and bypass the
+        // per-route scope check.
+        let claims = VerifiedCapClaims {
+            aud: TIER2_AUDIENCE.to_string(),
+            sub: "alice".to_string(),
+            scope: vec![],
+        };
+        check_scope_and_subject(&claims, Some(SCOPE_SIGN_AUTH), "alice")
+            .expect("Tier-2 caps bypass scope check");
+    }
+
+    #[test]
+    fn require_tier2_rejects_tier_user_audience() {
+        // B2: privileged routes (mint, enroll) require Tier-2 audience.
+        let claims = VerifiedCapClaims {
+            aud: TIER_USER_AUDIENCE.to_string(),
+            sub: "alice".to_string(),
+            scope: vec![],
+        };
+        let err = require_tier2(&claims).expect_err("Tier-User must reject");
+        assert_eq!(err.status, StatusCode::FORBIDDEN);
+        assert_eq!(err.code, "tier2_required");
     }
 
     #[test]

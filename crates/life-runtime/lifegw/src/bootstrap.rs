@@ -393,17 +393,66 @@ pub async fn serve_with_listener_and_signer(
     // dispatch directly to the anima handlers; everything else falls
     // through to the tonic stack (auth → ws-dispatch → grpc-web).
     let tier_user_minter = Arc::new(crate::auth::tier_user::TierUserMinter::with_defaults(
-        kms_signer_for_tier_user,
+        Arc::clone(&kms_signer_for_tier_user),
         cfg.auth
             .tier_user_ttl
             .unwrap_or(crate::auth::tier_user::DEFAULT_TIER_USER_TTL),
     ));
+    // Spec D D-Sub-C review fix (B1): the `/anima/custody/*` routes
+    // now verify their inbound bearers against a JWKS cache populated
+    // from the lifegw signer's published keys. Tier-2 (`aud=lifed`)
+    // and Tier-User (`aud=anima.user-cap`) tokens both ride the same
+    // active kid (the lifegw signer mints both), so a single inline
+    // JwksCache covers verification for the entire `/anima/custody/*`
+    // surface. When `dev_signer_enabled` is set we use the dev cache
+    // (which accepts the magic `dev-cap-token-for-{user_id}` bearer)
+    // so existing in-process tests keep working without a fresh KMS.
+    let anima_jwks: Arc<crate::auth::jwks::JwksCache> = if cfg.auth.dev_signer_enabled {
+        Arc::new(crate::auth::jwks::JwksCache::dev_only())
+    } else {
+        // Convert the signer's `Jwks` into the `JwksDoc` shape the
+        // JwksCache understands. `Jwks` has `Vec<JwksKey>` (kid + kty +
+        // crv + alg + optional pem); `JwksDoc` has `Vec<JwksEntry>`
+        // (same fields plus optional `x`/`y`/`n`/`e`). The lifegw
+        // signer only publishes `pem`, so the conversion is direct.
+        let inner = kms_signer_for_tier_user.publish_jwks();
+        let entries: Vec<crate::auth::jwks::JwksEntry> = inner
+            .keys
+            .into_iter()
+            .map(|k| crate::auth::jwks::JwksEntry {
+                kid: k.kid,
+                kty: k.kty,
+                crv: k.crv,
+                alg: k.alg,
+                use_: k.use_,
+                x: String::new(),
+                y: String::new(),
+                n: String::new(),
+                e: String::new(),
+                pem: k.pem,
+            })
+            .collect();
+        let mut jwks_cfg = crate::auth::jwks::JwksCacheConfig::new(
+            crate::auth::jwks::JwksSource::Inline(crate::auth::jwks::JwksDoc::new(entries)),
+            // Audience here is unused — `verify_capability_token`
+            // takes its own audience allowlist; keeping it set to the
+            // Tier-2 aud is the safest default.
+            "lifed",
+            "lifegw",
+        );
+        // No upstream fetch for the inline source, but keep TTL/grace
+        // aligned with the signer's rotation cadence anyway.
+        jwks_cfg.ttl = cfg.auth.jwks_cache_ttl;
+        jwks_cfg.rotation_grace = cfg.auth.jwks_rotation_grace;
+        Arc::new(crate::auth::jwks::JwksCache::new(jwks_cfg))
+    };
     let anima_state = crate::services::anima_custody::AnimaCustodyState::new(
         cfg.anima_custody
             .as_ref()
             .and_then(|c| c.soma_uds_path.as_ref())
             .map(|p| p.to_string_lossy().to_string()),
         Arc::clone(&tier_user_minter),
+        Arc::clone(&anima_jwks),
     );
     let anima_router = crate::services::anima_custody::router(anima_state);
 
