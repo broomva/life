@@ -7,8 +7,8 @@
  *
  *   POST /anima/custody/sign_auth        { user_id, digest_b64 }
  *   POST /anima/custody/sign_wallet      { user_id, digest_b64 }
- *   GET  /anima/custody/auth_pubkey/:uid
- *   GET  /anima/custody/wallet_pubkey/:uid
+ *   GET  /anima/custody/get_auth_pubkey/:uid
+ *   GET  /anima/custody/get_wallet_pubkey/:uid
  *   POST /anima/custody/mint_session_cap { user_id, attestation, assertion }
  *   POST /anima/custody/enroll_passkey   { user_id, attestation, client_data }
  *
@@ -49,7 +49,30 @@ export interface RemoteAnimaClientConfig {
    * production code lets it default to `globalThis.fetch`).
    */
   fetch?: typeof fetch;
+  /**
+   * I-2 review fix: per-request timeout in milliseconds. A hung
+   * lifegw shouldn't block the browser indefinitely — bare `fetch`
+   * has no built-in timeout. Defaults to 30 000 (30s); tune up for
+   * slow upstream KMS providers, down for tighter UX. Set to `0` to
+   * disable (NOT recommended in production).
+   */
+  requestTimeoutMs?: number;
 }
+
+/**
+ * Default per-request timeout (30 s) — used when
+ * `RemoteAnimaClientConfig.requestTimeoutMs` is unset.
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Maximum number of characters of an upstream HTTP error body that
+ * `RemoteAnimaClient` includes in `AnimaError.message`. I-1 review fix:
+ * lifegw error bodies often echo back JWT claims / `request_id` /
+ * upstream error blobs that leak under devtools, in stack traces shipped
+ * to Sentry, or on uncaught-promise reports. Truncate aggressively.
+ */
+const MAX_REMOTE_ERROR_BODY_CHARS = 200;
 
 /** Returned by `enrollPasskey`. */
 export interface EnrollPasskeyResult {
@@ -86,11 +109,34 @@ export class RemoteAnimaClient {
   readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
   private readonly getToken: () => Promise<string>;
+  private readonly requestTimeoutMs: number;
 
   constructor(cfg: RemoteAnimaClientConfig) {
     this.baseUrl = cfg.baseUrl.replace(/\/+$/, "");
     this.fetchFn = cfg.fetch ?? globalThis.fetch.bind(globalThis);
     this.getToken = cfg.getToken;
+    this.requestTimeoutMs =
+      cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  }
+
+  /**
+   * Build an `AbortSignal` that fires after `requestTimeoutMs` if the
+   * timeout is positive. Returns `undefined` when the timeout is `0`
+   * (caller explicitly opted out). I-2 review fix.
+   */
+  private buildTimeoutSignal(): AbortSignal | undefined {
+    if (this.requestTimeoutMs <= 0) return undefined;
+    // `AbortSignal.timeout` is widely supported (Chrome 103+, FF 100+,
+    // Safari 16+, Node 17.3+). We need it for browser custody and Node
+    // tests; the fake-fetch shim in tests ignores `signal` so this
+    // remains harmless there.
+    if (typeof AbortSignal !== "undefined" && "timeout" in AbortSignal) {
+      return AbortSignal.timeout(this.requestTimeoutMs);
+    }
+    // Fallback for ancient runtimes — manual controller + setTimeout.
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), this.requestTimeoutMs);
+    return ctrl.signal;
   }
 
   // ── auth half (P-256) ─────────────────────────────────────────────
@@ -117,7 +163,7 @@ export class RemoteAnimaClient {
    */
   async getAuthPubkey(userId: string): Promise<Uint8Array> {
     const json = await this.getJson<{ pubkey_b64: string }>(
-      `/anima/custody/auth_pubkey/${encodeURIComponent(userId)}`,
+      `/anima/custody/get_auth_pubkey/${encodeURIComponent(userId)}`,
     );
     return b64ToBytes(json.pubkey_b64);
   }
@@ -208,7 +254,7 @@ export class RemoteAnimaClient {
    */
   async getWalletPubkey(userId: string): Promise<Uint8Array> {
     const json = await this.getJson<{ pubkey_b64: string }>(
-      `/anima/custody/wallet_pubkey/${encodeURIComponent(userId)}`,
+      `/anima/custody/get_wallet_pubkey/${encodeURIComponent(userId)}`,
     );
     return b64ToBytes(json.pubkey_b64);
   }
@@ -329,12 +375,10 @@ export class RemoteAnimaClient {
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: this.buildTimeoutSignal(),
       });
     } catch (err) {
-      throw AnimaError.remote(
-        0,
-        `fetch failed for ${path}: ${(err as Error).message}`,
-      );
+      throw mapFetchFailure(path, err);
     }
     return await this.parseResponse<T>(path, resp);
   }
@@ -349,12 +393,10 @@ export class RemoteAnimaClient {
       resp = await this.fetchFn(`${this.baseUrl}${path}`, {
         method: "GET",
         headers,
+        signal: this.buildTimeoutSignal(),
       });
     } catch (err) {
-      throw AnimaError.remote(
-        0,
-        `fetch failed for ${path}: ${(err as Error).message}`,
-      );
+      throw mapFetchFailure(path, err);
     }
     return await this.parseResponse<T>(path, resp);
   }
@@ -362,8 +404,14 @@ export class RemoteAnimaClient {
   private async parseResponse<T>(path: string, resp: Response): Promise<T> {
     const text = await resp.text();
     if (!resp.ok) {
-      const message = text || resp.statusText || `HTTP ${resp.status}`;
-      throw AnimaError.remote(resp.status, `${path}: ${message}`);
+      // I-1 review fix: lifegw error bodies often echo back JWT
+      // claims, request IDs, or upstream KMS error blobs. Truncate
+      // aggressively so the error string never leaks an entire
+      // upstream payload into devtools / Sentry / uncaught-promise
+      // reports. Prefer parsed `{ code, message }` JSON shape when
+      // present; fall back to a length-capped raw string.
+      const safeBody = sanitizeErrorBody(text, resp.statusText, resp.status);
+      throw AnimaError.remote(resp.status, `${path}: ${safeBody}`);
     }
     if (!text) return {} as T;
     try {
@@ -407,4 +455,52 @@ function b64ToBytes(b64: string): Uint8Array {
   };
   if (g.Buffer) return new Uint8Array(g.Buffer.from(padded, "base64"));
   throw AnimaError.crypto("no base64 decoder available");
+}
+
+/**
+ * I-1 review fix: turn an upstream error body into a length-capped,
+ * leak-resistant message. If the body parses as JSON with `{ code,
+ * message }` shape, prefer those fields and drop everything else
+ * (avoids accidentally surfacing JWT claims / request IDs / upstream
+ * KMS errors). Otherwise truncate to `MAX_REMOTE_ERROR_BODY_CHARS`.
+ */
+function sanitizeErrorBody(
+  body: string,
+  statusText: string,
+  status: number,
+): string {
+  if (!body) return statusText || `HTTP ${status}`;
+  // Try to extract a structured `{ code, message }` shape — these are
+  // safe by convention (lifegw doesn't put PII in `code`/`message`).
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    const code = typeof parsed.code === "string" ? parsed.code : undefined;
+    const msg = typeof parsed.message === "string" ? parsed.message : undefined;
+    if (code && msg) return `${code}: ${truncate(msg, MAX_REMOTE_ERROR_BODY_CHARS)}`;
+    if (code) return code;
+    if (msg) return truncate(msg, MAX_REMOTE_ERROR_BODY_CHARS);
+  } catch {
+    // Not JSON — fall through to raw truncation.
+  }
+  return truncate(body, MAX_REMOTE_ERROR_BODY_CHARS);
+}
+
+function truncate(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, max)}…`;
+}
+
+/**
+ * I-2 review fix: convert a `fetch`-rejection error into a typed
+ * `AnimaError.remote`, distinguishing timeouts (AbortError /
+ * TimeoutError) from generic transport failures. Useful for callers
+ * that want to retry only on timeouts.
+ */
+function mapFetchFailure(path: string, err: unknown): AnimaError {
+  const e = err as { name?: string; message?: string };
+  const name = e?.name ?? "";
+  const message = e?.message ?? String(err);
+  if (name === "TimeoutError" || name === "AbortError") {
+    return AnimaError.remote(0, `request timeout for ${path}`);
+  }
+  return AnimaError.remote(0, `fetch failed for ${path}: ${message}`);
 }

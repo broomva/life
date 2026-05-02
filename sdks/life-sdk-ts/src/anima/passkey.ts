@@ -85,9 +85,22 @@ export interface PasskeyOracleConfig {
    */
   credentials?: CredentialsContainerLike;
   /**
-   * Optional injection point for the IndexedDB DB factory — defaults
-   * to `globalThis.indexedDB`. Tests use `fake-indexeddb` to avoid
-   * a real-browser dependency.
+   * Availability-check override for the IndexedDB DB factory.
+   *
+   * I-3 review fix — clarify the actual semantics: the underlying
+   * `idb` package always reads `globalThis.indexedDB` directly (no
+   * way to inject a custom factory through `openDB`). This field
+   * therefore acts as a **validation hook** only — if you pass a
+   * non-`undefined` value the constructor will short-circuit the
+   * "is IDB available?" check and trust your caller's environment
+   * setup. Tests register `fake-indexeddb/auto` BEFORE constructing
+   * the oracle so `globalThis.indexedDB` is set; production callers
+   * should leave this `undefined`.
+   *
+   * If you need a fully custom IndexedDB backend (e.g. encrypted-at-
+   * rest storage in a service worker), DON'T pass it here — fork
+   * `PasskeyOracle` and replace the `openDb` / `persist` / `read`
+   * methods.
    */
   indexedDB?: IDBFactory;
   /**
@@ -183,15 +196,20 @@ export class PasskeyOracle {
     }
     this.credentials = credentials;
 
+    // I-3 review fix: explicit-only availability check. The `idb`
+    // package always reads `globalThis.indexedDB` directly — no
+    // factory injection — so we just confirm one is available
+    // (either supplied via cfg.indexedDB OR registered globally,
+    // e.g. via `fake-indexeddb/auto` in test setup).
     const idb = cfg.indexedDB ?? this.resolveIndexedDB();
     if (!idb) {
       throw AnimaError.state(
-        "PasskeyOracle: no IndexedDB available — pass `indexedDB` config (e.g. fake-indexeddb)",
+        "PasskeyOracle: no IndexedDB available — register one globally \
+         (e.g. `import 'fake-indexeddb/auto'` in tests, or run in a browser)",
       );
     }
-    // Set the global IDB factory so `idb`'s `openDB()` picks it up.
-    // Tests use `fake-indexeddb` which is registered as the global
-    // before any oracle is constructed.
+    // NB: openDb() reads `globalThis.indexedDB` regardless of what
+    // was supplied here. See the cfg.indexedDB doc-comment.
     this.databaseName = cfg.databaseName ?? PASSKEY_DB_NAME;
   }
 

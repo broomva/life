@@ -242,7 +242,7 @@ describe("RemoteAnimaClient pubkey + address GETs", () => {
     const { fetchFn, calls } = makeFakeFetch([
       {
         method: "GET",
-        path: "/anima/custody/auth_pubkey/u%3A1",
+        path: "/anima/custody/get_auth_pubkey/u%3A1",
         handler: () => ({ json: { pubkey_b64: bytesToBase64(expected) } }),
       },
     ]);
@@ -263,7 +263,7 @@ describe("RemoteAnimaClient pubkey + address GETs", () => {
     const { fetchFn } = makeFakeFetch([
       {
         method: "GET",
-        path: "/anima/custody/wallet_pubkey/u-1",
+        path: "/anima/custody/get_wallet_pubkey/u-1",
         handler: () => ({ json: { pubkey_b64: bytesToBase64(expected) } }),
       },
     ]);
@@ -462,5 +462,94 @@ describe("RemoteAnimaClient error handling", () => {
       getToken: async () => "tok",
     });
     expect(client.baseUrl).toBe("https://gw.test");
+  });
+
+  // I-1 review fix: structured `{ code, message }` errors surface
+  // those fields only — never the raw body.
+  it("surfaces only code+message from structured error bodies (I-1)", async () => {
+    const { fetchFn } = makeFakeFetch([
+      {
+        method: "POST",
+        path: "/anima/custody/sign_auth",
+        handler: () => ({
+          status: 403,
+          json: {
+            code: "tier_user_revoked",
+            message: "session cap revoked",
+            // Sensitive fields that MUST NOT leak into AnimaError.message.
+            jwt: "eyJhbGciOiJFUzI1NiI.dot.dot",
+            request_id: "req_abc123",
+            upstream_kms_error: "vault: 403 lease expired",
+          },
+        }),
+      },
+    ]);
+    const client = new RemoteAnimaClient({
+      baseUrl: "https://gw.test",
+      getToken: async () => "tok",
+      fetch: fetchFn,
+    });
+    let caught: unknown;
+    try {
+      await client.signAuth("u-1", new Uint8Array(32));
+    } catch (err) {
+      caught = err;
+    }
+    const msg = (caught as AnimaError).message;
+    expect(msg).toContain("tier_user_revoked");
+    expect(msg).toContain("session cap revoked");
+    // Critical: none of these sensitive fields leak.
+    expect(msg).not.toContain("eyJhbGciOiJFUzI1NiI");
+    expect(msg).not.toContain("req_abc123");
+    expect(msg).not.toContain("vault: 403 lease expired");
+  });
+
+  // I-1 review fix: long unstructured bodies get truncated to
+  // MAX_REMOTE_ERROR_BODY_CHARS (200) + ellipsis. The fake-fetch
+  // helper always JSON-encodes responses; an enormous unstructured
+  // string lands as a JSON-string body, which sanitizeErrorBody falls
+  // through to truncate (no `code`/`message` shape).
+  it("truncates oversized error bodies to ~200 chars + ellipsis (I-1)", async () => {
+    const huge = "x".repeat(2_000);
+    const { fetchFn } = makeFakeFetch([
+      {
+        method: "POST",
+        path: "/anima/custody/sign_auth",
+        // `json: huge` serializes to '"xxxx..."' (~2002 chars total)
+        handler: () => ({ status: 500, json: huge }),
+      },
+    ]);
+    const client = new RemoteAnimaClient({
+      baseUrl: "https://gw.test",
+      getToken: async () => "tok",
+      fetch: fetchFn,
+    });
+    let caught: unknown;
+    try {
+      await client.signAuth("u-1", new Uint8Array(32));
+    } catch (err) {
+      caught = err;
+    }
+    const msg = (caught as AnimaError).message;
+    expect(msg.length).toBeLessThan(huge.length);
+    expect(msg).toContain("…");
+  });
+
+  // I-2 review fix: fetch failures with TimeoutError/AbortError name
+  // map to a typed "request timeout" AnimaError.
+  it("maps AbortError/TimeoutError to a request-timeout error (I-2)", async () => {
+    const fetchFn: typeof fetch = async () => {
+      const e = new Error("aborted") as Error & { name: string };
+      e.name = "TimeoutError";
+      throw e;
+    };
+    const client = new RemoteAnimaClient({
+      baseUrl: "https://gw.test",
+      getToken: async () => "tok",
+      fetch: fetchFn,
+    });
+    await expect(client.getAuthPubkey("u-1")).rejects.toThrow(
+      /request timeout/,
+    );
   });
 });

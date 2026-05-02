@@ -586,7 +586,7 @@ describe("loadWebCryptoAnima — load existing", () => {
       },
       {
         method: "GET",
-        path: "/anima/custody/wallet_pubkey/u-load",
+        path: "/anima/custody/get_wallet_pubkey/u-load",
         handler: () => ({ pubkey_b64: bytesToBase64(walletPk) }),
       },
     ]);
