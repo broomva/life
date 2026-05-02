@@ -74,14 +74,10 @@ impl RemoteFixture {
         let auth_pt = auth_pk.to_encoded_point(true); // SEC1 compressed
         let auth_pubkey_bytes = auth_pt.as_bytes().to_vec();
         Mock::given(method("GET"))
-            .and(path(format!(
-                "/anima/custody/get_auth_pubkey/{ALICE}"
-            )))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(json!({
-                    "pubkey_b64": B64_STANDARD.encode(&auth_pubkey_bytes)
-                })),
-            )
+            .and(path(format!("/anima/custody/get_auth_pubkey/{ALICE}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "pubkey_b64": B64_STANDARD.encode(&auth_pubkey_bytes)
+            })))
             .mount(&server)
             .await;
 
@@ -90,14 +86,10 @@ impl RemoteFixture {
         let wallet_pt = wallet_pk.to_encoded_point(false); // SEC1 uncompressed
         let wallet_pubkey_bytes = wallet_pt.as_bytes().to_vec();
         Mock::given(method("GET"))
-            .and(path(format!(
-                "/anima/custody/get_wallet_pubkey/{ALICE}"
-            )))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(json!({
-                    "pubkey_b64": B64_STANDARD.encode(&wallet_pubkey_bytes)
-                })),
-            )
+            .and(path(format!("/anima/custody/get_wallet_pubkey/{ALICE}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "pubkey_b64": B64_STANDARD.encode(&wallet_pubkey_bytes)
+            })))
             .mount(&server)
             .await;
 
@@ -145,13 +137,10 @@ struct SignAuthResponder {
 impl Respond for SignAuthResponder {
     fn respond(&self, req: &Request) -> ResponseTemplate {
         let body: Value = serde_json::from_slice(&req.body).expect("body must be JSON");
-        let has_bearer = req
-            .headers
-            .iter()
-            .any(|(name, value)| {
-                name.as_str().eq_ignore_ascii_case("authorization")
-                    && value.to_str().is_ok_and(|v| v.starts_with("Bearer "))
-            });
+        let has_bearer = req.headers.iter().any(|(name, value)| {
+            name.as_str().eq_ignore_ascii_case("authorization")
+                && value.to_str().is_ok_and(|v| v.starts_with("Bearer "))
+        });
         self.calls.lock().unwrap().push(SignCall {
             route: "/anima/custody/sign_auth".into(),
             body: body.clone(),
@@ -186,13 +175,10 @@ struct SignWalletResponder {
 impl Respond for SignWalletResponder {
     fn respond(&self, req: &Request) -> ResponseTemplate {
         let body: Value = serde_json::from_slice(&req.body).expect("body must be JSON");
-        let has_bearer = req
-            .headers
-            .iter()
-            .any(|(name, value)| {
-                name.as_str().eq_ignore_ascii_case("authorization")
-                    && value.to_str().is_ok_and(|v| v.starts_with("Bearer "))
-            });
+        let has_bearer = req.headers.iter().any(|(name, value)| {
+            name.as_str().eq_ignore_ascii_case("authorization")
+                && value.to_str().is_ok_and(|v| v.starts_with("Bearer "))
+        });
         self.calls.lock().unwrap().push(SignCall {
             route: "/anima/custody/sign_wallet".into(),
             body: body.clone(),
@@ -352,10 +338,7 @@ async fn sign_evm_tx_recovers_correct_v_byte() {
     let bytes = sig.bytes;
     assert_eq!(bytes.len(), 65, "EVM signature must be r||s||v (65 bytes)");
     let v = bytes[64];
-    assert!(
-        v == 27 || v == 28,
-        "legacy v must be 27 or 28, got {v}"
-    );
+    assert!(v == 27 || v == 28, "legacy v must be 27 or 28, got {v}");
 
     // Recover the pubkey from the signed digest and confirm it matches
     // the fixture wallet pubkey.

@@ -175,8 +175,7 @@ impl RemoteAnima {
         );
         let cap_arc = Arc::new(Mutex::new(cap));
 
-        let auth_pubkey =
-            Self::fetch_auth_pubkey(&client, &base_url, &user_id, &cap_arc).await?;
+        let auth_pubkey = Self::fetch_auth_pubkey(&client, &base_url, &user_id, &cap_arc).await?;
         let wallet_pubkey_uncompressed =
             Self::fetch_wallet_pubkey(&client, &base_url, &user_id, &cap_arc).await?;
         let wallet_addr_hex = derive_wallet_address(&wallet_pubkey_uncompressed)?;
@@ -245,9 +244,10 @@ impl RemoteAnima {
                 resp.status()
             )));
         }
-        let body: PubkeyResp = resp.json().await.map_err(|e| {
-            AnimaError::Crypto(format!("RemoteAnima get_auth_pubkey parse: {e}"))
-        })?;
+        let body: PubkeyResp = resp
+            .json()
+            .await
+            .map_err(|e| AnimaError::Crypto(format!("RemoteAnima get_auth_pubkey parse: {e}")))?;
         let bytes = decode_pubkey_b64(&body.pubkey_b64)
             .map_err(|e| AnimaError::Crypto(format!("RemoteAnima auth pubkey b64: {e}")))?;
         if bytes.len() != 33 {
@@ -289,9 +289,10 @@ impl RemoteAnima {
                 resp.status()
             )));
         }
-        let body: PubkeyResp = resp.json().await.map_err(|e| {
-            AnimaError::Crypto(format!("RemoteAnima get_wallet_pubkey parse: {e}"))
-        })?;
+        let body: PubkeyResp = resp
+            .json()
+            .await
+            .map_err(|e| AnimaError::Crypto(format!("RemoteAnima get_wallet_pubkey parse: {e}")))?;
         let bytes = decode_pubkey_b64(&body.pubkey_b64)
             .map_err(|e| AnimaError::Crypto(format!("RemoteAnima wallet pubkey b64: {e}")))?;
         if bytes.len() != 65 {
@@ -407,8 +408,7 @@ impl RemoteAnima {
                 Ok(r) => r,
                 Err(_) => continue,
             };
-            if let Ok(recovered) =
-                K256VerifyingKey::recover_from_prehash(digest, &signature, recid)
+            if let Ok(recovered) = K256VerifyingKey::recover_from_prehash(digest, &signature, recid)
                 && recovered == expected_pubkey
             {
                 return Ok(cand + 27);
@@ -593,10 +593,10 @@ impl AnimaCustody for RemoteAnima {
         let mut nonce = [0u8; 32];
         nonce.copy_from_slice(&nonce_bytes);
 
-        let from_b = parse_eth_address(from)
-            .map_err(|e| AnimaError::Crypto(format!("eip712 from: {e}")))?;
-        let to_b = parse_eth_address(to)
-            .map_err(|e| AnimaError::Crypto(format!("eip712 to: {e}")))?;
+        let from_b =
+            parse_eth_address(from).map_err(|e| AnimaError::Crypto(format!("eip712 from: {e}")))?;
+        let to_b =
+            parse_eth_address(to).map_err(|e| AnimaError::Crypto(format!("eip712 to: {e}")))?;
 
         let digest = hash_transfer_authorization(
             domain,
@@ -635,8 +635,7 @@ impl AnimaCustody for RemoteAnima {
     }
 
     fn export_identity_document(&self) -> AnimaResult<AgentIdentityDocument> {
-        let public_key_multibase =
-            format!("z{}", bs58::encode(self.auth_pubkey).into_string());
+        let public_key_multibase = format!("z{}", bs58::encode(self.auth_pubkey).into_string());
         let did = self.user_did.clone();
         let vm = VerificationMethod {
             id: format!("{did}#key-1"),
