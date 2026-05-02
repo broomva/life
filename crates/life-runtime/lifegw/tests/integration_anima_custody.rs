@@ -910,8 +910,7 @@ async fn unknown_field_in_sign_body_rejected_with_400() {
     // axum's Json extractor surfaces serde failures as 400 / 422.
     let status = resp.status();
     assert!(
-        status == http::StatusCode::BAD_REQUEST
-            || status == http::StatusCode::UNPROCESSABLE_ENTITY,
+        status == http::StatusCode::BAD_REQUEST || status == http::StatusCode::UNPROCESSABLE_ENTITY,
         "expected 400/422 for unknown field, got {status}"
     );
 }

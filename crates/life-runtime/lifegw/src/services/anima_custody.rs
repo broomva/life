@@ -911,11 +911,8 @@ fn validate_user_id(s: &str) -> Result<(), ApiError> {
                 "user_id contains control character",
             ));
         }
-        let allowed = ch.is_ascii_alphanumeric()
-            || ch == '_'
-            || ch == '.'
-            || ch == '-'
-            || ch == ':';
+        let allowed =
+            ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '-' || ch == ':';
         if !allowed {
             return Err(ApiError::bad_request(
                 "bad_user_id",
