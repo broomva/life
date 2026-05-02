@@ -111,6 +111,8 @@ pub mod ledger {
     //! Documented inline so future maintainers don't need to chase the
     //! upstream spec for routine work.
 
+    use anima_core::error::{AnimaError, AnimaResult};
+
     pub mod apdu {
         //! Canonical Ledger Ethereum app APDU codes.
         //!
@@ -226,17 +228,25 @@ pub mod ledger {
     /// expects: `[count u8] [index_0 u32be] [index_1 u32be] ...`. Each
     /// path component is 4 big-endian bytes; the path is prefixed with
     /// a 1-byte count of components.
-    pub fn encode_derivation_path(path: &[u32]) -> Vec<u8> {
-        assert!(
-            path.len() <= 10,
-            "Ledger derivation paths max 10 components"
-        );
+    ///
+    /// I-4 review fix: previously this panicked on a path > 10
+    /// components. Since the function is `pub` and re-exported via
+    /// `lib.rs`, that gave external callers a panic surface in a
+    /// custody backend. Now returns a typed `AnimaResult` so the same
+    /// condition surfaces as `AnimaError::Crypto`.
+    pub fn encode_derivation_path(path: &[u32]) -> AnimaResult<Vec<u8>> {
+        if path.len() > 10 {
+            return Err(AnimaError::Crypto(format!(
+                "Ledger derivation paths max 10 components, got {}",
+                path.len()
+            )));
+        }
         let mut out = Vec::with_capacity(1 + path.len() * 4);
         out.push(path.len() as u8);
         for component in path {
             out.extend_from_slice(&component.to_be_bytes());
         }
-        out
+        Ok(out)
     }
 }
 
@@ -264,14 +274,27 @@ pub trait HidTransport: Send + Sync {
 ///
 /// `hidapi::HidDevice` is `Send` but NOT `Sync` (the underlying
 /// hidraw / IOHIDDevice handle is single-reader). We wrap it in a
-/// `Mutex` so the transport implements `Sync` — this is fine for our
-/// usage because every `exchange()` call serialises a complete
-/// write-then-read APDU round-trip, and concurrent signing requests
-/// to the same hardware wallet would have to queue anyway (the device
-/// only displays one confirmation prompt at a time).
+/// `Mutex` so the transport implements `Sync`.
+///
+/// **I-1 review fix — atomic exchange.** Pre-fix, the `device` mutex
+/// was locked and unlocked per-HID-frame inside `write_apdu` and
+/// `read_apdu`, leaving a race window between the last write-frame
+/// and the first read-frame where another thread holding an
+/// `Arc<HardwareWalletAnima>` could interleave its own APDU and
+/// corrupt the protocol stream. The new `exchange_lock` is held
+/// across the FULL write-then-read round-trip so the trait shape
+/// `Arc<dyn AnimaCustody>` (which is explicitly designed to cross
+/// task boundaries) cannot interleave APDUs against the same
+/// physical device. Concurrent signing requests queue waiting on
+/// `exchange_lock` — that's fine because the hardware only displays
+/// one confirmation prompt at a time anyway.
 #[cfg(feature = "hw-wallet")]
 pub struct RealHidTransport {
     device: Mutex<hidapi::HidDevice>,
+    /// Outer mutex held across the whole `exchange()` round-trip so
+    /// concurrent callers serialize at the APDU boundary, not just
+    /// per-HID-frame. Closes I-1.
+    exchange_lock: Mutex<()>,
     /// Read timeout for `read_timeout` calls in milliseconds. Defaults
     /// to 60 seconds — matches Ledger Live's "look at your device"
     /// confirmation window.
@@ -288,6 +311,7 @@ impl RealHidTransport {
     pub fn new(device: hidapi::HidDevice) -> Self {
         Self {
             device: Mutex::new(device),
+            exchange_lock: Mutex::new(()),
             timeout_ms: 60_000,
         }
     }
@@ -416,6 +440,17 @@ impl RealHidTransport {
 #[cfg(feature = "hw-wallet")]
 impl HidTransport for RealHidTransport {
     fn exchange(&self, apdu: &[u8]) -> AnimaResult<Vec<u8>> {
+        // I-1 fix: hold the outer lock across the whole write-then-read
+        // round-trip. Without this guard, two concurrent callers
+        // sharing the same Arc<HardwareWalletAnima> could interleave
+        // their HID frames against the device. The per-frame
+        // `self.device.lock()` calls inside `write_apdu` / `read_apdu`
+        // protect the `!Sync` HidDevice itself but do NOT serialize
+        // the APDU exchange.
+        let _guard = self
+            .exchange_lock
+            .lock()
+            .map_err(|_| AnimaError::Crypto("ledger exchange_lock poisoned".into()))?;
         self.write_apdu(apdu)?;
         let response = self.read_apdu()?;
         if response.len() < 2 {
@@ -506,13 +541,13 @@ impl HardwareWalletAnima {
         }
 
         // GET ETH PUBLIC ADDRESS: E0 02 00 00 Lc <path>
-        let path_bytes = ledger::encode_derivation_path(&path);
+        let path_bytes = ledger::encode_derivation_path(&path)?;
         let apdu = build_apdu(
             ledger::apdu::INS_GET_PUBLIC_KEY,
             0x00,
             ledger::apdu::P2_ZERO,
             &path_bytes,
-        );
+        )?;
         let response = transport.exchange(&apdu)?;
 
         // Response: [pubkey_len u8] [pubkey...] [address_len u8] [address_ascii...]
@@ -585,13 +620,18 @@ impl HardwareWalletAnima {
         })
     }
 
-    /// Signal that this backend rejects the trait's `sign_jws` /
-    /// `sign_digest` if the auth_delegate is itself another hardware
-    /// wallet (which would force every JWS through a button press).
-    /// We don't enforce this at the type level — the trait shape is
-    /// `Arc<dyn AnimaCustody>` and detecting "hardware wrapping
-    /// hardware" requires runtime introspection — but the docs make
-    /// the recommended composition explicit.
+    /// Returns the backend kind of the wrapped auth delegate. Callers
+    /// MAY use this to detect "hardware wrapping hardware" compositions
+    /// (which would force every JWS through a button press) and reject
+    /// them at the integration layer.
+    ///
+    /// I-5 review fix: previously the doc claimed this method "rejects"
+    /// such compositions. It does not — it just returns the delegate's
+    /// `BackendKind`. The recommended composition (TpmAnima auth +
+    /// HardwareWalletAnima wallet) is documented in `crates/anima/CLAUDE.md`
+    /// D-Sub-F handoff state. Detecting the recursion at construction
+    /// would require runtime introspection of the delegate; this is
+    /// purely an informational accessor.
     pub fn auth_backend_kind(&self) -> BackendKind {
         self.auth_delegate.backend_kind()
     }
@@ -610,7 +650,7 @@ impl HardwareWalletAnima {
         // First chunk: derivation_path + as much of rlp as fits in
         // 255 - path_bytes.len(). Ledger Ethereum app takes Lc as a
         // single byte per command.
-        let path_bytes = ledger::encode_derivation_path(&self.derivation_path);
+        let path_bytes = ledger::encode_derivation_path(&self.derivation_path)?;
         let max_first_chunk_data = 255 - path_bytes.len();
         let take_first = max_first_chunk_data.min(rlp_envelope.len());
         let mut first_data = Vec::with_capacity(path_bytes.len() + take_first);
@@ -621,7 +661,7 @@ impl HardwareWalletAnima {
             ledger::apdu::P1_FIRST,
             ledger::apdu::P2_ZERO,
             &first_data,
-        ))?;
+        )?)?;
 
         let mut sent = take_first;
         while sent < rlp_envelope.len() {
@@ -631,7 +671,7 @@ impl HardwareWalletAnima {
                 ledger::apdu::P1_NEXT,
                 ledger::apdu::P2_ZERO,
                 &rlp_envelope[sent..sent + chunk_size],
-            ))?;
+            )?)?;
             sent += chunk_size;
         }
 
@@ -656,7 +696,7 @@ impl HardwareWalletAnima {
         domain_hash: &[u8; 32],
         message_hash: &[u8; 32],
     ) -> AnimaResult<(u8, [u8; 32], [u8; 32])> {
-        let path_bytes = ledger::encode_derivation_path(&self.derivation_path);
+        let path_bytes = ledger::encode_derivation_path(&self.derivation_path)?;
         let mut data = Vec::with_capacity(path_bytes.len() + 64);
         data.extend_from_slice(&path_bytes);
         data.extend_from_slice(domain_hash);
@@ -666,7 +706,7 @@ impl HardwareWalletAnima {
             ledger::apdu::P1_EIP712_PRECOMPUTED,
             ledger::apdu::P2_ZERO,
             &data,
-        ))?;
+        )?)?;
         if response.len() != 65 {
             return Err(AnimaError::Crypto(format!(
                 "ledger sign-eip712: expected 65-byte response, got {} bytes",
@@ -681,30 +721,30 @@ impl HardwareWalletAnima {
         Ok((v, r, s))
     }
 
-    /// Convert Ledger's `(v, r, s)` triple into the canonical
-    /// haima-wallet 65-byte `r || s || v` form, normalising `v` to the
-    /// legacy `27/28` convention.
+    /// Convert Ledger's `(r, s)` pair into the canonical haima-wallet
+    /// 65-byte `r || s || v` form, normalising `v` to the legacy `27/28`
+    /// convention.
     ///
-    /// Ledger returns `v` in the EIP-155 form for legacy txs
-    /// (`35 + 2 * chain_id + y_parity`) or in `0/1` (y_parity) form for
-    /// typed EIP-1559 envelopes (depending on app version + tx type).
-    /// For the EIP-3009 EIP-712 path the convention is also `0/1`. We
-    /// normalise to the haima 27/28 form here.
+    /// I-3 review fix: pre-fix this method took the device's `v` byte
+    /// but never used it — there was no fast-path that tried the
+    /// device-supplied parity first. The implementation is brute-force-
+    /// only by design (mirrors `VaultTransitAnima::compute_v_byte`,
+    /// which has no device `v` at all because Vault doesn't return it).
+    /// We've dropped the `v` parameter to match what the code actually
+    /// does. Callers that still hold the device `v` can discard it.
     ///
-    /// To resolve the y-parity unambiguously we ecrecover both
-    /// candidates against the cached wallet pubkey and pick the
-    /// matching one — same trade-off as `VaultTransitAnima`. Two
-    /// scalar multiplications per signing operation; negligible.
+    /// Ledger may return `v` in any of: legacy `27/28`, `0/1` y-parity,
+    /// or EIP-155 form (`35 + 2*chain_id + y_parity`) depending on app
+    /// version + tx type. Brute-forcing the two y-parity candidates +
+    /// matching against the cached wallet pubkey is unambiguous and
+    /// avoids encoding-format drift between Ledger app versions. Two
+    /// scalar multiplications per signing operation — negligible.
     fn normalize_signature(
         &self,
         digest: &[u8; 32],
-        v: u8,
         r: [u8; 32],
         s: [u8; 32],
     ) -> AnimaResult<EvmSignature> {
-        // First try the v-byte the device returned, mapping to a
-        // plausible y-parity. Any failure falls back to the brute-force
-        // ecrecover pair below.
         let mut r_s = [0u8; 64];
         r_s[..32].copy_from_slice(&r);
         r_s[32..].copy_from_slice(&s);
@@ -715,10 +755,11 @@ impl HardwareWalletAnima {
             K256VerifyingKey::from_sec1_bytes(&self.wallet_pubkey_uncompressed)
                 .map_err(|e| AnimaError::Crypto(format!("expected pubkey parse: {e}")))?;
 
-        // Candidate y-parities derived from the device's v-byte:
-        // 0/1 means typed-tx convention; 27/28 means legacy; >35 means
-        // EIP-155 chain-encoded. We try each in turn but always fall
-        // through to the brute-force loop if none match.
+        // Try both y-parity candidates and pick the one that recovers to
+        // the cached wallet pubkey. Same trade-off as
+        // `VaultTransitAnima::compute_v_byte`; D-Sub-G or later may
+        // factor a shared `crate::ecdsa::recover_v_byte_27_28` helper
+        // since this is the third call site.
         let candidates: [u8; 2] = [0, 1];
         for cand in candidates {
             let recid = match RecoveryId::try_from(cand) {
@@ -734,7 +775,6 @@ impl HardwareWalletAnima {
                 // what the device sent — downstream EIP-3009 / x402
                 // verifiers expect this shape.
                 out.push(cand + 27);
-                let _ = v; // suppress unused warning when path matches
                 return Ok(EvmSignature::from_bytes(out));
             }
         }
@@ -814,7 +854,9 @@ impl AnimaCustody for HardwareWalletAnima {
         let (v, r, s) = self.ledger_sign_transaction(&envelope)?;
 
         // 3. Normalise signature to the haima 27/28 convention.
-        self.normalize_signature(&digest, v, r, s)
+        // I-3 fix: dropped the device `v` parameter — was never used.
+        let _ = v;
+        self.normalize_signature(&digest, r, s)
     }
 
     fn sign_eip712(
@@ -929,7 +971,9 @@ impl AnimaCustody for HardwareWalletAnima {
         }
 
         let (v, r, s) = self.ledger_sign_eip712(&domain_hash, &message_only_hash)?;
-        self.normalize_signature(&message_hash, v, r, s)
+        // I-3 fix: dropped the device `v` parameter — was never used.
+        let _ = v;
+        self.normalize_signature(&message_hash, r, s)
     }
 
     fn rotate(&self) -> AnimaResult<(DidRotationEvent, Arc<dyn AnimaCustody>)> {
@@ -962,12 +1006,19 @@ impl AnimaCustody for HardwareWalletAnima {
 /// uses single-byte Lc; commands with `data.len() > 255` MUST be
 /// chunked by the caller (see `ledger_sign_transaction` for the
 /// chunking strategy).
-fn build_apdu(ins: u8, p1: u8, p2: u8, data: &[u8]) -> Vec<u8> {
-    assert!(
-        data.len() <= 255,
-        "build_apdu: data too long for single command ({}); caller must chunk",
-        data.len()
-    );
+///
+/// I-4 review fix: previously this `assert!`'d on `data.len() > 255`,
+/// which would panic the process if a caller forgot to chunk. The
+/// callers (`ledger_sign_transaction`) already clamp to 255, so this
+/// is defense-in-depth, but a panic in a custody backend is wrong
+/// shape — surface the same condition as a typed `AnimaError`.
+fn build_apdu(ins: u8, p1: u8, p2: u8, data: &[u8]) -> AnimaResult<Vec<u8>> {
+    if data.len() > 255 {
+        return Err(AnimaError::Crypto(format!(
+            "build_apdu: data too long for single command ({}); caller must chunk",
+            data.len()
+        )));
+    }
     let mut apdu = Vec::with_capacity(5 + data.len());
     apdu.push(ledger::apdu::CLA);
     apdu.push(ins);
@@ -975,7 +1026,7 @@ fn build_apdu(ins: u8, p1: u8, p2: u8, data: &[u8]) -> Vec<u8> {
     apdu.push(p2);
     apdu.push(data.len() as u8);
     apdu.extend_from_slice(data);
-    apdu
+    Ok(apdu)
 }
 
 /// Derive an EVM address (20-byte hex with `0x` prefix) from an
@@ -1068,7 +1119,7 @@ mod tests {
     #[test]
     fn encode_derivation_path_matches_ledger_format() {
         let path = ledger::DEFAULT_DERIVATION_PATH;
-        let encoded = ledger::encode_derivation_path(&path);
+        let encoded = ledger::encode_derivation_path(&path).expect("default path < 10 components");
         assert_eq!(encoded[0], 5, "5-component path");
         // First component: 0x8000002C (44' hardened)
         assert_eq!(&encoded[1..5], &[0x80, 0x00, 0x00, 0x2C]);
@@ -1085,13 +1136,39 @@ mod tests {
             0x00,
             ledger::apdu::P2_ZERO,
             &[1, 2, 3],
-        );
+        )
+        .expect("3 bytes < 255");
         assert_eq!(apdu[0], ledger::apdu::CLA);
         assert_eq!(apdu[1], ledger::apdu::INS_GET_PUBLIC_KEY);
         assert_eq!(apdu[2], 0x00);
         assert_eq!(apdu[3], 0x00);
         assert_eq!(apdu[4], 3); // Lc
         assert_eq!(&apdu[5..], &[1, 2, 3]);
+    }
+
+    /// I-4 fix verification: `build_apdu` returns Err on data > 255 bytes
+    /// instead of panicking.
+    #[test]
+    fn build_apdu_rejects_too_long_data() {
+        let huge = vec![0u8; 256];
+        let result = build_apdu(0x02, 0x00, 0x00, &huge);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("too long"),
+            "expected length error, got: {msg}"
+        );
+    }
+
+    /// I-4 fix verification: `encode_derivation_path` returns Err on
+    /// > 10 components instead of panicking.
+    #[test]
+    fn encode_derivation_path_rejects_too_long_path() {
+        let path: Vec<u32> = (0..11).map(|i| i as u32).collect();
+        let result = ledger::encode_derivation_path(&path);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("max 10"), "expected length error, got: {msg}");
     }
 
     /// APDU constants stay locked to upstream Ledger spec values.
