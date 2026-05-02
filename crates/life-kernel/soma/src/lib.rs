@@ -7,6 +7,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod admin;
 pub mod bootstrap;
 pub mod cli;
 pub mod config;
@@ -18,5 +19,5 @@ pub mod shutdown;
 
 // ── Convenience re-exports ────────────────────────────────────────────────────
 
-pub use config::{ServerConfig, SomaConfig};
+pub use config::{AdminPlaneConfig, ServerConfig, SomaConfig};
 pub use error::{SomaError, SomaResult};

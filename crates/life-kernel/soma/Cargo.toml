@@ -48,6 +48,30 @@ tower.workspace = true
 tempfile.workspace = true
 tracing.workspace = true
 hyper-util = { version = "0.1", features = ["tokio"] }
+futures = { workspace = true }
+parking_lot = { workspace = true }
+
+# Spec D D-Sub-E: SO_PEERCRED + group lookup for the soma admin
+# custody-oracle UDS. Same dep shape as lifegw's admin plane — `libc`
+# carries the syscalls, `nix` adds the `getgrouplist` wrapper for
+# supplementary groups (Linux only; macOS dev builds fall back to
+# primary-gid checks).
+libc = "0.2"
+nix = { version = "0.31", default-features = false, features = ["user"] }
+
+# Spec D D-Sub-E: in-process key store for CustodyOracle. The soma
+# admin custody surface holds the (P-256 auth + secp256k1 wallet) key
+# material per user. Operators may swap this for TPM via PKCS#11 or a
+# custom HSM sidecar — the trait shape doesn't constrain backend
+# choice (see SomaCustody's SPEC-D-DEVIATION block).
+k256 = { workspace = true }
+p256 = { workspace = true }
+sha2 = { workspace = true }
+sha3 = { workspace = true }
+zeroize = { workspace = true }
+
+anima-core.workspace = true
+hex = { workspace = true }
 
 arcan-provider-local.workspace = true
 
