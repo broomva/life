@@ -1,0 +1,27 @@
+[
+  {
+    "description": "parity_02_random",
+    "expected_did": "did:key:zDnaebnYfb4cmGGMbzeENo7Ek9T1fpnC7BvyvN2SXRY2EYCPr",
+    "pubkey_compressed_hex": "02a8b62fc1c3d8e1c4e1c1c0c1d1e1c1d1c1c1c1d1d1c1c1d1d1c1c1d1d1c1c1c1"
+  },
+  {
+    "description": "parity_03_random",
+    "expected_did": "did:key:zDnaevAWTtDuhBK1DwsQHAoCgLKLL2KnuNRvDgGKPBCFvNDXt",
+    "pubkey_compressed_hex": "03b9c8d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7"
+  },
+  {
+    "description": "parity_02_low_x",
+    "expected_did": "did:key:zDnaeQRy3dcKsKa1zmKtVKsTy3m2HYoQnFnfKuxD6HfSTQgbc",
+    "pubkey_compressed_hex": "0200000000000000000000000000000000000000000000000000000000000000ab"
+  },
+  {
+    "description": "parity_03_high_x",
+    "expected_did": "did:key:zDnaeztbndBq4ufVXuVTKnDpZSCdL3nhRkCoWt47k1WHzSatP",
+    "pubkey_compressed_hex": "03fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe00"
+  },
+  {
+    "description": "parity_02_zero_pad",
+    "expected_did": "did:key:zDnaeQRywL8RCtEJDKtEc1emuUcg1Da4GJgQ5Pk6mJqGE3yQU",
+    "pubkey_compressed_hex": "020001020304050607080910111213141516171819202122232425262728293031"
+  }
+]

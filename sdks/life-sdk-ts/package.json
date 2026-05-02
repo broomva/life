@@ -1,7 +1,7 @@
 {
   "name": "@broomva/life-sdk",
   "version": "0.1.0-pre",
-  "description": "Public TypeScript SDK for the Life Agent OS — talks to lifegw over grpc-web + WebSocket. Implements the user-facing life.v1.{Agent, Events, Wallet, Identity} services. v0.1.0-pre — see KNOWN_LIMITATIONS.md before depending on this in production.",
+  "description": "Public TypeScript SDK for the Life Agent OS — talks to lifegw over grpc-web + WebSocket. Implements the user-facing life.v1.{Agent, Events, Wallet, Identity} services plus the anima browser custody surface (Spec D D-Sub-C: WebCryptoAnima + PasskeyOracle + RemoteAnimaClient). v0.1.0-pre — see KNOWN_LIMITATIONS.md before depending on this in production.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -33,6 +33,10 @@
     "./ws": {
       "types": "./dist/ws.d.ts",
       "import": "./dist/ws.js"
+    },
+    "./anima": {
+      "types": "./dist/anima/index.d.ts",
+      "import": "./dist/anima/index.js"
     }
   },
   "files": ["dist", "README.md", "LICENSE"],
@@ -52,7 +56,13 @@
     "grpc-web",
     "websocket",
     "ai-agent",
-    "broomva"
+    "broomva",
+    "passkey",
+    "webauthn",
+    "did-key",
+    "p256",
+    "secp256k1",
+    "eip-712"
   ],
   "author": "Broomva <carlos@broomva.tech>",
   "license": "MIT",
@@ -68,9 +78,17 @@
   "engines": {
     "node": ">=20.0.0"
   },
+  "dependencies": {
+    "cbor-x": "^1.6.4",
+    "idb": "^8.0.3"
+  },
   "devDependencies": {
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
     "@types/node": "^25.5.0",
     "@types/ws": "^8.18.0",
+    "fake-indexeddb": "^6.2.5",
+    "msw": "^2.14.2",
     "tsx": "^4.20.0",
     "typescript": "^5.7",
     "vitest": "^3.0",

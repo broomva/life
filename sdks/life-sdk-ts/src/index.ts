@@ -66,6 +66,21 @@ export {
 // Proto types — re-exported so consumers don't need a deep import.
 export * as proto from "./proto/index.js";
 
+// Anima — browser custody surface (Spec D D-Sub-C).
+export * as anima from "./anima/index.js";
+export {
+  WebCryptoAnima,
+  PasskeyOracle,
+  RemoteAnimaClient,
+  SessionCap,
+  enrollWebCryptoAnima,
+  loadWebCryptoAnima,
+  generateDidKeyP256,
+  resolveDidKeyP256,
+  verifyDidKeyP256,
+  AnimaError,
+} from "./anima/index.js";
+
 // Proto3-JSON codec helpers — for converting between the wire shapes
 // (string for int64/uint64, base64 string for bytes) and the values
 // consumers actually want (bigint, Uint8Array). See `./codec.ts`.

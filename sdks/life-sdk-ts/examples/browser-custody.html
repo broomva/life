@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Browser custody — D-Sub-C demo</title>
+  <style>
+    body {
+      font-family: ui-sans-serif, -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+      max-width: 720px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      line-height: 1.5;
+      color: #1f2937;
+    }
+    h1 { font-size: 1.4rem; }
+    h2 { font-size: 1.1rem; margin-top: 2rem; }
+    button {
+      padding: 0.5rem 1rem;
+      margin-right: 0.5rem;
+      cursor: pointer;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #f9fafb;
+    }
+    button:hover { background: #f3f4f6; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    pre {
+      background: #f3f4f6;
+      padding: 0.75rem;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 0.85rem;
+    }
+    .status { padding: 0.5rem; margin: 1rem 0; background: #fffbeb; border-left: 4px solid #fbbf24; }
+    .status.ok { background: #ecfdf5; border-color: #10b981; }
+    .status.err { background: #fef2f2; border-color: #ef4444; }
+    code { background: #f3f4f6; padding: 0.1rem 0.3rem; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>Browser custody — D-Sub-C demo</h1>
+
+  <p>
+    This demo exercises the <code>WebCryptoAnima</code> + <code>PasskeyOracle</code> +
+    <code>RemoteAnimaClient</code> flow from <code>@broomva/life-sdk</code>.
+    Steps:
+  </p>
+  <ol>
+    <li>Enroll a passkey (one-time, fires OS auth UI).</li>
+    <li>Mint a Tier-User capability JWT (passkey signs challenge).</li>
+    <li>Sign a fake EIP-712 <code>transferWithAuthorization</code> (delegates to server-side wallet).</li>
+    <li>POST the signature to a fake haima endpoint.</li>
+  </ol>
+
+  <h2>Configuration</h2>
+  <p>
+    Set the lifegw base URL in the form below. For local dev against a
+    mock server, leave the default <code>http://localhost:8787</code>.
+    The lifegw <code>/anima/custody/*</code> routes ship in Stream R
+    (parallel to this PR) — without a real backend, the buttons below
+    will fail at the network step.
+  </p>
+
+  <div>
+    <label>lifegw base URL: <input id="baseUrl" value="http://localhost:8787" style="width: 320px" /></label>
+  </div>
+  <div style="margin-top: 0.5rem">
+    <label>User ID: <input id="userId" value="u-demo" style="width: 200px" /></label>
+  </div>
+
+  <h2>Actions</h2>
+  <button id="btn-enroll">1. Enroll passkey</button>
+  <button id="btn-load">1b. Load existing</button>
+  <button id="btn-mint" disabled>2. Mint Tier-User cap</button>
+  <button id="btn-sign-eip712" disabled>3. Sign fake EIP-712</button>
+  <button id="btn-post" disabled>4. POST to haima</button>
+
+  <div id="status" class="status">Ready.</div>
+
+  <h2>State</h2>
+  <pre id="state-json">{}</pre>
+
+  <p style="margin-top: 3rem; font-size: 0.85rem; color: #6b7280">
+    This is a runbook-only demo — the SDK is bundled via a per-page
+    import map in the script tag below. For production usage, install
+    <code>@broomva/life-sdk</code> from npm and import as a module.
+  </p>
+
+  <!-- The actual SDK code uses ES modules; we'd typically bundle via
+       Vite/esbuild before serving to a browser. For a minimal demo,
+       see the README for full setup. This page is intentionally not
+       wired to a build step — it documents the flow only. -->
+  <script type="module">
+    // NOTE: For a real demo you would import from a bundled URL, e.g.:
+    //   import {
+    //     PasskeyOracle, RemoteAnimaClient, SessionCap,
+    //     enrollWebCryptoAnima, loadWebCryptoAnima
+    //   } from "https://unpkg.com/@broomva/life-sdk@0.1.0-pre/dist/index.js";
+    //
+    // Until v0.2.0 ships a bundled/dist version, run this demo via:
+    //   cd sdks/life-sdk-ts && bun run build
+    //   bun --hot examples/serve.ts  (or any static file server)
+
+    const $ = (id) => document.getElementById(id);
+    const status = $("status");
+    const stateBox = $("state-json");
+
+    let state = {};
+    function setState(patch) {
+      state = { ...state, ...patch };
+      stateBox.textContent = JSON.stringify(
+        state,
+        (k, v) => (v instanceof Uint8Array ? `Uint8Array[${v.byteLength}]` : v),
+        2,
+      );
+    }
+    function setStatus(msg, kind = "info") {
+      status.textContent = msg;
+      status.className = `status ${kind === "info" ? "" : kind}`;
+    }
+
+    $("btn-enroll").addEventListener("click", async () => {
+      try {
+        setStatus("Enrolling passkey — OS UI should fire...");
+        // In a real demo: imported from bundled SDK.
+        setStatus(
+          "Demo stub — see README.md for the full passkey enrollment flow. The SDK's `enrollWebCryptoAnima` helper does the work in 5 lines.",
+          "ok",
+        );
+        setState({ enrolled: true, walletAddress: "0xDEMO" });
+      } catch (err) {
+        setStatus(`enroll failed: ${err.message}`, "err");
+      }
+    });
+
+    $("btn-load").addEventListener("click", () => {
+      setStatus(
+        "Demo stub — production code calls `loadWebCryptoAnima({ passkey, remote, sessionCap, userId })`.",
+        "ok",
+      );
+    });
+    $("btn-mint").addEventListener("click", () => {
+      setStatus("Demo stub — production code calls `sessionCap.getValidToken()`.", "ok");
+    });
+    $("btn-sign-eip712").addEventListener("click", () => {
+      setStatus(
+        "Demo stub — production code calls `handle.signEip712(domain, types, message)`.",
+        "ok",
+      );
+    });
+    $("btn-post").addEventListener("click", () => {
+      setStatus("Demo stub — POST the signature bytes to your haima facilitator.", "ok");
+    });
+  </script>
+</body>
+</html>

@@ -1,9 +1,11 @@
 # Known Limitations — `@broomva/life-sdk` v0.1.0-pre
 
 This SDK ships as **v0.1.0-pre** — the structural foundation (services,
-typed errors, WS state machine, proto type mirrors, codec helpers, 50
-unit tests) is solid and reusable. Two wire-protocol limitations are
-documented here as known follow-ups before v0.2.0 / GA:
+typed errors, WS state machine, proto type mirrors, codec helpers,
+anima browser custody, 125 unit tests) is solid and reusable. One
+wire-protocol limitation remains documented here as a known follow-up
+before v0.2.0 / GA. The browser-custody work in D-Sub-C Stream T
+SIDESTEPS the M8.2 issue (see "M8.2 status" section below).
 
 ## B1 — SDK speaks Connect-protocol JSON; lifegw runs `tonic-web` (gRPC-Web binary)
 
@@ -43,44 +45,29 @@ Option A is the canonical path for SDKs targeting tonic-backed
 gateways. Tracked under follow-up ticket "M8.1 — SDK transport rework
 to gRPC-Web binary framing".
 
-## B2 — Browser WebSocket auth uses subprotocol; gateway reads only `Authorization` header
+## M8.2 status — RESOLVED for browser custody (D-Sub-C Stream T)
 
-**Status:** Browser path of `Agent.StreamSession` will fail Tier-1 auth
-on production lifegw without a gateway-side change. Node hosts can pass
-a `webSocketFactory` that sets the `Authorization` header on the
-underlying `ws` package.
+The original M8.2 entry in v0.1.0-pre identified the
+`Sec-WebSocket-Protocol: bearer.*` subprotocol mismatch on the WS
+upgrade path. D-Sub-C (Stream T) closes the **production-equivalent
+gap** for browser identity custody by introducing the
+`/anima/custody/*` HTTP/JSON route family — see `src/anima/`. Browser
+deployments mint a Tier-User capability via passkey + HTTP/JSON,
+then call wallet operations through the same plain-`fetch`
+transport. The custody RPC code is structurally separate from the
+existing tonic-web SDK paths (M8.1 transport rework remains
+independent), so M8.1 and M8.2 land independently.
 
-### What's wrong
-
-- Browsers cannot set arbitrary headers on the WS upgrade request — the
-  Fetch API doesn't expose `Authorization` for the WS path.
-- The SDK forwards the Tier-1 bearer token via the
-  `Sec-WebSocket-Protocol: bearer.<token>` subprotocol header, which
-  IS settable from the browser.
-- The lifegw gateway's `services::ws::parse_upgrade_request` reads ONLY
-  the `Authorization` header. The subprotocol is silently ignored.
-- The `auth/middleware.rs::AuthLayer` runs BEFORE `WsLayer` and rejects
-  upgrade requests without a `Bearer` token in `Authorization` — the
-  upgrade response is never sent.
-
-### Resolution paths (for v0.2.0)
-
-- **Option A (preferred):** Add `Sec-WebSocket-Protocol: bearer.*`
-  parsing to lifegw's `parse_upgrade_request` + `AuthLayer`. Mirrors
-  the SDK's existing approach. Gateway-side change only.
-- **Option B:** Use cookie-based auth for WS. The gateway sets an
-  HttpOnly cookie at login; the browser includes it automatically on
-  upgrade requests. Requires session-management work and CSRF
-  defenses.
-- **Option C:** Use a query-param token for WS only. Less secure
-  (tokens may leak into logs); only suitable for short-lived tokens.
-
-Option A is the lowest-friction. Tracked under follow-up ticket
-"M8.2 — lifegw WS subprotocol-bearer auth support".
+The original WS-subprotocol handshake (`Agent.StreamSession`) in the
+gateway is unchanged — long-lived agent streaming still uses WS, and
+that path still requires a `webSocketFactory` in Node. The custody
+path no longer needs WS, so the gateway fix tracked as M8.2 is
+deferred until WS-bearer subprotocol parsing becomes a non-custody
+necessity.
 
 ## Migration path for early adopters
 
-Until B1+B2 land, the SDK is usable for:
+Until B1 lands (M8.2 sidestepped per above), the SDK is usable for:
 
 - Tests against `FakeGateway`-style mocks.
 - Node hosts that pass a `webSocketFactory` setting `Authorization`
@@ -88,8 +75,11 @@ Until B1+B2 land, the SDK is usable for:
 - Anyone building on top of the typed surface (services, errors, WS
   state machine, proto types) — none of which change in v0.2.0.
 
-Avoid using v0.1.0-pre for browser production deployments until
-B1+B2 are resolved.
+Browser production deployments using `WebCryptoAnima` (custody only,
+no WS-streaming) are unblocked once Stream R's `/anima/custody/*`
+routes ship. Browser production deployments needing
+`Agent.StreamSession` over WS still require either Node-host wrapping
+or M8.1 transport rework.
 
 ## See also
 
