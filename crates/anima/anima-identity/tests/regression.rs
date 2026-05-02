@@ -97,6 +97,7 @@ fn regression_known_seed_produces_known_keys() {
     let seed = MasterSeed::from_bytes([42u8; 32]);
     let ks = AnimaKeystore::from_seed(seed).unwrap();
 
+    let p256_hex = ks.p256().public_key_hex();
     let ed25519_hex = ks.ed25519().public_key_hex();
     let wallet_addr = ks.wallet_address().address.clone();
 
@@ -106,9 +107,14 @@ fn regression_known_seed_produces_known_keys() {
     let ks2 = AnimaKeystore::from_seed(seed2).unwrap();
 
     assert_eq!(
+        p256_hex,
+        ks2.p256().public_key_hex(),
+        "P-256 key derivation must be deterministic"
+    );
+    assert_eq!(
         ed25519_hex,
         ks2.ed25519().public_key_hex(),
-        "Ed25519 key derivation must be deterministic"
+        "Ed25519 (legacy) key derivation must be deterministic"
     );
     assert_eq!(
         wallet_addr,
@@ -125,7 +131,7 @@ fn regression_different_seeds_never_collide() {
             bytes[0] = i;
             let seed = MasterSeed::from_bytes(bytes);
             let ks = AnimaKeystore::from_seed(seed).unwrap();
-            ks.ed25519().public_key_hex()
+            ks.p256().public_key_hex()
         })
         .collect();
 
@@ -133,7 +139,7 @@ fn regression_different_seeds_never_collide() {
     assert_eq!(
         keys.len(),
         unique.len(),
-        "100 different seeds must produce 100 different keys"
+        "100 different seeds must produce 100 different P-256 keys"
     );
 }
 
@@ -404,11 +410,13 @@ fn regression_three_generation_lineage() {
 #[test]
 fn regression_mismatched_key_always_rejected() {
     let ks = AnimaKeystore::generate().unwrap();
-    let soul = SoulBuilder::new("agent", "mission", ks.ed25519().public_key_bytes()).build();
+    // Soul built with the (current) P-256 root key. ks.build_identity()
+    // also produces the matching P-256 identity.
+    let soul = SoulBuilder::new("agent", "mission", ks.p256().public_key_bytes().to_vec()).build();
 
     // Build identity with WRONG key
     let mut identity = ks.build_identity("agt_001", "host_test");
-    identity.auth_public_key = vec![99u8; 32]; // Mismatch!
+    identity.auth_public_key = vec![99u8; 33]; // Mismatch (33 bytes for P-256)
 
     let result = AgentSelf::new(soul, identity, AgentBelief::default());
     assert!(result.is_err(), "mismatched key must always be rejected");
@@ -487,9 +495,13 @@ fn regression_jwt_always_has_required_fields() {
         )
         .unwrap();
 
-        // Required header fields
+        // Required header fields — Spec D L4-D6 cutover means alg=ES256.
         assert_eq!(header["typ"], "agent+jwt", "typ must be agent+jwt");
-        assert_eq!(header["alg"], "EdDSA", "alg must be EdDSA");
+        assert_eq!(header["alg"], "ES256", "alg must be ES256 post-Spec-D");
+        assert!(
+            header["kid"].is_string(),
+            "kid must be present (DID of signer)"
+        );
 
         // Required claim fields
         assert!(claims["iss"].is_string(), "iss must be present");
@@ -505,4 +517,44 @@ fn regression_jwt_always_has_required_fields() {
         assert!(exp - iat <= 60, "TTL must not exceed 60 seconds");
         assert!(exp > iat, "exp must be after iat");
     }
+}
+
+/// Spec D L4-D6 — historical Ed25519 events still verify.
+///
+/// This test guards the legacy Ed25519 path: existing fixtures and replayed
+/// events from before the cutover MUST continue to verify against the
+/// Ed25519 verifier.
+#[test]
+fn regression_ed25519_legacy_jwt_still_verifies() {
+    let ks = AnimaKeystore::generate().unwrap();
+    let jwt = ks
+        .sign_agent_jwt_ed25519_legacy("agt_legacy", "https://broomva.tech", 60)
+        .unwrap();
+    let parts: Vec<&str> = jwt.split('.').collect();
+    assert_eq!(parts.len(), 3);
+
+    let header: serde_json::Value = serde_json::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(parts[0])
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(header["alg"], "EdDSA");
+
+    // Verify with the Ed25519 verifier.
+    let signing_input = format!("{}.{}", parts[0], parts[1]);
+    let sig_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[2])
+        .unwrap();
+    let signature = ed25519_dalek::Signature::from_bytes(sig_bytes.as_slice().try_into().unwrap());
+    let pubkey: [u8; 32] = ks
+        .ed25519()
+        .public_key_bytes()
+        .as_slice()
+        .try_into()
+        .unwrap();
+    let vk = ed25519_dalek::VerifyingKey::from_bytes(&pubkey).unwrap();
+    use ed25519_dalek::Verifier;
+    vk.verify(signing_input.as_bytes(), &signature)
+        .expect("legacy Ed25519 JWT must still verify");
 }

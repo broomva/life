@@ -128,7 +128,12 @@ pub fn fold(belief: &mut AgentBelief, event: &AnimaEventKind, seq: u64, timestam
         | AnimaEventKind::KeyRotated { .. }
         | AnimaEventKind::LineageVerified { .. }
         | AnimaEventKind::IdentityAttested { .. }
-        | AnimaEventKind::IdentityVerified { .. } => {
+        | AnimaEventKind::IdentityVerified { .. }
+        // Spec D §"Event additions" — identity-lifecycle events. They
+        // affect the rotation chain on AgentIdentityDocument, not beliefs.
+        | AnimaEventKind::IdentityRotated { .. }
+        | AnimaEventKind::CustodyMigrated { .. }
+        | AnimaEventKind::IdentityRevoked { .. } => {
             // These events are tracked but don't change beliefs.
             // They affect Soul, Identity, and KYA documents, which are managed separately.
         }

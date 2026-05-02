@@ -224,10 +224,12 @@ dependencies = [
  "hkdf",
  "jsonwebtoken",
  "k256",
+ "p256",
  "rand 0.8.6",
  "serde",
  "serde_json",
  "sha2",
+ "sha3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -450,6 +452,7 @@ name = "arcan-anima"
 version = "0.3.0"
 dependencies = [
  "anima-core",
+ "anima-identity",
  "anima-lago",
  "arcan-core",
  "chrono",
@@ -3287,6 +3290,7 @@ dependencies = [
  "ff",
  "generic-array",
  "group",
+ "pem-rfc7468",
  "pkcs8",
  "rand_core 0.6.4",
  "sec1",
@@ -4038,6 +4042,7 @@ name = "haima-x402"
 version = "0.3.0"
 dependencies = [
  "aios-protocol",
+ "anima-identity",
  "async-trait",
  "base64 0.22.1",
  "chrono",
@@ -4936,6 +4941,7 @@ name = "lago-auth"
 version = "0.3.0"
 dependencies = [
  "axum 0.8.8",
+ "base64",
  "http-body-util",
  "jsonwebtoken",
  "lago-core",
@@ -7197,6 +7203,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "p256"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
+dependencies = [
+ "ecdsa",
+ "elliptic-curve",
+ "primeorder",
+ "sha2",
+]
+
+[[package]]
 name = "papergrid"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7659,6 +7677,15 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "primeorder"
+version = "0.13.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
+dependencies = [
+ "elliptic-curve",
 ]
 
 [[package]]

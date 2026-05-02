@@ -38,12 +38,9 @@ fn agent_genesis_full_lifecycle() {
     let keystore = AnimaKeystore::generate().unwrap();
 
     println!("\n--- AGENT GENESIS ---");
-    println!(
-        "Ed25519 public key: {}",
-        keystore.ed25519().public_key_hex()
-    );
+    println!("P-256 public key:   {}", keystore.p256().public_key_hex());
     println!("Wallet address:     {}", keystore.wallet_address().address);
-    println!("DID:                {}", keystore.ed25519().did_key());
+    println!("DID:                {}", keystore.p256().did_key());
 
     // ============================================================
     // STEP 2: Define the soul
@@ -88,7 +85,7 @@ fn agent_genesis_full_lifecycle() {
     let soul = SoulBuilder::new(
         "arcan-prime",
         "Serve as the primary runtime agent for the Life Agent OS",
-        keystore.ed25519().public_key_bytes(),
+        keystore.p256().public_key_bytes().to_vec(),
     )
     .creator(Creator::Human {
         identity: "carlos@broomva.tech".into(),
@@ -148,27 +145,23 @@ fn agent_genesis_full_lifecycle() {
     println!("Claims: {}", serde_json::to_string_pretty(&claims).unwrap());
 
     assert_eq!(header["typ"], "agent+jwt");
-    assert_eq!(header["alg"], "EdDSA");
+    // Spec D L4-D6: alg flipped to ES256 (P-256).
+    assert_eq!(header["alg"], "ES256");
     assert_eq!(claims["sub"], "agt_arcan_prime_001");
     assert_eq!(claims["aud"], "https://broomva.tech");
 
-    // Verify signature
+    // Verify signature with P-256 verifier.
     let signing_input = format!("{}.{}", parts[0], parts[1]);
     let sig_bytes = URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
-    let sig = ed25519_dalek::Signature::from_bytes(sig_bytes.as_slice().try_into().unwrap());
-    let vk = ed25519_dalek::VerifyingKey::from_bytes(
-        keystore
-            .ed25519()
-            .public_key_bytes()
-            .as_slice()
-            .try_into()
-            .unwrap(),
-    )
-    .unwrap();
-    vk.verify_strict(signing_input.as_bytes(), &sig)
+    use p256::ecdsa::signature::Verifier;
+    let signature = p256::ecdsa::Signature::from_slice(&sig_bytes).unwrap();
+    keystore
+        .p256()
+        .verifying_key()
+        .verify(signing_input.as_bytes(), &signature)
         .expect("JWT signature must verify");
 
-    println!("\n[OK] JWT signature verified with Ed25519 public key");
+    println!("\n[OK] JWT signature verified with P-256 public key (ES256)");
 
     // ============================================================
     // STEP 6: Evolve beliefs via event replay
@@ -290,7 +283,7 @@ fn agent_genesis_full_lifecycle() {
     let child_soul = SoulBuilder::new(
         "arcan-scout-001",
         "Autonomous research agent spawned by arcan-prime",
-        child_keystore.ed25519().public_key_bytes(),
+        child_keystore.p256().public_key_bytes().to_vec(),
     )
     .creator(Creator::Agent {
         agent_id: "agt_arcan_prime_001".into(),
@@ -318,8 +311,8 @@ fn agent_genesis_full_lifecycle() {
     let recovered = AnimaKeystore::from_encrypted(&encrypted, &encryption_key).unwrap();
 
     assert_eq!(
-        recovered.ed25519().public_key_bytes(),
-        keystore.ed25519().public_key_bytes(),
+        recovered.p256().public_key_bytes(),
+        keystore.p256().public_key_bytes(),
     );
     assert_eq!(
         recovered.wallet_address().address,

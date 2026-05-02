@@ -32,9 +32,13 @@ ed25519-dalek.workspace = true
 # secp256k1 (shared with Haima)
 k256.workspace = true
 
+# P-256 (ES256) — Spec D L4-D6: anima auth keypair migrated from Ed25519
+p256.workspace = true
+
 # Key derivation + encryption
 hkdf.workspace = true
 sha2.workspace = true
+sha3.workspace = true
 chacha20poly1305.workspace = true
 rand.workspace = true
 zeroize.workspace = true

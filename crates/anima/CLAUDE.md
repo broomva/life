@@ -113,10 +113,57 @@ KYA is the agent-era equivalent of KYC. It provides:
 
 | Crate | How Anima Integrates |
 |-------|---------------------|
-| **Arcan** | Reconstructs `AgentSelf` from Lago on session start |
+| **Arcan** | Reconstructs `AgentSelf` from Lago on session start (D-Sub-A: via `Arc<dyn AnimaCustody>`) |
 | **Lago** | Soul = genesis event; Belief = projection fold |
 | **Autonomic** | Beliefs feed into homeostasis regulation |
-| **Haima** | secp256k1 identity unifies with wallet |
-| **Spaces** | Ed25519 key signs messages, presence includes identity |
+| **Haima** | secp256k1 wallet half via `CustodyWalletAdapter` (haima-x402, feature `custody-adapter`) |
+| **Spaces** | Ed25519 key signs messages, presence includes identity (signed-presence not yet wired) |
 | **Vigil** | OTel spans carry `agent.id` + `agent.soul_hash` |
-| **broomva.tech** | Agent Auth Protocol via Ed25519 JWT signing |
+| **broomva.tech** | Agent Auth Protocol via ES256 JWT (Spec D L4-D6 — was EdDSA) |
+| **lago-auth** | `agent_jwt::detect_alg` dispatches EdDSA / ES256 verification |
+
+## Spec D — Production Custody (D-Sub-A shipped)
+
+`docs/superpowers/specs/2026-04-29-spec-d-anima-custody.md` defines the
+trait abstraction + 6 production backends. D-Sub-A (this PR) ships:
+
+- `AnimaCustody` trait (`anima-identity/src/custody.rs`) + 6 backend
+  variants in `BackendKind`. Only `InProcessAnima` is implemented.
+- `EcdsaP256Identity` (`anima-identity/src/p256.rs`) — ES256 / P-256 via
+  the `p256` crate. Mirrors `Ed25519Identity` API surface for mechanical
+  swap.
+- `did:key` extends to multicodec `0x1200` (P-256 → `did:key:zDn…`).
+  Legacy `0xed01` (Ed25519 → `did:key:z6Mk…`) preserved for verifying
+  historical events.
+- New events: `anima.identity_rotated`, `anima.custody_migrated`,
+  `anima.identity_revoked`. Plus `BackendKind` enum on `anima-core::event`.
+- `AgentIdentityDocument.rotation_chain` (`Vec<DidRotation>`) +
+  `published_at_seq: u64`. Both `#[serde(default)]` for backwards compat.
+
+### D-Sub-A coordination items (cross-repo / cross-substrate)
+
+- **broomva.tech AAP verifier** (separate repo): swap `EdDSA` →
+  `ES256` (or accept both during the transition window). Track via Linear
+  ticket: `BRO-XXX: broomva.tech AAP P-256 verifier swap` (placeholder;
+  user files when MCP re-auths). **Non-blocking** because there are no
+  production users yet — the cutover is fresh-deploy.
+- **Spaces presence signing**: spec mentions "spaces SDK signs presence
+  with `Ed25519Identity`". The `crates/spaces/life-spaces` crate today
+  uses SpacetimeDB tables for presence-state, not cryptographic
+  presence-beacons. When signed presence ships, route through
+  `AnimaCustody::sign_digest`. Filed as a follow-up.
+- **lifegw / broomva.tech ES256 verification cohesion**: lifegw's
+  Tier-2 KMS (Spec C₃ §5) and anima's auth (Spec D L4-D6) are both ES256
+  / P-256 now. Verifiers can share JWKS publish/cache plumbing; no
+  immediate dependency, but worth tracking for a future M8 SDK pass.
+
+### Backend phasing reminder
+
+| Sub-phase | Backend | Status |
+|---|---|---|
+| D-Sub-A | `InProcessAnima` | shipped this PR |
+| D-Sub-B | `VaultTransitAnima` | planned (~5 days) |
+| D-Sub-C | `WebCryptoAnima` + `RemoteAnima` | M9-blocking (~7 days) |
+| D-Sub-D | `TpmAnima` | planned (~3 days) |
+| D-Sub-E | `SomaCustody` + rotation/revocation flow | planned (~5 days) |
+| D-Sub-F | `HardwareWalletAnima` | optional (~2 days) |

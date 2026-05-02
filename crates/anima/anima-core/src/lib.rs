@@ -61,7 +61,7 @@ pub use error::{AnimaError, AnimaResult};
 pub use event::AnimaEventKind;
 pub use identity::AgentIdentity;
 pub use identity_document::{
-    AgentIdentityDocument, AgentType, Attestation, IdentityDocumentBuilder, TrustTier,
+    AgentIdentityDocument, AgentType, Attestation, DidRotation, IdentityDocumentBuilder, TrustTier,
     VerificationMethod,
 };
 pub use policy::PolicyManifest;

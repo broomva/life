@@ -246,8 +246,24 @@ impl AgentSelf {
             AnimaError::Did("agent identity has no DID — generate one first".into())
         })?;
 
+        // Spec D L4-D6: pick the multicodec by inspecting the auth public
+        // key length. Post-D-Sub-A keys are 33-byte SEC1 P-256; legacy
+        // Ed25519 events use 32-byte keys. We keep both paths so historical
+        // identity documents continue to round-trip without rewriting.
+        let (multicodec_prefix, method_type): (&[u8], &str) =
+            match self.identity.auth_public_key.len() {
+                33 => (&[0x80, 0x24], "JsonWebKey2020"),
+                32 => (&[0xed, 0x01], "Ed25519VerificationKey2020"),
+                other => {
+                    return Err(AnimaError::Identity(format!(
+                        "auth_public_key length {other} is neither 32 (Ed25519) nor 33 (P-256)"
+                    )));
+                }
+            };
         let auth_key_multibase = {
-            let mut bytes = vec![0xed, 0x01]; // Ed25519 multicodec prefix
+            let mut bytes =
+                Vec::with_capacity(multicodec_prefix.len() + self.identity.auth_public_key.len());
+            bytes.extend_from_slice(multicodec_prefix);
             bytes.extend_from_slice(&self.identity.auth_public_key);
             let encoded = bs58::encode(&bytes).into_string();
             format!("z{encoded}")
@@ -255,7 +271,7 @@ impl AgentSelf {
 
         let vm = VerificationMethod {
             id: format!("{did}#key-1"),
-            method_type: "Ed25519VerificationKey2020".into(),
+            method_type: method_type.into(),
             controller: did.clone(),
             public_key_multibase: auth_key_multibase,
         };

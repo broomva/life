@@ -19,6 +19,29 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// One link in the agent's DID rotation chain (Spec D §"Event additions").
+///
+/// Each entry documents that the holder of `old_did` rotated to `new_did` at
+/// some Lago seq. Verifiers seeing an old DID walk this chain to find the
+/// currently-authoritative DID. The `rotation_proof_jws` is signed by the
+/// *old* key over the *new* DID, providing cryptographic continuity.
+///
+/// Spec D L4-D10 — "Rotation is documented in the journal, not implicit."
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DidRotation {
+    /// The DID that was rotated away from. Remains valid for verifying
+    /// historical events but cannot mint new signatures.
+    pub old_did: String,
+    /// The DID that signing now flows through.
+    pub new_did: String,
+    /// Detached JWS by the *old* key over the *new* DID.
+    pub rotation_proof_jws: String,
+    /// Lago journal seq at which the `anima.identity_rotated` event was
+    /// written. Verifiers use this to scope which signatures the old DID
+    /// can validate (only events at seq < `rotated_at_seq`).
+    pub rotated_at_seq: u64,
+}
+
 /// The type of agent — how it operates and who controls it.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -186,6 +209,22 @@ pub struct AgentIdentityDocument {
 
     /// Soul hash — tamper-evident seal of the agent's immutable origin.
     pub soul_hash: String,
+
+    /// Spec D §"Event additions": the chain of DID rotations for this agent.
+    ///
+    /// Empty for agents that have never rotated. Replayed from
+    /// `anima.identity_rotated` events in the Lago journal. Verifiers use
+    /// this chain to resolve old DIDs back to the current authoritative DID
+    /// for the agent.
+    #[serde(default)]
+    pub rotation_chain: Vec<DidRotation>,
+
+    /// Spec D — Lago journal seq at which the most recent
+    /// `anima.identity_rotated` (or `anima.identity_created` if no rotations
+    /// have occurred) event was written. `0` for backwards compatibility
+    /// with documents minted before rotation chains were tracked.
+    #[serde(default)]
+    pub published_at_seq: u64,
 }
 
 impl AgentIdentityDocument {
@@ -237,6 +276,8 @@ pub struct IdentityDocumentBuilder {
     mission: String,
     soul_hash: String,
     created_at: DateTime<Utc>,
+    rotation_chain: Vec<DidRotation>,
+    published_at_seq: u64,
 }
 
 impl IdentityDocumentBuilder {
@@ -255,6 +296,8 @@ impl IdentityDocumentBuilder {
             mission,
             soul_hash,
             created_at: Utc::now(),
+            rotation_chain: vec![],
+            published_at_seq: 0,
         }
     }
 
@@ -301,6 +344,26 @@ impl IdentityDocumentBuilder {
         self
     }
 
+    /// Add a DID rotation to the chain.
+    pub fn rotation(mut self, rotation: DidRotation) -> Self {
+        self.rotation_chain.push(rotation);
+        self
+    }
+
+    /// Replace the rotation chain wholesale (e.g., when replaying from the
+    /// journal). Spec D §"Event additions" — the chain is replayed at
+    /// session start.
+    pub fn rotation_chain(mut self, chain: Vec<DidRotation>) -> Self {
+        self.rotation_chain = chain;
+        self
+    }
+
+    /// Set the `published_at_seq` pointer.
+    pub fn published_at_seq(mut self, seq: u64) -> Self {
+        self.published_at_seq = seq;
+        self
+    }
+
     /// Build the identity document.
     pub fn build(self) -> AgentIdentityDocument {
         let now = Utc::now();
@@ -318,6 +381,8 @@ impl IdentityDocumentBuilder {
             name: self.name,
             mission: self.mission,
             soul_hash: self.soul_hash,
+            rotation_chain: self.rotation_chain,
+            published_at_seq: self.published_at_seq,
         }
     }
 }
@@ -478,5 +543,70 @@ mod tests {
         assert!(TrustTier::Unverified < TrustTier::Provisional);
         assert!(TrustTier::Provisional < TrustTier::Trusted);
         assert!(TrustTier::Trusted < TrustTier::Certified);
+    }
+
+    #[test]
+    fn rotation_chain_serializes() {
+        let rotation = DidRotation {
+            old_did: "did:key:z6MkOld".into(),
+            new_did: "did:key:zDnNew".into(),
+            rotation_proof_jws: "header.body.sig".into(),
+            rotated_at_seq: 17,
+        };
+        let json = serde_json::to_string(&rotation).unwrap();
+        let deserialized: DidRotation = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, rotation);
+    }
+
+    #[test]
+    fn agent_identity_document_with_rotation_chain() {
+        let doc = IdentityDocumentBuilder::new(
+            "did:key:zDnCurrent".into(),
+            "agent".into(),
+            "mission".into(),
+            "soul_hash".into(),
+        )
+        .rotation(DidRotation {
+            old_did: "did:key:z6MkV1".into(),
+            new_did: "did:key:zDnCurrent".into(),
+            rotation_proof_jws: "h.b.s".into(),
+            rotated_at_seq: 10,
+        })
+        .published_at_seq(10)
+        .build();
+
+        assert_eq!(doc.rotation_chain.len(), 1);
+        assert_eq!(doc.rotation_chain[0].rotated_at_seq, 10);
+        assert_eq!(doc.published_at_seq, 10);
+
+        // Round-trip through serde — backwards-compat fields default cleanly.
+        let json = serde_json::to_string(&doc).unwrap();
+        let deserialized: AgentIdentityDocument = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.rotation_chain.len(), 1);
+        assert_eq!(deserialized.published_at_seq, 10);
+    }
+
+    #[test]
+    fn agent_identity_document_default_rotation_chain_back_compat() {
+        // Older serialized documents (pre-Spec-D) won't have rotation_chain
+        // / published_at_seq. Verify the #[serde(default)] handles them.
+        let json = r#"{
+            "did": "did:key:z6MkOld",
+            "controller_did": null,
+            "agent_type": "hosted",
+            "verification_methods": [],
+            "capabilities": [],
+            "trust_score": null,
+            "trust_tier": null,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "attestations": [],
+            "name": "legacy-agent",
+            "mission": "legacy",
+            "soul_hash": "sh"
+        }"#;
+        let doc: AgentIdentityDocument = serde_json::from_str(json).unwrap();
+        assert!(doc.rotation_chain.is_empty());
+        assert_eq!(doc.published_at_seq, 0);
     }
 }
