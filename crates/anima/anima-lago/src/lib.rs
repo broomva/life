@@ -10,6 +10,10 @@
 
 pub mod genesis;
 pub mod projection;
+pub mod rotation_events;
 
 pub use genesis::{create_genesis_event, reconstruct_soul};
 pub use projection::{fold, replay};
+pub use rotation_events::{
+    write_custody_migration_event, write_revocation_event, write_rotation_event,
+};
