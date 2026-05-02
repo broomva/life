@@ -161,9 +161,53 @@ trait abstraction + 6 production backends. D-Sub-A (this PR) ships:
 
 | Sub-phase | Backend | Status |
 |---|---|---|
-| D-Sub-A | `InProcessAnima` | shipped this PR |
-| D-Sub-B | `VaultTransitAnima` | planned (~5 days) |
+| D-Sub-A | `InProcessAnima` | shipped 2026-04-29 (PR #1070) |
+| D-Sub-B | `VaultTransitAnima` | shipped this PR; closes `sign_evm_tx` SPEC-D-DEVIATION via shared RLP encoder |
 | D-Sub-C | `WebCryptoAnima` + `RemoteAnima` | M9-blocking (~7 days) |
 | D-Sub-D | `TpmAnima` | planned (~3 days) |
 | D-Sub-E | `SomaCustody` + rotation/revocation flow | planned (~5 days) |
 | D-Sub-F | `HardwareWalletAnima` | optional (~2 days) |
+
+### D-Sub-B (`VaultTransitAnima`) handoff state
+
+`VaultTransitAnima` ships under feature flag `kms-vault` (default off
+to keep the slim build slim). Production deployments (broomva.tech +
+Sentinel + Life-Module tenants) enable the feature; the `kms-vault`
+build pulls reqwest + tokio for the renewal task.
+
+- Per-user namespace pattern: `transit/keys/anima-{user_id}-{auth,wallet}-v{n}`.
+- Auth half: P-256 (ECDSA) — Vault transit `ecdsa-p256`. Signs JWS
+  via `transit/sign/<auth_key>` with `marshaling_algorithm: "jws"`.
+- Wallet half: secp256k1 — Vault transit `ecdsa-secp256k1`. Signs
+  prehash via `transit/sign/<wallet_key>` with `prehashed: true`.
+  EIP-1559 RLP digest computed via `crate::rlp` (shared with
+  `InProcessAnima`).
+- `sign_evm_tx` produces broadcast-ready 65-byte `r||s||v`
+  signatures. Recovery byte computed via ecrecover loop (Vault doesn't
+  return `v`). Two scalar multiplications per tx — negligible.
+- Rotation: `transit/keys/<auth_key>/rotate` bumps version. Wallet
+  half preserved per L4-D7. Rotation proof JWS signed by the
+  PRE-rotation key version using Vault's `key_version:` parameter.
+- mTLS: parameter accepted for forward compat but workspace's reqwest
+  pin doesn't enable a TLS feature → operators run a localhost mTLS
+  sidecar (envoy/consul-template). Same caveat as lifegw's
+  `VaultTransit`. Documented inline.
+
+### D-Sub-B follow-ups
+
+- **Vault secp256k1 native support** — Vault v1.15 does NOT support
+  secp256k1 transit keys natively. Live `vault server -dev`
+  integration test (`live_vault_dev_server` in `integration_vault.rs`)
+  is currently `#[ignore]`-gated and exercises only the auth half.
+  Full USDC-transfer + Base-fork end-to-end test is achievable when
+  Vault-secp256k1 patches land or a secp256k1-capable HSM sidecar is
+  introduced. Track via Linear (pending MCP re-auth).
+- **Generic EIP-712 encoder** — D-Sub-B retains the D-Sub-A
+  limitation: only EIP-3009 `TransferWithAuthorization` is supported
+  through `sign_eip712`. Generic encoder deferred to a follow-up
+  sub-phase (likely D-Sub-E when SomaCustody adds typed-data signing
+  of arbitrary payloads).
+- **mTLS feature plumbing** — when the workspace's reqwest pin gains
+  an optional TLS feature (likely a Sub-phase F refinement after
+  M7-E ships), revisit `with_explicit_keys`'s mTLS handling so
+  populated configs aren't silently ignored.
