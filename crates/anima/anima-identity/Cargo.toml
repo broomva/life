@@ -43,6 +43,15 @@ kms-soma = [
     "dep:life-kernel-proto",
     "dep:tokio",
 ]
+# Spec D D-Sub-C: RemoteAnima — HTTP/JSON bridge to lifegw's
+# `/anima/custody/*` proxy. Used by Rust clients (CLIs, native apps,
+# agents-as-services) to delegate wallet ops to a server-side anima
+# daemon (typically VaultTransitAnima). Browser-side parallel is
+# WebCryptoAnima (TS, separate crate). Default off; pulls reqwest's
+# async client + tokio runtime primitives. reqwest + tokio are
+# already optional from kms-vault — this feature reuses the same
+# dep-gated graph.
+kms-remote = ["dep:reqwest", "dep:tokio"]
 
 [dependencies]
 anima-core.workspace = true
