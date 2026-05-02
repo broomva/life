@@ -197,7 +197,13 @@ pub fn router(state: AnimaCustodyState) -> Router {
 // ─── Wire shapes ────────────────────────────────────────────────────
 
 /// Body of `POST /anima/custody/sign_{auth,wallet}`.
+///
+/// Spec D D-Sub-C review fix (I-5): `#[serde(deny_unknown_fields)]`
+/// rejects unexpected fields so callers can't smuggle extra payload
+/// past the wire contract. lifegw is a security boundary — strict
+/// shape parsing fails closed.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SignBody {
     pub user_id: String,
     /// Base64-encoded 32-byte digest. Both standard and URL-safe
@@ -219,7 +225,12 @@ pub struct PubkeyResp {
 }
 
 /// Body of `POST /anima/custody/mint_session_cap`.
+///
+/// Spec D D-Sub-C review fix (I-5): `#[serde(deny_unknown_fields)]`
+/// rejects unexpected fields so callers can't smuggle extra payload
+/// past the wire contract.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MintSessionCapBody {
     pub user_id: String,
     /// Base64-encoded WebAuthn assertion (CBOR `authenticatorData` +
@@ -251,7 +262,12 @@ pub struct EnrollResp {
 }
 
 /// Body of `POST /anima/custody/enroll_passkey`.
+///
+/// Spec D D-Sub-C review fix (I-5): `#[serde(deny_unknown_fields)]`
+/// rejects unexpected fields so callers can't smuggle extra payload
+/// past the wire contract.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EnrollPasskeyBody {
     pub user_id: String,
     /// Base64-encoded CBOR attestation object. Browser sends the raw
