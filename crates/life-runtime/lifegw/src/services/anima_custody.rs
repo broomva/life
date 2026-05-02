@@ -658,7 +658,10 @@ fn require_tier2(claims: &VerifiedCapClaims) -> Result<(), ApiError> {
                 claims.aud
             ),
             extras: vec![
-                ("required_aud", serde_json::Value::String(TIER2_AUDIENCE.to_string())),
+                (
+                    "required_aud",
+                    serde_json::Value::String(TIER2_AUDIENCE.to_string()),
+                ),
                 ("present_aud", serde_json::Value::String(claims.aud.clone())),
             ],
         });

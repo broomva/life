@@ -265,16 +265,13 @@ impl AudClaim {
     fn first_match(&self, allowed: &[&str]) -> Option<String> {
         match self {
             AudClaim::Single(s) => {
-                if allowed.iter().any(|a| *a == s.as_str()) {
+                if allowed.contains(&s.as_str()) {
                     Some(s.clone())
                 } else {
                     None
                 }
             }
-            AudClaim::Many(v) => v
-                .iter()
-                .find(|s| allowed.iter().any(|a| *a == s.as_str()))
-                .cloned(),
+            AudClaim::Many(v) => v.iter().find(|s| allowed.contains(&s.as_str())).cloned(),
         }
     }
 }
@@ -608,10 +605,10 @@ impl JwksCache {
     ///
     /// **Dev shortcut:** when [`JwksCache::dev_signer_enabled`] is
     /// `true`, the magic `Bearer dev-cap-token-for-{user_id}` is
-    /// accepted and synthesizes claims with `aud = allowed_audiences[0]`
-    /// + `scope = ["anima.user.sign_auth", "anima.user.sign_wallet",
-    /// "anima.user.get_pubkey"]`. This is gated to dev / CI only by
-    /// the same flag the Tier-1 dev shortcut uses.
+    /// accepted and synthesizes claims with audience set to the first
+    /// entry in `allowed_audiences` and the scope set to all three
+    /// `anima.user.*` defaults. This is gated to dev / CI only by the
+    /// same flag the Tier-1 dev shortcut uses.
     pub fn verify_capability_token(
         &self,
         bearer: &str,

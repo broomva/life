@@ -26,14 +26,16 @@
 //! 7. Auth-layer rejection — missing Authorization → 401.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD as B64_STANDARD, URL_SAFE_NO_PAD};
 use http::Request;
 use http_body_util::BodyExt;
-use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+use jsonwebtoken::{Algorithm, DecodingKey, Header, Validation, decode, decode_header, encode};
+use lifegw::auth::jwks::{JwksCache, JwksCacheConfig, JwksDoc, JwksEntry, JwksSource};
+use lifegw::auth::keystore::Keystore;
 use lifegw::auth::kms::{KmsSigner, StaticKeystore};
 use lifegw::auth::tier_user::{DEFAULT_TIER_USER_TTL, TierUserClaims, TierUserMinter};
 use lifegw::services::anima_custody::{self, AnimaCustodyState};
@@ -198,43 +200,163 @@ impl Drop for MockSomaServer {
 
 // ─── Test rig ───────────────────────────────────────────────────────
 
+/// Shared signer + JwksCache used by tests that exercise the real
+/// JWS verification path. The keystore is the same `StaticKeystore`
+/// the production `kms_signer_for_tier_user` uses; the JwksCache
+/// holds the keystore's published JWK so `verify_capability_token`
+/// can verify minted tokens.
+struct CryptoCtx {
+    signer: Arc<StaticKeystore>,
+    keystore: Keystore,
+    jwks: Arc<JwksCache>,
+}
+
+impl CryptoCtx {
+    fn new() -> Self {
+        let keystore = Keystore::generate_dev().expect("dev keystore");
+        let signer = Arc::new(StaticKeystore::from_keystore(keystore.clone()));
+        // Build a real JwksCache from the signer's published JWKS so
+        // minted tokens verify end-to-end.
+        let inner = signer.publish_jwks();
+        let entries: Vec<JwksEntry> = inner
+            .keys
+            .into_iter()
+            .map(|k| JwksEntry::ec_p256_pem(k.kid, k.pem.unwrap_or_default()))
+            .collect();
+        let jwks_cfg = JwksCacheConfig::new(
+            JwksSource::Inline(JwksDoc::new(entries)),
+            // The audience here is unused — `verify_capability_token`
+            // takes its own audience allowlist.
+            "lifed",
+            "lifegw",
+        );
+        let jwks = Arc::new(JwksCache::new(jwks_cfg));
+        Self {
+            signer,
+            keystore,
+            jwks,
+        }
+    }
+
+    /// Mint a Tier-User capability JWT for the given user with the
+    /// given scope vector.
+    fn mint_tier_user(&self, user_id: &str, scope: Vec<String>) -> String {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let claims = json!({
+            "iss": "lifegw",
+            "sub": user_id,
+            "aud": "anima.user-cap",
+            "iat": now,
+            "nbf": now.saturating_sub(5),
+            "exp": now + 900,
+            "jti": uuid::Uuid::new_v4().to_string(),
+            "scope": scope,
+        });
+        let mut header = Header::new(Algorithm::ES256);
+        header.kid = Some(self.keystore.kid.clone());
+        encode(&header, &claims, &self.keystore.encoding).expect("mint tier-user")
+    }
+
+    /// Mint a Tier-2 capability JWT (audience `lifed`) — server-side
+    /// caller, full access. Tier-2 carries `scopes` (plural) per the
+    /// existing Tier-2 minter convention.
+    fn mint_tier2(&self, user_id: &str) -> String {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let claims = json!({
+            "iss": "lifegw",
+            "sub": user_id,
+            "aud": "lifed",
+            "iat": now,
+            "nbf": now.saturating_sub(5),
+            "exp": now + 900,
+            "jti": uuid::Uuid::new_v4().to_string(),
+            "sid": "",
+            "project_id": "demo",
+            "scopes": ["agent:dispatch"],
+            "tier": "free",
+        });
+        let mut header = Header::new(Algorithm::ES256);
+        header.kid = Some(self.keystore.kid.clone());
+        encode(&header, &claims, &self.keystore.encoding).expect("mint tier-2")
+    }
+
+    /// Mint a JWT with the given audience + override `exp` — used by
+    /// the negative-path tests (expired / wrong-aud / etc.).
+    fn mint_custom(
+        &self,
+        user_id: &str,
+        audience: &str,
+        scope: Vec<String>,
+        exp_secs_from_now: i64,
+    ) -> String {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let exp = (now + exp_secs_from_now).max(0);
+        let claims = json!({
+            "iss": "lifegw",
+            "sub": user_id,
+            "aud": audience,
+            "iat": now,
+            "nbf": (now - 5).max(0),
+            "exp": exp,
+            "jti": uuid::Uuid::new_v4().to_string(),
+            "scope": scope,
+        });
+        let mut header = Header::new(Algorithm::ES256);
+        header.kid = Some(self.keystore.kid.clone());
+        encode(&header, &claims, &self.keystore.encoding).expect("mint custom")
+    }
+}
+
 struct TestRig {
     /// Held to keep the mock soma server's UDS alive for the lifetime
     /// of the rig — Drop on the server shuts it down.
     _soma: MockSomaServer,
     signer: Arc<StaticKeystore>,
     minter: Arc<TierUserMinter>,
+    crypto: CryptoCtx,
     router: axum::Router,
 }
 
 impl TestRig {
     async fn build() -> Self {
         let soma = MockSomaServer::start().await;
-        let signer = Arc::new(StaticKeystore::generate_dev().expect("dev keystore"));
+        let crypto = CryptoCtx::new();
         let minter = Arc::new(TierUserMinter::with_defaults(
-            signer.clone() as Arc<dyn KmsSigner>,
+            crypto.signer.clone() as Arc<dyn KmsSigner>,
             DEFAULT_TIER_USER_TTL,
         ));
-        let state = AnimaCustodyState::new(Some(soma.socket_path.clone()), Arc::clone(&minter));
+        let state = AnimaCustodyState::new(
+            Some(soma.socket_path.clone()),
+            Arc::clone(&minter),
+            Arc::clone(&crypto.jwks),
+        );
         let router = anima_custody::router(state);
         Self {
             _soma: soma,
-            signer,
+            signer: Arc::clone(&crypto.signer),
             minter,
+            crypto,
             router,
         }
     }
 
     /// Build a rig with the soma proxy disabled — used by the
-    /// "soma not configured" graceful-degradation test.
+    /// "soma not configured" graceful-degradation test. Shares the
+    /// outer rig's CryptoCtx (signer + JwksCache) so a bearer minted
+    /// by the outer rig verifies against the no-soma router too.
     async fn build_without_soma() -> (Self, axum::Router) {
         let rig = Self::build().await;
-        let signer = Arc::new(StaticKeystore::generate_dev().expect("dev keystore"));
-        let minter = Arc::new(TierUserMinter::with_defaults(
-            signer as Arc<dyn KmsSigner>,
-            DEFAULT_TIER_USER_TTL,
-        ));
-        let state = AnimaCustodyState::new(None, minter);
+        let state =
+            AnimaCustodyState::new(None, Arc::clone(&rig.minter), Arc::clone(&rig.crypto.jwks));
         let router_no_soma = anima_custody::router(state);
         (rig, router_no_soma)
     }
@@ -242,10 +364,27 @@ impl TestRig {
     fn router(&self) -> axum::Router {
         self.router.clone()
     }
-}
 
-fn fake_bearer() -> &'static str {
-    "Bearer fake-tier-user-token"
+    /// Bearer header value for a Tier-User cap with the default
+    /// ALL-scopes set (matches `DEFAULT_SCOPES` in
+    /// `services::anima_custody`).
+    fn tier_user_bearer(&self, user_id: &str) -> String {
+        let token = self.crypto.mint_tier_user(
+            user_id,
+            vec![
+                "anima.user.sign_auth".to_string(),
+                "anima.user.sign_wallet".to_string(),
+                "anima.user.get_pubkey".to_string(),
+            ],
+        );
+        format!("Bearer {token}")
+    }
+
+    /// Bearer header value for a Tier-2 cap (server-side caller).
+    fn tier2_bearer(&self, user_id: &str) -> String {
+        let token = self.crypto.mint_tier2(user_id);
+        format!("Bearer {token}")
+    }
 }
 
 async fn read_body_json(resp: http::Response<Body>) -> Value {
@@ -269,7 +408,7 @@ async fn sign_auth_round_trip() {
     let req = Request::builder()
         .method("POST")
         .uri("/sign_auth")
-        .header("authorization", fake_bearer())
+        .header("authorization", rig.tier_user_bearer(ALICE))
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
@@ -302,7 +441,7 @@ async fn sign_wallet_strips_v_byte() {
     let req = Request::builder()
         .method("POST")
         .uri("/sign_wallet")
-        .header("authorization", fake_bearer())
+        .header("authorization", rig.tier_user_bearer(ALICE))
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
@@ -345,7 +484,7 @@ async fn get_auth_pubkey_returns_compressed_p256() {
     let req = Request::builder()
         .method("GET")
         .uri(format!("/get_auth_pubkey/{ALICE}"))
-        .header("authorization", fake_bearer())
+        .header("authorization", rig.tier_user_bearer(ALICE))
         .body(Body::empty())
         .unwrap();
     let resp = rig.router().oneshot(req).await.unwrap();
@@ -363,7 +502,7 @@ async fn get_wallet_pubkey_returns_uncompressed_secp256k1() {
     let req = Request::builder()
         .method("GET")
         .uri(format!("/get_wallet_pubkey/{ALICE}"))
-        .header("authorization", fake_bearer())
+        .header("authorization", rig.tier_user_bearer(ALICE))
         .body(Body::empty())
         .unwrap();
     let resp = rig.router().oneshot(req).await.unwrap();
@@ -381,11 +520,12 @@ async fn get_wallet_pubkey_returns_uncompressed_secp256k1() {
 #[tokio::test(flavor = "multi_thread")]
 async fn mint_session_cap_returns_verifiable_jwt() {
     let rig = TestRig::build().await;
+    // mint_session_cap is a privileged route — requires Tier-2 audience.
     let body = json!({ "user_id": ALICE });
     let req = Request::builder()
         .method("POST")
         .uri("/mint_session_cap")
-        .header("authorization", fake_bearer())
+        .header("authorization", rig.tier2_bearer(ALICE))
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
@@ -435,12 +575,12 @@ async fn soma_uds_unconfigured_returns_501() {
     // Spec D D-Sub-C: when the operator hasn't configured soma's
     // custody-oracle UDS, the proxy routes degrade gracefully to
     // 501 Not Implemented. lifegw stays running.
-    let (_rig, router_no_soma) = TestRig::build_without_soma().await;
+    let (rig, router_no_soma) = TestRig::build_without_soma().await;
     let body = json!({ "user_id": ALICE, "digest_b64": B64_STANDARD.encode([0u8; 32]) });
     let req = Request::builder()
         .method("POST")
         .uri("/sign_auth")
-        .header("authorization", fake_bearer())
+        .header("authorization", rig.tier_user_bearer(ALICE))
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
@@ -517,10 +657,11 @@ async fn enroll_passkey_extracts_did_from_attestation() {
         "user_id": ALICE,
         "attestation_object_b64": B64_STANDARD.encode(&attestation_buf),
     });
+    // enroll_passkey is a privileged route — requires Tier-2 audience.
     let req = Request::builder()
         .method("POST")
         .uri("/enroll_passkey")
-        .header("authorization", fake_bearer())
+        .header("authorization", rig.tier2_bearer(ALICE))
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
@@ -573,10 +714,173 @@ async fn url_safe_no_pad_digest_is_accepted() {
     let req = Request::builder()
         .method("POST")
         .uri("/sign_auth")
-        .header("authorization", fake_bearer())
+        .header("authorization", rig.tier_user_bearer(ALICE))
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
     let resp = rig.router().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), http::StatusCode::OK);
+}
+
+// ─── Spec D D-Sub-C review-fix tests (B1, B2, I1) ────────────────────
+
+/// Spec D D-Sub-C review fix B1 — bearer with bogus signature → 401.
+///
+/// Previously `require_bearer` accepted any `Bearer <something>` header.
+/// `verify_bearer` now runs full ES256/JWKS verification — a token
+/// signed with a different key MUST be rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn unverified_bearer_rejected_with_401() {
+    let rig = TestRig::build().await;
+    // Mint a token with a DIFFERENT keystore so the signature won't
+    // verify against the rig's JwksCache.
+    let other = CryptoCtx::new();
+    let bogus = other.mint_tier_user(ALICE, vec!["anima.user.sign_auth".to_string()]);
+    let body = json!({
+        "user_id": ALICE,
+        "digest_b64": B64_STANDARD.encode([0u8; 32]),
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/sign_auth")
+        .header("authorization", format!("Bearer {bogus}"))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = rig.router().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
+    let parsed = read_body_json(resp).await;
+    assert_eq!(parsed["error"], "unauthorized");
+}
+
+/// Spec D D-Sub-C review fix B1 — bearer with `exp` in the past → 401.
+#[tokio::test(flavor = "multi_thread")]
+async fn expired_bearer_rejected_with_401() {
+    let rig = TestRig::build().await;
+    // exp 10 minutes in the past — well outside the verifier's 30 s
+    // leeway window.
+    let expired = rig.crypto.mint_custom(
+        ALICE,
+        "anima.user-cap",
+        vec!["anima.user.sign_auth".to_string()],
+        -600,
+    );
+    let body = json!({
+        "user_id": ALICE,
+        "digest_b64": B64_STANDARD.encode([0u8; 32]),
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/sign_auth")
+        .header("authorization", format!("Bearer {expired}"))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = rig.router().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
+}
+
+/// Spec D D-Sub-C review fix B1 — bearer with `aud=other` → 401.
+///
+/// Only `lifed` (Tier-2) and `anima.user-cap` (Tier-User) are accepted;
+/// any other audience MUST be rejected before the route runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn wrong_audience_rejected_with_401() {
+    let rig = TestRig::build().await;
+    let wrong = rig.crypto.mint_custom(
+        ALICE,
+        "some-other-aud",
+        vec!["anima.user.sign_auth".to_string()],
+        900,
+    );
+    let body = json!({
+        "user_id": ALICE,
+        "digest_b64": B64_STANDARD.encode([0u8; 32]),
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/sign_auth")
+        .header("authorization", format!("Bearer {wrong}"))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = rig.router().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
+}
+
+/// Spec D D-Sub-C review fix B2 — Tier-User cap with the wrong scope
+/// for the route → 403 + `{ code: "scope_insufficient", required, present }`.
+#[tokio::test(flavor = "multi_thread")]
+async fn tier_user_without_scope_rejected_with_403() {
+    let rig = TestRig::build().await;
+    // Cap carries `sign_wallet` but caller hits `/sign_auth` — wrong
+    // scope.
+    let token = rig
+        .crypto
+        .mint_tier_user(ALICE, vec!["anima.user.sign_wallet".to_string()]);
+    let body = json!({
+        "user_id": ALICE,
+        "digest_b64": B64_STANDARD.encode([0u8; 32]),
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/sign_auth")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = rig.router().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
+    let parsed = read_body_json(resp).await;
+    assert_eq!(parsed["error"], "scope_insufficient");
+    assert_eq!(parsed["required"], "anima.user.sign_auth");
+    assert!(parsed["present"].is_array());
+    assert_eq!(parsed["present"][0], "anima.user.sign_wallet");
+}
+
+/// Spec D D-Sub-C review fix I1 — Tier-User cap for user X cannot be
+/// used to sign for user Y. Returns 403 + structured `user_id_mismatch`.
+#[tokio::test(flavor = "multi_thread")]
+async fn user_id_mismatch_rejected_with_403() {
+    let rig = TestRig::build().await;
+    // Cap minted for user "X" — request body says user_id="Y".
+    let token = rig
+        .crypto
+        .mint_tier_user("user-x", vec!["anima.user.sign_auth".to_string()]);
+    let body = json!({
+        "user_id": "user-y",
+        "digest_b64": B64_STANDARD.encode([0u8; 32]),
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/sign_auth")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = rig.router().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
+    let parsed = read_body_json(resp).await;
+    assert_eq!(parsed["error"], "user_id_mismatch");
+    assert_eq!(parsed["claimed"], "user-x");
+    assert_eq!(parsed["requested"], "user-y");
+}
+
+/// Bonus coverage: a Tier-User cap MUST NOT be able to mint itself
+/// fresh caps via /mint_session_cap — the route enforces Tier-2.
+#[tokio::test(flavor = "multi_thread")]
+async fn tier_user_cannot_call_mint_session_cap() {
+    let rig = TestRig::build().await;
+    let body = json!({ "user_id": ALICE });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/mint_session_cap")
+        .header("authorization", rig.tier_user_bearer(ALICE))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = rig.router().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), http::StatusCode::FORBIDDEN);
+    let parsed = read_body_json(resp).await;
+    assert_eq!(parsed["error"], "tier2_required");
 }
