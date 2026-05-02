@@ -157,15 +157,29 @@ pub fn parse_address_20(s: &str) -> Result<[u8; 20], String> {
 }
 
 /// Decode a `0x`-prefixed hex calldata. May be empty.
+///
+/// I2 review fix — strict prefix required when non-empty.
+/// Pre-fix this function silently accepted unprefixed hex (e.g. `"ab"`
+/// → `[0xab]`) which is a footgun: a caller mistakenly passing the
+/// ASCII string `"ab"` (intending two bytes `'a','b'`) got a single
+/// byte `0xab`. Calldata determines what an EVM contract executes;
+/// silent ambiguity here is unsafe. Now any non-empty value MUST be
+/// `0x`/`0X`-prefixed; bare hex strings are rejected with a clear
+/// error.
 pub fn parse_data_hex(s: &str) -> Result<Vec<u8>, String> {
     let s = s.trim();
     if s.is_empty() {
         return Ok(Vec::new());
     }
-    let hex_str = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"));
-    let hex_str = match hex_str {
+    let hex_str = match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         Some(h) => h,
-        None => s,
+        None => {
+            return Err(format!(
+                "data hex must be `0x`-prefixed (got `{s}`); \
+                 reject ambiguous unprefixed strings to prevent silent \
+                 calldata corruption"
+            ));
+        }
     };
     if hex_str.is_empty() {
         return Ok(Vec::new());
@@ -401,8 +415,24 @@ mod tests {
             parse_data_hex("0xdeadbeef").unwrap(),
             vec![0xde, 0xad, 0xbe, 0xef]
         );
-        // Without prefix is also accepted (best-effort for legacy callers).
-        assert_eq!(parse_data_hex("ab").unwrap(), vec![0xab]);
+        assert_eq!(
+            parse_data_hex("0XDEADBEEF").unwrap(),
+            vec![0xde, 0xad, 0xbe, 0xef]
+        );
+    }
+
+    #[test]
+    fn parse_data_rejects_unprefixed_hex() {
+        // I2 review fix: bare hex strings are rejected to prevent the
+        // ambiguous "did you mean ASCII or hex?" footgun. Caller MUST
+        // include `0x`/`0X` prefix when non-empty.
+        let err = parse_data_hex("ab").unwrap_err();
+        assert!(
+            err.contains("0x"),
+            "rejection error must mention the required prefix (got: {err})"
+        );
+        assert!(parse_data_hex("deadbeef").is_err());
+        assert!(parse_data_hex("zz").is_err()); // not even hex
     }
 
     #[test]
