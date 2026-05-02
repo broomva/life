@@ -1362,6 +1362,127 @@ L4-D5..D10. Closes BRO-XXX (D-Sub-E).
 
 PR #1075 + #1074 + #1076 merged 2026-05-02.
 
+### 2026-05-02 — Wave 3: D-Sub-C (browser path + Rust bridge + lifegw routes) — Spec D 100% complete
+
+Three PRs merged the same day (2026-05-02) closing the final Spec D
+sub-phase. **Spec D is now 100% complete (6/6 sub-phases shipped).**
+M9 (apps/chat migration to AnimaCustody) is unblocked. The wave
+shipped via 3 parallel streams (R-1 Rust + T TypeScript + R-2 lifegw)
+using the worktree-driven dispatch pattern proven in Wave 2B.
+
+**Stream R-1 — `RemoteAnima` Rust backend (PR #1082, commit
+`4f4394c8`):** HTTP/JSON bridge to lifegw `/anima/custody/*` for
+non-browser callers (CLIs, agents-as-services, native apps). Mirrors
+SomaCustody (D-Sub-E) but with reqwest-over-HTTPS instead of tonic
+UDS. Caches auth + wallet pubkeys at construction; sign_* methods
+route through HTTP; `rotate()` returns the journal-flow error.
+`TierUserCap { token, expires_at_unix }` with `is_expired(now_unix)`
+helper. `kms-remote` Cargo feature default off (pulls reqwest +
+tokio). Code-quality fixes in commit `76e16411`: dual-base64 error
+clarity (decoder confusion), expired-cap fail-fast (cap_token now
+returns `AnimaResult<String>` with cheap-path expiry check before
+issuing the request). 107 lib tests + 5 wiremock integration tests.
+
+**Stream T — `WebCryptoAnima` TypeScript browser backend (PR #1083,
+commit `93bf7687`):** Composes `PasskeyOracle` (WebAuthn-backed P-256
+auth via `navigator.credentials`) with `RemoteAnimaClient` (wallet
+half delegated to lifegw via fetch). DID multicodec `0x1200` →
+`did:key:zDn…` byte-identical to Rust; cross-language fixtures pin
+this. `SessionCap` lifecycle (15-min Tier-User cap, refresh-on-expiry,
+concurrent-mint coalescing). Spec compliance fix `be55b1f5`: route
+paths use `get_auth_pubkey` / `get_wallet_pubkey` (matches Stream R-1
+wiremock fixtures). Code-quality fixes in same commit: response body
+sanitization (`sanitizeErrorBody` truncates upstream errors to ≤200
+chars + ellipsis; structured `{ code, message }` JSON shapes
+preferred), `requestTimeoutMs` config (DEFAULT 30s, AbortSignal.timeout
+with manual fallback), `mapFetchFailure` distinguishing TimeoutError
+from generic transport, `cfg.indexedDB` doc-comment honesty fix.
+128 vitest tests + 5 cross-language DID vectors.
+
+**Stream R-2 — lifegw `/anima/custody/*` routes + `TierUserMinter` +
+WS bearer subprotocol (PR #1084, commit `b082ee52`):** 6 axum HTTP/JSON
+routes + `TierUserMinter` (sibling of `Tier2Minter`, same `KmsSigner`
+trait, `aud="anima.user-cap"`, 15-min default TTL). Each route
+verifies the bearer JWT (signature + audience + sub-binding via
+`JwksCache::verify_capability_token`), enforces per-route scope
+intersection (Tier-User cap with `anima.user.sign_auth` cannot call
+`/sign_wallet`), and binds `claims.sub == body.user_id`. Mint + enroll
+require Tier-2 audience exclusively. WS bearer subprotocol parses
+`Sec-WebSocket-Protocol: bearer.<jwt>` (Tier-1 only — closes M8.2 SDK
+gap for browser WS clients that can't set Authorization headers).
+Strict char validation. soma admin UDS connector via `service_fn`
+(per-request connect; pooling deferred). All upstream errors are
+sanitized (no `tonic::Status` leaked verbatim); per-RPC deadline 10s
+via `tokio::time::timeout`; `validate_user_id` rejects empty / >64
+chars / control chars at gateway boundary; request bodies use
+`deny_unknown_fields`. Two rounds of in-PR fixes:
+
+1. **Security review fixes (B1+B2+I1, commits `e825b541` + `bd8ec745`):**
+   The initial PR mounted the anima router OUTSIDE the AuthLayer with
+   `require_bearer` doing presence-only checks — auth bypass on 6
+   privileged routes. Spec-compliance review caught this as
+   BLOCKING. Fix: built `JwksCache::verify_capability_token` (new
+   multi-audience verifier in `auth/jwks.rs`), added `verify_bearer`
+   helper, added `check_scope_and_subject` enforcing per-route scope
+   + subject binding. 6 new negative integration tests
+   (unverified bearer rejected with 401, expired bearer rejected,
+   wrong audience rejected, scope-insufficient rejected with 403,
+   user_id mismatch rejected with 403, Tier-User cap rejected from
+   mint_session_cap).
+
+2. **Code-quality follow-up fixes (I-1 through I-7, commits
+   `d9e6f505` + `b9ad820b` + `24f5da36` + `fbd740f0` + `16fc91ff`):**
+   Sanitize upstream errors (`sanitize_upstream` maps
+   `tonic::Code` → `(StatusCode, &'static str)`; soma UDS path no
+   longer leaked in 502 body — log via `tracing::warn!`), per-RPC
+   deadline (10s), `deny_unknown_fields` on request bodies,
+   `validate_user_id` at gateway boundary, WS subprotocol bearer
+   strict char validation. 4 new tests (deny_unknown_fields rejection,
+   empty/oversized user_id rejection, WS bearer with whitespace
+   rejection).
+
+199 lifegw tests total (151 unit + 19 anima_custody integration + 29
+others). Graceful degradation: if `cfg.anima_custody = None` the
+routes return 501 with helpful message — lifegw still starts cleanly.
+
+**Cross-cutting integration (Wave 3):**
+
+- The 6 `/anima/custody/*` route shapes are now the canonical browser
+  custody contract. Stream R-1's wiremock fixtures and Stream T's
+  msw-mock-fetch tests pin both sides; Stream R-2 implements the
+  server-side handlers. Wire compatibility verified at every boundary.
+- Closes M8.2 SDK known-limitation (browser-auth via WS subprotocol
+  unsupported by gateway). M8.1 (Connect-vs-grpc-web mismatch)
+  remains open but is sidestepped for custody — the `/anima/custody/*`
+  routes are HTTP/JSON, NOT gRPC-web, so they're consumed via plain
+  `fetch` from chatOS without proto codegen.
+- The lago-auth `verify_jwt` multi-alg dispatcher (D-Sub-E) and the
+  new lifegw `JwksCache::verify_capability_token` (D-Sub-C R-2) both
+  implement multi-audience verification — they're sibling
+  implementations of the same canonical pattern. broomva.tech's
+  external AAP verifier should adopt the same shape.
+
+**Wave 3 summary:**
+- Spec D = **100% complete (6/6 sub-phases shipped)**. All 6
+  production custody backends ship: InProcessAnima, VaultTransitAnima,
+  TpmAnima, SomaCustody, HardwareWalletAnima, WebCryptoAnima +
+  RemoteAnima (paired).
+- M9 (apps/chat migration to AnimaCustody) is now unblocked.
+- M8.2 SDK known-limitation closed (subprotocol bearer auth).
+- Tests delta: ~3922 Rust + 50 TS → ~3922 + ~12 (R-1) + ~199 net
+  lifegw delta (R-2) + ~78 TS delta (T 50→128) = ~4133 Rust + 128 TS.
+- Code-quality discipline: 2 streams surfaced BLOCKING issues in
+  spec review (T's wire-shape divergence, R-2's auth bypass + scope
+  bypass). Both fixed in-PR via dispatched fix-agents. The two-stage
+  review pattern + parallel worktree dispatch + fix-in-PR discipline
+  is now well-tested across 9 PRs across 3 waves.
+- Critical-path next: M9 (apps/chat migration). chatOS settings UI
+  for passkey enrollment + custody status + rotation history lives
+  here; live USDC-transfer e2e on Base testnet validates the full
+  D-Sub-C → soma → Vault → Base path.
+
+PR #1082 + #1083 + #1084 merged 2026-05-02.
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |

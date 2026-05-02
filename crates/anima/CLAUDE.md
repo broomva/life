@@ -163,10 +163,12 @@ trait abstraction + 6 production backends. D-Sub-A (this PR) ships:
 |---|---|---|
 | D-Sub-A | `InProcessAnima` | shipped 2026-04-29 (PR #1070) |
 | D-Sub-B | `VaultTransitAnima` | shipped 2026-05-01 (PR #1073); closes `sign_evm_tx` SPEC-D-DEVIATION via shared RLP encoder |
-| D-Sub-C | `WebCryptoAnima` + `RemoteAnima` | M9-blocking (~7 days) |
+| D-Sub-C | `WebCryptoAnima` + `RemoteAnima` + lifegw `/anima/custody/*` | shipped 2026-05-02 (PRs #1082 + #1083 + #1084); browser passkey custody + Tier-User caps + WS bearer subprotocol (closes M8.2) |
 | D-Sub-D | `TpmAnima` | shipped 2026-05-02 (PR #1075); PKCS#11 auth half + wallet-half delegation |
-| D-Sub-E | `SomaCustody` + rotation/revocation flow + lago-auth verifier | shipped this PR |
+| D-Sub-E | `SomaCustody` + rotation/revocation flow + lago-auth verifier | shipped 2026-05-02 (PR #1076) |
 | D-Sub-F | `HardwareWalletAnima` | shipped 2026-05-02 (PR #1074); Ledger via hidapi, wallet-only wrapper |
+
+**Spec D = 100% complete (6/6 sub-phases).** All 6 production custody backends ship. M9 (apps/chat migration to AnimaCustody) is now unblocked.
 
 ### D-Sub-B (`VaultTransitAnima`) handoff state
 
@@ -426,3 +428,98 @@ delegate, only the secp256k1 wallet half goes to the hardware device.
   acceptance is "USDC transfer signed by a Ledger Nano X over WebHID
   from chatOS browser". This PR ships the desktop hidapi half;
   the browser-side acceptance test lands with the WebHID wrapper.
+
+### D-Sub-C (`WebCryptoAnima` + `RemoteAnima` + lifegw routes) handoff state
+
+D-Sub-C is the M9-blocking sub-phase that closes Spec D. It ships in
+THREE parallel PRs (Stream R-1 + Stream T + Stream R-2) merging in
+order R-1 → T → R-2 to keep history clean.
+
+**Stream R-1 (PR #1082, commit `4f4394c8`):** `RemoteAnima` Rust
+backend at `crates/anima/anima-identity/src/remote.rs`.
+HTTP/JSON-over-lifegw bridge for non-browser callers (CLIs,
+agents-as-services, native apps). Mirror of `SomaCustody` (D-Sub-E)
+but transport is `reqwest` to lifegw `/anima/custody/*` instead of
+tonic UDS. `kms-remote` Cargo feature (default off; pulls reqwest
++ tokio). Caches auth + wallet pubkeys at construction; sign_*
+methods route through HTTP; `rotate()` returns the journal-flow
+error mirroring soma. `TierUserCap { token, expires_at_unix }` with
+`is_expired(now_unix)` helper. `cap_token()` cheap-path-checks
+expiry before issuing the request — surfaces clean
+`AnimaError::Crypto` instead of waiting for lifegw 401. 112 tests
+(107 lib + 5 wiremock integration).
+
+**Stream T (PR #1083, commit `93bf7687`):** `WebCryptoAnima`
+TypeScript browser backend at `sdks/life-sdk-ts/src/anima/`. Composes
+`PasskeyOracle` (auth via WebAuthn `navigator.credentials`) with a
+`RemoteAnimaClient` (wallet half delegated to lifegw via fetch).
+DID multicodec `0x1200` → `did:key:zDn…` byte-identical to Rust;
+cross-language fixtures pin this. `SessionCap` lifecycle (15-min
+Tier-User cap, refresh-on-expiry, concurrent-mint-coalescing). 128
+vitest tests + cross-language DID fixture vectors.
+HTTP/JSON request shape matches Stream R-1 + R-2's wire fixtures.
+Per spec compliance review: route paths use `get_auth_pubkey` /
+`get_wallet_pubkey` (NOT bare `auth_pubkey`) to match the Rust
+`RemoteAnima` shape. Per code-quality review: response body
+sanitization (`sanitizeErrorBody` + `MAX_REMOTE_ERROR_BODY_CHARS`),
+`requestTimeoutMs` config (DEFAULT 30s) with `AbortSignal.timeout`,
+`mapFetchFailure` distinguishing TimeoutError from generic. 128 tests
+total.
+
+**Stream R-2 (PR #1084, commit `b082ee52`):** lifegw HTTP/JSON
+`/anima/custody/*` routes + `TierUserMinter` + WS bearer
+subprotocol (closes M8.2). 6 routes:
+`POST /sign_auth`, `POST /sign_wallet`,
+`GET /get_auth_pubkey/{user_id}`, `GET /get_wallet_pubkey/{user_id}`,
+`POST /mint_session_cap`, `POST /enroll_passkey`. Each route
+verifies the bearer JWT (signature + audience + sub-binding via
+`JwksCache::verify_capability_token`), enforces per-route scope
+intersection (e.g., Tier-User cap with `anima.user.sign_auth` cannot
+call `/sign_wallet`), and binds `claims.sub == body.user_id` to
+prevent cross-user impersonation. Mint + enroll require Tier-2
+audience exclusively. `TierUserMinter` is a sibling of
+`Tier2Minter`: same `KmsSigner` trait (VaultTransit / StaticKeystore
+/ AwsKms / GcpKms all work transparently), separate
+`aud="anima.user-cap"`, 15-min default TTL via `cfg.auth.tier_user_ttl`.
+WS bearer subprotocol parses `Sec-WebSocket-Protocol: bearer.<jwt>`
+(Tier-1 caps only; subprotocol-bearer auth specifically for browser
+WS clients that can't set Authorization headers). Strict char
+validation (rejects whitespace / control chars / commas). soma admin
+UDS connector via `service_fn` (mirror of `SomaCustody::new`); each
+route opens a fresh tonic channel per request (pooling deferred —
+filed as follow-up in module docstring). All upstream errors are
+sanitized (no `tonic::Status` leaked verbatim into HTTP body); per-RPC
+deadline 10s; `validate_user_id` rejects empty / >64 chars / control
+chars at gateway boundary; request bodies use `deny_unknown_fields`.
+199 lifegw tests (151 lib + 19 anima_custody integration + 29
+others). Graceful degradation: if `cfg.anima_custody = None` the
+routes return 501 with helpful message — lifegw still starts cleanly.
+
+### D-Sub-C follow-ups
+
+- **Generic EIP-712 encoder** — same limitation as D-Sub-A/B/E/F.
+  EIP-3009 `TransferWithAuthorization` only; generic typed-data
+  shapes return server-side errors.
+- **Live USDC-transfer e2e on Base testnet** — Spec D acceptance is
+  "USDC transfer initiated in chatOS browser, signed via server-side
+  Vault, settled on Base testnet". The wire shape lands in this PR
+  triplet; the live e2e against a real chain ships with M9 (chatOS
+  apps integration).
+- **Connection pooling for lifegw → soma admin UDS** — currently
+  per-request connect. Production deploys with high JWT mint
+  throughput should pool channels via `life-runtime-pool`. Filed as
+  Sub-phase F-ish hardening.
+- **Full FIDO2 attestation chain verification on `enroll_passkey`** —
+  current implementation extracts the COSE_Key but doesn't verify
+  the AAGUID / cert chain / TPM-or-yubikey-vendor claims. Trusts the
+  browser's WebAuthn impl. Production hardening tracked as a
+  follow-up; for D-Sub-C launch the browser-side WebAuthn semantics
+  + lifegw-side JWT verification are sufficient.
+- **WebHID hardware wallet for browser** — D-Sub-F desktop hidapi is
+  the only transport today. The browser path lives in a separate
+  crate (`anima-web-hardware` or similar) consumed by chatOS during
+  M9. Public trait surface is identical; only the underlying HID
+  transport differs.
+- **chatOS UI integration** — D-Sub-C ships the substrate +
+  contracts; chatOS settings UI (passkey enrollment, custody status,
+  rotation history, revocation) lands in M9.
