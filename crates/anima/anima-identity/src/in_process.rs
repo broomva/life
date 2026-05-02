@@ -20,7 +20,6 @@ use haima_core::wallet::{ChainId, WalletAddress};
 use haima_wallet::evm::derive_address;
 use k256::ecdsa::SigningKey as Secp256k1SigningKey;
 use serde_json::Value;
-use sha3::{Digest as Sha3Digest, Keccak256};
 use zeroize::Zeroizing;
 
 use crate::custody::{
@@ -264,20 +263,42 @@ impl AnimaCustody for InProcessAnima {
     }
 
     fn sign_evm_tx(&self, tx: &TxRequest) -> AnimaResult<EvmSignature> {
-        // Compute the EIP-155 signing digest. For D-Sub-A we keep this minimal:
-        // we Keccak the canonical RLP-equivalent (a JSON canonicalisation
-        // suitable for testing — production EVM tx signing is extended in
-        // a follow-up that brings full RLP encoding once we have a chain
-        // for it). The signature shape (65-byte r||s||v) matches the
-        // `LocalSigner::sign_typed_data` output haima already consumes.
-        let canonical = serde_json::to_vec(tx)
-            .map_err(|e| AnimaError::Crypto(format!("tx canonicalisation: {e}")))?;
-        let mut hasher = Keccak256::new();
-        hasher.update(&canonical);
-        let digest = hasher.finalize();
-        let mut digest_arr = [0u8; 32];
-        digest_arr.copy_from_slice(&digest);
-        let bytes = self.sign_keccak_digest(&digest_arr)?;
+        // D-Sub-B: closes the D-Sub-A SPEC-D-DEVIATION on `sign_evm_tx`.
+        // The shared RLP encoder in `crate::rlp` produces the canonical
+        // EIP-1559 typed-envelope digest. `InProcessAnima` and
+        // `VaultTransitAnima` both go through this path so signatures
+        // produced here are broadcast-ready Ethereum/Base transactions.
+        //
+        // Per the trait `TxRequest` shape (max_fee + max_priority_fee
+        // fields), we always emit the EIP-1559 envelope. Legacy
+        // EIP-155 callers can use `crate::rlp::encode_eip155_unsigned`
+        // directly + `sign_keccak_digest` if they need the older shape.
+        use crate::rlp;
+
+        let chain_id = rlp::parse_eip155_chain_id(&tx.chain)
+            .map_err(|e| AnimaError::Crypto(format!("evm tx: {e}")))?;
+        let to = rlp::parse_address_20(&tx.to)
+            .map_err(|e| AnimaError::Crypto(format!("evm tx to: {e}")))?;
+        let value = rlp::parse_u256_str(&tx.value_wei)
+            .map_err(|e| AnimaError::Crypto(format!("evm tx value: {e}")))?;
+        let max_fee = rlp::parse_u256_str(&tx.max_fee_per_gas_wei)
+            .map_err(|e| AnimaError::Crypto(format!("evm tx max_fee: {e}")))?;
+        let max_priority = rlp::parse_u256_str(&tx.max_priority_fee_per_gas_wei)
+            .map_err(|e| AnimaError::Crypto(format!("evm tx max_priority: {e}")))?;
+        let data = rlp::parse_data_hex(&tx.data_hex)
+            .map_err(|e| AnimaError::Crypto(format!("evm tx data: {e}")))?;
+        let envelope = rlp::encode_eip1559_unsigned(
+            chain_id,
+            tx.nonce,
+            &max_priority,
+            &max_fee,
+            tx.gas_limit,
+            &to,
+            &value,
+            &data,
+        );
+        let digest = rlp::keccak256(&envelope);
+        let bytes = self.sign_keccak_digest(&digest)?;
         Ok(EvmSignature::from_bytes(bytes))
     }
 

@@ -26,19 +26,16 @@
 //!   the NEW post-rotation custody; the original handle remains a valid
 //!   snapshot of pre-rotation state for verifying historical signatures.
 //!
-//! - **`sign_evm_tx` is currently a stub for D-Sub-A**: the implementation
-//!   in `InProcessAnima` Keccak-256-hashes a JSON canonicalisation of the
-//!   `TxRequest` rather than computing the EIP-155 RLP digest. Signatures
-//!   produced by `sign_evm_tx` will NOT verify as valid Ethereum/Base
-//!   transactions. This is acceptable in D-Sub-A only because the sole
-//!   production hot path that signs EVM transactions is haima-x402's
-//!   EIP-3009 `transferWithAuthorization` flow, which goes through
-//!   `sign_eip712` (which IS production-grade — it delegates to
-//!   `haima_wallet::sign_transfer_authorization`). A proper RLP-based
-//!   `sign_evm_tx` is deferred to a follow-up PR (likely D-Sub-B's Vault
-//!   backend will need it for transit-signed Base transactions). Callers
-//!   that need broadcast-ready EIP-155 signatures TODAY MUST go through
-//!   haima-wallet directly until this is fixed.
+//! - **`sign_evm_tx` — D-Sub-B fixed**: D-Sub-A shipped a
+//!   JSON-canonicalisation stub that did not produce broadcast-ready
+//!   transactions. D-Sub-B replaces the stub with proper EIP-1559 RLP
+//!   encoding via `crate::rlp::encode_eip1559_unsigned` +
+//!   `crate::rlp::keccak256`. Both `InProcessAnima` and
+//!   `VaultTransitAnima` now go through the same shared RLP path, so
+//!   the signature shape (65-byte `r||s||v`) is broadcast-ready on
+//!   Ethereum/Base. Legacy EIP-155 callers can use
+//!   `crate::rlp::encode_eip155_unsigned` directly + the backend's
+//!   `sign_digest`-equivalent if they need the older 9-tuple shape.
 //!
 //! - `export_identity_document()` returns the `AgentIdentityDocument` shape
 //!   from `anima-core`. The `rotation_chain` field is added in this PR

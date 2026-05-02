@@ -33,7 +33,11 @@ pub mod ed25519;
 pub mod in_process;
 pub mod keystore;
 pub mod p256;
+pub mod rlp;
 pub mod seed;
+
+#[cfg(feature = "kms-vault")]
+pub mod vault;
 
 pub use custody::{
     AnimaCustody, AnimaCustodyHandle, BackendKind, DidRotationEvent, Eip712Domain, EvmSignature,
@@ -47,3 +51,6 @@ pub use in_process::InProcessAnima;
 pub use keystore::AnimaKeystore;
 pub use p256::EcdsaP256Identity;
 pub use seed::{EncryptedSeed, MasterSeed};
+
+#[cfg(feature = "kms-vault")]
+pub use vault::{VaultMtls, VaultTransitAnima};
