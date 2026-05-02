@@ -326,7 +326,7 @@ fn peer_ip_from_request<B>(req: &Request<B>) -> Option<std::net::IpAddr> {
     if let Some(hv) = req.headers().get("x-forwarded-for")
         && let Ok(s) = hv.to_str()
         && let Some(first) = s.split(',').map(str::trim).find(|x| !x.is_empty())
-        && let Ok(ip) = first.parse::<std::net::IpAddr>()
+        && let Some(ip) = parse_ip_or_socket(first)
     {
         return Some(ip);
     }
@@ -342,11 +342,7 @@ fn peer_ip_from_request<B>(req: &Request<B>) -> Option<std::net::IpAddr> {
                     .or_else(|| trimmed.strip_prefix("For="));
                 if let Some(rest) = rest {
                     let raw = rest.trim_matches('"');
-                    let raw = raw.trim_start_matches('[').trim_end_matches(']');
-                    // Strip optional :<port> suffix (only on IPv4 since
-                    // IPv6 addresses use `[v6]:port`).
-                    let candidate = raw.split(':').next().unwrap_or(raw);
-                    if let Ok(ip) = candidate.parse::<std::net::IpAddr>() {
+                    if let Some(ip) = parse_ip_or_socket(raw) {
                         return Some(ip);
                     }
                 }
@@ -358,6 +354,39 @@ fn peer_ip_from_request<B>(req: &Request<B>) -> Option<std::net::IpAddr> {
     req.extensions()
         .get::<TcpConnectInfo>()
         .and_then(|ci| ci.remote_addr.map(|s| s.ip()))
+}
+
+/// Parse an IP literal that may carry an optional port. Sub-phase E
+/// sweep (item #10): admin-plane error reporting + XFF parsing both
+/// previously assumed IPv6 addresses arrive bracket-stripped. Real
+/// world flows (`Forwarded: for="[::1]:443"`, `X-Forwarded-For: [::1]:443`,
+/// `tonic remote_addr` debug output) carry brackets + ports.
+///
+/// Order of attempts:
+/// 1. `[::1]:port` form — try `SocketAddr::from_str` (handles bracketed
+///    IPv6 with port).
+/// 2. `1.2.3.4:port` form — also via `SocketAddr::from_str`.
+/// 3. Bare `IpAddr` — strip optional brackets, try `IpAddr::from_str`.
+/// 4. IPv4-with-port (`1.2.3.4:port`) is already handled by
+///    `SocketAddr::from_str` in step 2; we keep step 3 separate so the
+///    caller can pass a bare IPv6 (e.g. `::1`) without brackets.
+pub(crate) fn parse_ip_or_socket(input: &str) -> Option<std::net::IpAddr> {
+    use std::net::{IpAddr, SocketAddr};
+    use std::str::FromStr;
+    if let Ok(sa) = SocketAddr::from_str(input) {
+        return Some(sa.ip());
+    }
+    let stripped = input
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim()
+        .to_string();
+    if let Ok(ip) = IpAddr::from_str(&stripped) {
+        return Some(ip);
+    }
+    // Final fallback for IPv4-with-port reported as `1.2.3.4:443`
+    // already covered by SocketAddr above; nothing else to try.
+    None
 }
 
 /// Build a `Status::resource_exhausted`-shaped HTTP response. Per
@@ -451,5 +480,50 @@ mod tests {
         // — per-test verifier swaps without global mutation.
         let cache = Arc::new(JwksCache::dev_only());
         verify_with_handle(Some(&cache), "dev-token-for-isolated").expect("isolated verify");
+    }
+
+    // Sub-phase E sweep (item #10): IPv6-with-port parser.
+    #[test]
+    fn parse_ip_or_socket_accepts_bracketed_ipv6_with_port() {
+        let ip = parse_ip_or_socket("[::1]:443").expect("parse [::1]:443");
+        assert!(ip.is_loopback());
+        assert!(ip.is_ipv6());
+    }
+
+    #[test]
+    fn parse_ip_or_socket_accepts_ipv4_with_port() {
+        let ip = parse_ip_or_socket("1.2.3.4:443").expect("parse 1.2.3.4:443");
+        assert_eq!(
+            ip,
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(1, 2, 3, 4))
+        );
+    }
+
+    #[test]
+    fn parse_ip_or_socket_accepts_bare_ipv4() {
+        let ip = parse_ip_or_socket("10.0.0.1").expect("parse 10.0.0.1");
+        assert_eq!(
+            ip,
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))
+        );
+    }
+
+    #[test]
+    fn parse_ip_or_socket_accepts_bare_ipv6() {
+        let ip = parse_ip_or_socket("::1").expect("parse ::1");
+        assert!(ip.is_loopback());
+        assert!(ip.is_ipv6());
+    }
+
+    #[test]
+    fn parse_ip_or_socket_accepts_bracketed_bare_ipv6() {
+        let ip = parse_ip_or_socket("[::1]").expect("parse [::1]");
+        assert!(ip.is_loopback());
+    }
+
+    #[test]
+    fn parse_ip_or_socket_rejects_garbage() {
+        assert!(parse_ip_or_socket("definitely not an ip").is_none());
+        assert!(parse_ip_or_socket("").is_none());
     }
 }

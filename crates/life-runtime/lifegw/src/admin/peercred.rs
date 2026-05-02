@@ -102,9 +102,52 @@ pub fn group_gid(name: &str) -> std::io::Result<Option<u32>> {
 }
 
 /// Test whether `cred` belongs to a process whose primary group is
-/// `gid`. Sub-phase D MVS only checks the primary gid.
+/// `gid`. Sub-phase D MVS only checked the primary gid; Sub-phase E
+/// sweep (item #12) extends this with [`supplementary_gids_of_uid`].
 pub fn is_member_of(cred: &PeerCred, gid: u32) -> bool {
     cred.gid == gid
+}
+
+/// Sub-phase E sweep (item #12): query the supplementary groups for a
+/// uid via `getgrouplist(3)` (not by reading `/etc/group` directly).
+/// Returns the full list of supplementary GIDs for the user, including
+/// the user's primary GID.
+///
+/// **Linux/BSD only.** `getgrouplist` is not available on Apple
+/// platforms (the libc has it but the nix wrapper opts out — see
+/// `nix::unistd::getgrouplist` cfg gate). On macOS / non-Linux the
+/// function returns `Ok(Vec::new())` so callers fall back to the
+/// primary-gid path. Production deploys are Linux-only per master spec
+/// §L10 so the macOS fallback is dev-box-only.
+///
+/// Sub-phase E sweep (item #13): on lookup error (Linux user not in
+/// `/etc/passwd`, or `getgrouplist` syscall failure), the function
+/// returns `Err`. Callers use `unwrap_or_default()` only when their
+/// fail-mode policy is permit; admin policy now fails CLOSED via the
+/// `gateway.admin.rejected_total{reason="group_lookup"}` counter.
+#[cfg(target_os = "linux")]
+pub fn supplementary_gids_of_uid(uid: u32) -> std::io::Result<Vec<u32>> {
+    use std::ffi::CString;
+    let user = nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid))
+        .map_err(|e| std::io::Error::other(format!("getpwuid_r({uid}): {e}")))?
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("uid {uid} not in /etc/passwd"),
+            )
+        })?;
+    let cname = CString::new(user.name.as_bytes())
+        .map_err(|e| std::io::Error::other(format!("user name has nul: {e}")))?;
+    let groups = nix::unistd::getgrouplist(&cname, user.gid)
+        .map_err(|e| std::io::Error::other(format!("getgrouplist({uid}): {e}")))?;
+    Ok(groups.into_iter().map(|g| g.as_raw()).collect())
+}
+
+/// macOS / non-Linux fallback. Returns `Ok(Vec::new())` so callers can
+/// proceed with primary-gid checks. Production is Linux-only.
+#[cfg(not(target_os = "linux"))]
+pub fn supplementary_gids_of_uid(_uid: u32) -> std::io::Result<Vec<u32>> {
+    Ok(Vec::new())
 }
 
 #[cfg(test)]
@@ -136,5 +179,39 @@ mod tests {
         };
         assert!(is_member_of(&cred, 1000));
         assert!(!is_member_of(&cred, 1001));
+    }
+
+    /// Sub-phase E sweep (item #12): supplementary group lookup. On
+    /// Linux this returns the actual group list; on macOS it returns
+    /// an empty vec (the policy table falls back to primary-GID
+    /// checks).
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn supplementary_gids_of_uid_resolves_root() {
+        // root (uid 0) always exists and is at minimum a member of the
+        // root group (gid 0). The test proves the syscall pipeline
+        // works without depending on /etc/group format.
+        let groups = supplementary_gids_of_uid(0).expect("getgrouplist(root)");
+        assert!(
+            groups.contains(&0),
+            "root must be in its own primary group (gid 0): got {groups:?}"
+        );
+    }
+
+    #[test]
+    fn supplementary_gids_of_uid_unknown_user_errors_or_empty() {
+        // uid `4294967295` (u32::MAX) cannot exist in /etc/passwd. On
+        // Linux this errors with NotFound; on macOS the fallback
+        // returns an empty vec (no syscall). Both behaviours are
+        // acceptable per the function contract.
+        let outcome = supplementary_gids_of_uid(u32::MAX);
+        if cfg!(target_os = "linux") {
+            assert!(outcome.is_err(), "missing uid must error on Linux");
+        } else {
+            assert!(
+                outcome.unwrap().is_empty(),
+                "non-Linux fallback returns empty"
+            );
+        }
     }
 }

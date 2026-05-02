@@ -17,12 +17,14 @@
 
 pub mod blocklist;
 pub mod listener;
+pub mod metrics;
 pub mod peercred;
 pub mod policy;
 pub mod service;
 
 pub use blocklist::{Blocklist, BlocklistEntry};
 pub use listener::{AdminAcceptor, AdminConn, AdminConnInfo};
+pub use metrics::AdminMetrics;
 pub use peercred::{PeerCred, group_gid, is_member_of, peer_cred};
 pub use policy::{AdminOp, AdminPolicy};
 pub use service::{CertReloadHook, CertReloadOutcome, GatewayAdminService};

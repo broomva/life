@@ -235,6 +235,14 @@ pub struct AuthConfig {
     /// `kms_provider = "vault"`.
     #[serde(default)]
     pub vault: Option<VaultConfig>,
+    /// AWS KMS configuration. Required when `kms_provider = "aws"`.
+    /// Sub-phase E item #1.
+    #[serde(default)]
+    pub aws: Option<AwsConfig>,
+    /// GCP Cloud KMS configuration. Required when `kms_provider = "gcp"`.
+    /// Sub-phase E item #2.
+    #[serde(default)]
+    pub gcp: Option<GcpConfig>,
     /// Path to which the gateway publishes its Tier-2 JWKS document.
     /// `None` disables publish (used by tests that share key material
     /// in-memory). Default `/run/life/lifegw-jwks.json`.
@@ -258,6 +266,13 @@ pub struct AuthConfig {
 
 /// HashiCorp Vault Transit configuration (Sub-phase B production
 /// primary). Loaded only when `auth.kms_provider = "vault"`.
+///
+/// Sub-phase E adds:
+/// - `[mtls]` — optional client-cert + client-key paths for
+///   peer-authenticated TLS to Vault.
+/// - `renew_interval` — optional cadence for the background
+///   `auth/token/renew-self` task. Vault tokens with `renewable: true`
+///   require periodic renewal to stay live.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -273,6 +288,60 @@ pub struct VaultConfig {
     pub key_name: String,
     /// JWS `kid` value embedded in token headers + the published JWKS.
     /// Convention: same as `key_name`.
+    pub kid: String,
+    /// Sub-phase E (item #5): optional mTLS to Vault.
+    #[serde(default)]
+    pub mtls: Option<VaultMtlsConfig>,
+    /// Sub-phase E (item #5): optional renewal cadence. `None`
+    /// disables the background renewal task. Recommend half the
+    /// token's TTL.
+    #[serde(default, with = "humantime_serde_opt")]
+    pub renew_interval: Option<Duration>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct VaultMtlsConfig {
+    pub cert_path: PathBuf,
+    pub key_path: PathBuf,
+}
+
+/// AWS KMS configuration (Sub-phase E item #1). Loaded only when
+/// `auth.kms_provider = "aws"`. AWS credentials + region are resolved
+/// from the standard AWS credential chain (env vars, instance profile,
+/// IAM role, …) — this struct only carries lifegw-specific identifiers.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct AwsConfig {
+    /// AWS KMS Key ID or full ARN
+    /// (e.g. `alias/lifegw-tier2`, `arn:aws:kms:us-east-1:…`).
+    pub key_id: String,
+    /// JWS `kid` value embedded in token headers + the published JWKS.
+    /// Should be a stable identifier across key rotations (e.g. the
+    /// alias name rather than the underlying key ID, so rotations
+    /// don't break verifiers).
+    pub kid: String,
+}
+
+/// GCP Cloud KMS configuration (Sub-phase E item #2). Loaded only when
+/// `auth.kms_provider = "gcp"`. GCP credentials are resolved from the
+/// standard GCP credential chain (workload identity, ADC, service-account
+/// JSON file path in `GOOGLE_APPLICATION_CREDENTIALS`, …).
+///
+/// **Operator note**: the `resource` string MUST carry the full
+/// `cryptoKeyVersions/<n>` suffix — `asymmetric_sign` operates on a key
+/// version, not a crypto key. Operators who supply only the cryptoKey
+/// path will get a 404 from the API.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct GcpConfig {
+    /// Full GCP KMS resource path including version suffix, e.g.
+    /// `projects/broomva-prod/locations/global/keyRings/lifegw/cryptoKeys/tier2/cryptoKeyVersions/1`.
+    pub resource: String,
+    /// JWS `kid` value embedded in token headers + the published JWKS.
     pub kid: String,
 }
 
@@ -337,6 +406,8 @@ impl Default for AuthConfig {
             tier1_issuer: default_tier1_issuer(),
             kms_provider: KmsProvider::default(),
             vault: None,
+            aws: None,
+            gcp: None,
             publish_jwks_path: default_publish_jwks_path(),
             dev_signer_enabled: false,
             tier2_audience: default_tier2_audience(),
@@ -509,6 +580,46 @@ mod humantime_serde {
             .parse()
             .map_err(|e| D::Error::custom(format!("parse duration: {e}")))?;
         Ok(Duration::from_secs(n))
+    }
+}
+
+/// Sub-phase E: `Option<Duration>` round-trip via humantime. Used for
+/// `[auth.vault].renew_interval` which is optional.
+mod humantime_serde_opt {
+    use std::time::Duration;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
+
+    pub fn serialize<S>(d: &Option<Duration>, ser: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match d {
+            None => ser.serialize_none(),
+            Some(dur) => format!("{}s", dur.as_secs()).serialize(ser),
+        }
+    }
+
+    pub fn deserialize<'de, D>(de: D) -> Result<Option<Duration>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = Option::<String>::deserialize(de)?;
+        match s {
+            None => Ok(None),
+            Some(s) => {
+                if let Some(stripped) = s.strip_suffix('s') {
+                    let n: u64 = stripped
+                        .parse()
+                        .map_err(|e| D::Error::custom(format!("parse seconds: {e}")))?;
+                    return Ok(Some(Duration::from_secs(n)));
+                }
+                let n: u64 = s
+                    .parse()
+                    .map_err(|e| D::Error::custom(format!("parse duration: {e}")))?;
+                Ok(Some(Duration::from_secs(n)))
+            }
+        }
     }
 }
 

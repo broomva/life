@@ -102,6 +102,21 @@ impl CertReloader {
         self.inner.config.load_full()
     }
 
+    /// Sub-phase E sweep (item #14): produce a fresh
+    /// `tokio_rustls::TlsAcceptor` over the *current* `ServerConfig`.
+    /// The accept loop in `serve_connections` calls this on every new
+    /// connection so cert rotations reach the listener — not just the
+    /// shutdown-handler-driven `current()` accessor.
+    ///
+    /// `TlsAcceptor` is a thin newtype around `Arc<ServerConfig>`;
+    /// constructing one per accept is essentially a single Arc clone
+    /// from the live `config.load()` snapshot. In-flight TLS
+    /// connections keep the config they handshook with via the
+    /// `Arc` semantics rustls relies on.
+    pub fn acceptor(&self) -> tokio_rustls::TlsAcceptor {
+        tokio_rustls::TlsAcceptor::from(self.inner.config.load_full())
+    }
+
     /// Force an immediate reload. SIGHUP handler + admin-plane
     /// `CertReload` RPC route here. On parse failure the previous
     /// config stays live and the function returns `Err`.
@@ -343,6 +358,40 @@ mod tests {
         assert!(reloader.mtime_changed());
         // Second call returns false (we already consumed the change).
         assert!(!reloader.mtime_changed());
+    }
+
+    /// Sub-phase E sweep (item #14): the `acceptor()` accessor
+    /// returns a TlsAcceptor backed by the current ServerConfig. We
+    /// rotate the cert + key, call `reload()`, then call `acceptor()`
+    /// again — the new acceptor's underlying ServerConfig must be
+    /// distinct from the pre-rotation one.
+    #[test]
+    fn acceptor_returns_current_config_post_rotation() {
+        install_default_provider();
+        let dir = TempDir::new().expect("tempdir");
+        let (cert, key) = write_self_signed(dir.path());
+        let reloader = CertReloader::load(&cert, &key).expect("load");
+
+        // First snapshot.
+        let acceptor_before = reloader.acceptor();
+        let cfg_before = acceptor_before.config().clone();
+        let cfg_before_inner = reloader.current();
+        assert!(Arc::ptr_eq(&cfg_before, &cfg_before_inner));
+
+        // Rotate.
+        let (cert2, key2) = write_self_signed_named(dir.path(), "rot.pem", "rot.key");
+        std::fs::copy(&cert2, &cert).expect("copy cert");
+        std::fs::copy(&key2, &key).expect("copy key");
+        reloader.reload().expect("reload");
+
+        // Second snapshot — the new TlsAcceptor must wrap a different
+        // Arc<ServerConfig>.
+        let acceptor_after = reloader.acceptor();
+        let cfg_after = acceptor_after.config().clone();
+        assert!(
+            !Arc::ptr_eq(&cfg_before, &cfg_after),
+            "post-rotation acceptor must wrap a NEW ServerConfig"
+        );
     }
 
     #[test]

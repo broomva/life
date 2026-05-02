@@ -12,7 +12,7 @@
 //! lock across an `await`.
 
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use tonic::{Request, Response, Status};
 
@@ -162,38 +162,31 @@ impl adm::gateway_admin_server::GatewayAdmin for GatewayAdminService {
     ) -> Result<Response<adm::JwksDumpResp>, Status> {
         let cred = Self::cred(&req)?;
         self.policy.check(&cred, AdminOp::JwksDump)?;
-        // The cache exposes total + active counts but not the per-key
-        // metadata directly. Sub-phase D ships an aggregate-only view
-        // (kid + alg unavailable from the public API today; see the
-        // follow-up note in CLAUDE.md). The proto field set is
-        // forward-compatible — when the cache adds a `dump()` method
-        // in Sub-phase E we can populate the per-key entries.
-        let mut keys = Vec::new();
-        for _ in 0..self.jwks.active_key_count() {
-            keys.push(adm::JwksKey {
-                kid: "<active>".to_string(),
-                alg: "ES256".to_string(),
-                retired: false,
-                retired_at: None,
-            });
-        }
-        let total = self.jwks.total_key_count();
-        let active = self.jwks.active_key_count();
-        for _ in 0..total.saturating_sub(active) {
-            keys.push(adm::JwksKey {
-                kid: "<retired>".to_string(),
-                alg: "ES256".to_string(),
-                retired: true,
-                retired_at: None,
-            });
-        }
+        // Sub-phase E sweep (item #11): JwksCache now exposes a real
+        // `dump()` method that returns kid + alg + crv + retired
+        // metadata for every entry. Operators can answer "is the cache
+        // holding the kid the gateway just minted against?" without
+        // shelling onto the host. Per the dump contract no key
+        // material (PEM, x/y) leaves the cache.
+        let keys = self
+            .jwks
+            .dump()
+            .into_iter()
+            .map(|d| adm::JwksKey {
+                kid: d.kid,
+                alg: d.alg,
+                crv: d.crv,
+                retired: d.retired,
+                retired_at_epoch_millis: d.retired_at_epoch_millis,
+            })
+            .collect();
         Ok(Response::new(adm::JwksDumpResp { keys }))
     }
 
     async fn blocklist_add(
         &self,
         req: Request<adm::BlocklistAddReq>,
-    ) -> Result<Response<adm::BlocklistEmpty>, Status> {
+    ) -> Result<Response<adm::AdminAck>, Status> {
         let cred = Self::cred(&req)?;
         self.policy.check(&cred, AdminOp::BlocklistAdd)?;
         let body = req.into_inner();
@@ -201,13 +194,13 @@ impl adm::gateway_admin_server::GatewayAdmin for GatewayAdminService {
             return Err(Status::invalid_argument("missing subject"));
         }
         self.blocklist.add(body.subject, body.reason);
-        Ok(Response::new(adm::BlocklistEmpty {}))
+        Ok(Response::new(adm::AdminAck {}))
     }
 
     async fn blocklist_remove(
         &self,
         req: Request<adm::BlocklistRemoveReq>,
-    ) -> Result<Response<adm::BlocklistEmpty>, Status> {
+    ) -> Result<Response<adm::AdminAck>, Status> {
         let cred = Self::cred(&req)?;
         self.policy.check(&cred, AdminOp::BlocklistRemove)?;
         let body = req.into_inner();
@@ -215,7 +208,7 @@ impl adm::gateway_admin_server::GatewayAdmin for GatewayAdminService {
             return Err(Status::invalid_argument("missing subject"));
         }
         self.blocklist.remove(&body.subject);
-        Ok(Response::new(adm::BlocklistEmpty {}))
+        Ok(Response::new(adm::AdminAck {}))
     }
 
     async fn blocklist_list(
@@ -224,6 +217,9 @@ impl adm::gateway_admin_server::GatewayAdmin for GatewayAdminService {
     ) -> Result<Response<adm::BlocklistListResp>, Status> {
         let cred = Self::cred(&req)?;
         self.policy.check(&cred, AdminOp::BlocklistList)?;
+        // Sub-phase E sweep (item #8): direct u64 epoch-millis on the
+        // wire — no `prost_types::Timestamp` round-trip on the hot
+        // path.
         let entries = self
             .blocklist
             .list()
@@ -231,20 +227,12 @@ impl adm::gateway_admin_server::GatewayAdmin for GatewayAdminService {
             .map(|e| adm::BlocklistEntry {
                 subject: e.subject,
                 reason: e.reason,
-                added_at: Some(prost_types::Timestamp::from(
-                    e.added_at
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .map(|d| {
-                            let secs = d.as_secs() as i64;
-                            let nanos = d.subsec_nanos() as i32;
-                            (secs, nanos)
-                        })
-                        .map(|(secs, nanos)| {
-                            std::time::SystemTime::UNIX_EPOCH
-                                + std::time::Duration::new(secs as u64, nanos as u32)
-                        })
-                        .unwrap_or(SystemTime::UNIX_EPOCH),
-                )),
+                added_at_epoch_millis: e
+                    .added_at
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .and_then(|d| u64::try_from(d.as_millis()).ok())
+                    .unwrap_or(0),
             })
             .collect();
         Ok(Response::new(adm::BlocklistListResp { entries }))
@@ -253,7 +241,7 @@ impl adm::gateway_admin_server::GatewayAdmin for GatewayAdminService {
     async fn rate_limit_override(
         &self,
         req: Request<adm::RateLimitOverrideReq>,
-    ) -> Result<Response<adm::BlocklistEmpty>, Status> {
+    ) -> Result<Response<adm::AdminAck>, Status> {
         let cred = Self::cred(&req)?;
         self.policy.check(&cred, AdminOp::RateLimitOverride)?;
         let body = req.into_inner();
@@ -270,6 +258,6 @@ impl adm::gateway_admin_server::GatewayAdmin for GatewayAdminService {
                 refill_per_sec: body.refill_per_sec,
             },
         );
-        Ok(Response::new(adm::BlocklistEmpty {}))
+        Ok(Response::new(adm::AdminAck {}))
     }
 }

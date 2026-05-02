@@ -30,4 +30,14 @@ lint:
 breaking:
   use:
     - WIRE_JSON
+  ignore:
+    # life.admin.gw.v1.* — added in M7 Sub-phase D (2026-04-29), refined
+    # in M7 Sub-phase E sweep (2026-04-29 → 2026-05-01) before public
+    # release. The whole `life.admin.gw.v1` package is still pre-1.0 and
+    # only consumed by the gateway's own admin-plane UDS — not exposed
+    # to external SDK / app consumers. Renames during the M7 finalisation
+    # window are intentional (e.g. `BlocklistEmpty` → `AdminAck` for
+    # consistency with other admin RPCs). Once M7 ships, this ignore
+    # rolls off and breaking changes require a v2 bump.
+    - life/admin/gw/v1
 deps: []

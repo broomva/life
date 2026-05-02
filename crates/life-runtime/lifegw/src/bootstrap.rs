@@ -32,7 +32,8 @@ use tower::ServiceExt;
 use life_runtime_proto::life::v1 as pb;
 
 use crate::admin::{
-    AdminPolicy, Blocklist, CertReloadHook, GatewayAdminService, listener as admin_listener,
+    AdminMetrics, AdminPolicy, Blocklist, CertReloadHook, GatewayAdminService,
+    listener as admin_listener,
 };
 use crate::auth::jwks::{JwksCache, JwksCacheConfig, JwksSource};
 use crate::auth::kms::{KmsSigner, StaticKeystore};
@@ -65,25 +66,108 @@ pub async fn run_daemon(config_path: Option<&Path>) -> LifegwResult<()> {
 
     let shutdown_rx = crate::shutdown::install_signal_handler();
 
-    // Sub-phase D (D3): install SIGHUP handler driving the cert
-    // reloader. The reloader is built optimistically — failures are
-    // logged but don't block startup (production deploys may have
-    // misconfigured paths during rollout; the gateway falls back to
-    // the static `bind()` cert in that case).
-    if let Ok(reloader) = CertReloader::load(&cfg.tls.cert_path, &cfg.tls.key_path) {
+    // Sub-phase D (D3) + Sub-phase E sweep (item #14) + post-merge fix
+    // for B2/B3:
+    //
+    // Build a SINGLE `Arc<CertReloader>` and share it across:
+    // - the SIGHUP handler (operator-driven reload via `kill -HUP`)
+    // - the polling watcher (file-mtime-driven reload, every
+    //   `POLL_INTERVAL` seconds — see `cert_watch::POLL_INTERVAL`)
+    // - the public-plane accept loop (`AcceptorSource::Reloader`)
+    // - the admin-plane `CertReload` RPC (via `CertReloadHook`)
+    //
+    // Pre-fix B2/B3: SIGHUP and the accept loop each constructed
+    // independent CertReloader instances, so a SIGHUP-triggered swap
+    // never reached the listener. The polling watcher was dead code —
+    // defined but never spawned. This fix wires all four consumers
+    // through a single shared instance and spawns the watcher exactly
+    // once.
+    //
+    // The reloader is built optimistically — failures are logged but
+    // don't block startup (production deploys may have misconfigured
+    // paths during rollout; the gateway falls back to the static
+    // `bind()` cert in that case).
+    let cert_reloader: Option<Arc<CertReloader>> =
+        match CertReloader::load(&cfg.tls.cert_path, &cfg.tls.key_path) {
+            Ok(reloader) => Some(Arc::new(reloader)),
+            Err(e) => {
+                tracing::warn!(
+                    cert = %cfg.tls.cert_path.display(),
+                    key = %cfg.tls.key_path.display(),
+                    error = %e,
+                    "cert-watch reloader could not load initial config; \
+                     SIGHUP + polling watcher will be no-ops"
+                );
+                None
+            }
+        };
+
+    // SIGHUP — share the Arc.
+    if let Some(rel) = cert_reloader.as_ref() {
         // Drop the JoinHandle — the SIGHUP task lives for the
         // process lifetime; tokio will reap it on shutdown.
-        std::mem::drop(crate::shutdown::install_sighup_handler(Arc::new(reloader)));
-    } else {
-        tracing::warn!(
-            cert = %cfg.tls.cert_path.display(),
-            key = %cfg.tls.key_path.display(),
-            "cert-watch reloader could not load initial config; SIGHUP will be a no-op"
-        );
+        std::mem::drop(crate::shutdown::install_sighup_handler(Arc::clone(rel)));
     }
 
+    // Polling watcher (B3 fix) — share the Arc and a oneshot for
+    // graceful teardown.
+    let (watcher_shutdown_tx, watcher_shutdown_rx) = oneshot::channel::<()>();
+    let watcher_handle = match cert_reloader.as_ref() {
+        Some(rel) => Some(rel.spawn_watcher(watcher_shutdown_rx)),
+        None => {
+            // Drop the receiver explicitly so the channel closes; the
+            // tx will become a no-op when we send below.
+            drop(watcher_shutdown_rx);
+            None
+        }
+    };
+
     let bind = listener::bind(&cfg.tls, &cfg.listen).await?;
-    serve_with_listener(cfg, bind, shutdown_rx).await
+
+    // Build the signer BEFORE moving cfg into the serve fn (borrow
+    // ordering — &cfg.auth must stay valid).
+    let signer = build_signer(&cfg.auth)?;
+
+    // I1 fix: spawn the Vault token-renewal task here (was inside
+    // build_signer pre-fix) so we own an AbortHandle for clean
+    // shutdown. Abort on graceful exit so we don't leak the task,
+    // its `Interval`, and its `reqwest::Client`.
+    let renewal_abort: Option<tokio::task::AbortHandle> = match cfg.auth.kms_provider {
+        #[cfg(feature = "kms-vault")]
+        KmsProvider::Vault => match (
+            &cfg.auth.vault,
+            cfg.auth.vault.as_ref().and_then(|v| v.renew_interval),
+        ) {
+            (Some(v), Some(interval)) => {
+                let abort = crate::auth::kms::VaultTransit::spawn_token_renewal(
+                    v.addr.clone(),
+                    v.token.clone(),
+                    interval,
+                );
+                tracing::info!(
+                    interval_secs = interval.as_secs(),
+                    "vault token renewal task spawned"
+                );
+                Some(abort)
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+
+    // Run the public plane with the shared reloader. After it
+    // returns, signal the polling watcher to exit, abort the
+    // renewal task, and wait briefly for everything to drain.
+    let result =
+        serve_with_listener_and_signer(cfg, bind, signer, cert_reloader, shutdown_rx).await;
+    let _ = watcher_shutdown_tx.send(());
+    if let Some(h) = watcher_handle {
+        let _ = tokio::time::timeout(Duration::from_secs(2), h).await;
+    }
+    if let Some(abort) = renewal_abort {
+        abort.abort();
+    }
+    result
 }
 
 /// Serve atop an already-bound `TlsBind`. Useful for integration tests
@@ -96,7 +180,12 @@ pub async fn serve_with_listener(
     shutdown_rx: oneshot::Receiver<()>,
 ) -> LifegwResult<()> {
     let signer = build_signer(&cfg.auth)?;
-    serve_with_listener_and_signer(cfg, bind, signer, shutdown_rx).await
+    // Test/standalone path: no externally-provided reloader, so
+    // serve_with_listener_and_signer will build its own from
+    // cfg.tls.{cert,key}_path. The polling watcher is NOT spawned on
+    // this path — production deploys use run_daemon which spawns the
+    // watcher with the shared Arc.
+    serve_with_listener_and_signer(cfg, bind, signer, None, shutdown_rx).await
 }
 
 // Decision (M7 Sub-phase C, BRO-938 follow-up #1, Option B):
@@ -119,10 +208,17 @@ pub async fn serve_with_listener(
 /// Serve atop an already-bound `TlsBind` with a pre-constructed signer.
 /// Used by integration tests that need the gateway and the conformance
 /// reader to share key material via the published JWKS file.
+///
+/// `cert_reloader` is the pre-constructed cert reloader passed by
+/// `run_daemon` so the SIGHUP handler, polling watcher, and accept
+/// loop all share the same `Arc<CertReloader>` instance. `None` is
+/// the test/standalone path; this function builds its own reloader
+/// (without a watcher) in that case.
 pub async fn serve_with_listener_and_signer(
     cfg: LifegwConfig,
     bind: TlsBind,
     signer: Arc<dyn KmsSigner>,
+    cert_reloader: Option<Arc<CertReloader>>,
     shutdown_rx: oneshot::Receiver<()>,
 ) -> LifegwResult<()> {
     install_default_crypto_provider();
@@ -159,31 +255,39 @@ pub async fn serve_with_listener_and_signer(
     )
     .with_rate_limiter(rate_limiter.clone());
 
-    // Sub-phase D (D3): construct the cert reloader from the same
-    // cert + key paths the bind step used. The reloader holds an
-    // ArcSwap<ServerConfig> so the listener path can swap configs
-    // atomically without disrupting in-flight TLS connections.
+    // Sub-phase D (D3) + Sub-phase E sweep (item #14): construct the
+    // cert reloader from the same cert + key paths the bind step
+    // used. The reloader holds an ArcSwap<ServerConfig> so the
+    // listener path can swap configs atomically without disrupting
+    // in-flight TLS connections.
     //
-    // Note: in Sub-phase D the gateway's bind path uses the
-    // `bind()` helper which synthesises a one-shot TlsAcceptor —
-    // the reloader exists but the per-connection TlsAcceptor is
-    // already cloned + held by the accept loop. Wiring the reloader
-    // into the per-connection acceptor is a Sub-phase E refinement
-    // (it requires plumbing the reloader through `serve_connections`).
-    // For now the reloader's value is twofold: (1) the admin-plane
-    // `CertReload` RPC routes here so operators have an RPC handle
-    // for ad-hoc reloads, and (2) the SIGHUP handler bumps the
-    // reload counter so dashboards observe rotations even before the
-    // per-connection swap lands.
-    let cert_reloader = CertReloader::load(&cfg.tls.cert_path, &cfg.tls.key_path)
-        .ok()
-        .map(Arc::new);
+    // Sub-phase E sweep (item #14) closes the previously-deferred
+    // hot-swap into `serve_connections` — see the AcceptorSource
+    // construction below where the reloader is wired into the accept
+    // loop. The admin-plane `CertReload` RPC routes through the
+    // reloader so operators retain the ad-hoc reload handle; the
+    // SIGHUP handler installed at startup also bumps the reload
+    // counter for dashboards.
+    // Use the caller-provided reloader if `run_daemon` passed one (so
+    // SIGHUP + polling watcher + accept loop share a single instance);
+    // otherwise (test path) build a fresh one. Tests don't get the
+    // polling watcher because nobody spawns it on this path — that's
+    // intentional, tests rely on admin-plane CertReload RPCs to drive
+    // rotations deterministically.
+    let cert_reloader =
+        cert_reloader.or_else(
+            || match CertReloader::load(&cfg.tls.cert_path, &cfg.tls.key_path) {
+                Ok(r) => Some(Arc::new(r)),
+                Err(_) => None,
+            },
+        );
     if cert_reloader.is_none() {
         tracing::warn!(
             cert = %cfg.tls.cert_path.display(),
             key = %cfg.tls.key_path.display(),
             "cert-watch reloader could not load initial config; \
-             admin-plane CertReload will return a no-op success"
+             admin-plane CertReload will return a no-op success and \
+             the listener will hold the bind() acceptor for the daemon's life"
         );
     }
     let cert_hook = match cert_reloader.as_ref() {
@@ -205,7 +309,11 @@ pub async fn serve_with_listener_and_signer(
     // always start it (mirroring lifed) so the admin RPCs land in
     // every test rig.
     let blocklist = Blocklist::new();
-    let admin_policy = build_admin_policy(&cfg.admin_plane);
+    // Sub-phase E sweep (item #13): admin metrics handle threaded into
+    // the policy so group-lookup fail-closed denials advance the
+    // `gateway.admin.rejected_total{reason="group_lookup"}` counter.
+    let admin_metrics = AdminMetrics::new();
+    let admin_policy = build_admin_policy(&cfg.admin_plane, admin_metrics.clone());
     let admin_service = GatewayAdminService::new(
         Arc::new(admin_policy),
         blocklist.clone(),
@@ -278,36 +386,47 @@ pub async fn serve_with_listener_and_signer(
 
     tracing::info!(addr = %local_addr, "lifegw listening");
 
+    // Sub-phase E sweep (item #14): if the cert reloader successfully
+    // loaded above, route accepts through it so cert rotations reach
+    // the per-connection handshake. The reloader's bg watcher already
+    // updates the underlying ArcSwap<ServerConfig>; wiring the source
+    // here ensures the listener consumes the swap. When the reloader
+    // failed to load (e.g. tests with disposable certs), fall back to
+    // the bind result's static acceptor.
+    let acceptor_source = match cert_reloader.as_ref() {
+        Some(r) => AcceptorSource::Reloader((**r).clone()),
+        None => AcceptorSource::Static(acceptor),
+    };
+
     // Run the public plane until shutdown. When it exits (graceful
     // drain or accept error), tear down the admin plane too so we
     // don't leak the bound socket.
-    let result = serve_connections(listener, acceptor, service, shutdown_rx).await;
+    let result = serve_connections(listener, acceptor_source, service, shutdown_rx).await;
     let _ = admin_shutdown_tx.send(());
     let _ = tokio::time::timeout(Duration::from_secs(5), admin_handle).await;
     result
 }
 
-fn build_admin_policy(cfg: &AdminPlaneConfig) -> AdminPolicy {
+fn build_admin_policy(cfg: &AdminPlaneConfig, metrics: AdminMetrics) -> AdminPolicy {
     // Resolve the admin GID — fall back to permissive mode if the
     // group isn't configured OR the lookup fails (matches the lifed
     // pattern; the systemd unit enforces FS-level access in the
-    // group-unconfigured case).
-    let (admin_gid, permissive) = match cfg.unix_socket_group.as_deref() {
+    // group-unconfigured case). Sub-phase E sweep (item #13): the
+    // policy is built with a metric handle so group-lookup
+    // fail-closed denials advance the
+    // `gateway.admin.rejected_total{reason="group_lookup"}` counter.
+    match cfg.unix_socket_group.as_deref() {
         Some(name) => match crate::admin::peercred::group_gid(name) {
-            Ok(Some(gid)) => (gid, false),
+            Ok(Some(gid)) => AdminPolicy::strict(gid).with_metrics(metrics),
             _ => {
                 tracing::warn!(
                     group = name,
                     "unix_socket_group not found in /etc/group; admin plane is in permissive mode"
                 );
-                (0, true)
+                AdminPolicy::permissive().with_metrics(metrics)
             }
         },
-        None => (0, true),
-    };
-    AdminPolicy {
-        admin_gid,
-        permissive,
+        None => AdminPolicy::permissive().with_metrics(metrics),
     }
 }
 
@@ -320,6 +439,29 @@ where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     err.into()
+}
+
+/// Sub-phase E sweep (item #14): hot-swappable source of TLS acceptors.
+///
+/// The accept loop calls [`AcceptorSource::current`] on every new
+/// connection so cert rotations reach the per-connection handshake.
+/// In production this wraps a [`CertReloader`] which holds an
+/// `ArcSwap<rustls::ServerConfig>`; under test (or when the reloader
+/// failed to load initial config) it wraps a single static
+/// `TlsAcceptor` and behaves like Sub-phase D's pre-rotate path.
+#[derive(Clone)]
+enum AcceptorSource {
+    Static(tokio_rustls::TlsAcceptor),
+    Reloader(CertReloader),
+}
+
+impl AcceptorSource {
+    fn current(&self) -> tokio_rustls::TlsAcceptor {
+        match self {
+            AcceptorSource::Static(a) => a.clone(),
+            AcceptorSource::Reloader(r) => r.acceptor(),
+        }
+    }
 }
 
 /// 500-shaped response for inner-service failures. Caller logs the
@@ -337,6 +479,14 @@ fn internal_error_response() -> http::Response<tonic::body::Body> {
 /// per-connection (cheap — it's a tower stack of `Arc`/`Channel`
 /// handles).
 ///
+/// Sub-phase E sweep (item #14): the `acceptor` parameter is now an
+/// `AcceptorSource` rather than a single static `TlsAcceptor`. Each
+/// new accept reads a fresh `TlsAcceptor` from the source so cert
+/// rotations reach the listener accept loop, not just the cert
+/// reloader's `current()` accessor. Pre-existing TLS connections keep
+/// the config they handshook with via rustls's `Arc<ServerConfig>`
+/// semantics — this is non-disruptive to in-flight traffic.
+///
 /// The body-type bridge: hyper feeds the inbound service
 /// `Request<hyper::body::Incoming>`. Tonic's auth + ws + grpc-web
 /// stack expects `Request<tonic::body::Body>`. The per-connection
@@ -344,7 +494,7 @@ fn internal_error_response() -> http::Response<tonic::body::Body> {
 /// `Body::new(incoming)` before calling the tower stack.
 async fn serve_connections<S>(
     listener: tokio::net::TcpListener,
-    acceptor: tokio_rustls::TlsAcceptor,
+    acceptor: AcceptorSource,
     service: S,
     mut shutdown_rx: oneshot::Receiver<()>,
 ) -> LifegwResult<()>
@@ -367,7 +517,10 @@ where
             accept = listener.accept() => {
                 match accept {
                     Ok((sock, _peer)) => {
-                        let acceptor = acceptor.clone();
+                        // Sub-phase E sweep (item #14): refresh the
+                        // TlsAcceptor on each new accept so cert
+                        // rotations reach the per-connection handshake.
+                        let acceptor = acceptor.current();
                         let service = service.clone();
                         tokio::spawn(async move {
                             let tls = match acceptor.accept(sock).await {
@@ -448,7 +601,17 @@ pub async fn serve_with_listener_and_keystore(
     shutdown_rx: oneshot::Receiver<()>,
 ) -> LifegwResult<()> {
     let signer: Arc<dyn KmsSigner> = Arc::new(StaticKeystore::from_keystore(keystore));
-    serve_with_listener_and_signer(cfg, bind, signer, shutdown_rx).await
+    // Test path: serve_with_listener_and_signer will build its own
+    // reloader (no watcher spawned).
+    serve_with_listener_and_signer(cfg, bind, signer, None, shutdown_rx).await
+}
+
+/// Test-visible wrapper around [`build_signer`]. Sub-phase E chaos
+/// battery exercises the fail-closed paths from a `tests/` integration
+/// test which can't reach the `pub(crate)` symbol.
+#[doc(hidden)]
+pub fn build_signer_for_test(cfg: &AuthConfig) -> LifegwResult<Arc<dyn KmsSigner>> {
+    build_signer(cfg)
 }
 
 /// Resolve the configured KMS provider into a concrete [`KmsSigner`]
@@ -475,12 +638,24 @@ pub(crate) fn build_signer(cfg: &AuthConfig) -> LifegwResult<Arc<dyn KmsSigner>>
         }
         #[cfg(feature = "kms-vault")]
         KmsProvider::Vault => match cfg.vault.as_ref() {
-            Some(v) => Ok(Arc::new(crate::auth::kms::VaultTransit::new(
-                v.addr.clone(),
-                v.token.clone(),
-                v.key_name.clone(),
-                v.kid.clone(),
-            )?)),
+            Some(v) => {
+                let mtls = v.mtls.as_ref().map(|m| crate::auth::kms::VaultMtls {
+                    cert_path: m.cert_path.clone(),
+                    key_path: m.key_path.clone(),
+                });
+                let signer = crate::auth::kms::VaultTransit::with_mtls(
+                    v.addr.clone(),
+                    v.token.clone(),
+                    v.key_name.clone(),
+                    v.kid.clone(),
+                    mtls,
+                )?;
+                // I1 fix: renewal spawn moved up to `run_daemon` so
+                // it owns the AbortHandle and can call .abort() on
+                // graceful shutdown. `build_signer` no longer spawns
+                // background tasks (keeps it pure / cancel-safe).
+                Ok(Arc::new(signer))
+            }
             None => Err(LifegwError::Config(
                 "auth.kms_provider = vault but [auth.vault] missing".to_string(),
             )),
@@ -490,17 +665,29 @@ pub(crate) fn build_signer(cfg: &AuthConfig) -> LifegwResult<Arc<dyn KmsSigner>>
             "auth.kms_provider = vault but lifegw built without `kms-vault` feature".to_string(),
         )),
         #[cfg(feature = "kms-aws")]
-        KmsProvider::Aws => Err(LifegwError::Config(
-            "kms-aws provider configured but body deferred to Sub-phase E".to_string(),
-        )),
+        KmsProvider::Aws => match &cfg.aws {
+            Some(a) => {
+                let signer = crate::auth::kms::AwsKms::new(a.key_id.clone(), a.kid.clone());
+                Ok(Arc::new(signer))
+            }
+            None => Err(LifegwError::Config(
+                "auth.kms_provider = aws but [auth.aws] missing".to_string(),
+            )),
+        },
         #[cfg(not(feature = "kms-aws"))]
         KmsProvider::Aws => Err(LifegwError::Config(
             "auth.kms_provider = aws but lifegw built without `kms-aws` feature".to_string(),
         )),
         #[cfg(feature = "kms-gcp")]
-        KmsProvider::Gcp => Err(LifegwError::Config(
-            "kms-gcp provider configured but body deferred to Sub-phase E".to_string(),
-        )),
+        KmsProvider::Gcp => match &cfg.gcp {
+            Some(g) => {
+                let signer = crate::auth::kms::GcpKms::new(g.resource.clone(), g.kid.clone());
+                Ok(Arc::new(signer))
+            }
+            None => Err(LifegwError::Config(
+                "auth.kms_provider = gcp but [auth.gcp] missing".to_string(),
+            )),
+        },
         #[cfg(not(feature = "kms-gcp"))]
         KmsProvider::Gcp => Err(LifegwError::Config(
             "auth.kms_provider = gcp but lifegw built without `kms-gcp` feature".to_string(),
