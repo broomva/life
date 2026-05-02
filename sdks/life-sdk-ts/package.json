@@ -1,0 +1,87 @@
+{
+  "name": "@broomva/life-sdk",
+  "version": "0.1.0",
+  "description": "Public TypeScript SDK for the Life Agent OS — talks to lifegw over grpc-web + WebSocket. Implements the user-facing life.v1.{Agent, Events, Wallet, Identity} services.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./agent": {
+      "types": "./dist/services/agent.d.ts",
+      "import": "./dist/services/agent.js"
+    },
+    "./events": {
+      "types": "./dist/services/events.d.ts",
+      "import": "./dist/services/events.js"
+    },
+    "./wallet": {
+      "types": "./dist/services/wallet.d.ts",
+      "import": "./dist/services/wallet.js"
+    },
+    "./identity": {
+      "types": "./dist/services/identity.d.ts",
+      "import": "./dist/services/identity.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js"
+    },
+    "./ws": {
+      "types": "./dist/ws.d.ts",
+      "import": "./dist/ws.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "example:quickstart": "tsx examples/quickstart.ts",
+    "example:streaming": "tsx examples/streaming.ts"
+  },
+  "keywords": [
+    "life-agent-os",
+    "lifegw",
+    "agent-os",
+    "grpc-web",
+    "websocket",
+    "ai-agent",
+    "broomva"
+  ],
+  "author": "Broomva <carlos@broomva.tech>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/broomva/life",
+    "directory": "sdks/life-sdk-ts"
+  },
+  "homepage": "https://broomva.tech",
+  "bugs": {
+    "url": "https://github.com/broomva/life/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/ws": "^8.18.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.7",
+    "vitest": "^3.0",
+    "ws": "^8.18.0"
+  },
+  "peerDependencies": {
+    "ws": ">=8"
+  },
+  "peerDependenciesMeta": {
+    "ws": {
+      "optional": true
+    }
+  }
+}

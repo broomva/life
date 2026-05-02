@@ -1,14 +1,28 @@
-# BRO-42: Multi-framework Haima SDK
+# Life Agent OS — Language SDKs
 
 ## Overview
 
-Multi-framework SDKs for x402 payments through the Haima facilitator.
-The Stripe Connect play: become the payment layer for AI agent platforms.
+Public-facing client libraries for the Life Agent OS Rust monorepo.
+Two product areas live here:
+
+1. **`life-sdk-ts`** — public TypeScript SDK over `lifegw` (M8). Browsers,
+   Node apps, and CLIs talk to the Life Agent OS through this client.
+   Wraps the four user-facing services from `life.v1.*` (Agent, Events,
+   Wallet, Identity) plus the WebSocket transport for `Agent.StreamSession`.
+2. **`haima-py` + `haima-ts`** (BRO-42) — multi-framework SDKs for x402
+   payments through the Haima facilitator. The Stripe Connect play.
 
 ## Structure
 
 ```
-BRO-42/
+sdks/
+├── life-sdk-ts/       # Public Life Agent OS SDK (npm: @broomva/life-sdk) — M8
+│   ├── src/           # client, transport, ws, errors
+│   │   ├── proto/     # Hand-curated TS mirror of proto/life/v1/*
+│   │   └── services/  # AgentClient, EventsClient, WalletClient, IdentityClient
+│   ├── examples/      # quickstart, streaming
+│   └── tests/         # vitest — 49 tests across 6 files
+│
 ├── haima-py/          # Python SDK (PyPI: haima)
 │   ├── src/haima/     # Core: client, wallet, types, x402
 │   │   └── integrations/  # LangChain, CrewAI
