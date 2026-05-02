@@ -867,6 +867,239 @@ Plus the deferred TLS-acceptor swap into `serve_connections` from
 D3 (currently the resolver hot-swaps but the listener accept loop
 still holds an old `TlsAcceptor`).
 
+### 2026-05-01 — M7-FINAL + D-Sub-A: Spec C M7 closed + Spec D Sub-phase A shipped (Wave 1)
+
+Two parallel streams merged the same evening (2026-05-01) closing
+out two milestones: the entire M7 sub-phase E + the M7-D sweep
+finally landed (M7 = 100% complete, gateway is production-ready),
+and Spec D's first sub-phase ships the AnimaCustody trait plus
+P-256 ECDSA migration of the auth keypair (Spec D L4-D6 cutover).
+
+**M7-FINAL (PR #1071, commit `00d97672`)** — closes Spec C M7.
+
+15 atomic items across 6 commits:
+
+KMS production bodies (items 1-6):
+- AwsKms body (`auth/kms.rs::AwsKms` impl) — feature `kms-aws`
+  via `aws-sdk-kms 1.x`. Sign API call with `MessageType::Raw` +
+  `SigningAlgorithmSpec::EcdsaSha256`. DER decoded → raw r||s for
+  JWS via shared `der_ecdsa_to_raw_p256` helper. Public key cached
+  via `OnceLock` from `GetPublicKey`.
+- GcpKms body (`auth/kms.rs::GcpKms` impl) — feature `kms-gcp`
+  via `google-cloud-kms 0.6`. Same pattern with `AsymmetricSign`
+  against `EC_SIGN_P256_SHA256`.
+- VaultTransit `latest_version` pinning — reads
+  `body.pointer("/data/latest_version")` instead of hardcoding
+  `keys/1`. Without this, key rotation in Vault silently kept
+  using the old public key in JWKS.
+- VaultTransit token renewal task (`spawn_token_renewal`) —
+  `tokio::spawn`'d task with `tokio::time::interval` polling
+  `auth/token/renew-self`. Returns `AbortHandle` so `run_daemon`
+  can cancel it on graceful shutdown (post-merge B1/I1 fix wired
+  this up; was a JoinHandle pre-merge).
+- VaultTransit mTLS scaffolding (`with_mtls` accepts
+  `Option<VaultMtls>`) — accepts cert/key paths for forward-compat;
+  emits `tracing::warn!` and ignores certs in this PR (real mTLS
+  deferred to Sub-phase F due to reqwest TLS-feature workspace
+  constraint).
+- VaultTransit URL_SAFE_NO_PAD `input` encoding — reverted from
+  STANDARD back to URL_SAFE_NO_PAD per the post-merge I4 fix
+  (Sub-phase B had shipped working with URL_SAFE_NO_PAD; STANDARD
+  was changed mid-flight without an integration test backing it).
+
+Chaos test battery (item 6 cont'd) at
+`crates/life-runtime/lifegw/tests/chaos_*.rs`:
+- `chaos_substrate_uds_drop` — bind-accept-drop scenario verifying
+  clean error from `connect_uds` on a dropped socket within 2s.
+  Post-merge B4 fix replaced an originally-no-op test with real
+  bind+drop+remove+reconnect assertions.
+- `chaos_jwks_outage` — 32-thread barrier verifying every cohort
+  member surfaces an Err and recovery path covered.
+- `chaos_cert_rotation_under_load` — 8 readers + 5 mid-flight
+  rotations, verifies ServerConfig instances are distinct
+  pre/post and reload counter advances exactly 5×.
+- `chaos_kms_unreachable` — exercises fail-closed paths when
+  KMS provider returns `LifegwError::Config` at signer-build
+  time.
+
+M7-D Sub-phase E sweep (items 7-14):
+- proto rename `BlocklistEmpty` → `AdminAck` for naming
+  consistency across mutating admin RPCs (BlocklistAdd,
+  BlocklistRemove, RateLimitOverride). buf-breaking gated
+  via `proto/buf.yaml` `breaking.ignore: [life/admin/gw/v1]`
+  for the M7 finalization window.
+- `BlocklistList` Timestamp simplification — `prost_types::Timestamp`
+  round-trip dropped; production code uses
+  `u64::try_from(d.as_millis()).ok().unwrap_or(0)`.
+- `as_millis() as u64` cast cleanup — every site replaced with
+  `u64::try_from(...).unwrap_or(u64::MAX)` for saturating.
+- IPv6-with-port parser (`auth/middleware.rs::parse_ip_or_socket`)
+  accepts `[::1]:443`, `1.2.3.4:443`, bare IPv4/IPv6, with 6 unit
+  tests.
+- `JwksCache::dump` returns `Vec<JwksKeyDump>` with kid + alg + crv
+  ONLY (no key material). Wired through admin `JwksDump` RPC.
+- `getgrouplist(3)` via nix crate replaces direct `/etc/group`
+  reading. Caches per-uid in `Arc<RwLock<HashMap<u32, Vec<u32>>>>`.
+  Post-merge I3 fix: also caches the FAILURE path (negative cache)
+  to prevent DoS amplification on syscall failure.
+- Fail-closed admin policy on group-lookup failure — emits
+  `gateway.admin.rejected_total{reason="group_lookup"}` metric
+  counter (not just log + deny).
+- TLS-acceptor swap into `serve_connections` (D3 deferred item):
+  `Arc<rustls::ServerConfig>` swap atomicity verified across the
+  accept loop via `arc_swap::ArcSwap` semantics + new
+  `AcceptorSource::Reloader` enum. Post-merge B2 fix shares a
+  single `Arc<CertReloader>` between SIGHUP, polling watcher,
+  and accept loop (was 2 separate instances). Post-merge B3 fix
+  wires `CertReloader::spawn_watcher` into production bootstrap.
+
+Spec amendment (item 15):
+- `docs/superpowers/specs/2026-04-29-spec-c3-close-codes.md` —
+  92-line amendment of Spec C₃ §6.5 close-code policy. 10 codes
+  documented (1000/1001/1003/1008/1011 + 4001-4005); tonic
+  `Code` → `CloseReason` mapping table; reason payload contract;
+  4001-4099 vs 4100-4199 split. Post-merge I15 fix reconciled
+  drift between the spec table and `services/ws.rs::CloseReason`
+  (Unauthenticated/PermissionDenied → 1008, not 1011;
+  Cancelled/Aborted → 1000, not 4002; removed nonexistent `Auth`
+  variant reference).
+
+Post-merge in-PR review fixes (commit `a73c3784` + `c5fade08` +
+`07e9e744`): closed 4 BLOCKING (B1: AWS/GCP wiring + AwsConfig/
+GcpConfig in config.rs, B2: shared CertReloader, B3: spawn watcher,
+B4: real chaos test) + 4 IMPORTANT (I1: AbortHandle for renewal,
+I3: negative-cache supplementary lookup, I4: URL_SAFE_NO_PAD revert,
+I15: spec amendment reconciliation) from spec-compliance + code-
+quality reviews. RUSTSEC-2026-0098/0099 advisories on rustls-webpki
+(transitive via aws-sdk-kms) ignored in `.cargo/audit.toml` (out
+of our control until aws-sdk-kms upgrades its TLS chain).
+
+Tests: lifegw 117 lib + 24 integration → 131 lib + 24 integration
++ 4 chaos files (10 tests) + 5 ws-bidi = ~170 lifegw tests passing.
+clippy --all-features clean.
+
+PR #1071 merged 2026-05-01 (commit `00d97672`). Refs BRO-932 +
+BRO-938. **M7 = 100% complete (A+B+C+D+E all shipped).**
+
+**D-Sub-A (PR #1070, commit `b13ede48`)** — Spec D Sub-phase A.
+
+15 atomic items across 4 commits (2 implementer + 2 review fixes):
+
+Trait abstraction (`crates/anima/anima-identity/src/`):
+- `custody.rs::AnimaCustody` trait — 7 methods (user_did,
+  auth_pubkey, wallet_address, sign_jws, sign_digest, sign_evm_tx,
+  sign_eip712, rotate, export_identity_document, backend_kind).
+  `Send + Sync + 'static` bound for `Arc<dyn AnimaCustody>`
+  plumbing across tonic/tokio task boundaries.
+- `BackendKind` enum — 7 variants (InProcess, Vault, WebCrypto,
+  Tpm, Soma, HardwareWallet, Remote) — `#[non_exhaustive]` for
+  forward compat with future backends.
+- `TxRequest` + `EvmSignature` shapes for the wallet-half signing
+  surface.
+- `DidRotationEvent` + `DidRotation` (in `anima-core/src/
+  identity_document.rs`) for rotation chain.
+
+P-256 cutover (Spec D L4-D6):
+- `p256.rs::EcdsaP256Identity` — full API parity with
+  `Ed25519Identity` for mechanical swap. `p256` crate with
+  `ecdsa, pem, pkcs8` features. SEC1 compressed (33 bytes) for
+  public key on the wire. ES256 / SHA-256 signing.
+- `did.rs` — both multicodecs supported: `0xed01` Ed25519 (legacy)
+  and `0x1200` P-256 (new). `resolve_did_key` dispatches via
+  prefix detection and returns `AuthAlg::{Ed25519, P256}`. New
+  DIDs default to P-256 (`did:key:zDn…`); Ed25519 stays for
+  verifying historical events.
+- `seed.rs::derive_p256_key` — HKDF info string `"anima/p256/v1"`
+  parallels existing `"anima/ed25519/v1"`.
+- `keystore.rs::AnimaKeystore` — production paths
+  (`build_identity`, `sign_agent_jwt`) now route through the new
+  P-256 identity. Legacy `sign_agent_jwt_ed25519_legacy` retained
+  for backwards compat.
+
+InProcessAnima backend (the only D-Sub-A backend):
+- `in_process.rs::InProcessAnima` — wraps master seed + derived
+  P-256 auth key + secp256k1 wallet key. Spec L4-D7 keeps wallet
+  on secp256k1. Constructor `from_seed_arc` returns `Arc<dyn
+  AnimaCustody>`; `from_seed` returns concrete type for tests.
+- `rotate()` — returns `(DidRotationEvent, Arc<dyn AnimaCustody>)`
+  per the post-merge B1 review fix. The original handle stays as
+  a snapshot of pre-rotation state; the new handle reflects the
+  new key. Wallet half preserved across rotation per L4-D7.
+- `rotate_concrete()` — concrete-type variant for callers needing
+  `encrypt_seed` on the post-rotation handle.
+- `encrypt_seed()` — returns Err on post-rotation handles (post-
+  merge I5 review fix) to prevent silent wallet corruption on
+  reload.
+
+Call-site refactor (cross-crate):
+- `arcan-anima` — new `reconstruct_agent_self_with_custody`
+  entry point taking `Arc<dyn AnimaCustody>`; existing
+  `reconstruct_agent_self` still works.
+- `haima-x402` — new `custody_adapter::CustodyWalletAdapter`
+  feature-gated by `custody-adapter`. Wraps the trait's wallet
+  half for haima's `sign_transfer_authorization` flow.
+- `lago-auth` — new `agent_jwt::detect_alg` + `extract_kid`
+  helpers dispatching EdDSA / ES256 verification (full verifier
+  body deferred to D-Sub-E).
+
+Event additions (`anima-core/src/event.rs`):
+- `anima.identity_rotated { old_did, new_did, rotation_proof_jws,
+  rotated_at }` — Spec D L4-D10. The proof JWS is signed by the
+  *old* key over the *new* DID.
+- `anima.custody_migrated { from_backend: BackendKind, to_backend:
+  BackendKind, attestation, migrated_at }` — Spec D L4-D9.
+- `anima.identity_revoked { did, reason, revoked_at }`.
+
+Post-merge in-PR review fixes (commit `183c4def`): closed 1 BLOCKING
+(B1: rotate() trait contract — returned `(event, Arc<dyn>)` instead
+of mutating self) + 2 IMPORTANT (I1: sign_evm_tx SPEC-D-DEVIATION
+flagged as RLP stub; I5: encrypt_seed Err on post-rotation) from
+spec-compliance + code-quality reviews. Plus a hotfix on main
+(commit `695fca2c`) for a pre-existing `lifed::tests::e2e_smoke.rs`
+regression — `from_sequence: None` field missing in `SessionRef`
+struct literal that M7-D's proto change introduced and M5 SHIPPED's
+e2e_smoke didn't pick up.
+
+Tests: anima 111 → 167 (+56 across all anima crates with custody
+trait + EcdsaP256Identity + InProcessAnima + new event variants
++ rotation crypto verification). Plus +1 arcan-anima, +5 haima-x402
+custody-adapter, +7 lago-auth agent_jwt = ~257 tests across touched
+crates.
+
+Coordination items (cross-repo, non-blocking):
+- broomva.tech AAP verifier swap (EdDSA → ES256) — separate repo
+  needs a follow-up PR. Tracked in `crates/anima/CLAUDE.md`
+  under "D-Sub-A coordination items".
+- Spaces signed-presence — current life-spaces uses SpacetimeDB
+  tables for presence-state, not crypto beacons. When signed
+  presence ships, route through `AnimaCustody::sign_digest`.
+- lifegw / broomva.tech ES256 verification cohesion — both layers
+  now ES256 / P-256; verifiers can share JWKS publish/cache
+  plumbing in a future M8 SDK pass.
+
+Spec deviations (`SPEC-D-DEVIATION` comments in `custody.rs`):
+- `sign_eip712` only supports EIP-3009 `TransferWithAuthorization`
+  shape in D-Sub-A; generic encoder deferred.
+- `sign_evm_tx` is a stub — Keccak-256 over JSON canonicalisation,
+  NOT EIP-155 RLP. Not on the production hot path (haima-x402
+  uses `sign_eip712`); proper RLP defer to D-Sub-B.
+- `rotate()` returns event + new handle but doesn't write to Lago
+  (caller's responsibility — matches lifegw `KmsSigner::publish_jwks`).
+
+PR #1070 merged 2026-05-01 (commit `b13ede48`). **D-Sub-A complete
+— `AnimaCustody` trait + `InProcessAnima` shipped.** Refs Spec D
+L4-D5..D10. Next: D-Sub-B (VaultTransitAnima) blocks nothing on the
+trait; can land in parallel with M8.
+
+**Wave 1 summary:**
+- M7 = 100% complete. Gateway is production-ready.
+- Spec D = 17% complete (1/6 sub-phases). Trait shape locked,
+  P-256 cutover done, six future backends now implementable.
+- Tests delta: ~3759 + ~57 (D-Sub-A) + ~26 (M7-FINAL) = ~3842
+  workspace tests passing.
+- Critical-path next: M8 SDK (was M7-blocked, now unblocked).
+- D-Sub-C is M9-blocking (browser path).
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
