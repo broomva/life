@@ -47,6 +47,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Canonical proto tree (M3): hosts kernel.proto + the aios.v1.* vocabulary.
     let canonical_proto_root = life_root.join("proto");
     let kernel_proto = canonical_proto_root.join("life/kernel/v1/kernel.proto");
+    // Spec D D-Sub-E: soma admin custody-oracle service. Sibling of
+    // `life.kernel.v1.KernelService` — mounted on the same admin UDS
+    // (SO_PEERCRED + life-runtime group), but in a separate proto
+    // package so per-RPC RBAC stays obvious.
+    let custody_proto = canonical_proto_root.join("life/admin/kernel/v1/custody.proto");
 
     // Legacy v0 service protos still live alongside this crate's manifest
     // until M3.5 / M4 migrates them to proto/life/v1/ + proto/life/admin/v1/.
@@ -58,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
     legacy_protos.sort();
 
-    let mut all_protos = vec![kernel_proto];
+    let mut all_protos = vec![kernel_proto, custody_proto];
     all_protos.extend(legacy_protos);
 
     for p in &all_protos {

@@ -62,6 +62,18 @@ pub mod broomva_life_kernel_v1 {
 /// `aios-proto` directly.
 pub use aios_proto::aios::v1 as aios_v1;
 
+/// Generated prost + tonic code for the
+/// `life.admin.kernel.v1.CustodyOracle` service.
+///
+/// Spec D D-Sub-E: soma's admin-plane custody-oracle. Sibling of
+/// [`pb::kernel_service_server::KernelService`] — mounted on the same
+/// admin UDS, but in a separate proto package so per-RPC RBAC and
+/// versioning evolve independently.
+#[allow(unused_qualifications, clippy::all, missing_docs)]
+pub mod custody {
+    tonic::include_proto!("life.admin.kernel.v1");
+}
+
 /// Shared wire DTOs — `LifeError`, `Attribution`, `Pagination`, and the
 /// typed ID wrappers used across every `life.*` service proto.
 #[allow(unused_qualifications, clippy::all, missing_docs)]
