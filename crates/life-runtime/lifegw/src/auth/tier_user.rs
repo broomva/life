@@ -226,10 +226,8 @@ mod tests {
         // Verifiers dispatch on this audience to route Tier-User vs
         // Tier-2 enforcement.
         let signer = Arc::new(StaticKeystore::generate_dev().expect("ks"));
-        let minter = TierUserMinter::with_defaults(
-            signer as Arc<dyn KmsSigner>,
-            DEFAULT_TIER_USER_TTL,
-        );
+        let minter =
+            TierUserMinter::with_defaults(signer as Arc<dyn KmsSigner>, DEFAULT_TIER_USER_TTL);
         assert_eq!(minter.audience(), "anima.user-cap");
         assert_ne!(minter.audience(), "lifed");
     }

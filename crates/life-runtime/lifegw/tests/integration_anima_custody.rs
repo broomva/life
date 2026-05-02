@@ -329,8 +329,7 @@ async fn sign_wallet_strips_v_byte() {
     let mut matched = false;
     for cand in 0u8..=1 {
         let recid = RecoveryId::try_from(cand).unwrap();
-        if let Ok(rec) =
-            K256VerifyingKey::recover_from_prehash(&digest, &signature, recid)
+        if let Ok(rec) = K256VerifyingKey::recover_from_prehash(&digest, &signature, recid)
             && rec == expected
         {
             matched = true;
@@ -420,7 +419,7 @@ async fn mint_session_cap_returns_verifiable_jwt() {
 #[tokio::test(flavor = "multi_thread")]
 async fn auth_layer_rejects_missing_bearer() {
     let rig = TestRig::build().await;
-    let body = json!({ "user_id": ALICE, "digest_b64": B64_STANDARD.encode(&[0u8; 32]) });
+    let body = json!({ "user_id": ALICE, "digest_b64": B64_STANDARD.encode([0u8; 32]) });
     let req = Request::builder()
         .method("POST")
         .uri("/sign_auth")
@@ -437,7 +436,7 @@ async fn soma_uds_unconfigured_returns_501() {
     // custody-oracle UDS, the proxy routes degrade gracefully to
     // 501 Not Implemented. lifegw stays running.
     let (_rig, router_no_soma) = TestRig::build_without_soma().await;
-    let body = json!({ "user_id": ALICE, "digest_b64": B64_STANDARD.encode(&[0u8; 32]) });
+    let body = json!({ "user_id": ALICE, "digest_b64": B64_STANDARD.encode([0u8; 32]) });
     let req = Request::builder()
         .method("POST")
         .uri("/sign_auth")
@@ -505,10 +504,7 @@ async fn enroll_passkey_extracts_did_from_attestation() {
             CborValue::Text("fmt".into()),
             CborValue::Text("none".into()),
         ),
-        (
-            CborValue::Text("attStmt".into()),
-            CborValue::Map(vec![]),
-        ),
+        (CborValue::Text("attStmt".into()), CborValue::Map(vec![])),
         (
             CborValue::Text("authData".into()),
             CborValue::Bytes(auth_data),

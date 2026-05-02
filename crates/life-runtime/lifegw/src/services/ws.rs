@@ -1340,12 +1340,18 @@ mod tests {
                 ("sec-websocket-version", "13"),
                 ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
                 ("x-life-sid", "s"),
-                ("sec-websocket-protocol", "life.v1.agent, bearer.eyJabc.def.ghi"),
+                (
+                    "sec-websocket-protocol",
+                    "life.v1.agent, bearer.eyJabc.def.ghi",
+                ),
             ],
             WS_UPGRADE_PATH,
         );
         let parsed = parse_upgrade_request(&req).expect("parse");
-        assert_eq!(parsed.tier2_bearer.as_deref(), Some("Bearer eyJabc.def.ghi"));
+        assert_eq!(
+            parsed.tier2_bearer.as_deref(),
+            Some("Bearer eyJabc.def.ghi")
+        );
     }
 
     #[test]

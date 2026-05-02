@@ -35,6 +35,6 @@ pub use keystore::Keystore;
 pub use kms::{KmsSigner, StaticKeystore};
 pub use middleware::AuthLayer;
 pub use scope::{RequiredScope, ScopeError, enforce as enforce_scope, required_scope};
+pub use tier_user::{DEFAULT_TIER_USER_TTL, TierUserClaims, TierUserMinter};
 pub use tier1::{DEFAULT_TIER, Tier1Claims};
 pub use tier2::Tier2Claims;
-pub use tier_user::{DEFAULT_TIER_USER_TTL, TierUserClaims, TierUserMinter};

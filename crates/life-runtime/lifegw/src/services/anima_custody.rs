@@ -129,10 +129,7 @@ pub fn router(state: AnimaCustodyState) -> Router {
     Router::new()
         .route("/sign_auth", post(sign_auth_handler))
         .route("/sign_wallet", post(sign_wallet_handler))
-        .route(
-            "/get_auth_pubkey/{user_id}",
-            get(get_auth_pubkey_handler),
-        )
+        .route("/get_auth_pubkey/{user_id}", get(get_auth_pubkey_handler))
         .route(
             "/get_wallet_pubkey/{user_id}",
             get(get_wallet_pubkey_handler),
@@ -170,8 +167,8 @@ pub struct PubkeyResp {
 #[derive(Debug, Deserialize)]
 pub struct MintSessionCapBody {
     pub user_id: String,
-    /// Base64-encoded WebAuthn assertion (CBOR `authenticatorData`
-    /// + raw signature). Forward-compat shape — D-Sub-C verifies the
+    /// Base64-encoded WebAuthn assertion (CBOR `authenticatorData` +
+    /// raw signature). Forward-compat shape — D-Sub-C verifies the
     /// signature only when the body is a well-formed P-256 ECDSA
     /// assertion.
     #[serde(default)]
@@ -400,9 +397,10 @@ async fn mint_session_cap_handler(
     // against the user's enrolled auth pubkey via soma's custody-oracle.
     // When the assertion is absent (Rust callers refreshing a cap from
     // a still-valid Tier-User bearer), trust the bearer and re-mint.
-    if let (Some(assertion_b64), Some(_client_data_b64)) =
-        (body.passkey_assertion_b64.as_ref(), body.client_data_json_b64.as_ref())
-    {
+    if let (Some(assertion_b64), Some(_client_data_b64)) = (
+        body.passkey_assertion_b64.as_ref(),
+        body.client_data_json_b64.as_ref(),
+    ) {
         let _assertion = decode_b64_either(assertion_b64).map_err(|e| {
             ApiError::bad_request("bad_assertion", format!("decode passkey assertion: {e}"))
         })?;
@@ -436,9 +434,8 @@ async fn enroll_passkey_handler(
     let attestation_bytes = decode_b64_either(&body.attestation_object_b64).map_err(|e| {
         ApiError::bad_request("bad_attestation", format!("decode attestation: {e}"))
     })?;
-    let auth_pubkey = parse_attestation_object(&attestation_bytes).map_err(|e| {
-        ApiError::bad_request("bad_attestation", format!("parse attestation: {e}"))
-    })?;
+    let auth_pubkey = parse_attestation_object(&attestation_bytes)
+        .map_err(|e| ApiError::bad_request("bad_attestation", format!("parse attestation: {e}")))?;
 
     // Derive the DID from the SEC1-compressed P-256 pubkey. Mirrors
     // anima-identity's `did::generate_did_key_p256` (multicodec 0x1200).
@@ -576,8 +573,8 @@ fn did_key_p256(pubkey_sec1_compressed: &[u8; 33]) -> String {
 /// the stable wire shape we keep here.
 fn parse_attestation_object(bytes: &[u8]) -> Result<[u8; 33], String> {
     use ciborium::value::Value as CborValue;
-    let value: CborValue = ciborium::de::from_reader(bytes)
-        .map_err(|e| format!("attestation object cbor: {e}"))?;
+    let value: CborValue =
+        ciborium::de::from_reader(bytes).map_err(|e| format!("attestation object cbor: {e}"))?;
     let map = match value {
         CborValue::Map(m) => m,
         _ => return Err("attestation object must be a CBOR map".to_string()),
@@ -647,8 +644,8 @@ fn parse_auth_data_cred_pubkey(auth_data: &[u8]) -> Result<[u8; 33], String> {
 /// - y (-3)   = 32 bytes
 fn parse_cose_key_p256(bytes: &[u8]) -> Result<[u8; 33], String> {
     use ciborium::value::Value as CborValue;
-    let value: CborValue = ciborium::de::from_reader(bytes)
-        .map_err(|e| format!("cose_key cbor: {e}"))?;
+    let value: CborValue =
+        ciborium::de::from_reader(bytes).map_err(|e| format!("cose_key cbor: {e}"))?;
     let map = match value {
         CborValue::Map(m) => m,
         _ => return Err("COSE_Key must be a CBOR map".to_string()),
@@ -706,14 +703,14 @@ mod tests {
 
     #[test]
     fn decode_digest_32_rejects_short() {
-        let too_short = B64_STANDARD.encode(&[0u8; 16]);
+        let too_short = B64_STANDARD.encode([0u8; 16]);
         let err = decode_digest_32(&too_short).expect_err("too short rejected");
         assert_eq!(err.code, "bad_digest");
     }
 
     #[test]
     fn decode_digest_32_accepts_32() {
-        let ok = B64_STANDARD.encode(&[0u8; 32]);
+        let ok = B64_STANDARD.encode([0u8; 32]);
         let bytes = decode_digest_32(&ok).unwrap();
         assert_eq!(bytes.len(), 32);
     }
@@ -777,10 +774,22 @@ mod tests {
         let y = raw[33..65].to_vec();
         let cose = CborValue::Map(vec![
             (CborValue::Integer(1.into()), CborValue::Integer(2.into())),
-            (CborValue::Integer(3.into()), CborValue::Integer((-7i64).into())),
-            (CborValue::Integer((-1i64).into()), CborValue::Integer(1.into())),
-            (CborValue::Integer((-2i64).into()), CborValue::Bytes(x.clone())),
-            (CborValue::Integer((-3i64).into()), CborValue::Bytes(y.clone())),
+            (
+                CborValue::Integer(3.into()),
+                CborValue::Integer((-7i64).into()),
+            ),
+            (
+                CborValue::Integer((-1i64).into()),
+                CborValue::Integer(1.into()),
+            ),
+            (
+                CborValue::Integer((-2i64).into()),
+                CborValue::Bytes(x.clone()),
+            ),
+            (
+                CborValue::Integer((-3i64).into()),
+                CborValue::Bytes(y.clone()),
+            ),
         ]);
         let mut buf = Vec::new();
         ciborium::ser::into_writer(&cose, &mut buf).unwrap();
@@ -794,9 +803,10 @@ mod tests {
     fn parse_cose_key_rejects_non_p256() {
         // kty=1 (OKP, Ed25519) — must reject.
         use ciborium::value::Value as CborValue;
-        let cose = CborValue::Map(vec![
-            (CborValue::Integer(1.into()), CborValue::Integer(1.into())),
-        ]);
+        let cose = CborValue::Map(vec![(
+            CborValue::Integer(1.into()),
+            CborValue::Integer(1.into()),
+        )]);
         let mut buf = Vec::new();
         ciborium::ser::into_writer(&cose, &mut buf).unwrap();
         let err = parse_cose_key_p256(&buf).expect_err("must reject OKP");
@@ -808,7 +818,10 @@ mod tests {
         use ciborium::value::Value as CborValue;
         let cose = CborValue::Map(vec![
             (CborValue::Integer(1.into()), CborValue::Integer(2.into())),
-            (CborValue::Integer((-1i64).into()), CborValue::Integer(1.into())),
+            (
+                CborValue::Integer((-1i64).into()),
+                CborValue::Integer(1.into()),
+            ),
             (
                 CborValue::Integer((-2i64).into()),
                 CborValue::Bytes(vec![0u8; 16]),
