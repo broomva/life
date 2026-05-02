@@ -387,12 +387,23 @@ fn bearer_from_authorization<B>(req: &Request<B>) -> Option<String> {
 /// else. The 101-response side (see `upgrade_response`) keeps echoing
 /// only the canonical `life.v1.agent` subprotocol — the bearer entry
 /// is consumed by the gateway.
+///
+/// Spec D D-Sub-C review fix (I-7): only outer whitespace is trimmed
+/// before this point — inner whitespace, control characters, and
+/// commas would otherwise slip through. JWS shape is `<base64url>.<base64url>.<base64url>`
+/// (3 segments separated by `.`) and only contains URL-safe-base64
+/// alphabet (`A-Z`, `a-z`, `0-9`, `-`, `_`, `=`); a token containing
+/// any whitespace, control char, or comma is malformed and MUST be
+/// rejected before flowing into the auth pipeline.
 fn bearer_from_subprotocol<B>(req: &Request<B>) -> Option<String> {
     let header = req.headers().get("sec-websocket-protocol")?.to_str().ok()?;
     for raw in header.split(',') {
         let part = raw.trim();
         if let Some(token) = part.strip_prefix("bearer.")
             && !token.is_empty()
+            && token
+                .chars()
+                .all(|c| !c.is_whitespace() && !c.is_control() && c != ',')
         {
             return Some(format!("Bearer {token}"));
         }
