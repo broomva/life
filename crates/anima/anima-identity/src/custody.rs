@@ -26,19 +26,25 @@
 //!   the NEW post-rotation custody; the original handle remains a valid
 //!   snapshot of pre-rotation state for verifying historical signatures.
 //!
-//! - **`sign_evm_tx` is currently a stub for D-Sub-A**: the implementation
-//!   in `InProcessAnima` Keccak-256-hashes a JSON canonicalisation of the
-//!   `TxRequest` rather than computing the EIP-155 RLP digest. Signatures
-//!   produced by `sign_evm_tx` will NOT verify as valid Ethereum/Base
-//!   transactions. This is acceptable in D-Sub-A only because the sole
-//!   production hot path that signs EVM transactions is haima-x402's
-//!   EIP-3009 `transferWithAuthorization` flow, which goes through
-//!   `sign_eip712` (which IS production-grade — it delegates to
-//!   `haima_wallet::sign_transfer_authorization`). A proper RLP-based
-//!   `sign_evm_tx` is deferred to a follow-up PR (likely D-Sub-B's Vault
-//!   backend will need it for transit-signed Base transactions). Callers
-//!   that need broadcast-ready EIP-155 signatures TODAY MUST go through
-//!   haima-wallet directly until this is fixed.
+//! - **`sign_evm_tx` — D-Sub-B fixed (with v-byte caveat)**: D-Sub-A
+//!   shipped a JSON-canonicalisation stub that did not produce
+//!   transactions of any kind. D-Sub-B replaces the stub with proper
+//!   EIP-1559 RLP encoding via `crate::rlp::encode_eip1559_unsigned` +
+//!   `crate::rlp::keccak256`. Both `InProcessAnima` and
+//!   `VaultTransitAnima` go through the same shared RLP path.
+//!
+//!   **v-byte semantics (I1 review note)**: the returned 65-byte
+//!   `r||s||v` signature uses the **legacy `v ∈ {27, 28}` form** — the
+//!   haima-wallet / EIP-3009 / Ethereum-`ecrecover` convention. This
+//!   is the right shape for the production hot path (haima-x402 +
+//!   EIP-3009 typed-data signing). For broadcasting a raw EIP-1559
+//!   typed envelope on-chain (which expects `y_parity ∈ {0, 1}` in
+//!   the signed payload, NOT 27/28), the caller MUST subtract 27 from
+//!   the last byte before splicing into the envelope. We deliberately
+//!   keep the 27/28 form here for symmetry with haima-wallet's
+//!   `LocalSigner::sign_transfer_authorization`. Direct EIP-1559
+//!   broadcasting from this trait surface is a follow-up — until then,
+//!   raw broadcasting requires a caller-side `v -= 27` transform.
 //!
 //! - `export_identity_document()` returns the `AgentIdentityDocument` shape
 //!   from `anima-core`. The `rotation_chain` field is added in this PR

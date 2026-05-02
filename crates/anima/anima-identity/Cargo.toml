@@ -14,6 +14,14 @@ categories.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Default: no external KMS — `InProcessAnima` only.
+default = []
+# Spec D D-Sub-B: HashiCorp Vault Transit backend (`VaultTransitAnima`).
+# Pulls reqwest's blocking client + tokio time primitives. Mirrors the
+# lifegw `kms-vault` feature pattern.
+kms-vault = ["dep:reqwest", "dep:tokio"]
+
 [dependencies]
 anima-core.workspace = true
 aios-protocol.workspace = true
@@ -52,6 +60,18 @@ bs58.workspace = true
 # Logging
 tracing.workspace = true
 
+# Spec D D-Sub-B: Vault backend uses reqwest's blocking client + tokio
+# for the optional token-renewal task. Both are workspace deps already
+# pulled by lifegw; here we gate them behind `kms-vault` so a default
+# build of anima-identity stays slim.
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
 anima-lago.workspace = true
+# Spec D D-Sub-B integration tests mock Vault's HTTP API to verify the
+# request shapes (input encoding, marshaling_algorithm, latest_version
+# pinning) without standing up a real Vault server. wiremock is already
+# a workspace dev-dep used by lifegw's JWKS integration test.
+wiremock = { workspace = true }

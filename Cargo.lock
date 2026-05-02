@@ -226,6 +226,7 @@ dependencies = [
  "k256",
  "p256",
  "rand 0.8.6",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
@@ -234,6 +235,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wiremock",
  "zeroize",
 ]
 
@@ -4941,7 +4943,7 @@ name = "lago-auth"
 version = "0.3.0"
 dependencies = [
  "axum 0.8.8",
- "base64",
+ "base64 0.22.1",
  "http-body-util",
  "jsonwebtoken",
  "lago-core",
