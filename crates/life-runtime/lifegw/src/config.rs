@@ -235,6 +235,14 @@ pub struct AuthConfig {
     /// `kms_provider = "vault"`.
     #[serde(default)]
     pub vault: Option<VaultConfig>,
+    /// AWS KMS configuration. Required when `kms_provider = "aws"`.
+    /// Sub-phase E item #1.
+    #[serde(default)]
+    pub aws: Option<AwsConfig>,
+    /// GCP Cloud KMS configuration. Required when `kms_provider = "gcp"`.
+    /// Sub-phase E item #2.
+    #[serde(default)]
+    pub gcp: Option<GcpConfig>,
     /// Path to which the gateway publishes its Tier-2 JWKS document.
     /// `None` disables publish (used by tests that share key material
     /// in-memory). Default `/run/life/lifegw-jwks.json`.
@@ -299,6 +307,44 @@ pub struct VaultMtlsConfig {
     pub key_path: PathBuf,
 }
 
+/// AWS KMS configuration (Sub-phase E item #1). Loaded only when
+/// `auth.kms_provider = "aws"`. AWS credentials + region are resolved
+/// from the standard AWS credential chain (env vars, instance profile,
+/// IAM role, …) — this struct only carries lifegw-specific identifiers.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct AwsConfig {
+    /// AWS KMS Key ID or full ARN
+    /// (e.g. `alias/lifegw-tier2`, `arn:aws:kms:us-east-1:…`).
+    pub key_id: String,
+    /// JWS `kid` value embedded in token headers + the published JWKS.
+    /// Should be a stable identifier across key rotations (e.g. the
+    /// alias name rather than the underlying key ID, so rotations
+    /// don't break verifiers).
+    pub kid: String,
+}
+
+/// GCP Cloud KMS configuration (Sub-phase E item #2). Loaded only when
+/// `auth.kms_provider = "gcp"`. GCP credentials are resolved from the
+/// standard GCP credential chain (workload identity, ADC, service-account
+/// JSON file path in `GOOGLE_APPLICATION_CREDENTIALS`, …).
+///
+/// **Operator note**: the `resource` string MUST carry the full
+/// `cryptoKeyVersions/<n>` suffix — `asymmetric_sign` operates on a key
+/// version, not a crypto key. Operators who supply only the cryptoKey
+/// path will get a 404 from the API.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct GcpConfig {
+    /// Full GCP KMS resource path including version suffix, e.g.
+    /// `projects/broomva-prod/locations/global/keyRings/lifegw/cryptoKeys/tier2/cryptoKeyVersions/1`.
+    pub resource: String,
+    /// JWS `kid` value embedded in token headers + the published JWKS.
+    pub kid: String,
+}
+
 fn default_jwks_url() -> String {
     "https://broomva.tech/api/auth/jwks.json".to_string()
 }
@@ -360,6 +406,8 @@ impl Default for AuthConfig {
             tier1_issuer: default_tier1_issuer(),
             kms_provider: KmsProvider::default(),
             vault: None,
+            aws: None,
+            gcp: None,
             publish_jwks_path: default_publish_jwks_path(),
             dev_signer_enabled: false,
             tier2_audience: default_tier2_audience(),

@@ -163,16 +163,41 @@ impl AdminPolicy {
     /// supplementary group list that contains `admin_gid`. Caches the
     /// supplementary list per-uid so steady-state admin traffic
     /// doesn't pay the syscall cost on every request.
+    ///
+    /// I3 fix: also cache the FAILURE path. When `getgrouplist` errors
+    /// (e.g. uid not in `/etc/passwd` — common attack-amplifier shape:
+    /// an attacker spamming the admin socket from a never-existing uid
+    /// would otherwise force a syscall per request). We cache an empty
+    /// `Vec<u32>` so subsequent calls fast-path through the read lock
+    /// and deterministically return false without re-issuing the
+    /// syscall. The cache entry stays valid for the daemon lifetime;
+    /// we don't TTL-evict because `/etc/passwd` updates on a running
+    /// daemon are rare and the fail-closed denial is correct in either
+    /// case.
     fn supplementary_membership(&self, uid: u32) -> std::io::Result<bool> {
         // Fast path — read lock.
         if let Some(groups) = self.supp_groups.read().get(&uid).cloned() {
             return Ok(groups.contains(&self.admin_gid));
         }
-        // Slow path — write-lock + syscall.
-        let groups = supplementary_gids_of_uid(uid)?;
-        let in_group = groups.contains(&self.admin_gid);
-        self.supp_groups.write().insert(uid, groups);
-        Ok(in_group)
+        // Slow path — write-lock + syscall. On failure, cache an
+        // empty list (negative cache) and surface the error to the
+        // caller so the admin policy can fail-closed and bump the
+        // `gateway.admin.rejected_total{reason="group_lookup"}`
+        // counter exactly once per uid.
+        match supplementary_gids_of_uid(uid) {
+            Ok(groups) => {
+                let in_group = groups.contains(&self.admin_gid);
+                self.supp_groups.write().insert(uid, groups);
+                Ok(in_group)
+            }
+            Err(e) => {
+                // Negative-cache: insert an empty Vec so a subsequent
+                // call from the same uid hits the fast path and returns
+                // `false` without re-issuing the syscall.
+                self.supp_groups.write().entry(uid).or_default();
+                Err(e)
+            }
+        }
     }
 }
 

@@ -118,12 +118,15 @@ impl KmsSigner for StaticKeystore {
 /// transit key, and serialises the result as a JWS.
 ///
 /// Sub-phase E hardening:
-/// - **URL_SAFE_NO_PAD signature codec verified.** The `marshaling_algorithm:
-///   "jws"` Vault flag asks the server to emit `r || s` concatenated and
+/// - **URL_SAFE_NO_PAD signature codec.** The `marshaling_algorithm: "jws"`
+///   Vault flag asks the server to emit `r || s` concatenated and
 ///   base64url-encoded WITHOUT padding (matching the JWS compact-serialisation
-///   convention RFC 7515 §3). Production verifies this against a real Vault
-///   dev-server in `tests/integration_vault_transit.rs` (gated `#[ignore]` so
-///   CI without infra skips it).
+///   convention RFC 7515 §3). The `input` field uses the same
+///   URL_SAFE_NO_PAD shape — Vault accepts both URL_SAFE_NO_PAD and
+///   STANDARD; we use URL_SAFE_NO_PAD for symmetry with the output.
+///   A real Vault dev-server integration test is filed as a follow-up
+///   under the M7 Sub-phase F ticket; until then unit tests cover the
+///   pointer-logic and JSON-shape contracts (`vault_transit_pins_latest_version`).
 /// - **Latest-version pinning.** `public_key_pem` now reads
 ///   `data.latest_version` and indexes `data.keys.<latest>.public_key` so
 ///   key rotation in Vault doesn't continue using the old public key.
@@ -228,10 +231,17 @@ impl VaultTransit {
     }
 
     /// Sub-phase E (item #5): spawn a background renewal task that
-    /// renews `self.token` at `interval`. Returns the JoinHandle; drop
-    /// it to cancel. Vault tokens with `renewable: true` and a periodic
+    /// renews `self.token` at `interval`. Returns an `AbortHandle` so
+    /// callers can cancel the task on graceful shutdown by calling
+    /// `.abort()`. Vault tokens with `renewable: true` and a periodic
     /// TTL stay alive indefinitely as long as renewal happens before
     /// the TTL elapses.
+    ///
+    /// I1 fix: previously this function returned a `JoinHandle` and
+    /// the doc claimed "drop it to cancel". Dropping a tokio
+    /// `JoinHandle` does NOT cancel the task — it abandons the handle.
+    /// The signature is now `AbortHandle` so cancellation actually
+    /// works, and `run_daemon` calls `.abort()` on graceful shutdown.
     ///
     /// The renewal loop exits cleanly on the first error so the
     /// gateway can react via its own reload path; we don't retry
@@ -242,8 +252,8 @@ impl VaultTransit {
         addr: String,
         token: String,
         interval: std::time::Duration,
-    ) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move {
+    ) -> tokio::task::AbortHandle {
+        let handle = tokio::spawn(async move {
             let mut clock = tokio::time::interval(interval);
             clock.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             // Skip the initial immediate tick so we don't renew on
@@ -284,7 +294,8 @@ impl VaultTransit {
                     }
                 }
             }
-        })
+        });
+        handle.abort_handle()
     }
 
     fn public_key_pem(&self) -> LifegwResult<String> {
@@ -333,7 +344,7 @@ impl KmsSigner for VaultTransit {
 
     fn sign_jws(&self, claims_json: &serde_json::Value) -> LifegwResult<String> {
         use base64::Engine;
-        use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
         // Build the JWS header + body (base64url-encoded NO PAD per
         // RFC 7515 §3) and ask Vault to sign the resulting
@@ -354,17 +365,20 @@ impl KmsSigner for VaultTransit {
         let signing_input = format!("{header_b64}.{body_b64}");
 
         let url = format!("{}/v1/transit/sign/{}", self.addr, self.key_name);
-        // Sub-phase E (item #3): the Vault `transit/sign` endpoint
-        // expects the `input` field to be **standard** base64
-        // (RFC 4648 with padding) per the Vault docs. Sub-phase B
-        // erroneously sent URL_SAFE_NO_PAD which Vault tolerates for
-        // some shapes but not all — switching to STANDARD is safer.
-        // The output side is unambiguous: `marshaling_algorithm: "jws"`
-        // makes Vault emit `r || s` concatenated and base64url-encoded
-        // without padding (matches the JWS compact-serialisation
-        // convention).
+        // Sub-phase E (item #3) — I4 revert: Vault `transit/sign`
+        // accepts both `STANDARD` and `URL_SAFE_NO_PAD` base64 per the
+        // current Vault docs (the API treats the input as opaque bytes
+        // for hashing). Sub-phase B used URL_SAFE_NO_PAD which had
+        // shipped successfully; M7-FINAL initially switched to STANDARD
+        // citing "safer per Vault docs" but introduced a behaviour
+        // change without a real Vault integration test backing it.
+        // Reverting to URL_SAFE_NO_PAD restores the working Sub-phase B
+        // behaviour. The output side is unambiguous:
+        // `marshaling_algorithm: "jws"` makes Vault emit `r || s`
+        // concatenated and base64url-encoded without padding (matches
+        // the JWS compact-serialisation convention).
         let payload = serde_json::json!({
-            "input": STANDARD.encode(signing_input.as_bytes()),
+            "input": URL_SAFE_NO_PAD.encode(signing_input.as_bytes()),
             "marshaling_algorithm": "jws",
             "hash_algorithm": "sha2-256",
         });

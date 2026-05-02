@@ -26,34 +26,49 @@ emits on the WebSocket upgraded at `/v1/agent/stream`. Codes 0-2999
 are RFC 6455 reserved; codes 3000-3999 are IANA-registered protocol
 codes; codes 4000-4999 are application-defined.
 
-| Code | Name | When emitted | Reason payload prefix |
+| Code | `CloseReason` variant | When emitted | Reason payload prefix |
 |---:|---|---|---|
-| 1000 | Normal | Client-initiated graceful close. | (none) |
-| 1001 | Going away | Server is shutting down (gateway drain). | `going_away` |
-| 1003 | Unsupported data | Client sent a frame `lifegw` does not understand (Sub-phase D D9 dispatcher rejects unknown frame kinds). | `unsupported:<frame_kind>` |
-| 1008 | Policy violation | Client sent a frame that violates the protocol contract (e.g. text body must be valid JSON; `Subscribe` from outside the per-session pump). | `policy:<violation>` |
-| 1011 | Internal error | Server-side fault (heartbeat timeout / unhandled upstream error). Sub-phase D D5 maps a missing-pong window onto this. | `server_error:<reason>` |
-| 4001 | Rate limit | Per-user OR per-IP token-bucket budget exhausted (Sub-phase D D1). Maps `tonic::Status::resource_exhausted` from the auth layer. | `rate_limit:per_user` or `rate_limit:per_ip` |
-| 4002 | Backpressure | Slow consumer — outbound mpsc(64) backed up; gateway closes to free memory before OOM. | `backpressure:slow_consumer` |
-| 4003 | IP blocked | The peer's IP is on the in-process blocklist (Sub-phase D D2 admin RPC `BlocklistAdd`). | `ip_blocked:<reason>` |
-| 4004 | lifed unavailable | Upstream lifed UDS is unreachable / circuit breaker open. | `lifed_unavailable:<reason>` |
-| 4005 | Sequence retired | Client requested resume from a `from_sequence` lifed has already evicted (lifed responds `out_of_range`). | `sequence_retired:from_sequence=<n>` |
+| 1000 | `Normal` | Client-initiated graceful close, OR upstream `tonic::Code::Cancelled`/`Aborted` (treated as graceful by the bidi pump). | `normal` |
+| 1001 | `GoingAway` | Server is shutting down (gateway drain). | `going_away` |
+| 1008 | `PolicyViolation` | Tier-1 token expired mid-stream (`Unauthenticated` or `PermissionDenied` from the auth layer). Mapped to 1008 rather than 1011 so operator dashboards distinguish auth violations from server faults. | `policy_violation:token_expired` |
+| 1011 | `InternalError` | Server-side fault — heartbeat-pong-deadline expired (Sub-phase D D5) OR unhandled upstream `tonic::Code::Internal` / non-listed code. | `internal_error` |
+| 4001 | `RateLimit` | Per-user OR per-IP token-bucket budget exhausted (Sub-phase D D1). Maps `tonic::Code::ResourceExhausted` from the rate-limit layer. | `rate_limit:per_user` |
+| 4002 | `SlowConsumer` | Backpressure — outbound mpsc(64) backed up `STALLED_THRESHOLD` consecutive ticks; gateway closes to free memory before OOM. | `backpressure:slow_consumer` |
+| 4003 | `IpBlocked` | Peer IP on the in-process blocklist (Sub-phase D D2 admin RPC `BlocklistAdd`). | `ip_blocked` |
+| 4004 | `LifedUnavailable` | Upstream lifed UDS unreachable / circuit breaker open (`tonic::Code::Unavailable`). | `lifed_circuit_open` |
+| 4005 | `SequenceRetired` | Client `from_sequence` lifed already evicted (`tonic::Code::OutOfRange`). | `sequence_retired` |
 
-## Mapping table — tonic `Status::Code` → WS close
+**Note on 1003 (Unsupported Data):** Sub-phase D D9's dispatcher rejects
+unknown inbound frame kinds by **dropping them silently** rather than
+closing the connection — see the `inbound_frame_drops_unknown_kind`
+test at `crates/life-runtime/lifegw/src/services/ws.rs`. Forward-compat
+clients can keep the connection alive while introducing a frame kind
+the gateway hasn't shipped support for. If a future sub-phase decides
+to close 1003 instead, this row gets added to the table.
 
-The auth layer + bidi pump consult `services::ws::map_status_to_close`
-to translate upstream gRPC errors into the table above. Sub-phase D
-finalised the mapping:
+## Mapping table — tonic `Status::Code` → `CloseReason`
+
+The bidi pump consults `services::ws::map_status_to_close` to translate
+upstream gRPC errors into the variants above. As of M7 Sub-phase D the
+mapping is:
 
 | `tonic::Code` | `CloseReason` | WS close code |
 |---|---|---:|
-| `Unauthenticated` | `Auth` (RateLimit slot used pre-D5; now mapped to 1011 with the `auth_failed:` prefix) | 1011 |
-| `PermissionDenied` | `Auth` | 1011 |
+| `Unauthenticated` | `PolicyViolation` | 1008 |
+| `PermissionDenied` | `PolicyViolation` | 1008 |
 | `ResourceExhausted` | `RateLimit` | 4001 |
 | `Unavailable` | `LifedUnavailable` | 4004 |
 | `OutOfRange` | `SequenceRetired` | 4005 |
-| `Aborted` | `SlowConsumer` (gateway-side abort during mpsc overflow) | 4002 |
-| `Internal` (default) | `InternalError` | 1011 |
+| `Cancelled` | `Normal` | 1000 |
+| `Aborted` | `Normal` | 1000 |
+| anything else (incl. `Internal`) | `InternalError` | 1011 |
+
+The `Cancelled`/`Aborted` → `Normal` (1000) pair reflects the production
+semantics: when a client cancels mid-stream we propagate the cancel as
+a graceful close rather than treating it as an error condition. The
+`InternalError` default (1011) covers `tonic::Code::Internal` plus
+every other tonic code variant the gateway hasn't enumerated explicitly
+— a defense against a future tonic version adding new codes.
 
 ## Reason payload contract
 

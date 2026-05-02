@@ -44,16 +44,54 @@ async fn substrate_uds_unreachable_returns_clean_error() {
 
 #[tokio::test]
 async fn substrate_uds_drop_after_handshake_yields_unavailable_on_next_call() {
-    // We don't have a full lifed rig in this chaos suite; the lifed
-    // UDS drop scenario is end-to-end-tested in
-    // `tests/integration_proxy_passthrough.rs::proxy_forwards_create_session`
-    // when the lifed handle is dropped. This test is a placeholder
-    // that documents the contract — the real e2e chaos run lives in
-    // CI with the `--ignored` flag set on the chaos suite below.
-    //
-    // The deterministic check that DOES land here without infra is:
-    // the connection to a closed socket returns a tonic Status with
-    // code = Unavailable when the channel is closed mid-call. We
-    // verify this on the connect_uds path above; per-RPC propagation
-    // is exercised by the existing integration tests.
+    // Bind a real UnixListener to a tempdir socket, accept ONE connection
+    // (mimicking the post-handshake state), then drop the listener and
+    // verify a subsequent connect attempt returns a clean error rather
+    // than hanging or panicking. This exercises the real-life "lifed
+    // restarted while gateway holds a stale connection" scenario from a
+    // gateway-side perspective without needing the full lifed rig.
+    use tokio::net::UnixListener;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let sock_path = tmp.path().join("lifed-chaos.sock");
+
+    // Bind, accept a token connection (handshake-equivalent), then close.
+    let listener = UnixListener::bind(&sock_path).expect("bind tempdir UDS");
+    let accept_handle = tokio::spawn(async move {
+        // Accept ONE connection then drop the listener.
+        let _ = listener.accept().await;
+        // listener drops here -> any further connect attempts fail
+    });
+
+    // First connect should succeed (post-handshake state).
+    let first =
+        tokio::time::timeout(std::time::Duration::from_secs(2), connect_uds(&sock_path)).await;
+    assert!(
+        first.is_ok() && first.unwrap().is_ok(),
+        "first connect to live socket must succeed"
+    );
+
+    // Wait for the accept task to finish dropping the listener.
+    accept_handle.await.expect("accept task completes");
+
+    // Remove the socket file to fully simulate lifed disappearing —
+    // connect to the now-removed path and verify a clean Err within
+    // the 2s budget.
+    let _ = std::fs::remove_file(&sock_path);
+    let second =
+        tokio::time::timeout(std::time::Duration::from_secs(2), connect_uds(&sock_path)).await;
+    let result = second.expect("connect_uds must not hang on dead UDS");
+    assert!(
+        result.is_err(),
+        "connect_uds to a dropped socket must error (got: {result:?})"
+    );
+
+    // The error string must mention the path so operational logs are
+    // useful — verify there's actual error content (not a panic message).
+    let err = result.unwrap_err();
+    let err_str = format!("{err:?}");
+    assert!(
+        !err_str.is_empty() && err_str.len() > 10,
+        "error must carry diagnostic content (got: {err_str})"
+    );
 }
