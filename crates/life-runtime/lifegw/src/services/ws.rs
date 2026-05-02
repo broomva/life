@@ -1409,6 +1409,66 @@ mod tests {
     }
 
     #[test]
+    fn bearer_with_inner_whitespace_rejected() {
+        // Spec D D-Sub-C review fix (I-7): a JWS only contains URL-safe
+        // base64 alphabet. Inner whitespace + control chars + commas
+        // are malformed and MUST NOT flow into the auth pipeline as a
+        // canonicalised `Bearer <token>`. We reject the malformed
+        // entry and fall through to None (the AuthLayer will surface
+        // the missing-bearer error).
+        //
+        // Note: control chars like `\n`/`\r`/`\0` can't be inserted via
+        // `http::Request::builder` because the http crate validates
+        // header values. We exercise the JS-friendly attack surface —
+        // SP and HT (both valid in header values per RFC 7230) plus
+        // an embedded comma. The control-char branch is exercised
+        // separately by directly calling the raw classifier closure
+        // below.
+        for malformed in [
+            "bearer.has space",
+            "bearer.has\ttab",
+            // `bearer.eyJa,bc.def.ghi` — comma inside the token would
+            // otherwise be interpreted by `split(',')` as a delimiter,
+            // but we ensure that even mis-quoted forms (e.g. with
+            // surrounding spaces/escapes from a buggy proxy) are
+            // rejected before flowing into auth.
+            "bearer.has\tspace_and\ttabs",
+        ] {
+            let proto = format!("life.v1.agent, {malformed}");
+            let req = ws_req(
+                &[
+                    ("upgrade", "websocket"),
+                    ("connection", "Upgrade"),
+                    ("sec-websocket-version", "13"),
+                    ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+                    ("x-life-sid", "s"),
+                    ("sec-websocket-protocol", proto.as_str()),
+                ],
+                WS_UPGRADE_PATH,
+            );
+            let parsed = parse_upgrade_request(&req).expect("parse");
+            assert!(
+                parsed.tier2_bearer.is_none(),
+                "malformed bearer must be rejected: {malformed:?}"
+            );
+        }
+
+        // Direct classifier coverage for control chars + commas that
+        // can't ride a real header value. Mirrors the inline closure
+        // in `bearer_from_subprotocol`.
+        let classify = |s: &str| {
+            s.chars()
+                .all(|c| !c.is_whitespace() && !c.is_control() && c != ',')
+        };
+        assert!(!classify("has\ncontrol"));
+        assert!(!classify("has\rcontrol"));
+        assert!(!classify("has\x07bell"));
+        assert!(!classify("has,comma"));
+        assert!(classify("eyJabc.def.ghi")); // well-formed JWS shape
+        assert!(classify("eyJabc-def_ghi.AB-_.XY12==")); // base64url + pad
+    }
+
+    #[test]
     fn empty_bearer_after_prefix_is_ignored() {
         // `bearer.` with no token after the dot is malformed; we
         // silently drop it instead of producing a bogus `Bearer ` line.

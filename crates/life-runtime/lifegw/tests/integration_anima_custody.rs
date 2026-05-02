@@ -884,3 +884,81 @@ async fn tier_user_cannot_call_mint_session_cap() {
     let parsed = read_body_json(resp).await;
     assert_eq!(parsed["error"], "tier2_required");
 }
+
+// ─── Spec D D-Sub-C code-quality fixes (I-5, I-6) ────────────────────
+
+/// Spec D D-Sub-C review fix I-5 — request bodies reject unexpected
+/// fields. `SignBody` carries `{ user_id, digest_b64 }`; an extra
+/// field (e.g. `bypass_validation`) MUST cause axum to fail the JSON
+/// extractor with 400 before the handler runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn unknown_field_in_sign_body_rejected_with_400() {
+    let rig = TestRig::build().await;
+    let body = json!({
+        "user_id": ALICE,
+        "digest_b64": B64_STANDARD.encode([0u8; 32]),
+        "bypass_validation": true,
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/sign_auth")
+        .header("authorization", rig.tier_user_bearer(ALICE))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = rig.router().oneshot(req).await.unwrap();
+    // axum's Json extractor surfaces serde failures as 400 / 422.
+    let status = resp.status();
+    assert!(
+        status == http::StatusCode::BAD_REQUEST
+            || status == http::StatusCode::UNPROCESSABLE_ENTITY,
+        "expected 400/422 for unknown field, got {status}"
+    );
+}
+
+/// Spec D D-Sub-C review fix I-6 — empty user_id rejected at gateway
+/// boundary. `validate_user_id` runs BEFORE `verify_bearer` so the
+/// 400 can be observed without minting a token at all.
+#[tokio::test(flavor = "multi_thread")]
+async fn empty_user_id_rejected_with_400() {
+    let rig = TestRig::build().await;
+    let body = json!({
+        "user_id": "",
+        "digest_b64": B64_STANDARD.encode([0u8; 32]),
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/sign_auth")
+        .header("authorization", rig.tier_user_bearer(ALICE))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = rig.router().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+    let parsed = read_body_json(resp).await;
+    assert_eq!(parsed["error"], "bad_user_id");
+}
+
+/// Spec D D-Sub-C review fix I-6 — oversized user_id rejected at
+/// gateway boundary. The gateway validates length before any soma
+/// call so the 400 is observed without a real upstream.
+#[tokio::test(flavor = "multi_thread")]
+async fn oversized_user_id_rejected_with_400() {
+    let rig = TestRig::build().await;
+    let oversized = "a".repeat(65); // MAX_USER_ID_LEN = 64
+    let body = json!({
+        "user_id": oversized,
+        "digest_b64": B64_STANDARD.encode([0u8; 32]),
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/sign_auth")
+        .header("authorization", rig.tier_user_bearer(ALICE))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = rig.router().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+    let parsed = read_body_json(resp).await;
+    assert_eq!(parsed["error"], "bad_user_id");
+}
