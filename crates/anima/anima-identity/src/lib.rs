@@ -50,6 +50,9 @@ pub mod hardware_wallet;
 #[cfg(feature = "kms-soma")]
 pub mod soma;
 
+#[cfg(feature = "kms-remote")]
+pub mod remote;
+
 pub use custody::{
     AnimaCustody, AnimaCustodyHandle, BackendKind, DidRotationEvent, Eip712Domain, EvmSignature,
     TxRequest,
@@ -74,6 +77,9 @@ pub use hardware_wallet::{HardwareWalletAnima, HidTransport, ledger};
 
 #[cfg(feature = "kms-soma")]
 pub use soma::SomaCustody;
+
+#[cfg(feature = "kms-remote")]
+pub use remote::{RemoteAnima, TierUserCap};
 
 pub use revocation::{RevocationCache, is_revoked};
 pub use rotation::{JournalResolver, RotationChainQuery, walk_rotation_chain};
