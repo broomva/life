@@ -40,6 +40,10 @@ dev-mode = []
 aios-protocol.workspace = true
 aios-proto.workspace = true
 life-runtime-proto.workspace = true
+# Spec D D-Sub-C: soma admin custody-oracle proto for the anima_custody
+# routes. Pulled in as a client-only dep — lifegw never serves the
+# CustodyOracle service, only proxies to it.
+life-kernel-proto.workspace = true
 
 # transport — tonic 0.14 + tonic-web for browser-compatible Connect protocol.
 tonic = "0.14"
@@ -47,6 +51,10 @@ tonic-web = "0.14"
 tonic-prost = "0.14"
 prost = "0.14"
 prost-types = "0.14"
+# Spec D D-Sub-C: axum router for the `/anima/custody/*` HTTP/JSON
+# routes. Lives at the workspace pin. Mounted alongside the tonic
+# stack via a tower-router fallback.
+axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 http = "1"
@@ -121,6 +129,12 @@ uuid = { workspace = true }
 base64 = { workspace = true }
 # Atomic JWKS publish (write-tmp + rename) — see auth/bootstrap.rs.
 tempfile = { workspace = true }
+# Spec D D-Sub-C: bs58 for did:key:zDn… encoding (multibase) +
+# ciborium for COSE_Key + WebAuthn attestation parsing + p256 for the
+# P-256 keypair derivation in tests / passkey verification.
+bs58.workspace = true
+ciborium = "0.2"
+p256.workspace = true
 # libc — Sub-phase D (D2) admin plane uses raw SO_PEERCRED + getgrnam
 # syscalls. The `admin/peercred.rs` module is the only `unsafe`
 # pocket inside lifegw (the rest of the crate is `#![deny(unsafe_code)]`).
@@ -172,6 +186,10 @@ tokio = { workspace = true, features = ["full", "test-util"] }
 rcgen = "0.13"
 tonic-prost = "0.14"
 async-trait.workspace = true
+# Spec D D-Sub-C: integration tests need k256 (sign_wallet round-trip
+# verification). p256 + ciborium are already lifegw main deps and so
+# accessible from tests.
+k256.workspace = true
 # Sub-phase A integration test stands up a real lifed instance with mock
 # substrates and proxies through lifegw. Allowed as a *dev*-dep only; the
 # production crate graph never pulls lifed (Spec C₃ §11.2 dependency rules

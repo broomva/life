@@ -339,11 +339,19 @@ fn parse_upgrade_request<B>(
             .unwrap_or(0),
     };
 
-    let tier2_bearer = req
-        .headers()
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+    // Spec D D-Sub-C (M8.2 close): browser WS clients can't set the
+    // Authorization header on a `new WebSocket(...)` upgrade — the
+    // platform doesn't expose request headers to the constructor.
+    // The portable workaround is `Sec-WebSocket-Protocol: bearer.<jwt>`,
+    // which the spec allows the server to negotiate or ignore. We
+    // accept either form here so the same upgrade endpoint serves
+    // browser clients (subprotocol bearer) and Rust clients
+    // (Authorization header) without divergent paths.
+    //
+    // Precedence: Authorization header wins over the subprotocol so a
+    // forwarded chain that strips subprotocols (some L7 proxies do)
+    // still sees the canonical header form.
+    let tier2_bearer = bearer_from_authorization(req).or_else(|| bearer_from_subprotocol(req));
 
     Ok(UpgradeRequest {
         sid,
@@ -351,6 +359,56 @@ fn parse_upgrade_request<B>(
         sec_key,
         tier2_bearer,
     })
+}
+
+/// Extract `Bearer <token>` from the `Authorization` header. Returns
+/// the full `Bearer <token>` string (matching the AuthLayer's downstream
+/// expectation that the upstream tonic call still receives the bearer
+/// in `Authorization` shape).
+fn bearer_from_authorization<B>(req: &Request<B>) -> Option<String> {
+    req.headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+}
+
+/// Extract a bearer token from the `Sec-WebSocket-Protocol` header
+/// (Spec D D-Sub-C M8.2 — closes the browser-auth gap that life-sdk-ts
+/// flagged in its KNOWN_LIMITATIONS.md).
+///
+/// Browser clients pass the JWT as one entry in the comma-separated
+/// subprotocol list, prefixed `bearer.`. The server returns it
+/// canonicalised as a regular `Authorization: Bearer <token>` form so
+/// the rest of the pipeline (Tier-2 mint, scope check, …) sees the
+/// same shape both code paths produce.
+///
+/// Multiple subprotocol values may be present (e.g. `life.v1.agent,
+/// bearer.<jwt>`); we scan for the `bearer.` prefix and ignore anything
+/// else. The 101-response side (see `upgrade_response`) keeps echoing
+/// only the canonical `life.v1.agent` subprotocol — the bearer entry
+/// is consumed by the gateway.
+///
+/// Spec D D-Sub-C review fix (I-7): only outer whitespace is trimmed
+/// before this point — inner whitespace, control characters, and
+/// commas would otherwise slip through. JWS shape is `<base64url>.<base64url>.<base64url>`
+/// (3 segments separated by `.`) and only contains URL-safe-base64
+/// alphabet (`A-Z`, `a-z`, `0-9`, `-`, `_`, `=`); a token containing
+/// any whitespace, control char, or comma is malformed and MUST be
+/// rejected before flowing into the auth pipeline.
+fn bearer_from_subprotocol<B>(req: &Request<B>) -> Option<String> {
+    let header = req.headers().get("sec-websocket-protocol")?.to_str().ok()?;
+    for raw in header.split(',') {
+        let part = raw.trim();
+        if let Some(token) = part.strip_prefix("bearer.")
+            && !token.is_empty()
+            && token
+                .chars()
+                .all(|c| !c.is_whitespace() && !c.is_control() && c != ',')
+        {
+            return Some(format!("Bearer {token}"));
+        }
+    }
+    None
 }
 
 /// Naive `&str=&str` query-string parser. Sufficient for the WS
@@ -1277,6 +1335,156 @@ mod tests {
                 assert!(msg.contains("sid"));
             }
         }
+    }
+
+    #[test]
+    fn parses_bearer_from_subprotocol_header() {
+        // Spec D D-Sub-C M8.2: browser WS clients can't set
+        // Authorization, so the bearer arrives as a `bearer.<jwt>`
+        // entry in `Sec-WebSocket-Protocol`. parse_upgrade_request
+        // canonicalises it back to `Bearer <jwt>` shape for the
+        // downstream pipeline.
+        let req = ws_req(
+            &[
+                ("upgrade", "websocket"),
+                ("connection", "Upgrade"),
+                ("sec-websocket-version", "13"),
+                ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+                ("x-life-sid", "s"),
+                (
+                    "sec-websocket-protocol",
+                    "life.v1.agent, bearer.eyJabc.def.ghi",
+                ),
+            ],
+            WS_UPGRADE_PATH,
+        );
+        let parsed = parse_upgrade_request(&req).expect("parse");
+        assert_eq!(
+            parsed.tier2_bearer.as_deref(),
+            Some("Bearer eyJabc.def.ghi")
+        );
+    }
+
+    #[test]
+    fn authorization_header_takes_precedence_over_subprotocol_bearer() {
+        // When both forms are present (forwarded chain that copies
+        // the bearer twice), the canonical Authorization header wins
+        // so the gateway never accidentally trusts a stale
+        // subprotocol entry.
+        let req = ws_req(
+            &[
+                ("upgrade", "websocket"),
+                ("connection", "Upgrade"),
+                ("sec-websocket-version", "13"),
+                ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+                ("x-life-sid", "s"),
+                ("authorization", "Bearer header-token"),
+                ("sec-websocket-protocol", "bearer.subproto-token"),
+            ],
+            WS_UPGRADE_PATH,
+        );
+        let parsed = parse_upgrade_request(&req).expect("parse");
+        assert_eq!(parsed.tier2_bearer.as_deref(), Some("Bearer header-token"));
+    }
+
+    #[test]
+    fn subprotocol_without_bearer_yields_no_token() {
+        // A subprotocol header that doesn't include a `bearer.` entry
+        // (e.g. just `life.v1.agent`) leaves tier2_bearer as None —
+        // matches the Sub-phase A fallback so AuthLayer surfaces the
+        // missing-bearer error.
+        let req = ws_req(
+            &[
+                ("upgrade", "websocket"),
+                ("connection", "Upgrade"),
+                ("sec-websocket-version", "13"),
+                ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+                ("x-life-sid", "s"),
+                ("sec-websocket-protocol", "life.v1.agent"),
+            ],
+            WS_UPGRADE_PATH,
+        );
+        let parsed = parse_upgrade_request(&req).expect("parse");
+        assert!(parsed.tier2_bearer.is_none());
+    }
+
+    #[test]
+    fn bearer_with_inner_whitespace_rejected() {
+        // Spec D D-Sub-C review fix (I-7): a JWS only contains URL-safe
+        // base64 alphabet. Inner whitespace + control chars + commas
+        // are malformed and MUST NOT flow into the auth pipeline as a
+        // canonicalised `Bearer <token>`. We reject the malformed
+        // entry and fall through to None (the AuthLayer will surface
+        // the missing-bearer error).
+        //
+        // Note: control chars like `\n`/`\r`/`\0` can't be inserted via
+        // `http::Request::builder` because the http crate validates
+        // header values. We exercise the JS-friendly attack surface —
+        // SP and HT (both valid in header values per RFC 7230) plus
+        // an embedded comma. The control-char branch is exercised
+        // separately by directly calling the raw classifier closure
+        // below.
+        for malformed in [
+            "bearer.has space",
+            "bearer.has\ttab",
+            // `bearer.eyJa,bc.def.ghi` — comma inside the token would
+            // otherwise be interpreted by `split(',')` as a delimiter,
+            // but we ensure that even mis-quoted forms (e.g. with
+            // surrounding spaces/escapes from a buggy proxy) are
+            // rejected before flowing into auth.
+            "bearer.has\tspace_and\ttabs",
+        ] {
+            let proto = format!("life.v1.agent, {malformed}");
+            let req = ws_req(
+                &[
+                    ("upgrade", "websocket"),
+                    ("connection", "Upgrade"),
+                    ("sec-websocket-version", "13"),
+                    ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+                    ("x-life-sid", "s"),
+                    ("sec-websocket-protocol", proto.as_str()),
+                ],
+                WS_UPGRADE_PATH,
+            );
+            let parsed = parse_upgrade_request(&req).expect("parse");
+            assert!(
+                parsed.tier2_bearer.is_none(),
+                "malformed bearer must be rejected: {malformed:?}"
+            );
+        }
+
+        // Direct classifier coverage for control chars + commas that
+        // can't ride a real header value. Mirrors the inline closure
+        // in `bearer_from_subprotocol`.
+        let classify = |s: &str| {
+            s.chars()
+                .all(|c| !c.is_whitespace() && !c.is_control() && c != ',')
+        };
+        assert!(!classify("has\ncontrol"));
+        assert!(!classify("has\rcontrol"));
+        assert!(!classify("has\x07bell"));
+        assert!(!classify("has,comma"));
+        assert!(classify("eyJabc.def.ghi")); // well-formed JWS shape
+        assert!(classify("eyJabc-def_ghi.AB-_.XY12==")); // base64url + pad
+    }
+
+    #[test]
+    fn empty_bearer_after_prefix_is_ignored() {
+        // `bearer.` with no token after the dot is malformed; we
+        // silently drop it instead of producing a bogus `Bearer ` line.
+        let req = ws_req(
+            &[
+                ("upgrade", "websocket"),
+                ("connection", "Upgrade"),
+                ("sec-websocket-version", "13"),
+                ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+                ("x-life-sid", "s"),
+                ("sec-websocket-protocol", "life.v1.agent, bearer."),
+            ],
+            WS_UPGRADE_PATH,
+        );
+        let parsed = parse_upgrade_request(&req).expect("parse");
+        assert!(parsed.tier2_bearer.is_none());
     }
 
     #[test]

@@ -258,6 +258,56 @@ impl AudClaim {
             AudClaim::Many(v) => v.iter().any(|s| s == expected),
         }
     }
+
+    /// Return the first audience that matches one of the allowed
+    /// values, owning the matched string. Used by
+    /// [`JwksCache::verify_capability_token`].
+    fn first_match(&self, allowed: &[&str]) -> Option<String> {
+        match self {
+            AudClaim::Single(s) => {
+                if allowed.contains(&s.as_str()) {
+                    Some(s.clone())
+                } else {
+                    None
+                }
+            }
+            AudClaim::Many(v) => v.iter().find(|s| allowed.contains(&s.as_str())).cloned(),
+        }
+    }
+}
+
+/// Decoded body of a capability JWS — Spec D D-Sub-C review fix (B1).
+/// Tier-2 (`aud=lifed`) and Tier-User (`aud=anima.user-cap`) tokens
+/// share this shape.
+#[derive(Deserialize)]
+struct CapTokenBody {
+    sub: String,
+    aud: AudClaim,
+    #[allow(dead_code)]
+    iss: String,
+    nbf: Option<u64>,
+    exp: u64,
+    /// Tier-User caps carry `scope` (singular). Tier-2 caps carry
+    /// `scopes` — the verifier maps either to a unified vector.
+    #[serde(default, alias = "scopes")]
+    scope: Option<Vec<String>>,
+}
+
+/// Output of [`JwksCache::verify_capability_token`]. Carries the
+/// audience the token actually landed on (so callers can dispatch on
+/// Tier-2 vs Tier-User), the subject, and the scope vector.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct VerifiedCapClaims {
+    /// Verified audience — guaranteed to be in the caller's
+    /// `allowed_audiences` list.
+    pub aud: String,
+    /// Subject — the user_id the cap is bound to.
+    pub sub: String,
+    /// Capability scopes. Empty for Tier-2 caps that don't carry a
+    /// `scopes` field; the route handler treats Tier-2 audience as
+    /// implicit full scope.
+    pub scope: Vec<String>,
 }
 
 /// Source of JWKS material.
@@ -524,6 +574,138 @@ impl JwksCache {
             tier: body
                 .tier
                 .unwrap_or_else(|| crate::auth::tier1::DEFAULT_TIER.to_string()),
+        })
+    }
+
+    /// Verify a capability JWS (Tier-2 or Tier-User) issued by THIS
+    /// gateway against an audience allowlist + expected issuer.
+    ///
+    /// Spec D D-Sub-C review fix (B1): the `/anima/custody/*` routes
+    /// previously checked only for `Authorization: Bearer <something>`
+    /// presence, allowing any caller to mint Tier-User caps and to
+    /// proxy auth/wallet-sign calls. This method centralizes the
+    /// real ES256 JWS verification path so anima_custody and any
+    /// future capability-bearing route share the same verifier.
+    ///
+    /// Behaviour:
+    ///
+    /// 1. Reject symmetric algorithms outright (HS256 / HS384 / HS512)
+    ///    before any signature work — closes the alg-confusion attack
+    ///    where an attacker could forge a token claiming a symmetric
+    ///    alg with the public key as the secret.
+    /// 2. Real algorithm is read from the JWKS entry, never from the
+    ///    JWT header.
+    /// 3. Audience MUST match one of `allowed_audiences`. Issuer MUST
+    ///    match `expected_issuer`. `nbf` / `exp` enforced.
+    /// 4. Returns a [`VerifiedCapClaims`] struct with the audience the
+    ///    token landed on, the subject, and the scope vector. The
+    ///    handler can then enforce per-route scope intersection +
+    ///    `claims.sub == body.user_id` binding (Spec D D-Sub-C
+    ///    review fixes B2 + I1).
+    ///
+    /// **Dev shortcut:** when [`JwksCache::dev_signer_enabled`] is
+    /// `true`, the magic `Bearer dev-cap-token-for-{user_id}` is
+    /// accepted and synthesizes claims with audience set to the first
+    /// entry in `allowed_audiences` and the scope set to all three
+    /// `anima.user.*` defaults. This is gated to dev / CI only by the
+    /// same flag the Tier-1 dev shortcut uses.
+    pub fn verify_capability_token(
+        &self,
+        bearer: &str,
+        allowed_audiences: &[&str],
+        expected_issuer: &str,
+    ) -> LifegwResult<VerifiedCapClaims> {
+        // Dev shortcut — gated to dev_signer_enabled JwksCaches.
+        if self.dev_signer_enabled
+            && let Some(rest) = bearer.strip_prefix("dev-cap-token-for-")
+        {
+            // Format: `dev-cap-token-for-{aud}/{user_id}` — aud must be
+            // in `allowed_audiences`. We default to allowed[0] when the
+            // caller passes the simpler `dev-cap-token-for-{user_id}`.
+            let (aud, user_id) = match rest.split_once('/') {
+                Some((a, u)) => (a, u),
+                None => (
+                    allowed_audiences
+                        .first()
+                        .copied()
+                        .unwrap_or("anima.user-cap"),
+                    rest,
+                ),
+            };
+            if user_id.is_empty() {
+                return Err(LifegwError::Auth("empty dev cap user_id".to_string()));
+            }
+            if !allowed_audiences.contains(&aud) {
+                return Err(LifegwError::Auth(format!(
+                    "dev cap audience {aud} not in allowed list"
+                )));
+            }
+            return Ok(VerifiedCapClaims {
+                aud: aud.to_string(),
+                sub: user_id.to_string(),
+                scope: vec![
+                    "anima.user.sign_auth".to_string(),
+                    "anima.user.sign_wallet".to_string(),
+                    "anima.user.get_pubkey".to_string(),
+                ],
+            });
+        }
+
+        let header =
+            decode_header(bearer).map_err(|e| LifegwError::Auth(format!("decode header: {e}")))?;
+        let kid = header
+            .kid
+            .ok_or_else(|| LifegwError::Auth("missing kid in JWT header".to_string()))?;
+
+        if matches!(
+            header.alg,
+            Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512
+        ) {
+            return Err(LifegwError::Auth(format!(
+                "symmetric algorithm rejected: {:?}",
+                header.alg
+            )));
+        }
+
+        let cached = self.lookup_kid(&kid)?;
+        let alg = cached.alg;
+        let mut validation = Validation::new(alg);
+        validation.set_audience(allowed_audiences);
+        validation.set_issuer(&[expected_issuer]);
+        validation.validate_nbf = true;
+        validation.leeway = self.cfg.leeway_secs;
+
+        let token = decode::<CapTokenBody>(bearer, &cached.decoding, &validation)
+            .map_err(|e| LifegwError::Auth(format!("verify: {e}")))?;
+        let body = token.claims;
+
+        // Defense-in-depth aud check — same shape as Tier-1 verify, but
+        // the audience can be ANY of `allowed_audiences`.
+        let aud_string = body.aud.first_match(allowed_audiences).ok_or_else(|| {
+            LifegwError::Auth(format!(
+                "aud claim does not match any of {:?}",
+                allowed_audiences
+            ))
+        })?;
+
+        // Defense-in-depth nbf / exp checks above the leeway window.
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| LifegwError::Auth(format!("clock: {e}")))?
+            .as_secs();
+        if let Some(nbf) = body.nbf
+            && nbf > now + self.cfg.leeway_secs
+        {
+            return Err(LifegwError::Auth("token not yet valid (nbf)".to_string()));
+        }
+        if body.exp + self.cfg.leeway_secs < now {
+            return Err(LifegwError::Auth("token expired".to_string()));
+        }
+
+        Ok(VerifiedCapClaims {
+            aud: aud_string,
+            sub: body.sub,
+            scope: body.scope.unwrap_or_default(),
         })
     }
 
