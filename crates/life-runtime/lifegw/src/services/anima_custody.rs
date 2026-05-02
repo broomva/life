@@ -95,6 +95,22 @@ use tower::service_fn;
 use crate::auth::jwks::{JwksCache, VerifiedCapClaims};
 use crate::auth::tier_user::TierUserMinter;
 
+/// Spec D D-Sub-C review fix (I-3): per-RPC deadline applied to every
+/// soma admin call. The connect-side timeout in `connect_oracle` only
+/// covers the UDS handshake; without a per-RPC deadline a stuck soma
+/// admin oracle parks the route handler indefinitely and a request
+/// flood pins runtime tasks. 10 s is generous for production custody
+/// signing latency (sub-millisecond happy-path) while keeping the
+/// route handler responsive under upstream brownout.
+const RPC_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Spec D D-Sub-C review fix (I-6): max length of a `user_id` accepted
+/// at the gateway boundary. Mirrors the constant in
+/// `anima_identity::vault::validate_user_id`. Vault namespace paths
+/// have a soft ceiling well below this; the cap also bounds the size
+/// of bearer subjects we'll mint into capability tokens.
+const MAX_USER_ID_LEN: usize = 64;
+
 /// Default scopes minted into Tier-User caps. The current routes
 /// (sign_auth, sign_wallet) all live under `anima.user.*` — operators
 /// can prune the default by overriding `cfg.anima_custody.default_scopes`
@@ -372,24 +388,29 @@ async fn sign_auth_handler(
     headers: HeaderMap,
     Json(body): Json<SignBody>,
 ) -> Result<Json<SignResp>, ApiError> {
+    validate_user_id(&body.user_id)?;
     let claims = verify_bearer(&headers, &state.jwks)?;
     check_scope_and_subject(&claims, Some(SCOPE_SIGN_AUTH), &body.user_id)?;
     let uds = soma_uds(&state)?;
     let digest = decode_digest_32(&body.digest_b64)?;
     let mut client = connect_oracle(&uds).await?;
-    let resp = client
-        .sign_auth(oracle_pb::SignAuthRequest {
-            user_id: body.user_id,
-            digest: digest.to_vec(),
-        })
+    let call = client.sign_auth(oracle_pb::SignAuthRequest {
+        user_id: body.user_id,
+        digest: digest.to_vec(),
+    });
+    let resp = tokio::time::timeout(RPC_TIMEOUT, call)
         .await
-        .map_err(|e| ApiError::upstream(format!("sign_auth: {e}")))?
+        .map_err(|_| rpc_timeout_error())?
+        .map_err(|e| upstream_to_api_error(&e))?
         .into_inner();
     if resp.signature_raw.len() != 64 {
-        return Err(ApiError::upstream(format!(
-            "sign_auth returned {} bytes (expected 64)",
-            resp.signature_raw.len()
-        )));
+        tracing::warn!(
+            got = resp.signature_raw.len(),
+            "anima_custody: sign_auth returned non-64-byte signature"
+        );
+        return Err(ApiError::upstream(
+            "soma upstream returned invalid signature length",
+        ));
     }
     Ok(Json(SignResp {
         signature_b64: B64_STANDARD.encode(&resp.signature_raw),
@@ -402,28 +423,33 @@ async fn sign_wallet_handler(
     headers: HeaderMap,
     Json(body): Json<SignBody>,
 ) -> Result<Json<SignResp>, ApiError> {
+    validate_user_id(&body.user_id)?;
     let claims = verify_bearer(&headers, &state.jwks)?;
     check_scope_and_subject(&claims, Some(SCOPE_SIGN_WALLET), &body.user_id)?;
     let uds = soma_uds(&state)?;
     let digest = decode_digest_32(&body.digest_b64)?;
     let mut client = connect_oracle(&uds).await?;
-    let resp = client
-        .sign_wallet(oracle_pb::SignWalletRequest {
-            user_id: body.user_id,
-            digest: digest.to_vec(),
-        })
+    let call = client.sign_wallet(oracle_pb::SignWalletRequest {
+        user_id: body.user_id,
+        digest: digest.to_vec(),
+    });
+    let resp = tokio::time::timeout(RPC_TIMEOUT, call)
         .await
-        .map_err(|e| ApiError::upstream(format!("sign_wallet: {e}")))?
+        .map_err(|_| rpc_timeout_error())?
+        .map_err(|e| upstream_to_api_error(&e))?
         .into_inner();
     // soma returns 65-byte r||s||v; the wire contract with RemoteAnima
     // / WebCryptoAnima is "raw r||s, ecrecover v on the client". Strip
     // the trailing v byte before responding so the wire shape matches
     // sign_auth (always 64 bytes).
     if resp.signature_rsv.len() != 65 {
-        return Err(ApiError::upstream(format!(
-            "sign_wallet returned {} bytes (expected 65)",
-            resp.signature_rsv.len()
-        )));
+        tracing::warn!(
+            got = resp.signature_rsv.len(),
+            "anima_custody: sign_wallet returned non-65-byte rsv signature"
+        );
+        return Err(ApiError::upstream(
+            "soma upstream returned invalid signature length",
+        ));
     }
     let r_s = &resp.signature_rsv[..64];
     Ok(Json(SignResp {
@@ -437,20 +463,25 @@ async fn get_auth_pubkey_handler(
     headers: HeaderMap,
     Path(user_id): Path<String>,
 ) -> Result<Json<PubkeyResp>, ApiError> {
+    validate_user_id(&user_id)?;
     let claims = verify_bearer(&headers, &state.jwks)?;
     check_scope_and_subject(&claims, Some(SCOPE_GET_PUBKEY), &user_id)?;
     let uds = soma_uds(&state)?;
     let mut client = connect_oracle(&uds).await?;
-    let resp = client
-        .get_auth_pubkey(oracle_pb::GetAuthPubkeyRequest { user_id })
+    let call = client.get_auth_pubkey(oracle_pb::GetAuthPubkeyRequest { user_id });
+    let resp = tokio::time::timeout(RPC_TIMEOUT, call)
         .await
-        .map_err(|e| ApiError::upstream(format!("get_auth_pubkey: {e}")))?
+        .map_err(|_| rpc_timeout_error())?
+        .map_err(|e| upstream_to_api_error(&e))?
         .into_inner();
     if resp.pubkey_sec1_compressed.len() != 33 {
-        return Err(ApiError::upstream(format!(
-            "auth pubkey is {} bytes (expected 33)",
-            resp.pubkey_sec1_compressed.len()
-        )));
+        tracing::warn!(
+            got = resp.pubkey_sec1_compressed.len(),
+            "anima_custody: get_auth_pubkey returned non-33-byte pubkey"
+        );
+        return Err(ApiError::upstream(
+            "soma upstream returned invalid pubkey length",
+        ));
     }
     Ok(Json(PubkeyResp {
         pubkey_b64: B64_STANDARD.encode(&resp.pubkey_sec1_compressed),
@@ -463,26 +494,34 @@ async fn get_wallet_pubkey_handler(
     headers: HeaderMap,
     Path(user_id): Path<String>,
 ) -> Result<Json<PubkeyResp>, ApiError> {
+    validate_user_id(&user_id)?;
     let claims = verify_bearer(&headers, &state.jwks)?;
     check_scope_and_subject(&claims, Some(SCOPE_GET_PUBKEY), &user_id)?;
     let uds = soma_uds(&state)?;
     let mut client = connect_oracle(&uds).await?;
-    let resp = client
-        .get_wallet_pubkey(oracle_pb::GetWalletPubkeyRequest { user_id })
+    let call = client.get_wallet_pubkey(oracle_pb::GetWalletPubkeyRequest { user_id });
+    let resp = tokio::time::timeout(RPC_TIMEOUT, call)
         .await
-        .map_err(|e| ApiError::upstream(format!("get_wallet_pubkey: {e}")))?
+        .map_err(|_| rpc_timeout_error())?
+        .map_err(|e| upstream_to_api_error(&e))?
         .into_inner();
     if resp.pubkey_sec1_uncompressed.len() != 65 {
-        return Err(ApiError::upstream(format!(
-            "wallet pubkey is {} bytes (expected 65)",
-            resp.pubkey_sec1_uncompressed.len()
-        )));
+        tracing::warn!(
+            got = resp.pubkey_sec1_uncompressed.len(),
+            "anima_custody: get_wallet_pubkey returned non-65-byte pubkey"
+        );
+        return Err(ApiError::upstream(
+            "soma upstream returned invalid pubkey length",
+        ));
     }
     if resp.pubkey_sec1_uncompressed[0] != 0x04 {
-        return Err(ApiError::upstream(format!(
-            "wallet pubkey prefix 0x{:02x} ≠ 0x04 (uncompressed)",
-            resp.pubkey_sec1_uncompressed[0]
-        )));
+        tracing::warn!(
+            prefix = resp.pubkey_sec1_uncompressed[0],
+            "anima_custody: get_wallet_pubkey returned non-uncompressed pubkey prefix"
+        );
+        return Err(ApiError::upstream(
+            "soma upstream returned invalid pubkey encoding",
+        ));
     }
     Ok(Json(PubkeyResp {
         pubkey_b64: B64_STANDARD.encode(&resp.pubkey_sec1_uncompressed),
@@ -495,6 +534,7 @@ async fn mint_session_cap_handler(
     headers: HeaderMap,
     Json(body): Json<MintSessionCapBody>,
 ) -> Result<Json<CapResp>, ApiError> {
+    validate_user_id(&body.user_id)?;
     let claims = verify_bearer(&headers, &state.jwks)?;
     // Spec D D-Sub-C review fix (B2): mint is a privileged operation —
     // it MUST come from a Tier-2 (server-side) caller. A Tier-User cap
@@ -538,6 +578,7 @@ async fn enroll_passkey_handler(
     headers: HeaderMap,
     Json(body): Json<EnrollPasskeyBody>,
 ) -> Result<Json<EnrollResp>, ApiError> {
+    validate_user_id(&body.user_id)?;
     let claims = verify_bearer(&headers, &state.jwks)?;
     // Spec D D-Sub-C review fix (B2): enroll is a privileged
     // operation — first-time passkey provisioning MUST come from a
@@ -708,12 +749,25 @@ fn decode_digest_32(s: &str) -> Result<[u8; 32], ApiError> {
 ///
 /// Per-request connect; the channel is dropped after the response
 /// returns. Same connector recipe as `SomaCustody::new`.
+///
+/// Spec D D-Sub-C review fix (I-1): on connect failure, the soma UDS
+/// path is logged via `tracing::warn!` for operator forensics but is
+/// NEVER echoed into the 502 response body. Untrusted clients only
+/// see the generic `"soma upstream unavailable"` message — exposing
+/// the full filesystem path leaks lifegw's deployment topology.
 async fn connect_oracle(
     uds_path: &str,
 ) -> Result<oracle_pb::custody_oracle_client::CustodyOracleClient<Channel>, ApiError> {
-    let endpoint = Endpoint::try_from("http://[::]:0")
-        .map_err(|e| ApiError::internal(format!("oracle endpoint: {e}")))?
-        .connect_timeout(Duration::from_secs(5));
+    let endpoint = match Endpoint::try_from("http://[::]:0") {
+        Ok(ep) => ep.connect_timeout(Duration::from_secs(5)),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "anima_custody: failed to construct soma oracle endpoint"
+            );
+            return Err(ApiError::internal("oracle endpoint construction failed"));
+        }
+    };
     let path = uds_path.to_string();
     let channel = endpoint
         .connect_with_connector(service_fn(move |_: Uri| {
@@ -724,10 +778,136 @@ async fn connect_oracle(
             }
         }))
         .await
-        .map_err(|e| ApiError::upstream(format!("soma uds connect ({uds_path}): {e}")))?;
+        .map_err(|e| {
+            tracing::warn!(
+                soma_uds_path = %uds_path,
+                error = %e,
+                "anima_custody: failed to connect to soma admin custody-oracle UDS"
+            );
+            ApiError::upstream("soma upstream unavailable")
+        })?;
     Ok(oracle_pb::custody_oracle_client::CustodyOracleClient::new(
         channel,
     ))
+}
+
+/// Spec D D-Sub-C review fix (I-2): map `tonic::Status` into a
+/// fixed-shape `(StatusCode, &'static str)` pair so handlers don't
+/// echo upstream `Status::message` into the HTTP response. The raw
+/// `Status::Display` includes upstream error text that may carry
+/// request-shape internals (user_id, digest length, etc.).
+///
+/// The inner status is logged via `tracing::debug!` for operator
+/// forensics. The HTTP response body only carries the canonical code
+/// and a generic message.
+fn sanitize_upstream(status: &tonic::Status) -> (StatusCode, &'static str, &'static str) {
+    use tonic::Code;
+    let pair = match status.code() {
+        Code::NotFound => (StatusCode::NOT_FOUND, "not_found", "upstream not found"),
+        Code::InvalidArgument => (
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "upstream rejected request",
+        ),
+        Code::Unavailable => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "upstream_unavailable",
+            "soma upstream unavailable",
+        ),
+        Code::DeadlineExceeded => (
+            StatusCode::GATEWAY_TIMEOUT,
+            "upstream_timeout",
+            "soma upstream timeout",
+        ),
+        Code::PermissionDenied => (
+            StatusCode::FORBIDDEN,
+            "upstream_forbidden",
+            "soma upstream forbidden",
+        ),
+        _ => (
+            StatusCode::BAD_GATEWAY,
+            "upstream_error",
+            "soma upstream error",
+        ),
+    };
+    tracing::debug!(
+        code = ?status.code(),
+        upstream_message = status.message(),
+        mapped_status = pair.0.as_u16(),
+        mapped_code = pair.1,
+        "anima_custody: sanitized upstream status"
+    );
+    pair
+}
+
+/// Build an `ApiError` from a sanitized upstream status. Helper for
+/// every handler that proxies to soma — the routes pass the
+/// `tonic::Status` directly so the dispatch + logging happens in one
+/// place.
+fn upstream_to_api_error(status: &tonic::Status) -> ApiError {
+    let (http_status, code, message) = sanitize_upstream(status);
+    ApiError {
+        status: http_status,
+        code,
+        message: message.to_string(),
+        extras: Vec::new(),
+    }
+}
+
+/// Build an `ApiError` for the per-RPC deadline expiry case. Same
+/// shape as `Code::DeadlineExceeded` from `sanitize_upstream` so
+/// callers see a consistent contract whether the timeout fires
+/// client-side (here) or server-side (a tonic `DeadlineExceeded`).
+fn rpc_timeout_error() -> ApiError {
+    tracing::warn!(
+        timeout_secs = RPC_TIMEOUT.as_secs(),
+        "anima_custody: per-RPC deadline expired waiting for soma upstream"
+    );
+    ApiError {
+        status: StatusCode::GATEWAY_TIMEOUT,
+        code: "upstream_timeout",
+        message: "soma upstream timeout".to_string(),
+        extras: Vec::new(),
+    }
+}
+
+/// Spec D D-Sub-C review fix (I-6): validate `user_id` at the
+/// gateway boundary. Mirrors `anima_identity::vault::validate_user_id`
+/// — reject empty, oversize (>64 chars), control characters, and
+/// anything outside the `[A-Za-z0-9_.\-:]` allowlist. Without this
+/// validation, lifegw would forward arbitrary strings to soma which
+/// the vault layer rejects, but the failure surfaces as an opaque
+/// upstream error instead of a clean 400 at the boundary.
+fn validate_user_id(s: &str) -> Result<(), ApiError> {
+    if s.is_empty() {
+        return Err(ApiError::bad_request("bad_user_id", "user_id is empty"));
+    }
+    if s.len() > MAX_USER_ID_LEN {
+        return Err(ApiError::bad_request(
+            "bad_user_id",
+            format!("user_id is {} chars, max {MAX_USER_ID_LEN}", s.len()),
+        ));
+    }
+    for ch in s.chars() {
+        if ch.is_control() {
+            return Err(ApiError::bad_request(
+                "bad_user_id",
+                "user_id contains control character",
+            ));
+        }
+        let allowed = ch.is_ascii_alphanumeric()
+            || ch == '_'
+            || ch == '.'
+            || ch == '-'
+            || ch == ':';
+        if !allowed {
+            return Err(ApiError::bad_request(
+                "bad_user_id",
+                format!("user_id contains disallowed character {ch:?}"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Derive a `did:key:zDn…` DID from a SEC1-compressed P-256 public
