@@ -57,7 +57,7 @@ parking_lot = { workspace = true }
 # supplementary groups (Linux only; macOS dev builds fall back to
 # primary-gid checks).
 libc = "0.2"
-nix = { version = "0.31", default-features = false, features = ["user"] }
+nix = { version = "0.31", default-features = false, features = ["user", "fs"] }
 
 # Spec D D-Sub-E: in-process key store for CustodyOracle. The soma
 # admin custody surface holds the (P-256 auth + secp256k1 wallet) key

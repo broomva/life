@@ -203,6 +203,21 @@ impl SomaCustody {
     /// context. We use a tokio handle because the trait method
     /// signatures are sync (matching VaultTransitAnima's pattern with
     /// reqwest::blocking).
+    ///
+    /// **IMPORTANT — runtime-flavor caveat (IMP-11 review fix):**
+    /// `block_in_place` panics if called from a `current_thread` tokio
+    /// runtime. `Handle::try_current()` returns Ok on a current-thread
+    /// runtime, but the subsequent `block_on` will deadlock if the
+    /// inner future awaits anything driven by the same single-threaded
+    /// executor. **Callers MUST use a multi-thread tokio runtime** —
+    /// integration tests use `#[tokio::test(flavor = "multi_thread")]`.
+    /// Calling `SomaCustody::sign_*` from inside a Future on a
+    /// `current_thread` runtime will panic or deadlock.
+    ///
+    /// Future cleanup: when D-Sub-C lands the async-native browser path,
+    /// `AnimaCustody`'s sync trait-method shape will need revisiting
+    /// (likely an `async fn sign_*` variant or a dual-shape trait).
+    /// Until then, `SomaCustody` requires a multi-thread runtime.
     fn block_on<F, T>(&self, fut: F) -> AnimaResult<T>
     where
         F: std::future::Future<Output = AnimaResult<T>>,

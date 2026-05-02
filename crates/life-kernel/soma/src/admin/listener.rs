@@ -30,12 +30,38 @@ pub async fn bind(cfg: &AdminPlaneConfig) -> SomaResult<AdminAcceptor> {
             .map_err(|e| SomaError::Server(format!("chmod admin: {e}")))?;
     }
     if let Some(group) = cfg.unix_socket_group.as_deref() {
-        tracing::warn!(
+        // IMP-2 review fix: pre-fix this just emitted a warning and
+        // bailed, deferring the chown to systemd's `SocketGroup=`.
+        // soma's custody-oracle is more likely to run outside systemd
+        // than lifegw (e.g. dev box, container without `SocketGroup=`)
+        // — the previous behaviour silently broke peer authentication
+        // by binding the policy to a group the daemon's primary group
+        // didn't belong to. Now we resolve the GID and chown explicitly
+        // so the socket's group ownership matches the strict policy.
+        let gid_opt = peercred::group_gid(group).map_err(|e| {
+            SomaError::Server(format!("unix_socket_group {group:?}: getgrnam failed: {e}"))
+        })?;
+        let gid = gid_opt.ok_or_else(|| {
+            SomaError::Server(format!(
+                "unix_socket_group {group:?}: group not found in getgrnam — \
+                 either create the group on the host or remove the field"
+            ))
+        })?;
+        chown_socket_to_group(&cfg.unix_socket, gid).map_err(|e| {
+            SomaError::Server(format!(
+                "chown admin socket {} to group {} (gid {}): {}",
+                cfg.unix_socket.display(),
+                group,
+                gid,
+                e
+            ))
+        })?;
+        tracing::info!(
             target: "soma::admin::listener",
             group,
+            gid,
             path = %cfg.unix_socket.display(),
-            "unix_socket_group honored via systemd SocketGroup; \
-             in-process chown deferred (matches lifegw + lifed pattern)",
+            "admin UDS chown'd to configured unix_socket_group"
         );
     }
     Ok(AdminAcceptor { inner: listener })
@@ -60,6 +86,22 @@ fn prepare_socket_path(path: &Path) -> SomaResult<()> {
     Ok(())
 }
 
+/// Chown the admin UDS to the given GID without changing the owner uid.
+/// Used by [`bind`] when `unix_socket_group` is configured. IMP-2 fix.
+#[cfg(unix)]
+fn chown_socket_to_group(path: &Path, gid: u32) -> std::io::Result<()> {
+    use nix::unistd::{Gid, chown};
+    chown(path, None, Some(Gid::from_raw(gid))).map_err(|e| std::io::Error::other(e.to_string()))
+}
+
+#[cfg(not(unix))]
+fn chown_socket_to_group(_path: &Path, _gid: u32) -> std::io::Result<()> {
+    // Non-Unix builds are dev-only (anima-identity is Linux/macOS-first
+    // for the kms-soma feature). Treat the chown as a no-op so the
+    // build doesn't break for non-Unix targets.
+    Ok(())
+}
+
 /// Acceptor that yields [`AdminConn`]s — each carrying the connected
 /// peer's `PeerCred` so admin handlers can run policy checks.
 pub struct AdminAcceptor {
@@ -73,11 +115,28 @@ impl futures::Stream for AdminAcceptor {
         let acc = self.get_mut();
         match acc.inner.poll_accept(cx) {
             Poll::Ready(Ok((stream, _addr))) => {
-                let cred = peercred::peer_cred(&stream).unwrap_or(PeerCred {
-                    pid: 0,
-                    uid: 0,
-                    gid: 0,
-                });
+                // IMP-1 review fix: pre-fix, peercred-syscall failure
+                // fell through to PeerCred { uid: 0, ... } which the
+                // strict policy then admitted as root to every
+                // custody-oracle RPC. For a custody oracle that holds
+                // user signing keys this is a fail-open security bug.
+                // Now we fail closed: a peercred failure rejects the
+                // connection. The lifegw admin plane has the same
+                // pattern but its surface (cert reload, blocklist) is
+                // less load-bearing; the soma custody oracle MUST be
+                // strict about peer authentication.
+                let cred = match peercred::peer_cred(&stream) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "soma::admin::listener",
+                            error = %e,
+                            "rejecting admin connection: peercred syscall failed; \
+                             fail-closed to prevent root-creds spoofing"
+                        );
+                        return Poll::Ready(Some(Err(e)));
+                    }
+                };
                 Poll::Ready(Some(Ok(AdminConn { stream, cred })))
             }
             Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
