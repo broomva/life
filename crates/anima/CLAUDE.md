@@ -162,11 +162,11 @@ trait abstraction + 6 production backends. D-Sub-A (this PR) ships:
 | Sub-phase | Backend | Status |
 |---|---|---|
 | D-Sub-A | `InProcessAnima` | shipped 2026-04-29 (PR #1070) |
-| D-Sub-B | `VaultTransitAnima` | shipped 2026-05-01 (PR #1073) |
+| D-Sub-B | `VaultTransitAnima` | shipped 2026-05-01 (PR #1073); closes `sign_evm_tx` SPEC-D-DEVIATION via shared RLP encoder |
 | D-Sub-C | `WebCryptoAnima` + `RemoteAnima` | M9-blocking (~7 days) |
-| D-Sub-D | `TpmAnima` | shipped this PR; PKCS#11 auth half + wallet-half delegation |
+| D-Sub-D | `TpmAnima` | shipped 2026-05-02 (PR #1075); PKCS#11 auth half + wallet-half delegation |
 | D-Sub-E | `SomaCustody` + rotation/revocation flow | planned (~5 days) |
-| D-Sub-F | `HardwareWalletAnima` | optional (~2 days) |
+| D-Sub-F | `HardwareWalletAnima` | shipped this PR (Ledger via hidapi, wallet-only wrapper) |
 
 ### D-Sub-B (`VaultTransitAnima`) handoff state
 
@@ -212,6 +212,7 @@ build pulls reqwest + tokio for the renewal task.
   M7-E ships), revisit `with_explicit_keys`'s mTLS handling so
   populated configs aren't silently ignored.
 
+<<<<<<< HEAD
 ### D-Sub-D (`TpmAnima`) handoff state
 
 `TpmAnima` ships under feature flag `kms-tpm` (default off; mirrors
@@ -285,3 +286,65 @@ NOT pull `cryptoki` so the slim binary stays slim.
   sessions (open-sign-close per signature) the unsafe impls
   would become unnecessary; keeping them for the long-lived
   session pattern.
+
+### D-Sub-F (`HardwareWalletAnima`) handoff state
+
+`HardwareWalletAnima` ships under feature flag `hw-wallet` (default
+off). The crate pulls `hidapi` 2.6 only when the feature is enabled;
+default builds stay slim. This is a **wallet-only wrapper** —
+auth-half operations forward to a wrapped `Arc<dyn AnimaCustody>`
+delegate, only the secp256k1 wallet half goes to the hardware device.
+
+- Wallet-half target: Ledger Nano X / S / S+ running the **Ledger
+  Ethereum app** (`app-ethereum`). APDU codes locked at
+  `crate::hardware_wallet::ledger::apdu` (CLA `0xE0`,
+  `INS_GET_PUBLIC_KEY` 0x02, `INS_SIGN_TRANSACTION` 0x04,
+  `INS_GET_APP_VERSION` 0x06, `INS_SIGN_EIP712` 0x0C).
+- HID transport: `hidapi::HidDevice` wrapped in
+  `RealHidTransport`. The device is held behind a `Mutex` because
+  `HidDevice` is `Send` but not `Sync`; serialising APDU round-trips
+  is fine — the hardware device only displays one confirmation prompt
+  at a time anyway.
+- HID frame layout: 64-byte reports, 5-byte header
+  `[channel_hi channel_lo command_tag seq_hi seq_lo]` with
+  `channel = 0x0101`, `command_tag = 0x05`, sequence starting at 0.
+  First frame additionally carries the 2-byte big-endian total APDU
+  length. Implementation in `RealHidTransport::write_apdu` /
+  `read_apdu`.
+- **Auth-half pass-through**: `sign_jws`, `sign_digest`, `user_did`,
+  `auth_pubkey`, `export_identity_document` all forward to the
+  wrapped delegate. The trait shape is unchanged; what differs is
+  semantics (the wrapper does NOT own its own auth key — Ledger
+  doesn't expose P-256). Verified by
+  `auth_half_passes_through_to_inner_delegate` integration test.
+- **`rotate()` returns an error** because the seed is
+  hardware-resident and cannot be software-rotated. Verified by
+  `rotate_returns_unsupported_error` integration test. Operators must
+  initialize a fresh device with a new recovery phrase to "rotate"
+  in any meaningful sense.
+- **Hardware-confirmation UX**: every `sign_evm_tx` /
+  `sign_eip712` call blocks on a button press. Default
+  `read_timeout` is 60s, matching Ledger Live.
+- Tests: 7 integration + 6 unit (mocked `MockHidTransport`) + 1
+  `#[ignore]`-gated live-Ledger end-to-end test. See
+  `tests/integration_hardware_wallet.rs::live_ledger_get_pubkey` for
+  operator setup steps.
+
+### D-Sub-F follow-ups
+
+- **WebHID (browser) wrapper** — desktop hidapi is the only
+  transport in this PR. The browser path will live in a separate
+  crate (`anima-web-hardware` or similar) consumed by chatOS during
+  the M9 work. Public trait surface is identical; only the
+  underlying transport differs.
+- **Trezor support** — APDU codes + framing differ from Ledger;
+  flagged as a follow-up. Ledger is the primary integration.
+- **Generic EIP-712 encoder** — same limitation as
+  D-Sub-A/B/E. EIP-3009 only; the Ledger app supports arbitrary
+  EIP-712 in `INS_SIGN_EIP712` v1+ (P1 = 0x01) but we'd need a host
+  side encoder to format arbitrary typed-data structs into the
+  device's clear-signing layout. Deferred.
+- **Live USDC-transfer end-to-end on Base testnet** — Spec D
+  acceptance is "USDC transfer signed by a Ledger Nano X over WebHID
+  from chatOS browser". This PR ships the desktop hidapi half;
+  the browser-side acceptance test lands with the WebHID wrapper.
