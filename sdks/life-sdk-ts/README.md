@@ -147,6 +147,135 @@ cannot set custom request headers on WS handshakes.
 
 ---
 
+## Browser custody (Spec D D-Sub-C — `WebCryptoAnima`)
+
+The SDK ships a passkey-based browser custody surface — Spec D L4-D5
+"split custody" with the auth half (P-256 passkey, non-extractable)
+in the browser and the wallet half (secp256k1) delegated to a
+server-side anima daemon over the `/anima/custody/*` HTTP routes.
+
+```ts
+import {
+  PasskeyOracle,
+  RemoteAnimaClient,
+  SessionCap,
+  enrollWebCryptoAnima,
+  loadWebCryptoAnima,
+} from "@broomva/life-sdk";
+
+const passkey = new PasskeyOracle({
+  rpId: "broomva.tech",
+  rpName: "Broomva",
+});
+
+// First-time enrollment fires the OS auth UI (Touch ID / Windows
+// Hello / iCloud Keychain).
+const remote = new RemoteAnimaClient({
+  baseUrl: "https://api.life.dev",
+  getToken: async () => sessionCap.getValidToken(),
+});
+const sessionCap = new SessionCap({
+  userId: "u-1",
+  passkey,
+  remote,
+});
+
+const handle = await enrollWebCryptoAnima({
+  passkey,
+  remote,
+  sessionCap,
+  userId: "u-1",
+  displayName: "Carlos Escobar",
+  challenge: crypto.getRandomValues(new Uint8Array(32)),
+});
+
+// Subsequent sessions: load the cached credential, no OS prompt
+// fires until the first signing operation.
+const handle2 = await loadWebCryptoAnima({
+  passkey,
+  remote,
+  sessionCap,
+  userId: "u-1",
+});
+
+// Sign an EIP-712 USDC transferWithAuthorization (haima x402 path).
+const sig = await handle.signEip712(
+  {
+    name: "USD Coin",
+    version: "2",
+    chainId: "8453",
+    verifyingContract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  },
+  {
+    EIP712Domain: [
+      { name: "name", type: "string" },
+      { name: "version", type: "string" },
+      { name: "chainId", type: "uint256" },
+      { name: "verifyingContract", type: "address" },
+    ],
+    TransferWithAuthorization: [
+      { name: "from", type: "address" },
+      { name: "to", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "validAfter", type: "uint256" },
+      { name: "validBefore", type: "uint256" },
+      { name: "nonce", type: "bytes32" },
+    ],
+  },
+  {
+    from: handle.walletAddress(),
+    to: "0xFACILITATOR",
+    value: "1000000",
+    validAfter: "0",
+    validBefore: String(Math.floor(Date.now() / 1000) + 600),
+    nonce: "0x" + "00".repeat(32),
+  },
+);
+console.log(sig.bytes); // 65-byte r||s||v signature
+```
+
+### How the split works
+
+| Operation              | Routed to              | Notes |
+|------------------------|------------------------|-------|
+| `signJws` / `signDigest` | Passkey (browser)    | Touch ID / Windows Hello fires per call unless `SessionCap` is fresh |
+| `signEvmTx` / `signEip712` | Remote (server)    | Forwards digest over `/anima/custody/sign_wallet` to server-side `VaultTransitAnima` |
+| `userDid()`            | Local                  | Derived from cached SEC1-compressed P-256 pubkey via `generateDidKeyP256` (cross-language compatible with Rust) |
+| `walletAddress()`      | Cached at enrollment   | Server-resolved address — same for every session |
+| `rotate()`             | Rejects                | Spec D L4-D10 — rotation is journal-driven; server-side anima daemon emits `anima.identity_rotated` |
+
+### Tier-User cap lifecycle
+
+`SessionCap` manages a short-lived (default 15 min) JWT minted by
+lifegw against a passkey-signed challenge. Subsequent custody RPCs
+auto-refresh when < 30 s remain:
+
+```ts
+const sessionCap = new SessionCap({
+  userId: "u-1",
+  passkey,
+  remote,
+  refreshBeforeSecs: 30,
+  onExpiringSoon: () => console.log("re-authenticate soon"),
+});
+```
+
+The cap lives in-memory only — IndexedDB is reserved for the
+credentialId + cached pubkey, not for capability tokens.
+
+### Spec D ground truth + cross-references
+
+- **Spec D**: `docs/superpowers/specs/2026-04-29-spec-d-anima-custody.md`
+- **Trait shape**: `crates/anima/anima-identity/src/custody.rs` (Rust)
+- **DID derivation**: `crates/anima/anima-identity/src/did.rs` (Rust);
+  byte-identical to TS `generateDidKeyP256`. Cross-language fixtures
+  pinned in `tests/fixtures/did_p256_vectors.json`.
+- **Backend matrix**: see Spec D §"Backend matrix" — browser deployments
+  pair `WebCryptoAnima` (auth) with `RemoteAnima` (wallet), both
+  exposed through this SDK.
+
+---
+
 ## Error handling
 
 Every error thrown by the SDK extends `LifeSdkError`:
