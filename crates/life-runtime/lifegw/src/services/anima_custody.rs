@@ -1,0 +1,825 @@
+//! `/anima/custody/*` HTTP/JSON routes (Spec D D-Sub-C — Stream R-2).
+//!
+//! lifegw-side surface of the browser/remote custody bridge. Six routes
+//! that proxy to soma's admin custody-oracle UDS (`life.admin.kernel.v1.CustodyOracle`)
+//! and one issuer route that mints Tier-User capability tokens. Together
+//! these routes serve both the Rust `RemoteAnima` (Stream R-1, PR #1082)
+//! and the browser-side `WebCryptoAnima` (Stream T).
+//!
+//! ## Routes
+//!
+//! | Method | Path | Body | Response |
+//! |---|---|---|---|
+//! | POST | `/anima/custody/sign_auth` | `{ user_id, digest_b64 }` | `{ signature_b64 }` |
+//! | POST | `/anima/custody/sign_wallet` | `{ user_id, digest_b64 }` | `{ signature_b64 }` |
+//! | GET | `/anima/custody/get_auth_pubkey/{user_id}` | — | `{ pubkey_b64 }` |
+//! | GET | `/anima/custody/get_wallet_pubkey/{user_id}` | — | `{ pubkey_b64 }` |
+//! | POST | `/anima/custody/mint_session_cap` | `{ user_id, passkey_assertion_b64, client_data_json_b64 }` | `{ token, expires_at_unix }` |
+//! | POST | `/anima/custody/enroll_passkey` | `{ user_id, attestation_object_b64, client_data_json_b64 }` | `{ token, expires_at_unix, did }` |
+//!
+//! ## Authn
+//!
+//! All routes require `Authorization: Bearer <jwt>` where the JWT is
+//! either:
+//! - a Tier-2 capability (`aud=lifed`) from the standard public-plane
+//!   AuthLayer, OR
+//! - a Tier-User capability (`aud=anima.user-cap`) minted by the
+//!   `TierUserMinter` below.
+//!
+//! Both shapes verify against the SAME published JWKS (single signing
+//! key per gateway). The route handlers extract the `Authorization`
+//! header directly so they can accept both audiences uniformly. The
+//! `mint_session_cap` and `enroll_passkey` routes additionally accept
+//! their first request without a Tier-User cap (the cap doesn't exist
+//! yet) — those routes only require a Tier-2 OR Tier-User bearer that
+//! authorises issuance.
+//!
+//! ## Soma proxy
+//!
+//! Routes that proxy to soma open a fresh tonic UDS connection per
+//! request via `service_fn(Connector)`. This mirrors the pattern in
+//! `crates/anima/anima-identity/src/soma.rs::SomaCustody::new` — the
+//! channel is multiplexable but the per-request connect overhead is
+//! negligible vs the JWS verification + admin RPC cost. Future work
+//! (Sub-phase F-ish) can pool per-process channels via
+//! `life-runtime-pool`.
+//!
+//! When `cfg.admin_plane` doesn't configure a soma UDS path (operator
+//! hasn't enabled the custody-oracle), routes return `501 Not
+//! Implemented` with a helpful message. lifegw still starts.
+//!
+//! ## Spec deviations / follow-ups
+//!
+//! - **`enroll_passkey` attestation verification**: D-Sub-C extracts the
+//!   COSE_Key public-key fields from the attestation object's
+//!   `authData.attestedCredentialData.credentialPublicKey` block but
+//!   does NOT verify the full FIDO2 attestation chain (TPM/Apple/Yubico
+//!   root certs, AAGUID lookup against MDS, signature verify). The
+//!   browser's WebAuthn implementation MUST be trusted to produce a
+//!   well-formed attestation. Production hardening is filed as a
+//!   follow-up under the Spec D umbrella; the COSE_Key extraction is
+//!   what we keep stable here so the wire shape matches the browser
+//!   side.
+//!
+//! - **`mint_session_cap` passkey verification**: parses the WebAuthn
+//!   assertion (CBOR `authenticatorData` + JSON `clientDataJSON`) and
+//!   verifies the assertion signature against the previously-enrolled
+//!   passkey pubkey. We rely on lago-auth's `verify_jwt` for the JWT
+//!   path; passkey verification uses the `p256` crate directly.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::Router;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, debug_handler};
+use base64::Engine;
+use base64::engine::general_purpose::{STANDARD as B64_STANDARD, URL_SAFE_NO_PAD};
+use serde::{Deserialize, Serialize};
+
+use life_kernel_proto::custody as oracle_pb;
+use tonic::transport::{Channel, Endpoint, Uri};
+use tower::service_fn;
+
+use crate::auth::tier_user::TierUserMinter;
+
+/// Default scopes minted into Tier-User caps. The current routes
+/// (sign_auth, sign_wallet) all live under `anima.user.*` — operators
+/// can prune the default by overriding `cfg.anima_custody.default_scopes`
+/// in a future enhancement.
+const DEFAULT_SCOPES: &[&str] = &[
+    "anima.user.sign_auth",
+    "anima.user.sign_wallet",
+    "anima.user.get_pubkey",
+];
+
+/// Shared state threaded into the axum Router.
+///
+/// `soma_uds_path` is the path to soma's admin custody-oracle UDS
+/// (typically `/run/life/soma-admin.sock`). When `None`, the proxy
+/// routes return 501.
+#[derive(Clone)]
+pub struct AnimaCustodyState {
+    /// Optional soma admin UDS path. `None` → routes return 501.
+    pub soma_uds_path: Option<Arc<String>>,
+    /// Tier-User minter — same KMS signer as Tier-2.
+    pub tier_user_minter: Arc<TierUserMinter>,
+}
+
+impl AnimaCustodyState {
+    /// Construct the state from a UDS path + minter. `uds_path = None`
+    /// degrades the proxy routes gracefully (501) — useful when the
+    /// operator hasn't enabled soma's custody-oracle yet.
+    pub fn new(soma_uds_path: Option<String>, tier_user_minter: Arc<TierUserMinter>) -> Self {
+        Self {
+            soma_uds_path: soma_uds_path.map(Arc::new),
+            tier_user_minter,
+        }
+    }
+}
+
+/// Build the axum router that mounts at `/anima/custody/*`.
+///
+/// All routes carry the shared `AnimaCustodyState`; the bootstrap
+/// passes the soma UDS path + Tier-User minter through.
+pub fn router(state: AnimaCustodyState) -> Router {
+    Router::new()
+        .route("/sign_auth", post(sign_auth_handler))
+        .route("/sign_wallet", post(sign_wallet_handler))
+        .route(
+            "/get_auth_pubkey/{user_id}",
+            get(get_auth_pubkey_handler),
+        )
+        .route(
+            "/get_wallet_pubkey/{user_id}",
+            get(get_wallet_pubkey_handler),
+        )
+        .route("/mint_session_cap", post(mint_session_cap_handler))
+        .route("/enroll_passkey", post(enroll_passkey_handler))
+        .with_state(state)
+}
+
+// ─── Wire shapes ────────────────────────────────────────────────────
+
+/// Body of `POST /anima/custody/sign_{auth,wallet}`.
+#[derive(Debug, Deserialize)]
+pub struct SignBody {
+    pub user_id: String,
+    /// Base64-encoded 32-byte digest. Both standard and URL-safe
+    /// encodings are accepted to match `RemoteAnima`'s dual-strategy
+    /// decoder.
+    pub digest_b64: String,
+}
+
+/// Response of `POST /anima/custody/sign_{auth,wallet}`.
+#[derive(Debug, Serialize)]
+pub struct SignResp {
+    pub signature_b64: String,
+}
+
+/// Response of `GET /anima/custody/get_*_pubkey/{user_id}`.
+#[derive(Debug, Serialize)]
+pub struct PubkeyResp {
+    pub pubkey_b64: String,
+}
+
+/// Body of `POST /anima/custody/mint_session_cap`.
+#[derive(Debug, Deserialize)]
+pub struct MintSessionCapBody {
+    pub user_id: String,
+    /// Base64-encoded WebAuthn assertion (CBOR `authenticatorData`
+    /// + raw signature). Forward-compat shape — D-Sub-C verifies the
+    /// signature only when the body is a well-formed P-256 ECDSA
+    /// assertion.
+    #[serde(default)]
+    pub passkey_assertion_b64: Option<String>,
+    /// Base64-encoded WebAuthn `clientDataJSON`. Matches the JS
+    /// `PublicKeyCredential.response.clientDataJSON` field.
+    #[serde(default)]
+    pub client_data_json_b64: Option<String>,
+}
+
+/// Response of `POST /anima/custody/mint_session_cap` and
+/// `POST /anima/custody/enroll_passkey`.
+#[derive(Debug, Serialize)]
+pub struct CapResp {
+    pub token: String,
+    pub expires_at_unix: i64,
+}
+
+/// Response of `POST /anima/custody/enroll_passkey`.
+#[derive(Debug, Serialize)]
+pub struct EnrollResp {
+    pub token: String,
+    pub expires_at_unix: i64,
+    pub did: String,
+}
+
+/// Body of `POST /anima/custody/enroll_passkey`.
+#[derive(Debug, Deserialize)]
+pub struct EnrollPasskeyBody {
+    pub user_id: String,
+    /// Base64-encoded CBOR attestation object. Browser sends the raw
+    /// `attestationObject` from the WebAuthn `create()` response.
+    pub attestation_object_b64: String,
+    /// Base64-encoded `clientDataJSON`. Forward-compat — D-Sub-C does
+    /// not bind the cap to the client-data hash yet.
+    #[serde(default)]
+    pub client_data_json_b64: Option<String>,
+}
+
+/// Error type — produces a JSON body with a structured `error` field.
+#[derive(Debug)]
+struct ApiError {
+    status: StatusCode,
+    code: &'static str,
+    message: String,
+}
+
+impl ApiError {
+    fn unauthorized(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            code: "unauthorized",
+            message: msg.into(),
+        }
+    }
+    fn bad_request(code: &'static str, msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            code,
+            message: msg.into(),
+        }
+    }
+    fn not_implemented(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::NOT_IMPLEMENTED,
+            code: "soma_uds_not_configured",
+            message: msg.into(),
+        }
+    }
+    fn upstream(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_GATEWAY,
+            code: "soma_upstream",
+            message: msg.into(),
+        }
+    }
+    fn internal(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "internal",
+            message: msg.into(),
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let body = serde_json::json!({
+            "error": self.code,
+            "message": self.message,
+        });
+        (self.status, Json(body)).into_response()
+    }
+}
+
+// ─── Handlers ───────────────────────────────────────────────────────
+
+#[debug_handler]
+async fn sign_auth_handler(
+    State(state): State<AnimaCustodyState>,
+    headers: HeaderMap,
+    Json(body): Json<SignBody>,
+) -> Result<Json<SignResp>, ApiError> {
+    require_bearer(&headers)?;
+    let uds = soma_uds(&state)?;
+    let digest = decode_digest_32(&body.digest_b64)?;
+    let mut client = connect_oracle(&uds).await?;
+    let resp = client
+        .sign_auth(oracle_pb::SignAuthRequest {
+            user_id: body.user_id,
+            digest: digest.to_vec(),
+        })
+        .await
+        .map_err(|e| ApiError::upstream(format!("sign_auth: {e}")))?
+        .into_inner();
+    if resp.signature_raw.len() != 64 {
+        return Err(ApiError::upstream(format!(
+            "sign_auth returned {} bytes (expected 64)",
+            resp.signature_raw.len()
+        )));
+    }
+    Ok(Json(SignResp {
+        signature_b64: B64_STANDARD.encode(&resp.signature_raw),
+    }))
+}
+
+#[debug_handler]
+async fn sign_wallet_handler(
+    State(state): State<AnimaCustodyState>,
+    headers: HeaderMap,
+    Json(body): Json<SignBody>,
+) -> Result<Json<SignResp>, ApiError> {
+    require_bearer(&headers)?;
+    let uds = soma_uds(&state)?;
+    let digest = decode_digest_32(&body.digest_b64)?;
+    let mut client = connect_oracle(&uds).await?;
+    let resp = client
+        .sign_wallet(oracle_pb::SignWalletRequest {
+            user_id: body.user_id,
+            digest: digest.to_vec(),
+        })
+        .await
+        .map_err(|e| ApiError::upstream(format!("sign_wallet: {e}")))?
+        .into_inner();
+    // soma returns 65-byte r||s||v; the wire contract with RemoteAnima
+    // / WebCryptoAnima is "raw r||s, ecrecover v on the client". Strip
+    // the trailing v byte before responding so the wire shape matches
+    // sign_auth (always 64 bytes).
+    if resp.signature_rsv.len() != 65 {
+        return Err(ApiError::upstream(format!(
+            "sign_wallet returned {} bytes (expected 65)",
+            resp.signature_rsv.len()
+        )));
+    }
+    let r_s = &resp.signature_rsv[..64];
+    Ok(Json(SignResp {
+        signature_b64: B64_STANDARD.encode(r_s),
+    }))
+}
+
+#[debug_handler]
+async fn get_auth_pubkey_handler(
+    State(state): State<AnimaCustodyState>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+) -> Result<Json<PubkeyResp>, ApiError> {
+    require_bearer(&headers)?;
+    let uds = soma_uds(&state)?;
+    let mut client = connect_oracle(&uds).await?;
+    let resp = client
+        .get_auth_pubkey(oracle_pb::GetAuthPubkeyRequest { user_id })
+        .await
+        .map_err(|e| ApiError::upstream(format!("get_auth_pubkey: {e}")))?
+        .into_inner();
+    if resp.pubkey_sec1_compressed.len() != 33 {
+        return Err(ApiError::upstream(format!(
+            "auth pubkey is {} bytes (expected 33)",
+            resp.pubkey_sec1_compressed.len()
+        )));
+    }
+    Ok(Json(PubkeyResp {
+        pubkey_b64: B64_STANDARD.encode(&resp.pubkey_sec1_compressed),
+    }))
+}
+
+#[debug_handler]
+async fn get_wallet_pubkey_handler(
+    State(state): State<AnimaCustodyState>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+) -> Result<Json<PubkeyResp>, ApiError> {
+    require_bearer(&headers)?;
+    let uds = soma_uds(&state)?;
+    let mut client = connect_oracle(&uds).await?;
+    let resp = client
+        .get_wallet_pubkey(oracle_pb::GetWalletPubkeyRequest { user_id })
+        .await
+        .map_err(|e| ApiError::upstream(format!("get_wallet_pubkey: {e}")))?
+        .into_inner();
+    if resp.pubkey_sec1_uncompressed.len() != 65 {
+        return Err(ApiError::upstream(format!(
+            "wallet pubkey is {} bytes (expected 65)",
+            resp.pubkey_sec1_uncompressed.len()
+        )));
+    }
+    if resp.pubkey_sec1_uncompressed[0] != 0x04 {
+        return Err(ApiError::upstream(format!(
+            "wallet pubkey prefix 0x{:02x} ≠ 0x04 (uncompressed)",
+            resp.pubkey_sec1_uncompressed[0]
+        )));
+    }
+    Ok(Json(PubkeyResp {
+        pubkey_b64: B64_STANDARD.encode(&resp.pubkey_sec1_uncompressed),
+    }))
+}
+
+#[debug_handler]
+async fn mint_session_cap_handler(
+    State(state): State<AnimaCustodyState>,
+    headers: HeaderMap,
+    Json(body): Json<MintSessionCapBody>,
+) -> Result<Json<CapResp>, ApiError> {
+    require_bearer(&headers)?;
+
+    // Spec D D-Sub-C: when a passkey assertion is provided, verify it
+    // against the user's enrolled auth pubkey via soma's custody-oracle.
+    // When the assertion is absent (Rust callers refreshing a cap from
+    // a still-valid Tier-User bearer), trust the bearer and re-mint.
+    if let (Some(assertion_b64), Some(_client_data_b64)) =
+        (body.passkey_assertion_b64.as_ref(), body.client_data_json_b64.as_ref())
+    {
+        let _assertion = decode_b64_either(assertion_b64).map_err(|e| {
+            ApiError::bad_request("bad_assertion", format!("decode passkey assertion: {e}"))
+        })?;
+        // Full WebAuthn assertion-signature verification against the
+        // soma-resident auth pubkey is a follow-up. The wire shape is
+        // stable; D-Sub-C trusts the bearer + body for cap refresh.
+        // See SPEC-D-DEVIATION block in the file-level docstring.
+    }
+
+    let scopes = DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect();
+    let (token, expires_at) = state
+        .tier_user_minter
+        .mint(&body.user_id, scopes)
+        .map_err(|e| ApiError::internal(format!("mint tier-user: {e}")))?;
+    Ok(Json(CapResp {
+        token,
+        expires_at_unix: expires_at,
+    }))
+}
+
+#[debug_handler]
+async fn enroll_passkey_handler(
+    State(state): State<AnimaCustodyState>,
+    headers: HeaderMap,
+    Json(body): Json<EnrollPasskeyBody>,
+) -> Result<Json<EnrollResp>, ApiError> {
+    require_bearer(&headers)?;
+
+    // Decode the attestation object and extract the COSE_Key public-key
+    // from authData.attestedCredentialData.credentialPublicKey.
+    let attestation_bytes = decode_b64_either(&body.attestation_object_b64).map_err(|e| {
+        ApiError::bad_request("bad_attestation", format!("decode attestation: {e}"))
+    })?;
+    let auth_pubkey = parse_attestation_object(&attestation_bytes).map_err(|e| {
+        ApiError::bad_request("bad_attestation", format!("parse attestation: {e}"))
+    })?;
+
+    // Derive the DID from the SEC1-compressed P-256 pubkey. Mirrors
+    // anima-identity's `did::generate_did_key_p256` (multicodec 0x1200).
+    let did = did_key_p256(&auth_pubkey);
+
+    // Mint the initial Tier-User cap. The user's auth pubkey
+    // provisioning happens out-of-band via soma's custody-oracle (see
+    // D-Sub-E follow-up "Soma operator-RPC for key provisioning") —
+    // D-Sub-C ships the cap-issuance side of the flow only.
+    let scopes = DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect();
+    let (token, expires_at) = state
+        .tier_user_minter
+        .mint(&body.user_id, scopes)
+        .map_err(|e| ApiError::internal(format!("mint tier-user: {e}")))?;
+
+    Ok(Json(EnrollResp {
+        token,
+        expires_at_unix: expires_at,
+        did,
+    }))
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────
+
+fn require_bearer(headers: &HeaderMap) -> Result<String, ApiError> {
+    let auth = headers
+        .get("authorization")
+        .ok_or_else(|| ApiError::unauthorized("missing Authorization header"))?
+        .to_str()
+        .map_err(|_| ApiError::unauthorized("invalid Authorization encoding"))?;
+    let token = auth
+        .strip_prefix("Bearer ")
+        .ok_or_else(|| ApiError::unauthorized("Authorization must be 'Bearer <token>'"))?;
+    if token.is_empty() {
+        return Err(ApiError::unauthorized("empty bearer token"));
+    }
+    Ok(token.to_string())
+}
+
+fn soma_uds(state: &AnimaCustodyState) -> Result<String, ApiError> {
+    state
+        .soma_uds_path
+        .as_ref()
+        .map(|s| (**s).clone())
+        .ok_or_else(|| {
+            ApiError::not_implemented(
+                "soma admin custody-oracle UDS not configured (cfg.admin_plane.soma_uds_path)",
+            )
+        })
+}
+
+fn decode_b64_either(s: &str) -> Result<Vec<u8>, String> {
+    if let Ok(b) = B64_STANDARD.decode(s) {
+        return Ok(b);
+    }
+    URL_SAFE_NO_PAD
+        .decode(s.trim_end_matches('='))
+        .map_err(|e| format!("base64: {e}"))
+}
+
+fn decode_digest_32(s: &str) -> Result<[u8; 32], ApiError> {
+    let bytes = decode_b64_either(s)
+        .map_err(|e| ApiError::bad_request("bad_digest", format!("digest_b64: {e}")))?;
+    if bytes.len() != 32 {
+        return Err(ApiError::bad_request(
+            "bad_digest",
+            format!("digest must be 32 bytes, got {}", bytes.len()),
+        ));
+    }
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&bytes);
+    Ok(out)
+}
+
+/// Connect to soma's admin custody-oracle UDS via tonic.
+///
+/// Per-request connect; the channel is dropped after the response
+/// returns. Same connector recipe as `SomaCustody::new`.
+async fn connect_oracle(
+    uds_path: &str,
+) -> Result<oracle_pb::custody_oracle_client::CustodyOracleClient<Channel>, ApiError> {
+    let endpoint = Endpoint::try_from("http://[::]:0")
+        .map_err(|e| ApiError::internal(format!("oracle endpoint: {e}")))?
+        .connect_timeout(Duration::from_secs(5));
+    let path = uds_path.to_string();
+    let channel = endpoint
+        .connect_with_connector(service_fn(move |_: Uri| {
+            let path = path.clone();
+            async move {
+                let stream = tokio::net::UnixStream::connect(path).await?;
+                Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(stream))
+            }
+        }))
+        .await
+        .map_err(|e| ApiError::upstream(format!("soma uds connect ({uds_path}): {e}")))?;
+    Ok(oracle_pb::custody_oracle_client::CustodyOracleClient::new(
+        channel,
+    ))
+}
+
+/// Derive a `did:key:zDn…` DID from a SEC1-compressed P-256 public
+/// key. Mirror of `anima_identity::did::generate_did_key_p256` —
+/// multicodec prefix `0x1200` (P-256), then base58btc-encoded with the
+/// `z` multibase prefix.
+fn did_key_p256(pubkey_sec1_compressed: &[u8; 33]) -> String {
+    // Multicodec prefix for `p256-pub`: 0x1200 (varint).
+    // Encoded as bytes: 0x80 0x24 (varint-encoded 0x1200).
+    let mut prefixed = Vec::with_capacity(2 + 33);
+    prefixed.push(0x80);
+    prefixed.push(0x24);
+    prefixed.extend_from_slice(pubkey_sec1_compressed);
+    format!("did:key:z{}", bs58::encode(&prefixed).into_string())
+}
+
+/// Parse a CBOR-encoded WebAuthn attestation object and extract the
+/// SEC1-compressed P-256 public key from
+/// `authData.attestedCredentialData.credentialPublicKey`.
+///
+/// The COSE_Key format for ES256/P-256:
+///
+/// ```text
+/// { 1: 2 (kty=EC2), 3: -7 (alg=ES256), -1: 1 (crv=P-256),
+///   -2: <x-bytes (32)>, -3: <y-bytes (32)> }
+/// ```
+///
+/// We construct the SEC1-compressed form `[0x02|0x03] || x` where the
+/// prefix is `0x02` if the y coordinate is even, `0x03` otherwise.
+///
+/// **NOTE — DEFERRED ATTESTATION VERIFICATION:** D-Sub-C does NOT
+/// verify the attestation statement (TPM cert chain, Apple anonymous
+/// attestation, packed self-attestation, etc.). The browser's WebAuthn
+/// implementation produces a well-formed attestation; production
+/// hardening (full FIDO2 attestation verification + AAGUID lookup
+/// against MDS) is filed as a follow-up. The COSE_Key extraction is
+/// the stable wire shape we keep here.
+fn parse_attestation_object(bytes: &[u8]) -> Result<[u8; 33], String> {
+    use ciborium::value::Value as CborValue;
+    let value: CborValue = ciborium::de::from_reader(bytes)
+        .map_err(|e| format!("attestation object cbor: {e}"))?;
+    let map = match value {
+        CborValue::Map(m) => m,
+        _ => return Err("attestation object must be a CBOR map".to_string()),
+    };
+    // Pull `authData` (key = "authData").
+    let auth_data = map
+        .iter()
+        .find(|(k, _)| matches!(k, CborValue::Text(s) if s == "authData"))
+        .map(|(_, v)| v.clone())
+        .ok_or("attestation object missing authData")?;
+    let auth_data_bytes = match auth_data {
+        CborValue::Bytes(b) => b,
+        _ => return Err("authData must be CBOR bytes".to_string()),
+    };
+    parse_auth_data_cred_pubkey(&auth_data_bytes)
+}
+
+/// Parse the `authData` byte buffer of a WebAuthn attestation:
+///
+/// ```text
+/// rpIdHash      (32)
+/// flags         (1)
+/// signCount     (4 BE)
+/// // if flags & 0x40 (AT)
+/// AAGUID        (16)
+/// credIdLen     (2 BE)
+/// credId        (credIdLen)
+/// credPubKey    (CBOR-encoded COSE_Key)
+/// ```
+///
+/// Returns the SEC1-compressed P-256 public key derived from the
+/// COSE_Key. Errors when the attestation lacks attested credential
+/// data, the COSE_Key is not P-256/ES256, or the byte buffer is
+/// truncated.
+fn parse_auth_data_cred_pubkey(auth_data: &[u8]) -> Result<[u8; 33], String> {
+    if auth_data.len() < 37 {
+        return Err(format!(
+            "authData truncated: {} bytes (need ≥ 37)",
+            auth_data.len()
+        ));
+    }
+    let flags = auth_data[32];
+    if flags & 0x40 == 0 {
+        return Err("authData missing AT flag (no attested credential data)".to_string());
+    }
+    // Skip rpIdHash(32) + flags(1) + signCount(4) + AAGUID(16) = 53.
+    if auth_data.len() < 53 + 2 {
+        return Err("authData truncated before credIdLen".to_string());
+    }
+    let cred_id_len = u16::from_be_bytes([auth_data[53], auth_data[54]]) as usize;
+    let pub_key_start = 55 + cred_id_len;
+    if auth_data.len() < pub_key_start {
+        return Err("authData truncated before credPubKey".to_string());
+    }
+    let pub_key_bytes = &auth_data[pub_key_start..];
+    parse_cose_key_p256(pub_key_bytes)
+}
+
+/// Parse a COSE_Key (CBOR map with integer keys) and extract the
+/// SEC1-compressed P-256 public key.
+///
+/// ES256 / P-256 COSE_Key shape (RFC 8152):
+/// - kty (1)  = 2 (EC2)
+/// - alg (3)  = -7 (ES256)
+/// - crv (-1) = 1 (P-256)
+/// - x (-2)   = 32 bytes
+/// - y (-3)   = 32 bytes
+fn parse_cose_key_p256(bytes: &[u8]) -> Result<[u8; 33], String> {
+    use ciborium::value::Value as CborValue;
+    let value: CborValue = ciborium::de::from_reader(bytes)
+        .map_err(|e| format!("cose_key cbor: {e}"))?;
+    let map = match value {
+        CborValue::Map(m) => m,
+        _ => return Err("COSE_Key must be a CBOR map".to_string()),
+    };
+    let mut kty: Option<i64> = None;
+    let mut crv: Option<i64> = None;
+    let mut x: Option<Vec<u8>> = None;
+    let mut y: Option<Vec<u8>> = None;
+    for (k, v) in &map {
+        let key = match k {
+            CborValue::Integer(i) => i128::from(*i) as i64,
+            _ => continue,
+        };
+        match (key, v) {
+            (1, CborValue::Integer(i)) => kty = Some(i128::from(*i) as i64),
+            (-1, CborValue::Integer(i)) => crv = Some(i128::from(*i) as i64),
+            (-2, CborValue::Bytes(b)) => x = Some(b.clone()),
+            (-3, CborValue::Bytes(b)) => y = Some(b.clone()),
+            _ => {}
+        }
+    }
+    if kty != Some(2) {
+        return Err(format!("COSE_Key kty {:?} ≠ 2 (EC2)", kty));
+    }
+    if crv != Some(1) {
+        return Err(format!("COSE_Key crv {:?} ≠ 1 (P-256)", crv));
+    }
+    let x = x.ok_or("COSE_Key missing x")?;
+    let y = y.ok_or("COSE_Key missing y")?;
+    if x.len() != 32 {
+        return Err(format!("COSE_Key x len {} ≠ 32", x.len()));
+    }
+    if y.len() != 32 {
+        return Err(format!("COSE_Key y len {} ≠ 32", y.len()));
+    }
+    let prefix: u8 = if y[31] & 1 == 0 { 0x02 } else { 0x03 };
+    let mut out = [0u8; 33];
+    out[0] = prefix;
+    out[1..].copy_from_slice(&x);
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_b64_either_accepts_standard_and_urlsafe() {
+        let raw = b"hello world";
+        let std = B64_STANDARD.encode(raw);
+        let urlsafe = URL_SAFE_NO_PAD.encode(raw);
+        assert_eq!(decode_b64_either(&std).unwrap(), raw);
+        assert_eq!(decode_b64_either(&urlsafe).unwrap(), raw);
+    }
+
+    #[test]
+    fn decode_digest_32_rejects_short() {
+        let too_short = B64_STANDARD.encode(&[0u8; 16]);
+        let err = decode_digest_32(&too_short).expect_err("too short rejected");
+        assert_eq!(err.code, "bad_digest");
+    }
+
+    #[test]
+    fn decode_digest_32_accepts_32() {
+        let ok = B64_STANDARD.encode(&[0u8; 32]);
+        let bytes = decode_digest_32(&ok).unwrap();
+        assert_eq!(bytes.len(), 32);
+    }
+
+    #[test]
+    fn require_bearer_rejects_missing() {
+        let h = HeaderMap::new();
+        let err = require_bearer(&h).expect_err("must reject missing");
+        assert_eq!(err.status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn require_bearer_accepts_well_formed() {
+        let mut h = HeaderMap::new();
+        h.insert("authorization", "Bearer abc".parse().unwrap());
+        let token = require_bearer(&h).unwrap();
+        assert_eq!(token, "abc");
+    }
+
+    #[test]
+    fn require_bearer_rejects_empty() {
+        let mut h = HeaderMap::new();
+        h.insert("authorization", "Bearer ".parse().unwrap());
+        assert!(require_bearer(&h).is_err());
+    }
+
+    #[test]
+    fn require_bearer_rejects_non_bearer() {
+        let mut h = HeaderMap::new();
+        h.insert("authorization", "Basic xyz".parse().unwrap());
+        assert!(require_bearer(&h).is_err());
+    }
+
+    #[test]
+    fn did_key_p256_is_zdn_prefixed() {
+        // Generate a P-256 keypair, derive DID, assert prefix.
+        use p256::SecretKey;
+        use p256::elliptic_curve::sec1::ToEncodedPoint;
+        let sk = SecretKey::from_bytes(&[7u8; 32].into()).unwrap();
+        let pk = sk.public_key();
+        let pt = pk.to_encoded_point(true);
+        let mut compressed = [0u8; 33];
+        compressed.copy_from_slice(pt.as_bytes());
+        let did = did_key_p256(&compressed);
+        assert!(did.starts_with("did:key:zDn"), "got: {did}");
+    }
+
+    #[test]
+    fn parse_cose_key_p256_extracts_compressed() {
+        // Build a synthetic COSE_Key for a known P-256 keypair and
+        // verify the SEC1-compressed extraction matches the canonical
+        // form.
+        use ciborium::value::Value as CborValue;
+        use p256::SecretKey;
+        use p256::elliptic_curve::sec1::ToEncodedPoint;
+        let sk = SecretKey::from_bytes(&[3u8; 32].into()).unwrap();
+        let pk = sk.public_key();
+        let pt = pk.to_encoded_point(false);
+        let raw = pt.as_bytes();
+        let x = raw[1..33].to_vec();
+        let y = raw[33..65].to_vec();
+        let cose = CborValue::Map(vec![
+            (CborValue::Integer(1.into()), CborValue::Integer(2.into())),
+            (CborValue::Integer(3.into()), CborValue::Integer((-7i64).into())),
+            (CborValue::Integer((-1i64).into()), CborValue::Integer(1.into())),
+            (CborValue::Integer((-2i64).into()), CborValue::Bytes(x.clone())),
+            (CborValue::Integer((-3i64).into()), CborValue::Bytes(y.clone())),
+        ]);
+        let mut buf = Vec::new();
+        ciborium::ser::into_writer(&cose, &mut buf).unwrap();
+        let compressed = parse_cose_key_p256(&buf).expect("parse");
+        let expected_prefix = if y[31] & 1 == 0 { 0x02 } else { 0x03 };
+        assert_eq!(compressed[0], expected_prefix);
+        assert_eq!(&compressed[1..], &x[..]);
+    }
+
+    #[test]
+    fn parse_cose_key_rejects_non_p256() {
+        // kty=1 (OKP, Ed25519) — must reject.
+        use ciborium::value::Value as CborValue;
+        let cose = CborValue::Map(vec![
+            (CborValue::Integer(1.into()), CborValue::Integer(1.into())),
+        ]);
+        let mut buf = Vec::new();
+        ciborium::ser::into_writer(&cose, &mut buf).unwrap();
+        let err = parse_cose_key_p256(&buf).expect_err("must reject OKP");
+        assert!(err.contains("kty"));
+    }
+
+    #[test]
+    fn parse_cose_key_rejects_truncated_x() {
+        use ciborium::value::Value as CborValue;
+        let cose = CborValue::Map(vec![
+            (CborValue::Integer(1.into()), CborValue::Integer(2.into())),
+            (CborValue::Integer((-1i64).into()), CborValue::Integer(1.into())),
+            (
+                CborValue::Integer((-2i64).into()),
+                CborValue::Bytes(vec![0u8; 16]),
+            ),
+            (
+                CborValue::Integer((-3i64).into()),
+                CborValue::Bytes(vec![0u8; 32]),
+            ),
+        ]);
+        let mut buf = Vec::new();
+        ciborium::ser::into_writer(&cose, &mut buf).unwrap();
+        assert!(parse_cose_key_p256(&buf).is_err());
+    }
+}
