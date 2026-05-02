@@ -155,6 +155,26 @@ jobs:
           echo "$PR_TITLE" | grep -qE '^(feat|fix|chore|docs|refactor|test|ci|perf|build|style|revert)(\(.+\))?(!)?: .+' \
             || { echo "::error::PR title must follow conventional commits: <type>(<scope>): <subject>"; exit 1; }
 
+  # ── Gate 9b: Life TypeScript SDK ──────────────────────────────────
+  sdk-life-ts:
+    name: SDK life-ts
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/life-sdk-ts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: TypeScript strict-mode check
+        run: bun run typecheck
+      - name: Unit tests
+        run: bun run test
+      - name: Production build
+        run: bun run build
+
   # ── Gate 10: Console Frontend ─────────────────────────────────────
   console:
     name: Console Frontend
