@@ -202,11 +202,11 @@ build pulls reqwest + tokio for the renewal task.
   Full USDC-transfer + Base-fork end-to-end test is achievable when
   Vault-secp256k1 patches land or a secp256k1-capable HSM sidecar is
   introduced. Track via Linear (pending MCP re-auth).
-- **Generic EIP-712 encoder** — D-Sub-B retains the D-Sub-A
+- **Generic EIP-712 encoder** — D-Sub-E retains the D-Sub-A/B
   limitation: only EIP-3009 `TransferWithAuthorization` is supported
   through `sign_eip712`. Generic encoder deferred to a follow-up
-  sub-phase (likely D-Sub-E when SomaCustody adds typed-data signing
-  of arbitrary payloads).
+  sub-phase (next opportunity is D-Sub-D's TPM body or a dedicated
+  hardening pass).
 - **mTLS feature plumbing** — when the workspace's reqwest pin gains
   an optional TLS feature (likely a Sub-phase F refinement after
   M7-E ships), revisit `with_explicit_keys`'s mTLS handling so
