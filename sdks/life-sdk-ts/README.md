@@ -1,8 +1,16 @@
 # @broomva/life-sdk
 
+> **⚠️ v0.1.0-pre — pre-release foundation.** Two known wire-protocol
+> gaps prevent this SDK from completing real calls against a production
+> lifegw deployment. See [KNOWN_LIMITATIONS.md](./KNOWN_LIMITATIONS.md)
+> for B1 (Connect-vs-grpc-web wire mismatch) and B2 (browser WS auth
+> via subprotocol). The structural foundation (services, typed errors,
+> WS state machine, proto types, codec helpers, 50 unit tests) is
+> stable and reusable; v0.2.0 ships the transport rework.
+
 Public TypeScript SDK for the **Life Agent OS**. Talks to `lifegw` (the
-edge gateway) over `grpc-web` + WebSocket, exposing the four user-facing
-services from `life.v1.*`:
+edge gateway) — see KNOWN_LIMITATIONS.md for the current transport
+state — exposing the four user-facing services from `life.v1.*`:
 
 | Service | Purpose |
 |---|---|
@@ -78,13 +86,20 @@ const balance = await life.wallet.getBalance({
 console.log(balance.micros, balance.currency);
 ```
 
-Run the example end-to-end against a local lifegw:
+Run the example end-to-end against a local lifegw (from inside this
+package directory):
 
 ```bash
+cd sdks/life-sdk-ts
+pnpm install
 LIFE_BASE_URL=https://localhost:443 \
 LIFE_USER_ID=u-quickstart \
-pnpm --filter @broomva/life-sdk example:quickstart
+pnpm run example:quickstart
 ```
+
+> The repo doesn't currently have a top-level pnpm workspace
+> declaration, so `pnpm --filter` won't resolve the package name from
+> the repo root. Run from `sdks/life-sdk-ts/` directly.
 
 ---
 

@@ -252,6 +252,14 @@ export class Transport {
         // Unknown flags are silently dropped per Connect spec.
       }
     } finally {
+      // I-2 fix: when the consumer breaks out of the for-await loop early,
+      // we need to abort the underlying fetch so the body stream is
+      // cancelled and the HTTP connection is freed. Without this, the
+      // connection stays open until GC. The body reader's
+      // `releaseLock()` (in `readConnectFrames`'s finally) only releases
+      // the lock — `controller.abort()` is what actually cancels the
+      // stream.
+      controller.abort();
       linked.cleanup();
     }
   }
@@ -290,6 +298,15 @@ interface ConnectFrame {
 
 /**
  * Read Connect-protocol stream frames from a `ReadableStream<Uint8Array>`.
+ *
+ * Pre-merge code-quality review I-2: previously this generator never
+ * called `reader.releaseLock()` or `reader.cancel()`. When a consumer
+ * broke out of the for-await loop early (e.g. the quickstart example
+ * `if (event.kind === "FINISH") break`), the underlying body reader
+ * stayed held and the HTTP connection stayed open until GC. The
+ * `try { ... } finally { reader.releaseLock(); }` wrapper here ensures
+ * the reader is released when the generator's `return()` fires (which
+ * happens automatically on early break/return from a for-await).
  */
 async function* readConnectFrames(
   stream: ReadableStream<Uint8Array>,
@@ -298,28 +315,39 @@ async function* readConnectFrames(
   let buffer = new Uint8Array(0);
   const td = new TextDecoder();
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    if (!value) continue;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value) continue;
 
-    // Append to buffer.
-    const next = new Uint8Array(buffer.byteLength + value.byteLength);
-    next.set(buffer, 0);
-    next.set(value, buffer.byteLength);
-    buffer = next;
+      // Append to buffer.
+      const next = new Uint8Array(buffer.byteLength + value.byteLength);
+      next.set(buffer, 0);
+      next.set(value, buffer.byteLength);
+      buffer = next;
 
-    // Parse all complete frames.
-    while (buffer.byteLength >= 5) {
-      const flag = buffer[0];
-      if (flag === undefined) break;
-      const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-      const length = view.getUint32(1, false);
-      if (buffer.byteLength < 5 + length) break;
-      const payload = buffer.slice(5, 5 + length);
-      const body = td.decode(payload);
-      yield { flag, body };
-      buffer = buffer.slice(5 + length);
+      // Parse all complete frames.
+      while (buffer.byteLength >= 5) {
+        const flag = buffer[0];
+        if (flag === undefined) break;
+        const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        const length = view.getUint32(1, false);
+        if (buffer.byteLength < 5 + length) break;
+        const payload = buffer.slice(5, 5 + length);
+        const body = td.decode(payload);
+        yield { flag, body };
+        buffer = buffer.slice(5 + length);
+      }
+    }
+  } finally {
+    // Release the lock so the underlying ReadableStream can be cancelled
+    // by the outer `serverStream` finally (which calls
+    // `controller.abort()` to cancel the in-flight fetch).
+    try {
+      reader.releaseLock();
+    } catch {
+      // ReadableStream is already cancelled — nothing to do.
     }
   }
 }

@@ -65,3 +65,15 @@ export {
 
 // Proto types — re-exported so consumers don't need a deep import.
 export * as proto from "./proto/index.js";
+
+// Proto3-JSON codec helpers — for converting between the wire shapes
+// (string for int64/uint64, base64 string for bytes) and the values
+// consumers actually want (bigint, Uint8Array). See `./codec.ts`.
+export {
+  microsToBigInt,
+  bigIntToMicros,
+  sequenceToBigInt,
+  bigIntToSequence,
+  bytesFromBase64,
+  bytesToBase64,
+} from "./codec.js";

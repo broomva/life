@@ -1,7 +1,7 @@
 {
   "name": "@broomva/life-sdk",
-  "version": "0.1.0",
-  "description": "Public TypeScript SDK for the Life Agent OS — talks to lifegw over grpc-web + WebSocket. Implements the user-facing life.v1.{Agent, Events, Wallet, Identity} services.",
+  "version": "0.1.0-pre",
+  "description": "Public TypeScript SDK for the Life Agent OS — talks to lifegw over grpc-web + WebSocket. Implements the user-facing life.v1.{Agent, Events, Wallet, Identity} services. v0.1.0-pre — see KNOWN_LIMITATIONS.md before depending on this in production.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -14,6 +14,7 @@ import {
   AuthError,
   BackpressureError,
   IpBlockedError,
+  type LifeSdkError,
   RateLimitError,
   SequenceRetiredError,
   WsAgentSession,
@@ -301,13 +302,33 @@ describe("WsAgentSession", () => {
     FakeWs.instances[0]!.serverClose(4002, "backpressure:slow_consumer");
     await vi.advanceTimersByTimeAsync(10);
     expect(FakeWs.instances.length).toBeGreaterThanOrEqual(2);
-    // Smoke-test that the second connection inherits the backpressure
-    // surface even though the first errored on it. The last-seq cursor
-    // should still be 0 (no events received).
+    // Last-seq cursor stays 0 (no events received before the close).
     expect(session.lastSeqNo).toBe(0n);
-    // Mark BackpressureError type used so the import isn't dead.
-    expect(BackpressureError.prototype).toBeDefined();
     vi.useRealTimers();
+  });
+
+  it("4002 backpressure surfaces BackpressureError when autoReconnect=false", async () => {
+    // I-4 fix: previously the only 4002 test asserted reconnect happened
+    // but never that the close was actually mapped to BackpressureError.
+    // This companion test disables auto-reconnect to verify the typed
+    // error reaches onError.
+    FakeWs.instances = [];
+    const errs: LifeSdkError[] = [];
+    const session = new WsAgentSession({
+      baseUrl: "https://gw.test",
+      sid: "sid",
+      autoReconnect: false,
+      webSocketFactory: (u, p) => new FakeWs(u, p),
+    });
+    session.on({ onError: (e) => errs.push(e) });
+    const openP = session.open();
+    await waitFor(() => FakeWs.instances.length > 0);
+    FakeWs.instances[0]!.open();
+    await openP;
+    FakeWs.instances[0]!.serverClose(4002, "backpressure:slow_consumer");
+    await waitFor(() => errs.length > 0);
+    expect(errs[0]).toBeInstanceOf(BackpressureError);
+    expect(errs[0]?.message).toContain("backpressure");
   });
 
   it("sends send_message / approve_dispatch / cancel_dispatch / ping / close frames", async () => {

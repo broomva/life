@@ -32,6 +32,10 @@ import {
   closeCodeToError,
   TransportError,
   TlsNegotiationError,
+  AuthError,
+  RateLimitError,
+  IpBlockedError,
+  SequenceRetiredError,
   type LifeSdkError,
 } from "./errors.js";
 
@@ -412,9 +416,36 @@ export class WsAgentSession {
     setTimeout(() => {
       if (this.closing) return;
       this.connect().catch((err: unknown) => {
-        // If the synchronous handshake fails outright, surface and stop.
+        // I-3 fix: if the retry handshake fails (close-before-open)
+        // with a transient error class AND we still have budget,
+        // schedule another reconnect rather than terminating
+        // immediately. Pre-fix this branch always set `closed = true`,
+        // which collapsed maxReconnectAttempts to 1 in practice.
+        //
+        // Permanent error classes (matching PERMANENT_CLOSE_CODES):
+        // AuthError (1008), RateLimitError (4001), IpBlockedError
+        // (4003), SequenceRetiredError (4005). Everything else is
+        // transient (TransportError, GoingAwayError,
+        // InternalServerError 1011, BackpressureError 4002,
+        // LifedUnavailableError 4004).
+        const sdkErr = err as LifeSdkError;
+        const isPermanent =
+          sdkErr instanceof AuthError ||
+          sdkErr instanceof RateLimitError ||
+          sdkErr instanceof IpBlockedError ||
+          sdkErr instanceof SequenceRetiredError;
+        if (
+          this.options.autoReconnect &&
+          !isPermanent &&
+          this.reconnectAttempts < this.options.maxReconnectAttempts &&
+          !this.closing
+        ) {
+          this.scheduleReconnect();
+          return;
+        }
+        // Permanent error or budget exhausted.
         this.closed = true;
-        this.handlers.onError?.(err as LifeSdkError);
+        this.handlers.onError?.(sdkErr);
       });
     }, delay);
   }

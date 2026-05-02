@@ -11,7 +11,8 @@ import type { Timestamp } from "./timestamp.js";
 
 export interface Profile {
   bio?: string;
-  avatarBlobRef?: Uint8Array;
+  /** Avatar blob ref. Proto3 JSON wire shape: base64 string. */
+  avatarBlobRef?: string;
   preferences?: Record<string, string>;
 }
 

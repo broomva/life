@@ -3,3 +3,4 @@ dist/
 *.tsbuildinfo
 .vitest-cache/
 .turbo/
+pnpm-lock.yaml

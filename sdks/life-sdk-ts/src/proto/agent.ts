@@ -66,10 +66,12 @@ export interface SessionRef {
   sid: SessionId;
   /**
    * Resume cursor — when set, `Agent.StreamSession` replays from
-   * `from_sequence + 1`. `0` (or unset) means "fresh stream". See
+   * `from_sequence + 1`. `"0"` (or unset) means "fresh stream". See
    * Spec C₃ §11.4 for the WebSocket-side reconnect semantics.
+   *
+   * Proto3 JSON wire shape: string (uint64).
    */
-  fromSequence?: bigint;
+  fromSequence?: string;
 }
 
 export interface SendMessageReq {
@@ -78,21 +80,28 @@ export interface SendMessageReq {
   /**
    * Optional reference to a previously-uploaded blob, e.g.
    * `"sha256:<hex>"`. Forwarded verbatim to lifed.
+   *
+   * Proto3 JSON wire shape: base64 string (the proto field is
+   * `bytes`, but in practice this carries an ASCII reference like
+   * `sha256:<hex>` which the gateway base64-decodes back to bytes).
    */
-  attachmentBlobRef?: Uint8Array;
+  attachmentBlobRef?: string;
 }
 
 /**
  * Re-exported from `events.ts` to match the proto layout where
  * `EventRecord` lives in `events.proto` even though `AgentEvent`
  * carries it.
+ *
+ * Proto3 JSON wire shape: `sequence` is a string (int64), `payload`
+ * is a base64 string (`bytes`).
  */
 export interface EventRecord {
   sessionId: SessionId;
-  sequence: bigint;
+  sequence: string;
   at?: Timestamp;
   kind: string;
-  payload: Uint8Array;
+  payload: string;
 }
 
 export interface AgentEvent {
@@ -125,7 +134,8 @@ export interface ListToolsReq {
 export interface CatalogEntry {
   id: string;
   version: string;
-  manifest: Uint8Array;
+  /** Manifest bytes. Proto3 JSON wire shape: base64 string. */
+  manifest: string;
 }
 
 export interface SkillCatalog {
@@ -143,7 +153,8 @@ export interface ToolCatalog {
 export interface SpawnChildReq {
   parentSid: SessionId;
   spec?: CreateSessionReq;
-  budgetCapMicros?: bigint;
+  /** Budget cap in micros. Proto3 JSON wire shape: string (uint64). */
+  budgetCapMicros?: string;
   inheritPolicy?: ChildPolicy;
 }
 

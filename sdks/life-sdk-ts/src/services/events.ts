@@ -58,21 +58,26 @@ export class EventsClient {
   /**
    * Convenience helper: read a blob and return its raw bytes.
    *
-   * The proto `Blob.data` field is decoded base64 → `Uint8Array` by
-   * the transport reviver.
+   * The proto `Blob.data` field is the proto3-JSON canonical encoding
+   * of `bytes`, which is a base64-encoded string on the wire (see the
+   * I-1 fix at top of `../proto/events.ts`). This helper decodes the
+   * base64 to the raw `Uint8Array` payload.
    */
   async getBlobBytes(req: BlobRef, opts?: TransportCallOptions): Promise<Uint8Array> {
     const blob = await this.getBlob(req, opts);
-    if (blob.data instanceof Uint8Array) return blob.data;
-    if (typeof blob.data === "string") {
-      // Some hosts skip the reviver — re-decode here.
-      return base64ToBytes(blob.data);
+    if (typeof blob.data !== "string" || blob.data.length === 0) {
+      return new Uint8Array();
     }
-    return new Uint8Array();
+    return base64ToBytes(blob.data);
   }
 }
 
-function base64ToBytes(b64: string): Uint8Array {
+/**
+ * Decode a proto3-JSON `bytes` field (base64 string) to raw bytes.
+ * Exported for downstream consumers who hold an `EventRecord.payload`
+ * or `CatalogEntry.manifest` and need the binary form.
+ */
+export function base64ToBytes(b64: string): Uint8Array {
   if (typeof atob === "function") {
     const bin = atob(b64);
     const out = new Uint8Array(bin.length);
