@@ -27,6 +27,11 @@ kms-vault = ["dep:reqwest", "dep:tokio"]
 # Default off; desktop deployments (mission-control on Linux/macOS)
 # opt in via this feature. Mirrors the `kms-vault` gating pattern.
 kms-tpm = ["dep:cryptoki", "dep:secrecy"]
+# Spec D D-Sub-F: Ledger / Trezor hardware wallet backend
+# (`HardwareWalletAnima`). Pulls `hidapi` for desktop HID transport;
+# WebHID (browser) is intentionally out-of-scope for this feature and
+# would land in a separate browser-side crate.
+hw-wallet = ["dep:hidapi"]
 
 [dependencies]
 anima-core.workspace = true
@@ -84,6 +89,11 @@ cryptoki = { workspace = true, optional = true }
 # threading the user PIN through `rotate()`. Same gate as cryptoki —
 # default builds don't pull it.
 secrecy = { workspace = true, optional = true }
+# Spec D D-Sub-F: Ledger / Trezor hardware wallet via desktop HID. The
+# `hw-wallet` feature pulls hidapi for the blocking, synchronous HID
+# transport; the browser-side WebHID path is OUT OF SCOPE for this
+# feature and would live in a separate crate.
+hidapi = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }

@@ -42,6 +42,9 @@ pub mod vault;
 #[cfg(feature = "kms-tpm")]
 pub mod tpm;
 
+#[cfg(feature = "hw-wallet")]
+pub mod hardware_wallet;
+
 pub use custody::{
     AnimaCustody, AnimaCustodyHandle, BackendKind, DidRotationEvent, Eip712Domain, EvmSignature,
     TxRequest,
@@ -60,3 +63,6 @@ pub use vault::{VaultMtls, VaultTransitAnima};
 
 #[cfg(feature = "kms-tpm")]
 pub use tpm::TpmAnima;
+
+#[cfg(feature = "hw-wallet")]
+pub use hardware_wallet::{HardwareWalletAnima, HidTransport, ledger};
