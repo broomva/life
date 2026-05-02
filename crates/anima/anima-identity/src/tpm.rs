@@ -218,17 +218,24 @@ struct TpmSession {
     auth_pub: ObjectHandle,
 }
 
-// SAFETY: we serialise all access to `TpmSession` through a `Mutex`,
-// which makes the contained `!Send` types Send-able from the outside.
-// `cryptoki::session::Session` does not implement `Send` because the
-// underlying PKCS#11 contract requires the same thread to call
-// `C_Login`/`C_Sign` on a session — but with a `Mutex` + a single-
-// thread executor this is upheld in practice. The trait
-// `AnimaCustody: Send + Sync + 'static` requires this, and
-// `VaultTransitAnima` does the same dance (it holds a non-Send
-// `reqwest::blocking::Client` behind no Mutex). For our blocking
-// PKCS#11 path, `Mutex` ensures only one thread is ever inside the
-// session at a time, satisfying PKCS#11's serialisation guarantee.
+// SAFETY: we serialise all access to `TpmSession` through the outer
+// `Mutex<TpmSession>`, so the `!Send` types it contains are accessed
+// exclusively from a single thread at a time. `cryptoki::session::Session`
+// is not `Send` because the PKCS#11 standard requires the same OS thread
+// that called `C_Login` to call subsequent `C_Sign` operations on that
+// session — with a `Mutex<TpmSession>` outer wrapper holding the lock
+// across the full sign-RPC, the same thread does the `C_Login` (at
+// construction) and the subsequent `C_Sign` calls.
+//
+// (Note: this is NOT the same pattern as `VaultTransitAnima` —
+// `reqwest::blocking::Client` is natively `Send + Sync` so Vault doesn't
+// need an `unsafe impl`. The PKCS#11 thread-affinity contract is what
+// forces our hand here. Spec D code-quality review I-2 follow-up: if
+// we move to per-call open-sign-close PKCS#11 sessions in a future
+// sub-phase, the `unsafe impl` here becomes unnecessary.)
+//
+// The trait `AnimaCustody: Send + Sync + 'static` requires this. The
+// `Mutex<TpmSession>` invariant is the load-bearing safety property.
 unsafe impl Send for TpmSession {}
 unsafe impl Sync for TpmSession {}
 
