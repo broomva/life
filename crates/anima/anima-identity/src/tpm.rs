@@ -126,7 +126,9 @@
 //! fixture.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
+
+use zeroize;
 
 use anima_core::error::{AnimaError, AnimaResult};
 use anima_core::identity_document::{
@@ -195,18 +197,22 @@ pub struct TpmAnima {
     /// Optional wallet delegate for the secp256k1 half (see
     /// SPEC-D-DEVIATION block). `None` means wallet ops return error.
     wallet_delegate: Option<Arc<dyn AnimaCustody>>,
-    /// Cached PEM-encoded auth public key for KYA doc export.
-    /// Lazy-built from `auth_pubkey` (no I/O after construction).
-    auth_public_pem: OnceLock<String>,
 }
 
 /// Internal session bundle — owns the PKCS#11 module, the open session,
 /// and the resolved key handles. Held inside `Arc<Mutex<>>` so trait
 /// methods (`&self`) can serialise access.
 struct TpmSession {
-    /// The Pkcs11 client. Held alongside the session because
-    /// `Session` borrows from `Pkcs11` internally; dropping `Pkcs11`
-    /// would invalidate the session.
+    /// The Pkcs11 client. I-3 review fix: `cryptoki::session::Session`
+    /// owns its own `Arc<Pkcs11Impl>` clone internally, so dropping the
+    /// outer `Pkcs11` here would NOT invalidate the session — the
+    /// underlying library stays alive as long as `Session` exists. We
+    /// keep the field to make `rotate()` cheap (the new session is
+    /// opened against the same `Pkcs11` instance, avoiding a second
+    /// `C_Initialize` call which most modules reject) and as a hedge
+    /// against any future cryptoki refactor that changes the borrow
+    /// shape. Documented honestly here vs. the previous "session
+    /// borrows from Pkcs11" claim which was incorrect.
     _pkcs11: Pkcs11,
     /// The open R/W session. Logged in to USER for the auth key.
     session: Session,
@@ -218,25 +224,29 @@ struct TpmSession {
     auth_pub: ObjectHandle,
 }
 
-// SAFETY: we serialise all access to `TpmSession` through the outer
-// `Mutex<TpmSession>`, so the `!Send` types it contains are accessed
-// exclusively from a single thread at a time. `cryptoki::session::Session`
-// is not `Send` because the PKCS#11 standard requires the same OS thread
-// that called `C_Login` to call subsequent `C_Sign` operations on that
-// session — with a `Mutex<TpmSession>` outer wrapper holding the lock
-// across the full sign-RPC, the same thread does the `C_Login` (at
-// construction) and the subsequent `C_Sign` calls.
+// SAFETY: I-2 review fix — only `unsafe impl Sync` is load-bearing.
 //
-// (Note: this is NOT the same pattern as `VaultTransitAnima` —
-// `reqwest::blocking::Client` is natively `Send + Sync` so Vault doesn't
-// need an `unsafe impl`. The PKCS#11 thread-affinity contract is what
-// forces our hand here. Spec D code-quality review I-2 follow-up: if
-// we move to per-call open-sign-close PKCS#11 sessions in a future
-// sub-phase, the `unsafe impl` here becomes unnecessary.)
+// `cryptoki::session::Session` is `Send` natively (the cryptoki crate
+// declares `unsafe impl Send for Session {}` since 0.10) but is `!Sync`
+// by design — `Session` carries a `PhantomData<*mut u32>` that blocks
+// the auto-derive. The PKCS#11 specification permits passing a session
+// handle by ownership across threads but forbids concurrent use of the
+// same handle from multiple threads simultaneously.
 //
-// The trait `AnimaCustody: Send + Sync + 'static` requires this. The
-// `Mutex<TpmSession>` invariant is the load-bearing safety property.
-unsafe impl Send for TpmSession {}
+// `TpmSession` would auto-derive `Send` (all its fields — `Pkcs11`,
+// `Session`, `ObjectHandle`, `String`, `[u8; 33]` — are `Send`). The
+// pre-fix `unsafe impl Send for TpmSession {}` was redundant; dropped.
+//
+// `unsafe impl Sync for TpmSession {}` IS required because `Session`'s
+// `PhantomData<*mut u32>` blocks auto-Sync. The invariant we uphold:
+// every `&self` access to fields inside `TpmSession` happens through
+// the outer `Mutex<TpmSession>` lock, so at most one thread reads from
+// the `!Sync` `Session` at a time. That satisfies PKCS#11's concurrent-
+// use prohibition. The `Mutex<TpmSession>` is the load-bearing safety
+// property.
+//
+// (If we move to per-call open-sign-close PKCS#11 sessions in a future
+// sub-phase, the `unsafe impl Sync` becomes unnecessary too.)
 unsafe impl Sync for TpmSession {}
 
 impl TpmAnima {
@@ -314,7 +324,6 @@ impl TpmAnima {
             user_did,
             auth_pubkey,
             wallet_delegate,
-            auth_public_pem: OnceLock::new(),
         })
     }
 
@@ -362,7 +371,6 @@ impl TpmAnima {
             user_did,
             auth_pubkey,
             wallet_delegate,
-            auth_public_pem: OnceLock::new(),
         })
     }
 
@@ -532,25 +540,24 @@ impl AnimaCustody for TpmAnima {
             rotated_at: Utc::now(),
         };
 
-        // Open a fresh TpmAnima handle bound to the new label. We
-        // re-bootstrap from `Self::new` so the new handle owns its
-        // own Pkcs11 + Session + key handles. Reusing the parent's
-        // session would entangle lifetimes — the parent handle is
-        // still meant to be valid as a snapshot of pre-rotation
-        // state per the trait contract.
+        // I-4 review fix: open a fresh PKCS#11 session against the
+        // EXISTING `Pkcs11` instance instead of constructing a new one.
+        // Pre-fix, `rotate()` called `Pkcs11::new(...)` + `initialize(...)`
+        // which most PKCS#11 modules reject on the second call within
+        // the same process (returns `CKR_CRYPTOKI_ALREADY_INITIALIZED`).
+        // The existing `Pkcs11` is `Arc<Pkcs11Impl>` internally so
+        // cloning it is cheap, and opening a fresh `Session` against
+        // it requires no re-initialization.
         //
-        // SAFETY: `AuthPin` does not expose its inner string for
-        // reconstruction. Production deployments rotate via operator
-        // workflow (kill mission-control + re-launch with new label)
-        // so this in-band rotation path is primarily for testing /
-        // single-machine smoke tests. We rebuild using
-        // `with_explicit_session` against a fresh PKCS#11 client
-        // bound to the new label.
-        let new_pkcs11 = Pkcs11::new(&self.module_path)
-            .map_err(|e| AnimaError::Crypto(format!("tpm rotate: load module: {e}")))?;
-        new_pkcs11
-            .initialize(CInitializeArgs::new(CInitializeFlags::OS_LOCKING_OK))
-            .map_err(|e| AnimaError::Crypto(format!("tpm rotate: initialize: {e}")))?;
+        // The parent handle (`self`) keeps its own session and remains
+        // a valid snapshot of pre-rotation state per the trait contract.
+        let new_pkcs11 = {
+            let s = self
+                .session
+                .lock()
+                .map_err(|_| AnimaError::Crypto("tpm rotate: session mutex poisoned".into()))?;
+            s._pkcs11.clone()
+        };
         let new_session = new_pkcs11
             .open_rw_session(self.slot)
             .map_err(|e| AnimaError::Crypto(format!("tpm rotate: open session: {e}")))?;
@@ -562,13 +569,20 @@ impl AnimaCustody for TpmAnima {
         // Re-supply the same PIN by exposing it via secrecy. `AuthPin` is
         // `SecretString` (a `SecretBox<str>`); `expose_secret()` returns
         // the underlying `&str` so we can re-wrap it.
-        let pin_str = self.pin.expose_secret().to_string();
+        //
+        // I-5 review fix: wrap the intermediate `String` in
+        // `zeroize::Zeroizing` so a failure inside `with_explicit_session`
+        // (e.g. a `read_p256_pubkey_compressed` error on the new key)
+        // doesn't leave the plaintext PIN in heap memory after the `?`
+        // bails. Without `Zeroizing`, `String::drop` frees the bytes
+        // but doesn't overwrite them.
+        let pin_str = zeroize::Zeroizing::new(self.pin.expose_secret().to_string());
         let new_handle = TpmAnima::with_explicit_session(
             new_pkcs11,
             new_session,
             self.slot,
             self.module_path.clone(),
-            pin_str,
+            (*pin_str).clone(),
             new_label,
             new_priv,
             new_pub,
@@ -585,14 +599,13 @@ impl AnimaCustody for TpmAnima {
     }
 
     fn export_identity_document(&self) -> AnimaResult<AgentIdentityDocument> {
-        // Lazy-build a multibase-z encoding of the SEC1 compressed pubkey
-        // for the `publicKeyMultibase` field. PEM is computed once and
-        // cached in `auth_public_pem` — KYA doc export is hot enough
-        // (per session start) that we skip re-deriving it.
-        let _ = self.auth_public_pem.set(format!(
-            "{{\"pubkey_hex\":\"{}\"}}",
-            hex::encode(self.auth_pubkey)
-        ));
+        // Build a multibase-z encoding of the SEC1 compressed pubkey
+        // directly from the cached `auth_pubkey`. (I-1 review fix:
+        // dropped the dead `auth_public_pem` OnceLock — it was
+        // populated with a JSON string, not actual PEM, and was never
+        // read anywhere. The `public_key_multibase` is computed
+        // directly from `auth_pubkey` which is what the KYA spec
+        // expects.)
         let public_key_multibase = format!("z{}", bs58::encode(self.auth_pubkey).into_string());
         let did = self.user_did.clone();
         let vm = VerificationMethod {
