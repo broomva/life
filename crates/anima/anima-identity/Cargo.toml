@@ -32,6 +32,17 @@ kms-tpm = ["dep:cryptoki", "dep:secrecy"]
 # WebHID (browser) is intentionally out-of-scope for this feature and
 # would land in a separate browser-side crate.
 hw-wallet = ["dep:hidapi"]
+# Spec D D-Sub-E: soma admin custody-oracle backend (`SomaCustody`).
+# Pulls the tonic UDS client + life-kernel-proto generated types.
+# Default off so non-soma deploys don't drag in the proto crate;
+# production soma-fronted deployments enable this feature.
+kms-soma = [
+    "dep:tonic",
+    "dep:tower",
+    "dep:hyper-util",
+    "dep:life-kernel-proto",
+    "dep:tokio",
+]
 
 [dependencies]
 anima-core.workspace = true
@@ -72,6 +83,10 @@ bs58.workspace = true
 # Logging
 tracing.workspace = true
 
+# Spec D D-Sub-E: rotation/revocation modules + SomaCustody async paths.
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+
 # Spec D D-Sub-B: Vault backend uses reqwest's blocking client + tokio
 # for the optional token-renewal task. Both are workspace deps already
 # pulled by lifegw; here we gate them behind `kms-vault` so a default
@@ -95,6 +110,14 @@ secrecy = { workspace = true, optional = true }
 # feature and would live in a separate crate.
 hidapi = { workspace = true, optional = true }
 
+# Spec D D-Sub-E: SomaCustody talks to soma's admin UDS via tonic.
+# All gated behind `kms-soma` so a default build doesn't drag in the
+# proto crate. tower/hyper-util are needed for the UDS connector.
+tonic = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
+hyper-util = { version = "0.1", features = ["tokio"], optional = true }
+life-kernel-proto = { workspace = true, optional = true, features = ["client"] }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
 anima-lago.workspace = true
@@ -103,3 +126,9 @@ anima-lago.workspace = true
 # pinning) without standing up a real Vault server. wiremock is already
 # a workspace dev-dep used by lifegw's JWKS integration test.
 wiremock = { workspace = true }
+# Spec D D-Sub-E integration tests mock soma's admin custody-oracle on
+# a tempdir UDS via tonic. tempfile + tokio-stream are needed for the
+# UnixListener/incoming wiring; they don't pull into the production
+# build.
+tempfile = { workspace = true }
+tokio-stream = { workspace = true }

@@ -165,8 +165,8 @@ trait abstraction + 6 production backends. D-Sub-A (this PR) ships:
 | D-Sub-B | `VaultTransitAnima` | shipped 2026-05-01 (PR #1073); closes `sign_evm_tx` SPEC-D-DEVIATION via shared RLP encoder |
 | D-Sub-C | `WebCryptoAnima` + `RemoteAnima` | M9-blocking (~7 days) |
 | D-Sub-D | `TpmAnima` | shipped 2026-05-02 (PR #1075); PKCS#11 auth half + wallet-half delegation |
-| D-Sub-E | `SomaCustody` + rotation/revocation flow | planned (~5 days) |
-| D-Sub-F | `HardwareWalletAnima` | shipped this PR (Ledger via hidapi, wallet-only wrapper) |
+| D-Sub-E | `SomaCustody` + rotation/revocation flow + lago-auth verifier | shipped this PR |
+| D-Sub-F | `HardwareWalletAnima` | shipped 2026-05-02 (PR #1074); Ledger via hidapi, wallet-only wrapper |
 
 ### D-Sub-B (`VaultTransitAnima`) handoff state
 
@@ -212,7 +212,6 @@ build pulls reqwest + tokio for the renewal task.
   M7-E ships), revisit `with_explicit_keys`'s mTLS handling so
   populated configs aren't silently ignored.
 
-<<<<<<< HEAD
 ### D-Sub-D (`TpmAnima`) handoff state
 
 `TpmAnima` ships under feature flag `kms-tpm` (default off; mirrors
@@ -286,6 +285,85 @@ NOT pull `cryptoki` so the slim binary stays slim.
   sessions (open-sign-close per signature) the unsafe impls
   would become unnecessary; keeping them for the long-lived
   session pattern.
+
+### D-Sub-E (`SomaCustody` + rotation/revocation flow) handoff state
+
+Spec D §"Phasing > D-Sub-E" closes by adding the soma admin
+custody-oracle RPC surface PLUS the cross-cutting journal-side helpers
+that rotation + revocation depend on. Production deployments enable
+two new pieces:
+
+1. **`kms-soma` Cargo feature on `anima-identity`** (default off).
+   Activates `SomaCustody` plus the tonic UDS client. Mirrors the
+   `kms-vault` feature flag pattern.
+2. **Soma admin custody-oracle UDS** — separate UDS from the kernel
+   service (`/run/life/soma-admin.sock` by default), authn'd via
+   SO_PEERCRED + `life-runtime` group membership. New
+   `[admin_plane]` config section in `/etc/soma/config.toml`; defaults
+   to `None` so non-Spec-D builds stay unchanged.
+
+Wire surfaces shipped:
+
+- `proto/life/admin/kernel/v1/custody.proto` — sibling of
+  `proto/life/kernel/v1/kernel.proto`. Defines
+  `life.admin.kernel.v1.CustodyOracle` with 4 RPCs: `SignAuth`,
+  `SignWallet`, `GetAuthPubkey`, `GetWalletPubkey`. Generated as
+  `life_kernel_proto::custody`.
+- `crates/life-kernel/soma/src/admin/` — peercred extractor,
+  AdminPolicy (closed-by-default with permissive mode for tests),
+  AdminAcceptor wrapping `AdminConn` for tonic, `InProcessCustodyKeys`
+  store (operator MAY swap for TPM/HSM — see SPEC-D-DEVIATION block in
+  `crates/anima/anima-identity/src/soma.rs`).
+- `crates/anima/anima-identity/src/soma.rs::SomaCustody` — full
+  `AnimaCustody` impl. Bootstrap fetches both pubkeys; `sign_*`
+  methods route through tonic UDS; `rotate()` deliberately returns a
+  helpful error pointing at `anima-lago::write_rotation_event` (the
+  rotation flow is journal-driven, NOT RPC-driven).
+- `crates/anima/anima-identity/src/rotation.rs` — `JournalResolver`
+  async trait + `walk_rotation_chain` helper with cycle protection
+  (256-hop cap).
+- `crates/anima/anima-identity/src/revocation.rs` — `RevocationCache`
+  with TTL'd negatives + permanent positives + `is_revoked` helper.
+- `crates/anima/anima-lago/src/rotation_events.rs` —
+  `write_rotation_event` / `write_revocation_event` /
+  `write_custody_migration_event` helpers that turn
+  `DidRotationEvent` into journal-appendable `AnimaEventKind`.
+- `crates/lago/lago-auth/src/agent_jwt.rs::verify_jwt` — full verifier
+  path. Detects alg, extracts kid, walks rotation chain, checks
+  revocation cache, resolves DID, verifies ES256 / EdDSA signature.
+  Plus `AgentJwtVerifier` convenience wrapper.
+
+Test counts:
+- `anima-identity --features kms-soma` — 5 new soma integration
+  tests + 8 new rotation_chain integration tests + 11 new unit tests
+  in `rotation.rs`/`revocation.rs`. 100/100 lib tests green.
+- `lago-auth` — 13 existing + 5 new verifier integration tests.
+- `soma` — 66 lib tests green (up 7 net from added admin module:
+  policy + service + keys).
+- Workspace total: **3898 passing / 0 failing / 20 ignored**.
+
+### D-Sub-E follow-ups
+
+- **Connection pooling for SomaCustody**. The current impl serialises
+  all calls through `Arc<Mutex<Channel>>`. Production deploys with
+  high JWT mint volume should wrap this backend in a
+  `life-runtime-pool::Pool` (lifed Sub-phase E pattern). Follow-up
+  ticket: pool the soma client at the call-site layer.
+- **Soma operator-RPC for key provisioning**. D-Sub-E lands the wire
+  surface but key provisioning happens out-of-band — operators must
+  populate `InProcessCustodyKeys` programmatically. A management RPC
+  (`Admin.ProvisionCustody { user_id, auth_pubkey, wallet_pubkey }`)
+  is a natural follow-up so deployments don't need a separate
+  provisioning channel.
+- **TPM/HSM swap-in for soma's CustodyKeyStore**. The trait shape is
+  in place (`CustodyKeyStore` in `crates/life-kernel/soma/src/admin/service.rs`);
+  TPM-backed body lives in D-Sub-D's territory.
+- **broomva.tech AAP verifier coordination**. lago-auth's
+  `verify_jwt` is the canonical implementation for the Spec D L4-D6
+  multi-curve verifier path. broomva.tech's external AAP verifier
+  should adopt the same shape (or call into lago-auth via a thin
+  HTTP wrapper) so the rotation-chain semantics stay uniform across
+  every downstream verifier.
 
 ### D-Sub-F (`HardwareWalletAnima`) handoff state
 

@@ -33,7 +33,9 @@ pub mod ed25519;
 pub mod in_process;
 pub mod keystore;
 pub mod p256;
+pub mod revocation;
 pub mod rlp;
+pub mod rotation;
 pub mod seed;
 
 #[cfg(feature = "kms-vault")]
@@ -44,6 +46,9 @@ pub mod tpm;
 
 #[cfg(feature = "hw-wallet")]
 pub mod hardware_wallet;
+
+#[cfg(feature = "kms-soma")]
+pub mod soma;
 
 pub use custody::{
     AnimaCustody, AnimaCustodyHandle, BackendKind, DidRotationEvent, Eip712Domain, EvmSignature,
@@ -66,3 +71,9 @@ pub use tpm::TpmAnima;
 
 #[cfg(feature = "hw-wallet")]
 pub use hardware_wallet::{HardwareWalletAnima, HidTransport, ledger};
+
+#[cfg(feature = "kms-soma")]
+pub use soma::SomaCustody;
+
+pub use revocation::{RevocationCache, is_revoked};
+pub use rotation::{JournalResolver, RotationChainQuery, walk_rotation_chain};
