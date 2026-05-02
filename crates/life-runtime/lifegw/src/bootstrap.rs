@@ -241,6 +241,11 @@ pub async fn serve_with_listener_and_signer(
     let upstream_path = Arc::new(cfg.upstream.lifed_uds_path.clone());
     let upstream_channel = connect_uds(&cfg.upstream.lifed_uds_path).await?;
 
+    // Spec D D-Sub-C: capture an `Arc<dyn KmsSigner>` handle BEFORE
+    // moving it into the Tier-2 minter. Same key material drives both
+    // the Tier-2 mint and the Tier-User mint (audience-distinct
+    // tokens, single signing key).
+    let kms_signer_for_tier_user: Arc<dyn KmsSigner> = Arc::clone(&signer);
     let minter = Arc::new(Tier2Minter::new(signer, &cfg.auth));
     // Sub-phase D (D1): build the rate limiter from config and
     // attach it to the auth layer. Production deploys ALWAYS run
@@ -372,11 +377,79 @@ pub async fn serve_with_listener_and_signer(
     routes_builder.add_service(pb::identity_server::IdentityServer::new(identity));
     let routes = routes_builder.routes().prepare();
 
-    let service = ServiceBuilder::new()
+    // Spec D D-Sub-C — Stream R-2: mount the `/anima/custody/*` axum
+    // router. Distinct from the tonic stack:
+    //
+    // - Routes are HTTP/JSON (not gRPC) — `RemoteAnima` and the browser
+    //   `WebCryptoAnima` both speak JSON via `fetch()`. M8.1 dropped the
+    //   gRPC/Connect path for these routes; staying on HTTP/JSON keeps
+    //   the Rust + browser surfaces symmetric.
+    // - Auth shape is Tier-User OR Tier-2 (audience-dispatched), not the
+    //   AuthLayer's Tier-1 → Tier-2 mint flow. Routes do their own
+    //   bearer-check via `require_bearer` in services::anima_custody.
+    //
+    // We therefore mount the anima router OUTSIDE the AuthLayer + WS
+    // stack via an axum top-level router. `/anima/custody/*` paths
+    // dispatch directly to the anima handlers; everything else falls
+    // through to the tonic stack (auth → ws-dispatch → grpc-web).
+    let tier_user_minter = Arc::new(crate::auth::tier_user::TierUserMinter::with_defaults(
+        kms_signer_for_tier_user,
+        cfg.auth
+            .tier_user_ttl
+            .unwrap_or(crate::auth::tier_user::DEFAULT_TIER_USER_TTL),
+    ));
+    let anima_state = crate::services::anima_custody::AnimaCustodyState::new(
+        cfg.anima_custody
+            .as_ref()
+            .and_then(|c| c.soma_uds_path.as_ref())
+            .map(|p| p.to_string_lossy().to_string()),
+        Arc::clone(&tier_user_minter),
+    );
+    let anima_router = crate::services::anima_custody::router(anima_state);
+
+    // Build the tonic stack (auth + WS + grpc-web). This is the
+    // pre-D-Sub-C pipeline; the only change is that we mount it as a
+    // fallback under an axum top-level router so the anima routes can
+    // dispatch first. The body-type adapter on the outer side converts
+    // axum::body::Body → tonic::body::Body for the request and back
+    // again for the response.
+    let tonic_stack = ServiceBuilder::new()
         .layer(auth_layer)
         .layer(ws_layer)
         .layer(GrpcWebLayer::new())
         .service(routes);
+
+    // Adapt the tonic stack to accept axum::Body inputs (axum's Router
+    // hands fallback services `Request<axum::body::Body>`). We convert
+    // request body axum::Body → tonic::body::Body on the way in and
+    // response body tonic::body::Body → axum::body::Body on the way
+    // out; both are thin wrappers around `http_body::Body` so the
+    // conversion is allocation-free.
+    let tonic_stack_adapted = ServiceBuilder::new()
+        .map_request(|req: http::Request<axum::body::Body>| {
+            let (parts, body) = req.into_parts();
+            http::Request::from_parts(parts, tonic::body::Body::new(body))
+        })
+        .map_response(|resp: http::Response<tonic::body::Body>| {
+            let (parts, body) = resp.into_parts();
+            http::Response::from_parts(parts, axum::body::Body::new(body))
+        })
+        .service(tonic_stack);
+
+    // Compose: top-level axum router that nests `/anima/custody/*`
+    // and falls back to the tonic-stack adapter for everything else.
+    let app: axum::Router<()> = axum::Router::new()
+        .nest("/anima/custody", anima_router)
+        .fallback_service(tonic_stack_adapted);
+
+    // Convert the axum router's response body to tonic::body::Body so
+    // the existing `serve_connections` body-type contract holds.
+    let service = ServiceBuilder::new()
+        .map_response(|resp: http::Response<axum::body::Body>| {
+            let (parts, body) = resp.into_parts();
+            http::Response::from_parts(parts, tonic::body::Body::new(body))
+        })
+        .service(app);
 
     let TlsBind {
         acceptor,

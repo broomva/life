@@ -46,6 +46,30 @@ pub struct LifegwConfig {
     /// Vigil OTLP exporter wiring (Sub-phase D fills this in).
     #[serde(default)]
     pub observability: ObservabilityConfig,
+    /// Spec D D-Sub-C: anima custody route configuration. Optional —
+    /// when absent, the `/anima/custody/*` proxy routes return
+    /// `501 Not Implemented` while the rest of the gateway stays
+    /// functional. Production deploys with soma admin custody-oracle
+    /// enabled MUST populate this with the soma admin UDS path.
+    #[serde(default)]
+    pub anima_custody: Option<AnimaCustodyConfig>,
+}
+
+/// Spec D D-Sub-C anima custody configuration.
+///
+/// Wires the lifegw-side proxy at `/anima/custody/*` to soma's admin
+/// custody-oracle UDS. When unset, the proxy routes degrade gracefully
+/// (501 Not Implemented) so lifegw still starts on operator boxes that
+/// haven't enabled soma custody.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct AnimaCustodyConfig {
+    /// Path to soma's admin custody-oracle UDS. Production default is
+    /// `/run/life/soma-admin.sock` — see Spec D D-Sub-E. When `None`,
+    /// the proxy routes return 501.
+    #[serde(default)]
+    pub soma_uds_path: Option<PathBuf>,
 }
 
 /// Admin-plane UDS configuration. Sub-phase D (D2).
@@ -262,6 +286,12 @@ pub struct AuthConfig {
     /// Tier-2 capability lifetime cap (Spec C₃ §5.4 — ≤ 15 min).
     #[serde(default = "default_tier2_ttl", with = "humantime_serde")]
     pub tier2_ttl: Duration,
+    /// Spec D D-Sub-C: Tier-User capability lifetime cap (≤ 15 min).
+    /// `None` falls back to `DEFAULT_TIER_USER_TTL` (15 min). Operators
+    /// MAY shorten this for high-security tenants but lengthening past
+    /// 15 min is rejected at config-validate time.
+    #[serde(default, with = "humantime_serde_opt")]
+    pub tier_user_ttl: Option<Duration>,
 }
 
 /// HashiCorp Vault Transit configuration (Sub-phase B production
@@ -413,6 +443,7 @@ impl Default for AuthConfig {
             tier2_audience: default_tier2_audience(),
             tier2_issuer: default_tier2_issuer(),
             tier2_ttl: default_tier2_ttl(),
+            tier_user_ttl: None,
         }
     }
 }
@@ -540,6 +571,20 @@ impl LifegwConfig {
             return Err(LifegwError::Config(
                 "auth.tier2_ttl must be > 0".to_string(),
             ));
+        }
+        // Spec D D-Sub-C: Tier-User caps follow the same 15-min cap.
+        if let Some(ttl) = self.auth.tier_user_ttl {
+            if ttl > Duration::from_secs(15 * 60) {
+                return Err(LifegwError::Config(format!(
+                    "auth.tier_user_ttl ({}s) exceeds Spec D D-Sub-C cap of 15 minutes",
+                    ttl.as_secs()
+                )));
+            }
+            if ttl.is_zero() {
+                return Err(LifegwError::Config(
+                    "auth.tier_user_ttl must be > 0".to_string(),
+                ));
+            }
         }
         if !(0.0..=1.0).contains(&self.observability.trace_sample_ratio) {
             return Err(LifegwError::Config(
