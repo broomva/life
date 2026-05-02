@@ -186,6 +186,10 @@ tokio = { workspace = true, features = ["full", "test-util"] }
 rcgen = "0.13"
 tonic-prost = "0.14"
 async-trait.workspace = true
+# Spec D D-Sub-C: integration tests need k256 (sign_wallet round-trip
+# verification). p256 + ciborium are already lifegw main deps and so
+# accessible from tests.
+k256.workspace = true
 # Sub-phase A integration test stands up a real lifed instance with mock
 # substrates and proxies through lifegw. Allowed as a *dev*-dep only; the
 # production crate graph never pulls lifed (Spec C₃ §11.2 dependency rules
