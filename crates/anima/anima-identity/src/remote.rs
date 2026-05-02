@@ -101,6 +101,19 @@ pub struct TierUserCap {
     pub expires_at_unix: i64,
 }
 
+impl TierUserCap {
+    /// Returns `true` if the cap's `expires_at_unix` is at or before
+    /// `now_unix`. I-2 review fix: gives the future Stream R-2 refresh
+    /// task an obvious, testable hook to decide when to re-mint.
+    ///
+    /// Caller passes `now_unix` explicitly so this stays deterministic
+    /// in tests (no hidden `Utc::now()` dependency).
+    #[must_use]
+    pub fn is_expired(&self, now_unix: i64) -> bool {
+        now_unix >= self.expires_at_unix
+    }
+}
+
 /// Request body for `POST /anima/custody/sign_{auth,wallet}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SignBody {
@@ -218,8 +231,37 @@ impl RemoteAnima {
         *self.cap.lock() = new_cap;
     }
 
-    fn cap_token(&self) -> String {
-        self.cap.lock().token.clone()
+    /// Snapshot the current Tier-User token. I-2 review fix: cheap-path
+    /// expiry check before issuing the request — saves a round trip and
+    /// surfaces a clean `AnimaError::Crypto` instead of waiting for the
+    /// gateway to return 401.
+    fn cap_token(&self) -> AnimaResult<String> {
+        let cap = self.cap.lock();
+        let now = chrono::Utc::now().timestamp();
+        if cap.is_expired(now) {
+            return Err(AnimaError::Crypto(
+                "RemoteAnima: tier-user cap expired; \
+                 call set_cap with a fresh token via the Stream R-2 \
+                 mint_session_cap flow"
+                    .into(),
+            ));
+        }
+        Ok(cap.token.clone())
+    }
+
+    /// Same expiry-aware token lookup, but operating on a `Mutex`
+    /// reference (used by the static fetch helpers in `RemoteAnima::new`).
+    fn cap_token_from(cap: &Arc<Mutex<TierUserCap>>) -> AnimaResult<String> {
+        let guard = cap.lock();
+        let now = chrono::Utc::now().timestamp();
+        if guard.is_expired(now) {
+            return Err(AnimaError::Crypto(
+                "RemoteAnima: tier-user cap expired before bootstrap; \
+                 supply a fresh cap to RemoteAnima::new"
+                    .into(),
+            ));
+        }
+        Ok(guard.token.clone())
     }
 
     /// Fetch the SEC1-compressed P-256 auth pubkey for `user_id` from
@@ -231,7 +273,7 @@ impl RemoteAnima {
         cap: &Arc<Mutex<TierUserCap>>,
     ) -> AnimaResult<[u8; 33]> {
         let url = format!("{base_url}/anima/custody/get_auth_pubkey/{user_id}");
-        let token = cap.lock().token.clone();
+        let token = Self::cap_token_from(cap)?;
         let resp = client
             .get(&url)
             .bearer_auth(&token)
@@ -276,7 +318,7 @@ impl RemoteAnima {
         cap: &Arc<Mutex<TierUserCap>>,
     ) -> AnimaResult<[u8; 65]> {
         let url = format!("{base_url}/anima/custody/get_wallet_pubkey/{user_id}");
-        let token = cap.lock().token.clone();
+        let token = Self::cap_token_from(cap)?;
         let resp = client
             .get(&url)
             .bearer_auth(&token)
@@ -320,10 +362,11 @@ impl RemoteAnima {
             user_id: self.user_id.clone(),
             digest_b64: B64_STANDARD.encode(digest),
         };
+        let token = self.cap_token()?;
         let resp = self
             .client
             .post(&url)
-            .bearer_auth(self.cap_token())
+            .bearer_auth(&token)
             .json(&body)
             .send()
             .await
@@ -360,10 +403,11 @@ impl RemoteAnima {
             user_id: self.user_id.clone(),
             digest_b64: B64_STANDARD.encode(digest),
         };
+        let token = self.cap_token()?;
         let resp = self
             .client
             .post(&url)
-            .bearer_auth(self.cap_token())
+            .bearer_auth(&token)
             .json(&body)
             .send()
             .await
@@ -661,13 +705,17 @@ impl AnimaCustody for RemoteAnima {
 
 /// Decode a pubkey base64 string. Tries standard b64 first, then
 /// URL-safe (some JS callers default to urlsafe).
+///
+/// I-1 review fix: when both decoders fail, surface that we tried
+/// BOTH alphabets so the operator's debug session isn't misled into
+/// thinking the wire was nominally URL-safe.
 fn decode_pubkey_b64(s: &str) -> Result<Vec<u8>, String> {
     if let Ok(b) = B64_STANDARD.decode(s) {
         return Ok(b);
     }
     URL_SAFE_NO_PAD
         .decode(s.trim_end_matches('='))
-        .map_err(|e| format!("base64 decode: {e}"))
+        .map_err(|e| format!("base64 decode (tried standard + url-safe-no-pad): {e}"))
 }
 
 /// Decode a signature base64 string. Same dual-strategy as pubkeys.
@@ -677,7 +725,7 @@ fn decode_signature_b64(s: &str) -> Result<Vec<u8>, String> {
     }
     URL_SAFE_NO_PAD
         .decode(s.trim_end_matches('='))
-        .map_err(|e| format!("base64 decode: {e}"))
+        .map_err(|e| format!("base64 decode (tried standard + url-safe-no-pad): {e}"))
 }
 
 /// Derive an EVM address from a 65-byte uncompressed secp256k1
@@ -831,5 +879,52 @@ mod tests {
         });
         assert_eq!(anima.current_cap().token, "new");
         assert_eq!(anima.current_cap().expires_at_unix, 200);
+    }
+
+    #[test]
+    fn tier_user_cap_is_expired_boundary() {
+        let cap = TierUserCap {
+            token: "t".into(),
+            expires_at_unix: 1_000,
+        };
+        // Past expiry: expired
+        assert!(cap.is_expired(1_001));
+        // At expiry: expired (>= boundary)
+        assert!(cap.is_expired(1_000));
+        // Before expiry: fresh
+        assert!(!cap.is_expired(999));
+    }
+
+    #[test]
+    fn cap_token_rejects_expired_cap() {
+        let auth_pubkey = [0x02u8; 33];
+        let mut wallet_uncompressed = [0u8; 65];
+        wallet_uncompressed[0] = 0x04;
+        let cap = TierUserCap {
+            token: "stale".into(),
+            // Already expired regardless of wall clock — i64::MIN guarantees
+            // `now_unix >= expires_at_unix` for all realistic clocks.
+            expires_at_unix: i64::MIN,
+        };
+        let client = Arc::new(reqwest::Client::new());
+        let anima = RemoteAnima {
+            base_url: "http://localhost".into(),
+            user_id: "test-user".into(),
+            auth_pubkey,
+            wallet_pubkey_uncompressed: wallet_uncompressed,
+            wallet_address: WalletAddress {
+                address: "0x0".into(),
+                chain: ChainId::base(),
+            },
+            user_did: "did:key:zDnTest".into(),
+            cap: Arc::new(Mutex::new(cap)),
+            client,
+        };
+        let err = anima
+            .cap_token()
+            .expect_err("expired cap must surface a clean error");
+        let msg = format!("{err}");
+        assert!(msg.contains("tier-user cap expired"), "got: {msg}");
+        assert!(msg.contains("set_cap"), "got: {msg}");
     }
 }
