@@ -39,6 +39,9 @@ pub mod seed;
 #[cfg(feature = "kms-vault")]
 pub mod vault;
 
+#[cfg(feature = "kms-tpm")]
+pub mod tpm;
+
 pub use custody::{
     AnimaCustody, AnimaCustodyHandle, BackendKind, DidRotationEvent, Eip712Domain, EvmSignature,
     TxRequest,
@@ -54,3 +57,6 @@ pub use seed::{EncryptedSeed, MasterSeed};
 
 #[cfg(feature = "kms-vault")]
 pub use vault::{VaultMtls, VaultTransitAnima};
+
+#[cfg(feature = "kms-tpm")]
+pub use tpm::TpmAnima;
