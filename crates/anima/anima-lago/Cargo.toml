@@ -16,6 +16,12 @@ workspace = true
 
 [dependencies]
 anima-core.workspace = true
+# Spec D D-Sub-E: rotation_events helper consumes
+# `anima_identity::custody::DidRotationEvent`. anima-lago is the I/O
+# boundary that turns rotation events into journal-appendable
+# AnimaEventKind variants. The dep does NOT pull any kms-* features —
+# we only need the trait + DidRotationEvent type.
+anima-identity = { path = "../anima-identity", version = "0.3.0" }
 aios-protocol.workspace = true
 lago-core.workspace = true
 lago-journal.workspace = true

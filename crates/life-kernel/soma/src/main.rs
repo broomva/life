@@ -99,7 +99,30 @@ async fn run_daemon(config: Option<PathBuf>) -> anyhow::Result<()> {
     // backing file is not deleted while the daemon is running.
     let _tempdir = bootstrap._lago_tempdir;
 
-    soma::listener::serve(&cfg, bootstrap.engine, shutdown_rx, seed).await?;
+    // Spec D D-Sub-E: spawn the admin custody-oracle UDS in parallel
+    // with the kernel UDS. Disabled when no `[admin_plane]` section is
+    // configured. The handle is held until the kernel listener
+    // returns; on shutdown we abort it so the kernel UDS drains
+    // unblocked.
+    let admin_handle = if cfg.admin_plane.is_some() {
+        // Operators provision keys via a future ticket / management
+        // RPC. For now the admin plane starts with an empty key store
+        // — calls for unprovisioned users return NotFound. This keeps
+        // the wire surface live for SomaCustody integration tests
+        // (which provision their own keys via the test harness) while
+        // making accidental production exposure fail-closed.
+        Some(soma::admin::run_admin_plane(&cfg).await?)
+    } else {
+        None
+    };
+
+    let serve_result = soma::listener::serve(&cfg, bootstrap.engine, shutdown_rx, seed).await;
+
+    if let Some(handle) = admin_handle {
+        handle.abort();
+    }
+
+    serve_result?;
 
     tracing::info!("soma daemon stopped");
     Ok(())

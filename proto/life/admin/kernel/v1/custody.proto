@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+// life.admin.kernel.v1 — soma admin-plane custody-oracle service.
+//
+// Spec D §"Phasing > D-Sub-E" defines `kernel.SignAuth` +
+// `kernel.SignWallet` + `kernel.GetAuthPubkey` + `kernel.GetWalletPubkey`
+// as the soma-side surface of the user-scoped Tier-2 KMS unification.
+// soma owns the (P-256 auth + secp256k1 wallet) keys for any user it
+// hosts; the anima-identity `SomaCustody` backend calls into this
+// service over soma's admin UDS for every signing operation.
+//
+// ## Threat model + authn
+//
+// Mounted exclusively on the existing soma admin UDS (the same
+// transport that hosts the kernel µVM RPCs in `life.kernel.v1.KernelService`,
+// which already enforces SO_PEERCRED + `life-runtime` group membership
+// per Spec C₃ §3.6).  Bearer tokens are NEVER accepted on this surface —
+// admin-plane is the trust-boundary unification point, not another
+// JWT-checked path.
+//
+// ## Trust boundary
+//
+// soma is the privileged kernel daemon: it can (and does) hold material
+// in TPM via PKCS#11, in an in-process Zeroizing<Vec<u8>>, or behind a
+// custom HSM sidecar — that's an operator-scope decision documented in
+// SomaCustody's SPEC-D-DEVIATION block. From the wire's perspective
+// the only invariant is: a successful sign RPC means soma has either
+// the private key or a delegate that can produce the signature.
+//
+// ## Why these RPCs are additive
+//
+// soma already exposes `life.kernel.v1.KernelService` for µVM lifecycle
+// (CreateVm / Dispatch / Snapshot / etc.). The custody-oracle RPCs
+// could either extend that service or live in a sibling service. We
+// choose a sibling service (`life.admin.kernel.v1.CustodyOracle`)
+// because:
+//
+// 1. The kernel service is on the same UDS but the call surfaces are
+//    operator-scoped (kernel) vs user-scoped (custody); keeping them
+//    separate avoids muddling RBAC.
+// 2. The custody surface is per-user (every method takes `user_id`)
+//    while the kernel surface is per-VM. Putting them on the same
+//    service forces awkward "spec D mode" toggles on every kernel RPC.
+// 3. soma's existing admin policy can route different roles to
+//    different services without amending KernelService.
+
+package life.admin.kernel.v1;
+
+// ── Service ───────────────────────────────────────────────────────
+
+service CustodyOracle {
+  // Spec D D-Sub-E — sign a 32-byte digest with the user's auth (P-256)
+  // private key. Returns the IEEE-P1363 raw r||s (64 bytes); the
+  // caller-side SomaCustody assembles JWS / event signatures from it.
+  //
+  // The user_id is the same shape SomaCustody passes to
+  // `kernel.GetAuthPubkey` at construction. Implementations MAY:
+  //   - hold the key in TPM via PKCS#11 (preferred for single-user
+  //     mission-control deploys);
+  //   - delegate to a custom HSM sidecar over a private channel;
+  //   - hold the key in process memory (Zeroizing<...>) for dev /
+  //     freelance-tenant deploys where TPM isn't available.
+  //
+  // The trait surface deliberately doesn't constrain that choice —
+  // SomaCustody's SPEC-D-DEVIATION block documents the hot-path cost
+  // implications.
+  rpc SignAuth(SignAuthRequest) returns (SignAuthResponse);
+
+  // Spec D D-Sub-E — sign a 32-byte digest with the user's wallet
+  // (secp256k1) private key. Returns the EVM-flavoured 65-byte
+  // r||s||v signature. soma is responsible for computing v (e.g. via
+  // an ecrecover loop against the cached pubkey); the caller may
+  // assume the signature is in legacy 27/28 form (matches haima-wallet
+  // / `EvmSignature` shape).
+  //
+  // Per Spec D L4-D7 the wallet keypair stays secp256k1 + EIP-712 +
+  // EIP-155 throughout. Implementations that don't support secp256k1
+  // natively (e.g. TPM via PKCS#11 on most boards) MAY either:
+  //   - escalate to a hardware-wallet sidecar (HardwareWalletAnima
+  //     pattern, Spec D D-Sub-F), or
+  //   - return Status::Unimplemented ("kms.wallet_unsupported"),
+  //     forcing the caller to use a different custody backend for
+  //     wallet operations.
+  rpc SignWallet(SignWalletRequest) returns (SignWalletResponse);
+
+  // Bootstrap — return the SEC1-compressed P-256 auth public key so
+  // SomaCustody can derive the DID and cache the pubkey at
+  // construction. Idempotent and free of side effects.
+  rpc GetAuthPubkey(GetAuthPubkeyRequest) returns (GetAuthPubkeyResponse);
+
+  // Bootstrap — return the SEC1-uncompressed secp256k1 wallet public
+  // key so SomaCustody can derive the EVM address and cache the
+  // pubkey at construction. Same idempotency guarantees as
+  // `GetAuthPubkey`.
+  rpc GetWalletPubkey(GetWalletPubkeyRequest) returns (GetWalletPubkeyResponse);
+}
+
+// ── Messages ──────────────────────────────────────────────────────
+
+// Common per-request envelope.
+//
+// `user_id` follows the same `[a-zA-Z0-9_-]{1,64}` whitelist
+// VaultTransitAnima enforces — soma's admin policy MUST validate
+// before reaching the key store to prevent path-traversal-style
+// attacks on the underlying secret backend (see
+// VaultTransitAnima::validate_user_id for prior art).
+message SignAuthRequest {
+  // Tenant scope — must be the user_id passed to GetAuthPubkey at
+  // construction.
+  string user_id = 1;
+  // 32-byte SHA-256 digest to sign. soma MUST treat this as opaque
+  // bytes; it does NOT re-hash. (Mirrors Vault transit's
+  // `prehashed: true` semantics.)
+  bytes digest = 2;
+}
+
+message SignAuthResponse {
+  // IEEE-P1363 raw r||s, 64 bytes. JWS callers concatenate this onto
+  // `<header>.<body>` after URL_SAFE_NO_PAD-encoding it.
+  bytes signature_raw = 1;
+}
+
+message SignWalletRequest {
+  string user_id = 1;
+  // 32-byte Keccak-256 digest of the EIP-1559 RLP envelope or the
+  // EIP-712 hashStruct, depending on which signing path the caller is
+  // exercising. Same opaque-bytes contract as SignAuthRequest.digest.
+  bytes digest = 2;
+}
+
+message SignWalletResponse {
+  // 65-byte r||s||v. v is in legacy 27/28 form (haima-wallet's
+  // `LocalSigner::sign_transfer_authorization` convention). Callers
+  // broadcasting raw EIP-1559 envelopes subtract 27 to recover the
+  // y-parity byte.
+  bytes signature_rsv = 1;
+}
+
+message GetAuthPubkeyRequest {
+  string user_id = 1;
+}
+
+message GetAuthPubkeyResponse {
+  // SEC1-compressed P-256 public key (33 bytes — `0x02|0x03 || x`).
+  bytes pubkey_sec1_compressed = 1;
+}
+
+message GetWalletPubkeyRequest {
+  string user_id = 1;
+}
+
+message GetWalletPubkeyResponse {
+  // SEC1-uncompressed secp256k1 public key (65 bytes — `0x04 || x || y`).
+  // Used for both EVM address derivation and the ecrecover-based
+  // v-byte selection inside soma when it returns SignWalletResponse.
+  bytes pubkey_sec1_uncompressed = 1;
+}

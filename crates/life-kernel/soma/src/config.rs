@@ -34,6 +34,49 @@ pub struct SomaConfig {
     /// Vigil OpenTelemetry exporter wiring for daemon-level tracing.
     #[serde(default)]
     pub vigil: VigilConfig,
+    /// Spec D D-Sub-E: admin custody-oracle UDS configuration.
+    /// `None` means the admin plane is disabled — production deploys
+    /// targeting Spec D should always populate this section.
+    #[serde(default)]
+    pub admin_plane: Option<AdminPlaneConfig>,
+}
+
+/// Spec D D-Sub-E: configuration for the soma admin custody-oracle UDS.
+///
+/// Mirrors lifegw's `AdminPlaneConfig` shape — the soma admin UDS is a
+/// sibling of the kernel UDS, hosted on a separate socket so per-RPC
+/// RBAC and FS-level access controls evolve independently.
+///
+/// ```toml
+/// [admin_plane]
+/// unix_socket = "/run/life/soma-admin.sock"
+/// unix_socket_mode = 0o660
+/// unix_socket_group = "life-runtime"
+/// ```
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct AdminPlaneConfig {
+    /// Path to the admin Unix domain socket. Production: `/run/life/soma-admin.sock`.
+    pub unix_socket: PathBuf,
+    /// File mode bits (e.g. `0o660`).
+    #[serde(default = "defaults::admin_socket_mode")]
+    pub unix_socket_mode: Option<u32>,
+    /// System group that should own the admin socket. The same group is
+    /// the RBAC root for the SO_PEERCRED policy check — peers whose
+    /// primary or supplementary group list contains this group are
+    /// admitted to all CustodyOracle RPCs.
+    pub unix_socket_group: Option<String>,
+}
+
+impl Default for AdminPlaneConfig {
+    fn default() -> Self {
+        Self {
+            unix_socket: PathBuf::from("/run/life/soma-admin.sock"),
+            unix_socket_mode: defaults::admin_socket_mode(),
+            unix_socket_group: Some("life-runtime".to_string()),
+        }
+    }
 }
 
 /// Transport configuration.
@@ -257,6 +300,9 @@ mod defaults {
     }
     pub(super) fn vigil_level() -> String {
         "info".into()
+    }
+    pub(super) fn admin_socket_mode() -> Option<u32> {
+        Some(0o660)
     }
 }
 
