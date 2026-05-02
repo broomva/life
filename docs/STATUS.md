@@ -1237,6 +1237,131 @@ the wire-codec layer needs replacement in v0.2.0.
 
 PR #1072 + #1073 merged 2026-05-01.
 
+### 2026-05-02 — Wave 2B: D-Sub-D + D-Sub-E + D-Sub-F (3 custody backends in parallel)
+
+Three Spec D sub-phases shipped in a single day (2026-05-02), all
+parallel-dispatched on the foundation laid by Wave 1 + 2A. Each was a
+distinct production custody backend; together they take Spec D from
+33% to 83% complete (5/6 sub-phases). Only D-Sub-C (browser path)
+remains and that is M9-blocking.
+
+**D-Sub-D — `TpmAnima` (PR #1075, commit `27dd0fad`):** PKCS#11-backed
+TPM custody for desktop deployments (mission-control on Linux/macOS).
+Auth half is P-256 in TPM via `cryptoki` crate + `CKM_ECDSA` over
+SHA-256 prehash; the TPM never reveals the scalar. Wallet half is
+delegated (TPM 2.0 secp256k1 support is OPTIONAL/rare) to an
+`Option<Arc<dyn AnimaCustody>>` — canonical mission-control deployment
+pairs TPM-auth with `HardwareWalletAnima` (Ledger) for the wallet
+half. Rotation is operator-driven via `C_GenerateKeyPair` with new
+label `{auth_label}-rot-{ulid}`. Constructor errors bubble cleanly —
+no fallback to `InProcessAnima` would silently downgrade the security
+guarantee. Ships under `kms-tpm` Cargo feature (default off). Tests:
+2 ignored live softhsm fixtures + 12 unit tests + integration suite.
+Code-quality fixes pushed in commit `3f1cacf1`: dropped dead
+`auth_public_pem: OnceLock<String>` field, removed redundant
+`unsafe impl Send for TpmSession` (cryptoki Session is natively Send;
+only Sync needs unsafe), fixed `rotate()` to reuse parent `Pkcs11`
+(was double-initializing — most modules reject
+`CKR_CRYPTOKI_ALREADY_INITIALIZED`), wrapped `pin_str` in
+`zeroize::Zeroizing` to prevent plaintext PIN leak on rotate failure.
+Refs Spec D L4-D5..D10. Closes BRO-XXX (D-Sub-D).
+
+**D-Sub-F — `HardwareWalletAnima` (PR #1074, commit `8a487041`):**
+Ledger-via-hidapi wallet-only wrapper. Auth-half forwards to a wrapped
+`Arc<dyn AnimaCustody>` delegate (Ledger doesn't expose P-256). Wallet
+half goes to the hardware device — Ledger Nano X/S/S+ running the
+**Ledger Ethereum app** (`app-ethereum`). APDU codes locked at
+`crate::hardware_wallet::ledger::apdu` (CLA `0xE0`,
+`INS_GET_PUBLIC_KEY` 0x02, `INS_SIGN_TRANSACTION` 0x04,
+`INS_SIGN_EIP712` 0x0C). HID frame layout: 64-byte reports, 5-byte
+header `[channel_hi channel_lo command_tag seq_hi seq_lo]` with
+`channel = 0x0101`, `command_tag = 0x05`. `rotate()` returns an error
+because the seed is hardware-resident and cannot be software-rotated.
+Ships under `hw-wallet` Cargo feature (default off; pulls `hidapi`).
+Tests: 7 integration + 6 unit (mocked `MockHidTransport`) + 1
+ignored live-Ledger end-to-end. Code-quality fix in commit `f4f85d5d`
+(after rebase from `f138385c`): added outer `exchange_lock: Mutex<()>`
+on `RealHidTransport` held across the FULL write_apdu+read_apdu
+round-trip — fixes a real concurrency bug where per-frame mutex left
+a race window between write/read APDUs (concurrent `Arc<...>` callers
+could interleave protocol streams). Also dropped dead `v` parameter
+from `normalize_signature`, replaced 2 `assert!`s with typed errors
+in `build_apdu` + `encode_derivation_path`, and rewrote
+`auth_backend_kind` doc honestly. Refs Spec D L4-D5..D10. Closes
+BRO-XXX (D-Sub-F).
+
+**D-Sub-E — `SomaCustody` + rotation/revocation flow (PR #1076, commit
+`944f2ba9`):** the cross-cutting sub-phase. Adds the soma admin
+custody-oracle UDS (separate from kernel UDS, authn'd via SO_PEERCRED
++ `life-runtime` group membership) PLUS the journal-side helpers that
+rotation + revocation depend on. New proto:
+`proto/life/admin/kernel/v1/custody.proto` defining
+`life.admin.kernel.v1.CustodyOracle` with 4 RPCs (`SignAuth`,
+`SignWallet`, `GetAuthPubkey`, `GetWalletPubkey`). New crate paths:
+`crates/life-kernel/soma/src/admin/` (peercred extractor + AdminPolicy
++ AdminAcceptor + InProcessCustodyKeys store);
+`crates/anima/anima-identity/src/soma.rs` (SomaCustody full impl —
+bootstrap fetches both pubkeys, sign_* methods route through tonic
+UDS, `rotate()` returns helpful error pointing at
+`anima-lago::write_rotation_event`);
+`crates/anima/anima-identity/src/rotation.rs` (`JournalResolver` async
+trait + `walk_rotation_chain` with 256-hop cycle protection);
+`crates/anima/anima-identity/src/revocation.rs` (`RevocationCache`
+with TTL'd negatives + permanent positives);
+`crates/anima/anima-lago/src/rotation_events.rs` (event journal
+helpers); `crates/lago/lago-auth/src/agent_jwt.rs::verify_jwt` (full
+verifier path: alg detect → kid extract → walk chain → check
+revocation → resolve DID → ES256/EdDSA verify). Ships under
+`kms-soma` Cargo feature (default off; pulls tonic + hyper-util +
+life-kernel-proto). Code-quality fixes in commit `5a6010e8` (after
+rebase chain): IMP-1 `peercred::peer_cred(&stream)` now fail-closes
+(was silently admitting root creds to a custody oracle on syscall
+failure); IMP-2 `chown_socket_to_group` via `nix::unistd::chown`
+(replaces silent `tracing::warn!`); IMP-11 prominent
+runtime-flavor warning on `block_on` rustdoc (`block_in_place` panics
+on `current_thread` runtime). Required `nix` workspace dep +
+`"fs"` feature in soma's Cargo.toml. Tests: 5 new soma integration +
+8 new rotation_chain integration + 11 new unit + 5 new lago-auth
+verifier integration + 7 new soma admin module tests. Refs Spec D
+L4-D5..D10. Closes BRO-XXX (D-Sub-E).
+
+**Cross-cutting integration (Wave 2B):**
+
+- All 3 custody backends now exist as feature-gated optional
+  dependencies of `anima-identity` (`kms-tpm`, `hw-wallet`,
+  `kms-soma`). Default builds remain slim — only opt-in deployments
+  pull cryptoki/hidapi/tonic.
+- BackendKind enum is `#[non_exhaustive]` and now has all 6 variants
+  filled (only WebCrypto remains).
+- The shared `crate::rlp` module (D-Sub-B legacy) is now consumed by
+  D-Sub-F's hardware-wallet `sign_evm_tx` round-trip + D-Sub-E's
+  SomaCustody fallback path. EIP-1559 + EIP-155 RLP encoding is
+  finally factored properly.
+- The lago-auth `verify_jwt` multi-alg dispatcher (D-Sub-E) is the
+  canonical reference for downstream verifiers — broomva.tech's
+  external AAP verifier should call into lago-auth via a thin HTTP
+  wrapper (or adopt the same shape) so rotation-chain semantics stay
+  uniform.
+
+**Wave 2B summary:**
+- Spec D = 83% complete (5/6 sub-phases shipped; D-Sub-A through F
+  except D-Sub-C). All 3 backends merged in single day via parallel
+  worktree-driven dispatch.
+- D-Sub-C (`WebCryptoAnima` + `RemoteAnima` for browser) remains —
+  M9-blocking (~7 days). Now fully unblocked since D-Sub-E ships the
+  RemoteAnima reference shape via SomaCustody.
+- Tests delta: ~3860 + ~12 (D-Sub-D) + ~14 (D-Sub-F) + ~36 (D-Sub-E) =
+  ~3922 Rust workspace + 50 TypeScript SDK (M8 unchanged).
+- Code-quality discipline: all 3 PRs surfaced real bugs in review
+  (D-Sub-D's double-init Pkcs11 in rotate; D-Sub-F's per-frame mutex
+  race; D-Sub-E's fail-open peercred). All fixed in-PR via
+  parallel-dispatched code-quality reviews. Two-stage review pattern
+  (spec compliance + code quality) is paying off.
+- Critical-path next: D-Sub-C (browser path) closes Spec D and
+  unblocks M9 (apps/chat migration to AnimaCustody).
+
+PR #1075 + #1074 + #1076 merged 2026-05-02.
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
