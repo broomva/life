@@ -162,9 +162,9 @@ trait abstraction + 6 production backends. D-Sub-A (this PR) ships:
 | Sub-phase | Backend | Status |
 |---|---|---|
 | D-Sub-A | `InProcessAnima` | shipped 2026-04-29 (PR #1070) |
-| D-Sub-B | `VaultTransitAnima` | shipped this PR; closes `sign_evm_tx` SPEC-D-DEVIATION via shared RLP encoder |
+| D-Sub-B | `VaultTransitAnima` | shipped 2026-05-01 (PR #1073) |
 | D-Sub-C | `WebCryptoAnima` + `RemoteAnima` | M9-blocking (~7 days) |
-| D-Sub-D | `TpmAnima` | planned (~3 days) |
+| D-Sub-D | `TpmAnima` | shipped this PR; PKCS#11 auth half + wallet-half delegation |
 | D-Sub-E | `SomaCustody` + rotation/revocation flow | planned (~5 days) |
 | D-Sub-F | `HardwareWalletAnima` | optional (~2 days) |
 
@@ -211,3 +211,77 @@ build pulls reqwest + tokio for the renewal task.
   an optional TLS feature (likely a Sub-phase F refinement after
   M7-E ships), revisit `with_explicit_keys`'s mTLS handling so
   populated configs aren't silently ignored.
+
+### D-Sub-D (`TpmAnima`) handoff state
+
+`TpmAnima` ships under feature flag `kms-tpm` (default off; mirrors
+the `kms-vault` gating). Desktop deployments (mission-control on
+Linux/macOS) enable the feature. Default builds of anima-identity do
+NOT pull `cryptoki` so the slim binary stays slim.
+
+- **Auth half: P-256 in TPM.** Bootstrap finds the keypair by
+  `CKA_LABEL` + validates `CKA_EC_PARAMS` matches the prime256v1
+  OID (DER `06 08 2A 86 48 CE 3D 03 01 07`). `sign_jws` /
+  `sign_digest` go through PKCS#11 `C_Sign` with mechanism
+  `CKM_ECDSA` over a SHA-256 prehash; the TPM never reveals the
+  scalar. Pubkey is read once at construction via
+  `get_attributes(EC_POINT)` and cached.
+- **Wallet half: delegated.** Per the SPEC-D-DEVIATION block at
+  the top of `tpm.rs`, the wallet keypair lives OUTSIDE the TPM.
+  Two reasons: (1) TPM 2.0 secp256k1 support is OPTIONAL and rare;
+  (2) wallet-key compromise has unrecoverable blast radius
+  (drains funds), so it deserves stricter custody. Constructor
+  takes `Option<Arc<dyn AnimaCustody>>` for the delegate.
+  - `wallet_address()` forwards to delegate, or returns `None`.
+  - `sign_evm_tx` / `sign_eip712` forward to delegate, or return
+    `Crypto("tpm: no wallet_delegate configured...")` error.
+  - Canonical mission-control deployment: TPM-auth +
+    `HardwareWalletAnima` (Ledger) for wallet half (D-Sub-F).
+  - Auth-only deployment: TPM-auth + `wallet_delegate=None`
+    (agent can authenticate but cannot move funds).
+- **Rotation: operator-driven.** `rotate()` generates a fresh
+  P-256 keypair on the TPM via `C_GenerateKeyPair` with mechanism
+  `CKM_EC_KEY_PAIR_GEN`. New label is `{auth_label}-rot-{ulid}`
+  to avoid collision; old key remains on TPM under original
+  label until operator wipes it via `pkcs11-tool --delete-object`.
+  Rotation proof JWS is signed by the OLD key over the NEW DID
+  per Spec D L4-D10. The simpler atomic-rotate semantics live in
+  `VaultTransitAnima` — production operators needing automated
+  rotation should run Vault, not TPM.
+- **`with_explicit_session` constructor** for tests with a
+  pre-opened session + resolved key handles. Lets the integration
+  test suite exercise composition rules without requiring a live
+  PKCS#11 fixture in CI.
+- **AnimaError::Crypto on bootstrap failures.** Constructor errors
+  bubble cleanly — no fallback to `InProcessAnima` would silently
+  downgrade the security guarantee. Mission-control surfaces them
+  to the operator and halts.
+
+### D-Sub-D follow-ups
+
+- **Live softhsm fixture in CI.** `tests/integration_tpm.rs` ships
+  with two `#[ignore]`-gated live tests (`live_tpm_softhsm_smoke`
+  + `live_tpm_with_wallet_delegate`) that require a real PKCS#11
+  module path + provisioned key. The fixture-setup is documented
+  in the file-level docstring; CI does not run them by default to
+  avoid binding to softhsm/TPM availability. Track as a follow-up
+  to wire a CI runner with softhsm pre-installed.
+- **Live rotation against softhsm.** Rotation flow is implemented
+  but not exercised by the live tests yet (requires careful
+  cleanup of generated PKCS#11 objects across test runs). Filed
+  as a follow-up — most operators use the static-label workflow
+  (operator generates a new key and restarts mission-control)
+  rather than in-band `rotate()`.
+- **`HardwareWalletAnima` composition test.** D-Sub-F will ship
+  the secp256k1 hardware wallet backend and add a composition
+  test (`TpmAnima` auth + `HardwareWalletAnima` wallet) that
+  verifies the production mission-control shape end-to-end. The
+  D-Sub-D integration tests use `InProcessAnima` as a delegate
+  proxy in the meantime.
+- **PKCS#11 `Send + Sync` audit.** `cryptoki::session::Session`
+  is not `Send` because PKCS#11 sessions are stateful per-thread.
+  We wrap the `TpmSession` in `Mutex` and add `unsafe impl Send
+  + Sync` (justified inline). If we move to per-call PKCS#11
+  sessions (open-sign-close per signature) the unsafe impls
+  would become unnecessary; keeping them for the long-lived
+  session pattern.

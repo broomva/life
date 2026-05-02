@@ -21,6 +21,12 @@ default = []
 # Pulls reqwest's blocking client + tokio time primitives. Mirrors the
 # lifegw `kms-vault` feature pattern.
 kms-vault = ["dep:reqwest", "dep:tokio"]
+# Spec D D-Sub-D: TPM (PKCS#11) backend (`TpmAnima`).
+# Pulls the `cryptoki` crate for PKCS#11 client bindings + the
+# `secrecy` crate (used by cryptoki's `AuthPin = SecretString`).
+# Default off; desktop deployments (mission-control on Linux/macOS)
+# opt in via this feature. Mirrors the `kms-vault` gating pattern.
+kms-tpm = ["dep:cryptoki", "dep:secrecy"]
 
 [dependencies]
 anima-core.workspace = true
@@ -33,6 +39,7 @@ thiserror.workspace = true
 chrono.workspace = true
 blake3.workspace = true
 uuid.workspace = true
+ulid.workspace = true
 
 # Ed25519
 ed25519-dalek.workspace = true
@@ -66,6 +73,17 @@ tracing.workspace = true
 # build of anima-identity stays slim.
 reqwest = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+
+# Spec D D-Sub-D: TpmAnima uses cryptoki for PKCS#11 access to the host
+# TPM. Default off — desktop deployments opt in via the `kms-tpm`
+# feature; multi-tenant server-side deployments use `kms-vault` and
+# never pull cryptoki.
+cryptoki = { workspace = true, optional = true }
+# secrecy is pulled by cryptoki transitively but we pin it as an
+# optional dep so we can call `expose_secret()` on the AuthPin when
+# threading the user PIN through `rotate()`. Same gate as cryptoki —
+# default builds don't pull it.
+secrecy = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
