@@ -758,6 +758,29 @@ pub(crate) fn build_signer(cfg: &AuthConfig) -> LifegwResult<Arc<dyn KmsSigner>>
             }
             Ok(Arc::new(StaticKeystore::generate_dev()?))
         }
+        KmsProvider::StaticPem => match cfg.static_pem.as_ref() {
+            Some(s) => {
+                let pem = std::env::var(&s.pem_env).map_err(|_| {
+                    LifegwError::Config(format!(
+                        "auth.kms_provider = static_pem but env var `{}` is unset \
+                         (operator must inject the PKCS#8 PEM private key — see \
+                         deploy/railway/lifegw-stack/HANDOFF.md §8)",
+                        s.pem_env
+                    ))
+                })?;
+                if pem.trim().is_empty() {
+                    return Err(LifegwError::Config(format!(
+                        "auth.kms_provider = static_pem but env var `{}` is empty",
+                        s.pem_env
+                    )));
+                }
+                let keystore = crate::auth::keystore::Keystore::from_pem(&pem, s.kid.clone())?;
+                Ok(Arc::new(StaticKeystore::from_keystore(keystore)))
+            }
+            None => Err(LifegwError::Config(
+                "auth.kms_provider = static_pem but [auth.static_pem] missing".to_string(),
+            )),
+        },
         #[cfg(feature = "kms-vault")]
         KmsProvider::Vault => match cfg.vault.as_ref() {
             Some(v) => {
@@ -897,6 +920,14 @@ pub(crate) fn install_default_crypto_provider() {
 }
 
 #[cfg(test)]
+// Test-only scope for `std::env::{set_var, remove_var}` — Rust 2024
+// requires `unsafe { ... }` because env mutations are process-wide. The
+// production crate keeps `#![deny(unsafe_code)]`; we relax it just for
+// these tests because the alternative (a separate test crate or
+// dependency-injection seam through the entire signer-build chain) is
+// disproportionate. The tests use distinct env-var names per test so
+// concurrent runs don't clobber each other.
+#[allow(unsafe_code)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
@@ -966,5 +997,188 @@ mod tests {
         let body = std::fs::read_to_string(&path).expect("read");
         assert!(body.contains("\"kid\""));
         assert_ne!(body, "stale");
+    }
+
+    /// Helper: derive a fresh PKCS#8 PEM for `KmsProvider::StaticPem`
+    /// tests. Mirrors what `openssl genpkey -algorithm EC -pkeyopt
+    /// ec_paramgen_curve:P-256` produces.
+    fn make_pkcs8_pem() -> String {
+        use base64::Engine;
+        let rng = ring::rand::SystemRandom::new();
+        let pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
+            &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+            &rng,
+        )
+        .expect("generate pkcs8");
+        let b64 = base64::engine::general_purpose::STANDARD.encode(pkcs8.as_ref());
+        let mut pem = String::from("-----BEGIN PRIVATE KEY-----\n");
+        for chunk in b64.as_bytes().chunks(64) {
+            pem.push_str(std::str::from_utf8(chunk).unwrap());
+            pem.push('\n');
+        }
+        pem.push_str("-----END PRIVATE KEY-----\n");
+        pem
+    }
+
+    /// Stage-2 happy path: `KmsProvider::StaticPem` reads the PEM from
+    /// the configured env var, builds a `Keystore` via `from_pem`, wraps
+    /// it in `StaticKeystore`, and the resulting signer mints tokens
+    /// with the operator-supplied kid.
+    #[test]
+    fn build_signer_static_pem_reads_env_and_uses_operator_kid() {
+        // Use a distinct env var name so concurrent tests don't collide.
+        let env_var = "LIFEGW_TEST_TIER2_STATIC_PEM_OK";
+        let pem = make_pkcs8_pem();
+        // SAFETY: Rust 2024 edition requires `unsafe { ... }` around
+        // `set_var` because env mutations affect process-global state.
+        // Tests in this module run on a single tokio runtime; we don't
+        // spawn parallel signer-builds against the same env var.
+        unsafe {
+            std::env::set_var(env_var, &pem);
+        }
+        let cfg = AuthConfig {
+            kms_provider: KmsProvider::StaticPem,
+            static_pem: Some(crate::config::StaticPemConfig {
+                pem_env: env_var.to_string(),
+                kid: "tier2-test-may26".to_string(),
+            }),
+            ..AuthConfig::default()
+        };
+        let signer = build_signer(&cfg).expect("static_pem signer builds");
+        assert_eq!(signer.active_kid(), "tier2-test-may26");
+        unsafe {
+            std::env::remove_var(env_var);
+        }
+    }
+
+    /// `KmsProvider::StaticPem` without `[auth.static_pem]` config is a
+    /// hard error — operators must explicitly opt in to the new
+    /// provider via the config block.
+    #[test]
+    fn build_signer_static_pem_rejects_missing_config_block() {
+        let cfg = AuthConfig {
+            kms_provider: KmsProvider::StaticPem,
+            static_pem: None,
+            ..AuthConfig::default()
+        };
+        match build_signer(&cfg) {
+            Ok(_) => panic!("must reject StaticPem without config block"),
+            Err(LifegwError::Config(m)) => {
+                assert!(m.contains("static_pem"), "error mentions static_pem: {m}")
+            }
+            Err(other) => panic!("expected Config error, got {other:?}"),
+        }
+    }
+
+    /// Missing env var → actionable error mentioning the env name.
+    #[test]
+    fn build_signer_static_pem_rejects_missing_env_with_actionable_error() {
+        let env_var = "LIFEGW_TEST_TIER2_STATIC_PEM_NEVER_SET";
+        // Defensive cleanup — set_var/remove_var are unsafe in Rust 2024.
+        unsafe {
+            std::env::remove_var(env_var);
+        }
+        let cfg = AuthConfig {
+            kms_provider: KmsProvider::StaticPem,
+            static_pem: Some(crate::config::StaticPemConfig {
+                pem_env: env_var.to_string(),
+                kid: "kid-x".to_string(),
+            }),
+            ..AuthConfig::default()
+        };
+        match build_signer(&cfg) {
+            Ok(_) => panic!("must reject StaticPem with unset env"),
+            Err(LifegwError::Config(m)) => {
+                assert!(m.contains(env_var), "error mentions env var name: {m}");
+                assert!(m.contains("HANDOFF"), "error references HANDOFF doc: {m}");
+            }
+            Err(other) => panic!("expected Config error, got {other:?}"),
+        }
+    }
+
+    /// Empty env var → also a hard error (operators sometimes set the
+    /// var to `""` thinking that "unsets" it).
+    #[test]
+    fn build_signer_static_pem_rejects_empty_env() {
+        let env_var = "LIFEGW_TEST_TIER2_STATIC_PEM_EMPTY";
+        unsafe {
+            std::env::set_var(env_var, "");
+        }
+        let cfg = AuthConfig {
+            kms_provider: KmsProvider::StaticPem,
+            static_pem: Some(crate::config::StaticPemConfig {
+                pem_env: env_var.to_string(),
+                kid: "kid-x".to_string(),
+            }),
+            ..AuthConfig::default()
+        };
+        match build_signer(&cfg) {
+            Ok(_) => panic!("must reject empty env value"),
+            Err(LifegwError::Config(m)) => {
+                assert!(
+                    m.contains("empty") || m.contains("unset"),
+                    "error mentions empty/unset: {m}"
+                );
+            }
+            Err(other) => panic!("expected Config error, got {other:?}"),
+        }
+        unsafe {
+            std::env::remove_var(env_var);
+        }
+    }
+
+    /// End-to-end: build StaticPem signer, sign a JWS, verify it
+    /// against the published JWKS. Proves the operator-key path mints
+    /// tokens that downstream verifiers (lifed) will accept.
+    #[test]
+    fn build_signer_static_pem_publishes_matching_jwks() {
+        use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
+
+        let env_var = "LIFEGW_TEST_TIER2_STATIC_PEM_E2E";
+        let pem = make_pkcs8_pem();
+        unsafe {
+            std::env::set_var(env_var, &pem);
+        }
+        let cfg = AuthConfig {
+            kms_provider: KmsProvider::StaticPem,
+            static_pem: Some(crate::config::StaticPemConfig {
+                pem_env: env_var.to_string(),
+                kid: "tier2-e2e".to_string(),
+            }),
+            ..AuthConfig::default()
+        };
+        let signer = build_signer(&cfg).expect("signer builds");
+
+        // Mint a JWS via the signer.
+        let claims = serde_json::json!({
+            "iss": "lifegw",
+            "aud": "lifed",
+            "sub": "user-stage2",
+            "exp": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() + 60,
+        });
+        let token = signer.sign_jws(&claims).expect("sign");
+
+        // Pull the public PEM from the published JWKS, build a
+        // DecodingKey from it, verify the JWS.
+        let jwks = signer.publish_jwks();
+        let entry = jwks
+            .keys
+            .iter()
+            .find(|k| k.kid == "tier2-e2e")
+            .expect("kid present in jwks");
+        let pub_pem = entry.pem.as_ref().expect("jwks entry has pem field");
+        let decoding =
+            DecodingKey::from_ec_pem(pub_pem.as_bytes()).expect("decoding key from jwks pem");
+        let mut v = Validation::new(Algorithm::ES256);
+        v.set_audience(&["lifed"]);
+        v.set_issuer(&["lifegw"]);
+        decode::<serde_json::Value>(&token, &decoding, &v).expect("verify");
+
+        unsafe {
+            std::env::remove_var(env_var);
+        }
     }
 }

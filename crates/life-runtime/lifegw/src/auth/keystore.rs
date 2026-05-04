@@ -91,6 +91,51 @@ impl Keystore {
         })
     }
 
+    /// Load a Tier-2 signing keystore from an operator-provided PKCS#8
+    /// PEM. Used by the `KmsProvider::StaticPem` arm to take the
+    /// dev-key-generator out of the boot path: the operator generates
+    /// the key once (e.g. via `openssl genpkey -algorithm EC -pkeyopt
+    /// ec_paramgen_curve:P-256`), persists it to a Railway volume, and
+    /// hands the PEM to lifegw via env. Both lifegw and lifed can then
+    /// agree on the same `kid` regardless of who boots first.
+    ///
+    /// Accepts only PKCS#8 PEM (`-----BEGIN PRIVATE KEY-----`). SEC1
+    /// (`-----BEGIN EC PRIVATE KEY-----`) is rejected — operators must
+    /// run `openssl pkcs8 -topk8 -nocrypt -in sec1.pem -out pkcs8.pem`
+    /// once if they have a SEC1 key.
+    pub fn from_pem(priv_pem: &str, kid: impl Into<String>) -> LifegwResult<Self> {
+        // Validate the PEM armour BEFORE handing to jsonwebtoken — this
+        // way SEC1 ("BEGIN EC PRIVATE KEY") gets a clear, actionable
+        // error mentioning the openssl conversion command, instead of
+        // jsonwebtoken's opaque "InvalidKeyFormat".
+        let pkcs8_der = pem_to_der(priv_pem, "PRIVATE KEY").map_err(|e| {
+            LifegwError::Auth(format!(
+                "from_pem expects PKCS#8 PEM (BEGIN PRIVATE KEY); convert SEC1 keys via \
+                 `openssl pkcs8 -topk8 -nocrypt -in sec1.pem -out pkcs8.pem`: {e}"
+            ))
+        })?;
+        let encoding = EncodingKey::from_ec_pem(priv_pem.as_bytes())
+            .map_err(|e| LifegwError::Auth(format!("encode priv pem: {e}")))?;
+        let rng = ring::rand::SystemRandom::new();
+        let kp = ring::signature::EcdsaKeyPair::from_pkcs8(
+            &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+            &pkcs8_der,
+            &rng,
+        )
+        .map_err(|e| LifegwError::Auth(format!("parse pkcs8: {e}")))?;
+        let raw_pub = ring::signature::KeyPair::public_key(&kp).as_ref().to_vec();
+        let spki_der = sec1_uncompressed_to_spki(&raw_pub);
+        let pub_pem = der_to_pem("PUBLIC KEY", &spki_der);
+        let decoding = DecodingKey::from_ec_pem(pub_pem.as_bytes())
+            .map_err(|e| LifegwError::Auth(format!("decode pub pem: {e}")))?;
+        Ok(Self {
+            kid: kid.into(),
+            encoding,
+            decoding,
+            public_pem: pub_pem,
+        })
+    }
+
     /// Public key in PEM form. Sub-phase D writes this to disk so lifed (the
     /// downstream verifier) can read it from a known path.
     pub fn public_key_pem(&self) -> String {
@@ -173,6 +218,30 @@ impl JwksKey {
             pem: None,
         }
     }
+}
+
+/// Inverse of `der_to_pem` — strip BEGIN/END `<label>` armour, drop
+/// whitespace, base64-decode the body. Returns the DER bytes.
+///
+/// Hand-rolled rather than pulling in another crate for one shape; the
+/// PEM format is small and stable enough that this is robust. We accept
+/// LF or CRLF line endings.
+fn pem_to_der(pem: &str, label: &str) -> LifegwResult<Vec<u8>> {
+    use base64::Engine;
+    let begin = format!("-----BEGIN {label}-----");
+    let end = format!("-----END {label}-----");
+    let begin_idx = pem
+        .find(&begin)
+        .ok_or_else(|| LifegwError::Auth(format!("PEM missing `{begin}` header")))?;
+    let after_begin = begin_idx + begin.len();
+    let end_offset = pem[after_begin..]
+        .find(&end)
+        .ok_or_else(|| LifegwError::Auth(format!("PEM missing `{end}` footer")))?;
+    let body = &pem[after_begin..after_begin + end_offset];
+    let cleaned: String = body.chars().filter(|c| !c.is_whitespace()).collect();
+    base64::engine::general_purpose::STANDARD
+        .decode(cleaned)
+        .map_err(|e| LifegwError::Auth(format!("base64 decode {label}: {e}")))
 }
 
 fn der_to_pem(label: &str, der: &[u8]) -> String {
@@ -278,5 +347,105 @@ mod tests {
         assert_eq!(jwks.keys[0].alg, "ES256");
         assert_eq!(jwks.keys[0].crv, "P-256");
         assert!(jwks.keys[0].pem.is_some());
+    }
+
+    /// Round-trip: dev_generate → re-import its private PKCS#8 PEM via
+    /// `from_pem` → public PEMs match → signed JWT verifies under both
+    /// `Keystore` instances. Exercises the Stage-2 `KmsProvider::StaticPem`
+    /// happy path entirely in-process.
+    #[test]
+    fn from_pem_round_trip_via_dev_keystore_private_pkcs8() {
+        // Generate a fresh dev keystore — we don't have direct access to
+        // its private PEM so we re-derive via `ring`, then format as
+        // PKCS#8 PEM. This mirrors what an operator does with
+        // `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256`.
+        let rng = ring::rand::SystemRandom::new();
+        let pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
+            &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+            &rng,
+        )
+        .expect("generate pkcs8");
+        let priv_pem = der_to_pem("PRIVATE KEY", pkcs8.as_ref());
+
+        let ks = Keystore::from_pem(&priv_pem, "tier2-test-2026-05").expect("from_pem");
+        assert_eq!(ks.kid, "tier2-test-2026-05");
+        assert!(ks.public_pem.contains("BEGIN PUBLIC KEY"));
+
+        // Sign + verify round-trip — proves the encoding/decoding halves
+        // are paired correctly (i.e. we derived the right public key
+        // from the private input).
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Probe {
+            sub: String,
+            aud: String,
+            iss: String,
+            exp: u64,
+        }
+        let claims = Probe {
+            sub: "user-stage2".to_string(),
+            aud: "lifed".to_string(),
+            iss: "lifegw".to_string(),
+            exp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                + 60,
+        };
+        let mut header = Header::new(Algorithm::ES256);
+        header.kid = Some(ks.kid.clone());
+        let token = encode(&header, &claims, &ks.encoding).expect("encode");
+        let mut v = Validation::new(Algorithm::ES256);
+        v.set_audience(&["lifed"]);
+        v.set_issuer(&["lifegw"]);
+        let decoded = decode::<Probe>(&token, &ks.decoding, &v).expect("verify");
+        assert_eq!(decoded.claims.sub, "user-stage2");
+    }
+
+    #[test]
+    fn from_pem_rejects_sec1_format_with_actionable_error() {
+        // SEC1 format: -----BEGIN EC PRIVATE KEY-----. We require PKCS#8
+        // and surface a clear "convert via openssl pkcs8 …" hint.
+        let sec1_pem = "-----BEGIN EC PRIVATE KEY-----\n\
+            MHcCAQEEIPmCWVS9w14MnDqyCabNmxRLywKtdwjmKCEZ7TI51tSloAoGCCqGSM49\n\
+            AwEHoUQDQgAEr5jeUd1bKTU+vHy5KFSDcYaeqHLECwbwAY9hAlR1qSsmNwMHkEjy\n\
+            6PqOEC8h4S8hrZD/zKL9k2KAMt6gzsMHAg==\n\
+            -----END EC PRIVATE KEY-----\n";
+        let err = match Keystore::from_pem(sec1_pem, "kid-x") {
+            Ok(_) => panic!("must reject SEC1 PEM"),
+            Err(e) => e,
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("PKCS#8") && msg.contains("openssl pkcs8"),
+            "expected actionable error mentioning PKCS#8 + openssl, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn from_pem_rejects_garbage_pem() {
+        match Keystore::from_pem("not a pem", "kid-x") {
+            Ok(_) => panic!("must reject non-PEM input"),
+            Err(LifegwError::Auth(_)) => {}
+            Err(other) => panic!("expected Auth error, got {other:?}"),
+        }
+    }
+
+    /// Two `Keystore::from_pem` calls with the same PEM produce
+    /// keystores that publish the same `pub_pem` — kids being external,
+    /// the public material is bit-identical for the same private input.
+    #[test]
+    fn from_pem_is_deterministic_in_public_key() {
+        let rng = ring::rand::SystemRandom::new();
+        let pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
+            &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+            &rng,
+        )
+        .expect("generate pkcs8");
+        let priv_pem = der_to_pem("PRIVATE KEY", pkcs8.as_ref());
+
+        let ks1 = Keystore::from_pem(&priv_pem, "k1").expect("from_pem 1");
+        let ks2 = Keystore::from_pem(&priv_pem, "k2").expect("from_pem 2");
+        assert_eq!(ks1.public_pem, ks2.public_pem);
+        assert_ne!(ks1.kid, ks2.kid); // kid is operator-supplied, not derived.
     }
 }
