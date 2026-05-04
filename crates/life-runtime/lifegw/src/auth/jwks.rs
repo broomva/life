@@ -445,6 +445,20 @@ impl JwksCache {
         }
     }
 
+    /// Build a real JWKS cache that ALSO accepts the dev shortcut.
+    ///
+    /// Used by deploys that want to flip on Tier-1 verification of
+    /// real JWS tokens (issued by an apps/chat JWKS server) WITHOUT
+    /// killing the existing `Bearer dev-token-for-{user_id}` path
+    /// integration tests + ops smoke tests rely on. Production deploys
+    /// pass `dev_signer_enabled = false` and use [`JwksCache::new`]
+    /// directly to forbid the shortcut.
+    pub fn new_with_dev_shortcut(cfg: JwksCacheConfig) -> Self {
+        let mut cache = Self::new(cfg);
+        cache.dev_signer_enabled = true;
+        cache
+    }
+
     /// Dev convenience: build a cache that ALSO accepts the
     /// `dev-token-for-{user_id}` shortcut so existing integration tests
     /// keep passing without standing up an apps/chat JWKS server.

@@ -1,0 +1,73 @@
+# lifegw-stack — Caddy reverse-proxy frontage.
+#
+# Public side : binds :$PORT cleartext (Railway edge already terminated TLS).
+# Upstream    : 127.0.0.1:8443 lifegw self-signed (tls_insecure_skip_verify).
+#
+# Caddy passes through:
+#   - HTTP/1.1 + HTTP/2 → upstream (auto-detected by hyper auto-Builder).
+#   - WebSocket Upgrade for `/v1/agent/stream`.
+#   - tonic-web (`application/grpc-web`) framing — Caddy is byte-transparent.
+#   - `/anima/custody/*` axum HTTP/JSON routes (Spec D D-Sub-C).
+#
+# Health probe: `/healthz` is served by lifegw directly; Caddy proxies it.
+
+{
+	auto_https off
+	# Inherit container log level via env so RUST_LOG-style toggles align.
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+}
+
+:{$PORT} {
+	# Operator visibility — every request line lands in the container log.
+	log {
+		output stdout
+		format console
+	}
+
+	# Quick liveness — Caddy answers if it is up; lifegw `/healthz` answers
+	# if the upstream is up. Railway hits the latter via the public domain.
+	handle /caddy/healthz {
+		respond "ok" 200
+	}
+
+	# WebSocket-upgrade matcher.
+	#
+	# Railway's edge proxy strips the `Connection: Upgrade` and
+	# `Upgrade: websocket` HTTP/1.1 hop-by-hop headers when fronting
+	# WebSocket traffic — only `Sec-WebSocket-Key`/`-Version`/`-Protocol`
+	# survive the hand-off to the origin. Caddy then sees a request that
+	# does NOT look like a WS upgrade, falls through to its plain HTTP
+	# proxy, and lifegw rejects the request as a malformed gRPC call.
+	#
+	# Workaround: detect WS by `Sec-WebSocket-Key` (which Railway DOES
+	# preserve), then re-inject the missing upgrade headers before the
+	# upstream call. lifegw's `is_ws_upgrade` then correctly dispatches
+	# the request to the bidi-pump handler.
+	@websocket {
+		path /v1/agent/stream
+		header Sec-WebSocket-Key *
+	}
+	reverse_proxy @websocket https://127.0.0.1:8443 {
+		header_up Connection Upgrade
+		header_up Upgrade websocket
+		transport http {
+			tls_insecure_skip_verify
+			versions 1.1
+		}
+	}
+
+	# Everything else (gRPC, gRPC-web, /healthz, /anima/custody/*) flows
+	# through the standard reverse-proxy path. `versions 1.1` pins HTTP/1.1
+	# to upstream so tonic-web's HTTP/1.1 trailer encoding works cleanly;
+	# native HTTP/2 gRPC isn't used by any client of this gateway today.
+	reverse_proxy https://127.0.0.1:8443 {
+		transport http {
+			tls_insecure_skip_verify
+			versions 1.1
+		}
+	}
+}
