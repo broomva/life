@@ -1,22 +1,14 @@
-# lifed config — Railway lifegw-stack deploy.
+# lifed config — Railway lifegw-stack deploy (Stage 2, May 2026).
 #
-# Stage 1: real lifed binary, mock substrates. lifed boots without any of
-# the per-substrate UDS sockets present (arcand / lagod / haimad / animad /
-# soma); the `LIFED_ALLOW_MOCK_FALLBACK=1` env var (set on the Railway
-# service) flips substrates to canned mocks at boot. The wire path
-# (Caddy → lifegw → lifed) runs end-to-end against real code; substrate
-# behaviour is mocked.
+# JwksCache is now lazy + file-backed (see `lifed::auth::jwks` Stage 2
+# notes): `validate()` reads `auth.jwks_path` on first miss and on
+# mtime change, so there's no boot-order race with lifegw. The dev
+# shortcut is additive — controlled by `auth.dev_signer_enabled`.
 #
-# Dev signer: lifed's bootstrap auto-falls-back to
-# `JwksCache::dev_only()` when `auth.jwks_path` does not exist, so the
-# `Bearer test-token-for-{user_id}` shortcut works without an explicit
-# config flag. Production swaps this by pre-publishing a real JWKS at
-# `auth.jwks_path` (which lifegw also writes to in this image).
-#
+# Substrates still run as in-process mocks (LIFED_ALLOW_MOCK_FALLBACK=true).
 # Production swap-in: drop `LIFED_ALLOW_MOCK_FALLBACK`, ship arcand +
-# lagod + haimad + animad + soma into the same container (or a successor
-# multi-container topology once tonic gets a TCP-only transport push),
-# and let lifed fail-fast on missing UDS sockets.
+# lagod + haimad + animad + soma into the same container (or move to a
+# multi-container topology), and let lifed fail-fast on missing UDS.
 
 [public_plane]
 unix_socket       = "/run/life/life.sock"
@@ -47,14 +39,17 @@ unix_socket = "/run/life/anima.sock"
 unix_socket = "/run/life/soma-admin.sock"
 
 [auth]
-# JWKS path is shared with lifegw — both daemons use the same key. lifegw
-# writes the JWKS to /run/life/lifegw-jwks.json on boot; lifed reads it.
-# Until lifegw publishes (couple-second race at startup), lifed runs in
-# dev-keystore mode (`Bearer test-token-for-{user_id}` accepted).
+# Stage 2: lifed reads `jwks_path` lazily on first verify (and on
+# mtime change for rotation). lifegw writes to the same path
+# atomically; the boot order between the two daemons no longer matters.
+# `dev_signer_enabled = true` keeps the test-token shortcut additive
+# during the Stage 1 → Stage 2 transition; flip to `false` once
+# every caller uses real JWS.
 jwks_path                   = "/run/life/lifegw-jwks.json"
 substrate_signing_key_path  = "/etc/life/lifed-signing-key.pem"
 substrate_jwks_publish_path = "/run/life/lifed-jwks.json"
 revoked_sids_path           = "/run/life/revoked_sids.json"
+dev_signer_enabled          = true
 
 [routing]
 idle_threshold_secs    = 3600

@@ -157,8 +157,10 @@ pub struct SubstrateEndpoint {
 #[non_exhaustive]
 pub struct AuthConfig {
     /// Path to a JSON-encoded JWKS file used to verify Tier-2 capability tokens.
-    /// In production, this file is fetched from `lifegw`'s well-known JWKS URL.
-    /// In dev/CI this is a static bundle.
+    /// In production, this file is published by lifegw at the path below.
+    /// lifed reads it lazily on first verify (and on `kid` cache miss /
+    /// mtime change) so there's no boot-order dependency between the two
+    /// daemons — see `auth::jwks` Stage-2 docs.
     #[serde(default = "default_jwks_path")]
     pub jwks_path: PathBuf,
     /// Path to lifed's substrate-token signing key (PEM-encoded EC key).
@@ -172,6 +174,14 @@ pub struct AuthConfig {
     /// Path to the `revoked_sids.json` snapshot file (master spec §L4 invariant 5).
     #[serde(default = "default_revoked_sids_path")]
     pub revoked_sids_path: PathBuf,
+    /// When `true`, the JWKS verifier ALSO accepts the
+    /// `Bearer test-token-for-{user_id}` shortcut as an additive
+    /// fallback (real ES256 verification still runs against `jwks_path`).
+    /// MUST be `false` in production. Integration tests + ops smoke
+    /// runs flip this on during the Stage 1 → Stage 2 transition; once
+    /// every caller mints real JWS the flag flips back to `false`.
+    #[serde(default)]
+    pub dev_signer_enabled: bool,
 }
 
 fn default_jwks_path() -> PathBuf {
@@ -194,6 +204,8 @@ impl Default for AuthConfig {
             substrate_signing_key_path: default_signing_key_path(),
             substrate_jwks_publish_path: default_published_jwks_path(),
             revoked_sids_path: default_revoked_sids_path(),
+            // Production posture — dev shortcut OFF by default.
+            dev_signer_enabled: false,
         }
     }
 }

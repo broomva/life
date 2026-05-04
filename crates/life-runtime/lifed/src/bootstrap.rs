@@ -94,15 +94,28 @@ pub async fn run_with_mocks_handles(
         "lifed starting (sub-phase C — mock substrates)",
     );
 
-    let jwks = if cfg.auth.jwks_path.exists() {
-        Arc::new(JwksCache::load_from_path(&cfg.auth.jwks_path)?)
+    // Stage 2 (May 2026): lazy file-backed JWKS — no boot-order race.
+    // The previous `if exists() { real } else { dev_only }` branch
+    // pinned the cache identity at boot time, which inside the Railway
+    // lifegw-stack container caused lifed to ALWAYS land on dev_only
+    // (lifegw publishes the JWKS ~100 ms after lifed binds its UDS).
+    // The new cache lazy-reads on first verify + on mtime change, so
+    // it picks up lifegw's publish without coordination. The dev
+    // shortcut is now an explicit additive flag — production deploys
+    // leave `cfg.auth.dev_signer_enabled = false` and reject the
+    // shortcut outright.
+    let jwks = if cfg.auth.dev_signer_enabled {
+        Arc::new(JwksCache::new_lazy_file_with_dev_shortcut(
+            &cfg.auth.jwks_path,
+        ))
     } else {
-        tracing::warn!(
-            path = %cfg.auth.jwks_path.display(),
-            "jwks file missing — using dev keystore (test-token-for-{{user}} accepted)"
-        );
-        Arc::new(JwksCache::dev_only())
+        Arc::new(JwksCache::new_lazy_file(&cfg.auth.jwks_path))
     };
+    tracing::info!(
+        path = %cfg.auth.jwks_path.display(),
+        dev_shortcut = cfg.auth.dev_signer_enabled,
+        "jwks cache initialised (lazy file-backed)"
+    );
     let auth = AuthLayer::new(Arc::clone(&jwks));
 
     // Sub-phase E: build pools first so we can wrap each substrate impl

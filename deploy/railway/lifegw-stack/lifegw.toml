@@ -1,10 +1,16 @@
-# lifegw config — Railway lifegw-stack deploy.
+# lifegw config — Railway lifegw-stack deploy (Stage 2, May 2026).
 #
-# This is a Stage-1 deploy: dev signer + Dev KMS. The gateway accepts the
-# `Bearer dev-token-for-{user_id}` Tier-1 shortcut and mints Tier-2 caps
-# from an in-process key. Production swap-in (Vault / AWS / GCP KMS, real
-# Vercel JWKS) is future work tracked in the canonical spec at
-# `apps/chat/docs/superpowers/specs/2026-05-03-life-runtime-canonical.md`.
+# Tier-2 mint runs against an operator-provided PKCS#8 PEM private key
+# (KmsProvider::StaticPem) — `entrypoint.sh` persists it under
+# `/var/life-state/tier2-signing.pkcs8.pem` and exports the contents
+# via `LIFEGW_TIER2_SIGNING_KEY_PEM` so this config can stay in source
+# control. Mount a Railway volume at /var/life-state to keep the key
+# stable across image redeploys (kid stays valid → in-flight tokens
+# survive rolling deploys).
+#
+# Tier-1 verification still uses real ES256 + broomva.tech's
+# `/api/auth/jwks.json`, with the dev shortcut additive (controlled
+# by `dev_signer_enabled = true`).
 #
 # `[upstream] lifed_uds_path` — path is shared with `lifed.toml`. Keep
 # both files in sync if you change the socket location.
@@ -31,27 +37,42 @@ unix_socket_group = "life-runtime"
 unix_socket_mode  = 0o660
 
 [auth]
+# Stage 2: Tier-2 mint is operator-key-backed via
+# `KmsProvider::StaticPem` (see `[auth.static_pem]` below). The kid is
+# stable across container restarts; the public half is published
+# atomically to `publish_jwks_path` on boot.
+#
 # Tier-1 verification accepts BOTH real ES256 JWS (verified against
 # broomva.tech's `/api/auth/jwks.json`) AND the dev shortcut
 # `Bearer dev-token-for-{user_id}`. lifegw's
-# `JwksCache::new_with_dev_shortcut` makes the two additive: real JWS
-# tokens are validated against the upstream JWKS, and the dev shortcut
-# is also accepted for ops smoke tests.
-#
-# `dev_signer_enabled = true` is also required by lifegw's Sub-phase C
-# hardening guard which couples the Dev `kms_provider` to this flag.
-# When we swap Tier-2 mint to Vault/AWS/GCP KMS (Spec C₃ Sub-phase E)
-# we flip this to `false` so the dev shortcut is rejected outright.
+# `JwksCache::new_with_dev_shortcut` makes the two additive — real JWS
+# tokens get JWKS verification, and the dev shortcut still works for
+# ops smoke tests during the Stage 1 → Stage 2 transition. Flip
+# `dev_signer_enabled` to `false` once every caller mints real JWS.
 jwks_url            = "https://broomva.tech/api/auth/jwks.json"
 tier1_audience      = "lifegw"
 tier1_issuer        = "https://broomva.tech"
-kms_provider        = "dev"
+kms_provider        = "static_pem"
 dev_signer_enabled  = true
 publish_jwks_path   = "/run/life/lifegw-jwks.json"
 tier2_audience      = "lifed"
 tier2_issuer        = "lifegw"
 tier2_ttl           = "900s"
 tier_user_ttl       = "900s"
+
+# ── Tier-2 signing key (Stage 2) ──────────────────────────────────────────
+# `pem_env` names the env var that holds the PKCS#8 PEM private key
+# (default `LIFEGW_TIER2_SIGNING_KEY_PEM`). entrypoint.sh exports it by
+# reading the persistent file at /var/life-state/tier2-signing.pkcs8.pem
+# (auto-generated once if absent), or by accepting an operator-pre-set
+# value (Railway secrets / external KMS shim).
+#
+# `kid` is operator-pinned. Rotation = bump kid + redeploy. The kid is
+# echoed into the published JWKS so substrates verify against the same
+# value lifegw signs with.
+[auth.static_pem]
+pem_env = "LIFEGW_TIER2_SIGNING_KEY_PEM"
+kid     = "tier2-railway-may26"
 
 [rate_limit]
 per_user_capacity        = 60

@@ -267,6 +267,13 @@ pub struct AuthConfig {
     /// Sub-phase E item #2.
     #[serde(default)]
     pub gcp: Option<GcpConfig>,
+    /// Operator-provided PKCS#8 PEM private key + kid (Stage 2). Used
+    /// when `kms_provider = "static_pem"`. The key material is read
+    /// from the env vars named in the config — keeps secrets out of
+    /// disk in container deployments where the operator injects via
+    /// the platform's secret manager.
+    #[serde(default)]
+    pub static_pem: Option<StaticPemConfig>,
     /// Path to which the gateway publishes its Tier-2 JWKS document.
     /// `None` disables publish (used by tests that share key material
     /// in-memory). Default `/run/life/lifegw-jwks.json`.
@@ -292,6 +299,44 @@ pub struct AuthConfig {
     /// 15 min is rejected at config-validate time.
     #[serde(default, with = "humantime_serde_opt")]
     pub tier_user_ttl: Option<Duration>,
+}
+
+/// Operator-provided PKCS#8 PEM signing-key configuration.
+///
+/// Used by the Stage-2 lifegw-stack Railway deploy to break the
+/// boot-order race between lifegw and lifed: the operator generates an
+/// ES256 P-256 keypair once at container start (or persists it on a
+/// Railway volume), pre-publishes the public JWKS to the path lifed
+/// reads, and hands the private PEM to lifegw via env. With this in
+/// place, lifegw + lifed can boot in either order — lifed reads the
+/// JWKS lazily on first verify, and the kid is stable because it
+/// originates from the operator-provided key, not a per-boot
+/// `StaticKeystore::generate_dev()` call.
+///
+/// The `pem_env` field names the env var that holds the actual PEM —
+/// lifegw refuses to embed the key material into the config TOML
+/// (which is committed to source control). Operators inject via
+/// `LIFEGW_TIER2_SIGNING_KEY_PEM` (recommended) or any other env var.
+///
+/// `kid` is stable across deploys — the JWKS publishes the same `kid`
+/// whatever the env's actual value, so verifiers see continuity.
+/// Rotation = generate a new key + bump `kid` + redeploy.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct StaticPemConfig {
+    /// Name of the env var that holds the PKCS#8 PEM private key.
+    /// Default `LIFEGW_TIER2_SIGNING_KEY_PEM`.
+    #[serde(default = "default_static_pem_env")]
+    pub pem_env: String,
+    /// JWS `kid` for tokens minted with this key. Convention: a short
+    /// stable string (e.g. `tier2-2026-05`). Substrates verify against
+    /// this kid in the published JWKS.
+    pub kid: String,
+}
+
+fn default_static_pem_env() -> String {
+    "LIFEGW_TIER2_SIGNING_KEY_PEM".to_string()
 }
 
 /// HashiCorp Vault Transit configuration (Sub-phase B production
@@ -418,6 +463,14 @@ pub enum KmsProvider {
     /// In-process dev signer. Sub-phase A default.
     #[default]
     Dev,
+    /// Operator-provided PKCS#8 PEM private key, loaded from env at
+    /// boot (Stage 2 — May 2026). Bridges the gap between `Dev`
+    /// (per-boot random) and the heavy KMS providers (Vault / AWS /
+    /// GCP). The key is operator-managed: rotation = re-issue + redeploy.
+    /// Used by `lifegw-stack` Railway deploys where the entrypoint
+    /// generates the key once + hands it to both lifegw + lifed via
+    /// shared `/run/life/` paths and an env var.
+    StaticPem,
     /// AWS KMS (Sub-phase E, behind feature flag `kms-aws`).
     Aws,
     /// GCP Cloud KMS (Sub-phase E, behind feature flag `kms-gcp`).
@@ -438,6 +491,7 @@ impl Default for AuthConfig {
             vault: None,
             aws: None,
             gcp: None,
+            static_pem: None,
             publish_jwks_path: default_publish_jwks_path(),
             dev_signer_enabled: false,
             tier2_audience: default_tier2_audience(),

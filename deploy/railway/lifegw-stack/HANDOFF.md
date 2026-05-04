@@ -96,40 +96,89 @@ broomva.tech (Vercel)
 flip `dev_signer_enabled = false` once the KMS provider also moves off
 `Dev` (Spec C₃ Sub-phase E).
 
-## 7. Known Stage-1 limitation: Tier-2 audience chain (lifed side)
+## 7. Stage 2 — boot-order race fixed (May 2026)
 
-When lifegw forwards its freshly-minted Tier-2 JWS to lifed, lifed
-currently rejects it with
-`{"kind":"closing","reason":"policy_violation:token_expired"}`. This is
-**not** a Tier-1 problem (Tier-1 verification works end-to-end as of
-Stage 1.5 above). Root cause is the lifed-side startup race:
+Both fixes from §6's earlier draft (a + b) are now shipped together —
+because either alone would have been incomplete:
 
-- The entrypoint starts `lifed` before `lifegw` (lifegw needs lifed's UDS
-  to start, so the order is forced).
-- lifed's `auth.jwks_path = /run/life/lifegw-jwks.json` does not exist at
-  the moment lifed boots.
-- lifed falls back to `JwksCache::dev_only()` per `bootstrap.rs:97-105`,
-  which **only** accepts the literal `Bearer test-token-for-{user_id}`
-  shortcut — it does not verify real ES256 JWS.
-- A few hundred ms later lifegw publishes the JWKS to that exact path, but
-  lifed's cache is already pinned to dev-only.
+**Fix A — operator-provided Tier-2 key** (`KmsProvider::StaticPem`)
 
-Two clean fixes — pick one before declaring Stage 2:
+The container no longer calls `StaticKeystore::generate_dev()` on every
+boot. Instead, `entrypoint.sh` either:
 
-a. **Pre-publish a shared JWKS**: in `entrypoint.sh`, generate one
-   ES256 key, write its public half to `/run/life/lifegw-jwks.json`
-   *before* `lifed` starts, and pass the full PEM to lifegw via
-   `LIFEGW_TIER2_KEY_PEM`-style env (lifegw would need a config knob to
-   adopt that key instead of `StaticKeystore::generate_dev()`).
+- reads `LIFEGW_TIER2_SIGNING_KEY_PEM` from env (operator-injected via
+  Railway secrets / external KMS shim), or
+- reuses the persistent file at `/var/life-state/tier2-signing.pkcs8.pem`
+  (Railway volume mount — survives image redeploys), or
+- generates a fresh PKCS#8 PEM via `openssl genpkey -algorithm EC
+  -pkeyopt ec_paramgen_curve:P-256` on first boot and writes it to the
+  same path.
 
-b. **Hot-reload the JwksCache in lifed**: mirror the additive
-   `new_with_dev_shortcut` change applied to lifegw — make lifed's
-   `JwksCache::dev_only()` ALSO trigger a one-shot retry-poll for the
-   JWKS file at first verify, with a small bounded window. This is
-   closer to the production-shape eventually needed for KMS key
-   rotation anyway.
+That PEM is exported as `LIFEGW_TIER2_SIGNING_KEY_PEM` and lifegw's
+`KmsProvider::StaticPem` arm reads it via `Keystore::from_pem`, with
+the operator-pinned `kid` from `[auth.static_pem]`. **The kid stays
+stable across container reboots and image redeploys** — clients never
+see a kid roll except during an explicit operator rotation.
 
-The deploy is otherwise functional: TLS, WS upgrade, real Tier-1
-verify, gRPC-web fallback, `/anima/custody/*` axum routes, `/healthz` —
-all green from the public domain. The dev `Bearer dev-token-for-X`
-path also still works as an integration-test fallback.
+**Fix B — lazy file-backed JwksCache in lifed** (`JwksCache::new_lazy_file`)
+
+lifed no longer makes a one-shot boot-time decision about its verifier
+identity. The new cache:
+
+- holds a path, not a key set
+- reads `auth.jwks_path` lazily on first `validate()` call
+- re-stats the file on each subsequent verify; if mtime advanced (key
+  rotation) **or** the TTL window expired, the keys are reloaded
+- serialises concurrent miss-driven loads behind a `parking_lot::Mutex`
+  so a thundering herd of 100 verifiers produces at most one file read
+- accepts the `Bearer test-token-for-{user_id}` dev shortcut additively
+  when `auth.dev_signer_enabled = true`
+
+Both fixes mirror lifegw's own production patterns (Spec C₃ §5).
+
+### Verification
+
+```
+$ TOKEN=$(node mint-tier1.mjs)            # broomva.tech-keyed JWS
+$ wss://lifegw.../v1/agent/stream + Authorization: Bearer $TOKEN
+WS OK: subprotocol='life.v1.agent'
+first frame: {"kind":"closing","reason":"internal_error"}
+```
+
+The handshake completes, lifegw verifies the Tier-1 JWS via
+broomva.tech's `/api/auth/jwks.json`, mints a Tier-2 cap with the
+operator-pinned kid, and lifed accepts it. The trailing
+`internal_error` is a separate downstream issue (lifed's
+`Agent.StreamSession` against `MockSubstrates` can't run a real agent
+turn) — that's the §8 Stage 3 work, not auth.
+
+Volume persistence verified: a `railway redeploy` after first boot
+shows `[entrypoint] reusing existing Tier-2 key at
+/var/life-state/tier2-signing.pkcs8.pem` instead of regenerating, and
+the published JWKS keeps the same kid across deploys.
+
+## 8. Open work (Stage 3) — real substrates instead of mocks
+
+`internal_error` from lifed's `Agent.StreamSession` is the next thing
+to fix. Two paths:
+
+a. **Single-container substrate fan-out**: ship `arcand`, `lagod`,
+   `haimad`, `animad`, `soma` into the same Railway container (more
+   `runuser -- /usr/local/bin/<daemon> &` blocks in `entrypoint.sh`).
+   All UDS sockets stay on the shared `/run/life/` tmpfs. Heaviest
+   single-image bloat but keeps the existing UDS-only wire.
+
+b. **Multi-container topology with substrate-side TCP transport**: each
+   substrate becomes its own Railway service, lifed's substrate clients
+   speak TCP+TLS over Railway's private DNS. Requires touching each
+   substrate's listener (currently UDS-only) but separates concerns
+   cleanly.
+
+(b) is the production-grade answer; (a) is the pragmatic one for
+keeping the demo end-to-end stack inside one container. We'll pick one
+based on the next user-facing milestone.
+
+The dev `Bearer dev-token-for-X` and `Bearer test-token-for-X` paths
+both still work as integration-test fallbacks. Production posture
+flips `dev_signer_enabled = false` in both daemons once every caller
+mints real JWS — at that point the dev shortcut is rejected outright.
