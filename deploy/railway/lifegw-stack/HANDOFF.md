@@ -73,11 +73,36 @@ vercel env rm LIFED_GATEWAY_URL production
 The factory falls back to `InProcessAgentSessionClient` — the old in-process
 agent loop — without redeploying anything else.
 
-## 6. Known Stage-1 limitation: Tier-2 audience chain
+## 6. Stage 1.5 — Tier-1 verification is REAL now (May 2026)
 
-When the WS handshake completes and lifegw forwards a freshly-minted Tier-2
-JWS to lifed, lifed currently rejects it with
-`{"kind":"closing","reason":"policy_violation:token_expired"}`. Root cause:
+The Tier-1 chain runs against broomva.tech's real Better Auth-bridged
+ES256 keypair:
+
+```
+broomva.tech (Vercel)
+  ─▶ /api/auth/jwks.json publishes the public ES256 key
+     (private half lives in `LIFEGW_TIER1_SIGNING_JWK` Vercel env)
+  ─▶ /api/life/run/.../prosopon mints a fresh Tier-1 JWT per turn
+     (audience=lifegw, issuer=https://broomva.tech, exp = now + 15min)
+     ─▶ wss://lifegw.../v1/agent/stream  (Bearer / subprotocol)
+        ─▶ lifegw fetches the JWKS, verifies the JWS via the fetched key
+           ─▶ mints Tier-2 cap, opens upstream lifed Agent.StreamSession
+```
+
+`lifegw.toml` keeps `dev_signer_enabled = true` so the dev shortcut
+(`Bearer dev-token-for-{user_id}`) **also** still works — lifegw's
+`JwksCache::new_with_dev_shortcut(cfg)` makes the two paths additive
+(real JWS preferred, dev shortcut as fallback). Production deploys
+flip `dev_signer_enabled = false` once the KMS provider also moves off
+`Dev` (Spec C₃ Sub-phase E).
+
+## 7. Known Stage-1 limitation: Tier-2 audience chain (lifed side)
+
+When lifegw forwards its freshly-minted Tier-2 JWS to lifed, lifed
+currently rejects it with
+`{"kind":"closing","reason":"policy_violation:token_expired"}`. This is
+**not** a Tier-1 problem (Tier-1 verification works end-to-end as of
+Stage 1.5 above). Root cause is the lifed-side startup race:
 
 - The entrypoint starts `lifed` before `lifegw` (lifegw needs lifed's UDS
   to start, so the order is forced).
@@ -97,11 +122,14 @@ a. **Pre-publish a shared JWKS**: in `entrypoint.sh`, generate one
    `LIFEGW_TIER2_KEY_PEM`-style env (lifegw would need a config knob to
    adopt that key instead of `StaticKeystore::generate_dev()`).
 
-b. **Hot-reload the JwksCache in lifed**: add a periodic reload (e.g. on
-   verify miss, refetch from `cfg.auth.jwks_path` if the mtime moved).
-   This is closer to the production-shape eventually needed for KMS key
-   rotation.
+b. **Hot-reload the JwksCache in lifed**: mirror the additive
+   `new_with_dev_shortcut` change applied to lifegw — make lifed's
+   `JwksCache::dev_only()` ALSO trigger a one-shot retry-poll for the
+   JWKS file at first verify, with a small bounded window. This is
+   closer to the production-shape eventually needed for KMS key
+   rotation anyway.
 
-The deploy is otherwise functional: TLS, WS upgrade, Tier-1 dev-signer,
-gRPC-web fallback, `/anima/custody/*` axum routes, `/healthz` — all
-green from the public domain.
+The deploy is otherwise functional: TLS, WS upgrade, real Tier-1
+verify, gRPC-web fallback, `/anima/custody/*` axum routes, `/healthz` —
+all green from the public domain. The dev `Bearer dev-token-for-X`
+path also still works as an integration-test fallback.
