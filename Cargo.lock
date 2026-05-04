@@ -6025,6 +6025,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "life-perturb"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
 name = "life-praxis"
 version = "0.3.0"
 dependencies = [
