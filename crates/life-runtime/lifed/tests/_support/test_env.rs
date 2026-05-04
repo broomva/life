@@ -62,6 +62,14 @@ impl TestEnv {
         // macOS the dev fallback returns the real getuid()/getgid() —
         // so the user already matches.
         cfg.admin_plane.unix_socket_group = None;
+        // Stage-2 (May 2026): the `JwksCache` is now lazy + file-backed
+        // and `dev_signer_enabled` defaults to `false`. Existing smoke
+        // / integration tests authenticate via the
+        // `Bearer test-token-for-{user_id}` shortcut — opt them into
+        // the additive dev path here so the `JwksCache` accepts the
+        // shortcut alongside (and in the absence of) any real JWS.
+        // Production deploys leave the field at its `false` default.
+        cfg.auth.dev_signer_enabled = true;
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let (handles_tx, handles_rx) = oneshot::channel::<LifedHandles>();
