@@ -1,0 +1,58 @@
+# Docker build context exclusions for Railway / docker-buildx.
+#
+# Mirror .gitignore for the obvious caches, then prune workspace-level
+# artifacts that are huge but never needed inside any container build:
+# documentation, archived snapshots, evaluation harnesses, MLflow stores,
+# IDE caches, etc.
+
+# Rust build artifacts
+target/
+.target/
+**/target/
+**/.target/
+
+# Node + JS workspace artifacts
+node_modules/
+**/node_modules/
+.next/
+.bun/
+.cache/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local agent runtime data + secrets
+.arcan/
+.lago/
+.aios/
+.aios-*/
+.life/
+.env
+.env.*
+!.env.example
+
+# Git metadata is unnecessary at build time
+.git/
+.gitignore
+.githooks/
+
+# Heavy non-build paths
+docs/
+evals/
+archive/
+mlflow.db
+**/dev-tls/
+**/test-fixtures/
+
+# Tooling caches
+.pre-commit-cache/
+.pytest_cache/
+.ruff_cache/
+.cache/
+playwright-report/
+test-results/

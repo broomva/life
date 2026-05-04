@@ -821,22 +821,37 @@ pub(crate) fn build_signer(cfg: &AuthConfig) -> LifegwResult<Arc<dyn KmsSigner>>
 /// installing this into the deprecated process-global; instead the
 /// returned `Arc<JwksCache>` is threaded into `AuthLayer::with_jwks`
 /// so each `AuthService<S>` instance owns its own handle.
+///
+/// `dev_signer_enabled` is **additive** to real JWKS verification:
+///
+///   - `dev_signer_enabled = false` → only real JWS tokens are
+///     accepted (production posture).
+///   - `dev_signer_enabled = true`  → real JWS tokens AND the
+///     `Bearer dev-token-for-{user_id}` shortcut are accepted.
+///
+/// Pre-fix the dev path returned a cache with an empty inline JWKS
+/// (`JwksCache::dev_only()`), so flipping the dev flag effectively
+/// disabled the real-JWS path. Deploys that wanted both — the apps/chat
+/// JWKS-issued production tokens AND the local-test dev shortcut — had
+/// to choose one or the other. The new
+/// `JwksCache::new_with_dev_shortcut` constructor combines both: real
+/// JWKS fetch + dev shortcut.
 fn build_jwks_cache(cfg: &AuthConfig) -> LifegwResult<Arc<JwksCache>> {
+    let mut jwks_cfg = JwksCacheConfig::new(
+        JwksSource::Url(cfg.jwks_url.clone()),
+        cfg.tier1_audience.clone(),
+        cfg.tier1_issuer.clone(),
+    );
+    jwks_cfg.ttl = cfg.jwks_cache_ttl;
+    jwks_cfg.rotation_grace = cfg.jwks_rotation_grace;
     let cache = if cfg.dev_signer_enabled {
-        // Dev path — accept the magic Bearer shortcut for tests / CI.
-        Arc::new(JwksCache::dev_only())
+        // Dev shortcut + real JWKS verification both active.
+        JwksCache::new_with_dev_shortcut(jwks_cfg)
     } else {
-        // Production path — fetch JWKS from the configured URL.
-        let mut jwks_cfg = JwksCacheConfig::new(
-            JwksSource::Url(cfg.jwks_url.clone()),
-            cfg.tier1_audience.clone(),
-            cfg.tier1_issuer.clone(),
-        );
-        jwks_cfg.ttl = cfg.jwks_cache_ttl;
-        jwks_cfg.rotation_grace = cfg.jwks_rotation_grace;
-        Arc::new(JwksCache::new(jwks_cfg))
+        // Production: real JWS only. Dev shortcut rejected.
+        JwksCache::new(jwks_cfg)
     };
-    Ok(cache)
+    Ok(Arc::new(cache))
 }
 
 /// Atomic JWKS publish — write to a temporary file then rename into
