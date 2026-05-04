@@ -139,6 +139,8 @@ members = [
     "crates/life-runtime/life-runtime-proto",
     # M7 — lifegw edge gateway (see Spec C₃ at docs/superpowers/specs/2026-04-27-spec-c3-lifegw-design.md)
     "crates/life-runtime/lifegw",
+    # life-perturb — controlled perturbation injection for RCS λ̂ validation (BRO-947)
+    "crates/life-perturb",
 ]
 exclude = ["crates/spaces/life-spaces/spacetimedb"]
 

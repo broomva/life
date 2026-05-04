@@ -5,6 +5,7 @@
 //! Sub-phase D adds `rate_limit` (token-bucket limiter), the admin
 //! plane UDS, plus a `cert_watch` reloader.
 
+pub mod agent_http;
 pub mod anima_custody;
 pub mod cert_watch;
 pub mod health;

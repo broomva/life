@@ -253,7 +253,10 @@ pub async fn serve_with_listener_and_signer(
     // `AuthLayer::with_jwks(...)` directly.
     let rate_limiter = TokenBucketLimiter::from_config(&cfg.rate_limit);
     let auth_layer = AuthLayer::with_jwks(
-        minter,
+        // The `agent_http` axum route (Stage 3a) also needs the minter
+        // — clone the Arc so both consumers share the same Tier-2
+        // signer / kid / TTL. Cheap (Arc bump).
+        Arc::clone(&minter),
         cfg.auth.dev_signer_enabled,
         Arc::clone(&upstream_path),
         Arc::clone(&jwks),
@@ -485,10 +488,25 @@ pub async fn serve_with_listener_and_signer(
         })
         .service(tonic_stack);
 
-    // Compose: top-level axum router that nests `/anima/custody/*`
-    // and falls back to the tonic-stack adapter for everything else.
+    // Stage 3a (May 2026): HTTP/JSON wrapper for `Agent.CreateSession`.
+    // Browser/Vercel-side callers (broomva.tech) call this before
+    // opening the WS so the routing-cache entry exists when
+    // `/v1/agent/stream` lands. See `services/agent_http.rs`.
+    let agent_http_state = crate::services::agent_http::AgentHttpState {
+        jwks: Arc::clone(&jwks),
+        minter: Arc::clone(&minter),
+        upstream: upstream_channel.clone(),
+    };
+    let agent_http_router = crate::services::agent_http::router(agent_http_state);
+
+    // Compose: top-level axum router that nests `/anima/custody/*`,
+    // merges the `/v1/agent/create_session` route, and falls back to
+    // the tonic-stack adapter for everything else (including
+    // `/v1/agent/stream` which the WS layer handles inside the tonic
+    // stack).
     let app: axum::Router<()> = axum::Router::new()
         .nest("/anima/custody", anima_router)
+        .merge(agent_http_router)
         .fallback_service(tonic_stack_adapted);
 
     // Convert the axum router's response body to tonic::body::Body so
