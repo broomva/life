@@ -18,9 +18,20 @@ thiserror.workspace = true
 tokio = { workspace = true }
 tracing.workspace = true
 ulid.workspace = true
+# Optional — only pulled in when an L0 injector is enabled. Keeps the
+# default build minimal and the perturbation surface explicitly opt-in.
+rand = { workspace = true, optional = true }
+autonomic-core = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+default = []
+# Enables the real L0 latency-injection probe + autonomic-derived V_0 probe.
+# Off by default per spec §7 phasing — this is research instrumentation,
+# not a production feature.
+inject-l0 = ["dep:rand", "dep:autonomic-core"]
 
 [lints]
 workspace = true

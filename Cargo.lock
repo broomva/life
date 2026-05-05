@@ -6030,7 +6030,9 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "autonomic-core",
  "chrono",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
