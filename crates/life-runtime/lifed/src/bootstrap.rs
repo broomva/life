@@ -125,10 +125,53 @@ pub async fn run_with_mocks_handles(
     let skel = build_handles_skeleton(cfg);
     let pools_for_handlers = Arc::clone(&skel.pools);
 
-    let arcan: Arc<dyn ArcanCall> = Arc::new(arcan_proxy::Pooled::new(
-        mocks.arcan.clone(),
-        pools_for_handlers.arcan.load_full(),
-    ));
+    // Stage 3b (May 2026): per-substrate backend selection. Today the
+    // only knob is the `arcan` substrate, gated by
+    // `LIFED_ARCAN_BACKEND`:
+    //
+    //   - unset / "mock"             → MockArcan (canned events; default)
+    //   - "vercel_ai_gateway"        → VercelAiGatewayArcan (real LLM
+    //                                  streaming via OpenAI-compatible
+    //                                  endpoint; reads OPENAI_API_KEY +
+    //                                  OPENAI_BASE_URL + OPENAI_MODEL)
+    //
+    // This is transitional: when `arcan-proto` ships and arcand exposes
+    // a real tonic UDS server, the canonical path becomes the existing
+    // mock-fallback gate (`run_with_real_substrates`). The per-backend
+    // selection here lets us flip on real LLM tokens NOW without
+    // blocking on the wider arcan-proto rollout.
+    //
+    // Other substrates (lago / haima / anima) stay on mocks — their
+    // tonic-substrate equivalents are the canonical Spec C₂ §11.4 path.
+    let arcan: Arc<dyn ArcanCall> = match arcan_backend_from_env() {
+        ArcanBackendChoice::Mock => Arc::new(arcan_proxy::Pooled::new(
+            mocks.arcan.clone(),
+            pools_for_handlers.arcan.load_full(),
+        )),
+        ArcanBackendChoice::VercelAiGateway => {
+            match arcan_proxy::VercelAiGatewayArcan::from_env() {
+                Ok(real) => {
+                    tracing::info!(
+                        "lifed: arcan substrate using VercelAiGatewayArcan (real LLM streaming)"
+                    );
+                    Arc::new(arcan_proxy::Pooled::new(
+                        real,
+                        pools_for_handlers.arcan.load_full(),
+                    ))
+                }
+                Err(e) => {
+                    // Operator selected the real backend but the env is
+                    // missing the API key. Fail fast at boot — silent
+                    // fallback to the mock would mislead operators expecting
+                    // real LLM output.
+                    return Err(crate::error::LifedError::Substrate(format!(
+                        "LIFED_ARCAN_BACKEND=vercel_ai_gateway requires OPENAI_API_KEY \
+                     (and optionally OPENAI_BASE_URL / OPENAI_MODEL): {e}"
+                    )));
+                }
+            }
+        }
+    };
     let lago: Arc<dyn LagoCall> = Arc::new(lago_proxy::Pooled::new(
         mocks.lago.clone(),
         pools_for_handlers.lago.load_full(),
@@ -254,6 +297,36 @@ fn list_missing_substrate_sockets(cfg: &LifedConfig) -> Vec<String> {
         ));
     }
     out
+}
+
+/// Stage 3b (May 2026): per-substrate backend choice for the `arcan`
+/// slot. Selected via the `LIFED_ARCAN_BACKEND` env var.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArcanBackendChoice {
+    /// `MockArcan` — canned events, no LLM. The default.
+    Mock,
+    /// `VercelAiGatewayArcan` — real chat-completions streaming via
+    /// any OpenAI-compatible endpoint (Vercel AI Gateway by default).
+    /// Requires `OPENAI_API_KEY` (and optionally `OPENAI_BASE_URL`,
+    /// `OPENAI_MODEL`).
+    VercelAiGateway,
+}
+
+fn arcan_backend_from_env() -> ArcanBackendChoice {
+    match std::env::var("LIFED_ARCAN_BACKEND") {
+        Ok(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "vercel_ai_gateway" | "vercel-ai-gateway" => ArcanBackendChoice::VercelAiGateway,
+            "mock" | "" => ArcanBackendChoice::Mock,
+            other => {
+                tracing::warn!(
+                    value = other,
+                    "LIFED_ARCAN_BACKEND has unknown value; falling back to mock",
+                );
+                ArcanBackendChoice::Mock
+            }
+        },
+        Err(_) => ArcanBackendChoice::Mock,
+    }
 }
 
 fn all_substrate_sockets_present(cfg: &LifedConfig) -> bool {

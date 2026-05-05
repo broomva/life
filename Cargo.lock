@@ -751,11 +751,16 @@ dependencies = [
  "aios-proto",
  "aios-protocol",
  "async-trait",
+ "bytes",
  "futures",
  "hyper-util",
  "life-runtime-pool",
  "life-runtime-proto",
  "prost 0.14.3",
+ "prost-types 0.14.3",
+ "reqwest",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -763,6 +768,7 @@ dependencies = [
  "tonic-prost",
  "tower 0.5.3",
  "tracing",
+ "wiremock",
 ]
 
 [[package]]

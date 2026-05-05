@@ -1,14 +1,21 @@
-# lifed config — Railway lifegw-stack deploy (Stage 2, May 2026).
+# lifed config — Railway lifegw-stack deploy (Stage 3b, May 2026).
 #
-# JwksCache is now lazy + file-backed (see `lifed::auth::jwks` Stage 2
-# notes): `validate()` reads `auth.jwks_path` on first miss and on
-# mtime change, so there's no boot-order race with lifegw. The dev
-# shortcut is additive — controlled by `auth.dev_signer_enabled`.
+# JwksCache is lazy + file-backed (Stage 2 notes preserved): no
+# boot-order race with lifegw.
 #
-# Substrates still run as in-process mocks (LIFED_ALLOW_MOCK_FALLBACK=true).
-# Production swap-in: drop `LIFED_ALLOW_MOCK_FALLBACK`, ship arcand +
-# lagod + haimad + animad + soma into the same container (or move to a
-# multi-container topology), and let lifed fail-fast on missing UDS.
+# Stage 3b: lifed's per-substrate backend selection lets the `arcan`
+# slot use real LLM streaming via Vercel AI Gateway (or any
+# OpenAI-compatible endpoint) without waiting for the canonical
+# arcan-proto / arcand UDS substrate. Set
+# `LIFED_ARCAN_BACKEND=vercel_ai_gateway` on the Railway service env
+# along with `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`. The
+# other substrates (lago / haima / anima) stay on mocks via
+# `LIFED_ALLOW_MOCK_FALLBACK=true`.
+#
+# Production swap-in (Stage 4+): publish arcan-proto, ship arcand /
+# lagod / haimad / animad / soma into the same container (or
+# multi-container), drop `LIFED_ALLOW_MOCK_FALLBACK`, and let lifed
+# fail-fast on missing UDS sockets.
 
 [public_plane]
 unix_socket       = "/run/life/life.sock"
