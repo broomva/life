@@ -54,9 +54,18 @@ async fn ws_round_trip_streams_token_and_finish() {
     // Open the WS upgrade.
     let mut ws = env.dial_ws(&sid, None).await;
 
-    // Drive the upstream: dispatch_message produces (Token, Finish)
-    // immediately. We expect to read at least one agent_event frame
-    // before the close frame arrives.
+    // Stage 3b-bis (May 2026): `stream_session` is now a passive
+    // subscribe and no longer auto-spawns a pump on empty content.
+    // Drive a turn explicitly by sending a `send_message` frame; the
+    // mock substrate's `dispatch_message` produces (Token, Finish).
+    let frame = serde_json::json!({
+        "kind": "send_message",
+        "content": "hello",
+    });
+    ws.send(Message::Text(frame.to_string().into()))
+        .await
+        .expect("send WS frame");
+
     let mut got_event = false;
     let mut got_close = false;
     let timeout = tokio::time::sleep(Duration::from_secs(5));
@@ -101,22 +110,102 @@ async fn ws_round_trip_streams_token_and_finish() {
     env.shutdown().await;
 }
 
+/// Stage 3b-bis (May 2026) regression: a single inbound `send_message`
+/// frame must produce **exactly one** outbound TOKEN + one FINISH —
+/// not two of each.
+///
+/// Background: lifed's session fanout broadcasts every AgentEvent to
+/// ALL attached subscribers. Both `Agent.SendMessage` (the dispatcher's
+/// upstream call) and `Agent.StreamSession` (the WS pump's upstream
+/// tail) attach to the same fanout, so the dispatcher used to forward
+/// events that the tail also forwarded → 2× emission.
+///
+/// Fix: the dispatcher drains the SendMessage response stream but
+/// drops normal AgentEvents. Only Closing frames on upstream error
+/// reach `outbound_tx` from the dispatcher. The tail is the canonical
+/// AgentEvent source.
+#[tokio::test]
+async fn ws_send_message_does_not_duplicate_agent_events() {
+    let env = TestEnv::start().await;
+    let sid = env.create_session("user-dedup").await;
+    let mut ws = env.dial_ws(&sid, None).await;
+
+    // Send a single `send_message` frame. The mock substrate's
+    // `dispatch_message` produces exactly 1 Token + 1 Finish.
+    let frame = serde_json::json!({
+        "kind": "send_message",
+        "content": "hello, dedup test",
+    });
+    ws.send(Message::Text(frame.to_string().into()))
+        .await
+        .expect("send WS frame");
+
+    let mut token_count = 0usize;
+    let mut finish_count = 0usize;
+    let mut closing_count = 0usize;
+    let timeout = tokio::time::sleep(Duration::from_secs(5));
+    tokio::pin!(timeout);
+    loop {
+        tokio::select! {
+            _ = &mut timeout => break,
+            msg = ws.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        let v: serde_json::Value =
+                            serde_json::from_str(&text).expect("valid json envelope");
+                        let kind = v["kind"].as_str().unwrap_or("");
+                        let agent_kind = v["agent_kind"].as_str().unwrap_or("");
+                        if kind == "agent_event" && agent_kind == "TOKEN" {
+                            token_count += 1;
+                        } else if kind == "agent_event" && agent_kind == "FINISH" {
+                            finish_count += 1;
+                        } else if kind == "closing" {
+                            closing_count += 1;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) | None => break,
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        token_count, 1,
+        "expected exactly one TOKEN frame (dedup'd from the dual fanout subscription); \
+         got {token_count} TOKEN, {finish_count} FINISH, {closing_count} closing",
+    );
+    assert_eq!(
+        finish_count, 1,
+        "expected exactly one FINISH frame; got {finish_count} (with {token_count} TOKEN)",
+    );
+
+    env.shutdown().await;
+}
+
 #[tokio::test]
 async fn ws_reconnect_with_last_seq_no_query_param() {
     let env = TestEnv::start().await;
     let sid = env.create_session("user-ws-resume-q").await;
 
-    // First connection — read until close.
+    // First connection — drive a turn, then drain until close.
     let mut ws1 = env.dial_ws(&sid, None).await;
+    let frame = serde_json::json!({ "kind": "send_message", "content": "first" });
+    ws1.send(Message::Text(frame.to_string().into()))
+        .await
+        .expect("send first frame");
     drain_until_close(&mut ws1).await;
     drop(ws1);
 
     // Second connection with last_seq_no query param. The gateway
-    // accepts it and forwards as `from_sequence` to lifed (mock
-    // re-runs the canned sequence each time). We assert the
-    // connection succeeds without panicking and the second pump
-    // yields at least one frame.
+    // accepts it and forwards as `from_sequence` to lifed. We then
+    // drive a second turn and assert at least one event flows back.
     let mut ws2 = env.dial_ws(&sid, Some(ResumeCursor::Query(7))).await;
+    let frame = serde_json::json!({ "kind": "send_message", "content": "resume" });
+    ws2.send(Message::Text(frame.to_string().into()))
+        .await
+        .expect("send resume frame");
     let got_frame = read_at_least_one_event(&mut ws2).await;
     assert!(got_frame, "reconnect with last_seq_no must stream events");
 
@@ -129,10 +218,18 @@ async fn ws_reconnect_with_last_seq_no_header() {
     let sid = env.create_session("user-ws-resume-h").await;
 
     let mut ws1 = env.dial_ws(&sid, None).await;
+    let frame = serde_json::json!({ "kind": "send_message", "content": "first" });
+    ws1.send(Message::Text(frame.to_string().into()))
+        .await
+        .expect("send first frame");
     drain_until_close(&mut ws1).await;
     drop(ws1);
 
     let mut ws2 = env.dial_ws(&sid, Some(ResumeCursor::Header(42))).await;
+    let frame = serde_json::json!({ "kind": "send_message", "content": "resume" });
+    ws2.send(Message::Text(frame.to_string().into()))
+        .await
+        .expect("send resume frame");
     let got_frame = read_at_least_one_event(&mut ws2).await;
     assert!(
         got_frame,

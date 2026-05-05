@@ -432,15 +432,27 @@ impl pb::agent_server::Agent for AgentService {
             })
             .ok_or_else(|| Status::not_found("session not found"))?;
         let stream = fanout.attach(64);
-        // Sub-phase D6/E: per-session pump claim. Pool bracketing is now
-        // inside arcan-proxy. Subsequent stream_session / send_message
-        // calls reuse the active pump.
-        spawn_or_attach_fanout_pump(
-            &fanout,
-            Arc::clone(&self.arcan_call),
-            sid_value,
-            String::new(),
-        );
+        // Stage 3b-bis (May 2026): `stream_session` is a passive
+        // subscribe — it MUST NOT spawn a new pump.
+        //
+        // The previous behavior called `spawn_or_attach_fanout_pump`
+        // with empty content. The intent was "attach if there's an
+        // in-flight pump, no-op otherwise". But `try_claim` returns
+        // `Some` when no pump is running — kicking off a phantom
+        // `dispatch_message("")`. With substrates that emit events on
+        // empty input (mocks, and any real LLM that produces a
+        // synthetic "empty input" response), this duplicates every
+        // subsequent token: the phantom pump and the real-content
+        // pump both broadcast through the same fanout.
+        //
+        // Spec C₂ §6.4 invariant: exactly one pump per session,
+        // started by `send_message` (which carries the user
+        // content). `stream_session` only attaches to the fanout
+        // and reads. Reconnecting after a crash works the same way
+        // — the routing-cache entry holds the fanout; if no pump
+        // is running, the subscriber sits idle until the next
+        // `send_message` triggers one.
+        let _ = sid_value;
         Ok(Response::new(Box::pin(stream)))
     }
 

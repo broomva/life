@@ -1025,16 +1025,30 @@ async fn run_send_message_dispatcher(
                 match agent_client.send_message(req).await {
                     Ok(resp) => {
                         let mut s = resp.into_inner();
-                        // Drain the upstream stream synchronously
-                        // within this dispatcher task — that's what
-                        // serialises subsequent SendMessage frames.
+                        // Stage 3b-bis (May 2026): drain the upstream
+                        // SendMessage response stream but DROP normal
+                        // AgentEvents. The canonical browser-facing
+                        // event stream is `Agent.StreamSession` — the
+                        // upstream-tail task already pumps events from
+                        // there into `outbound_tx`. Forwarding
+                        // SendMessage events here would duplicate every
+                        // token (lifed's fanout broadcasts to BOTH
+                        // subscribers — see
+                        // `lifed::services::agent::send_message`).
+                        //
+                        // We still drain the stream synchronously
+                        // because that's what serialises subsequent
+                        // SendMessage frames per Sub-phase D D9. We
+                        // only forward Closing frames on upstream
+                        // error so the WS observes auth/rate-limit/etc.
+                        // failures and tears down cleanly.
                         while let Some(item) = s.next().await {
                             match item {
-                                Ok(event) => {
-                                    let frame = event_to_outbound_frame(event);
-                                    if outbound_tx.send(frame).await.is_err() {
-                                        return;
-                                    }
+                                Ok(_event) => {
+                                    // Intentionally dropped — the
+                                    // StreamSession fanout subscriber
+                                    // delivers this same event to the
+                                    // outbound channel.
                                 }
                                 Err(status) => {
                                     let reason = map_status_to_close(&status);

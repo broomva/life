@@ -46,17 +46,18 @@ unix_socket = "/run/life/anima.sock"
 unix_socket = "/run/life/soma-admin.sock"
 
 [auth]
-# Stage 2: lifed reads `jwks_path` lazily on first verify (and on
-# mtime change for rotation). lifegw writes to the same path
-# atomically; the boot order between the two daemons no longer matters.
-# `dev_signer_enabled = true` keeps the test-token shortcut additive
-# during the Stage 1 → Stage 2 transition; flip to `false` once
-# every caller uses real JWS.
+# Stage 4 (May 2026): production posture. `dev_signer_enabled = false`
+# rejects the `Bearer test-token-for-{user_id}` shortcut outright.
+# Only real ES256 JWS minted by lifegw's Tier-2 minter (kid pinned via
+# `KmsProvider::StaticPem`) are accepted.
+#
+# JwksCache is lazy + file-backed (Stage 2): reads `jwks_path` on
+# first verify and on mtime change for rotation. No boot-order race.
 jwks_path                   = "/run/life/lifegw-jwks.json"
 substrate_signing_key_path  = "/etc/life/lifed-signing-key.pem"
 substrate_jwks_publish_path = "/run/life/lifed-jwks.json"
 revoked_sids_path           = "/run/life/revoked_sids.json"
-dev_signer_enabled          = true
+dev_signer_enabled          = false
 
 [routing]
 idle_threshold_secs    = 3600
