@@ -15,7 +15,7 @@
 //!
 //! ## Architecture (transitional)
 //!
-//! ```
+//! ```text
 //!   lifed.Agent.SendMessage
 //!     ─▶ ArcanCall::dispatch_message(sid, content)
 //!         ─▶ VercelAiGatewayArcan
