@@ -64,6 +64,8 @@ members = [
     "crates/praxis/praxis-mcp-bridge",
     "crates/praxis/praxis-skills",
     "crates/praxis/praxis-tools",
+    # Ergon — agent harness primitive
+    "crates/ergon/ergon",
     # Haima — finance
     "crates/haima/haima-api-schema",
     "crates/haima/haima-api",
@@ -221,6 +223,8 @@ praxis-core = { path = "crates/praxis/praxis-core", version = "0.3.0" }
 praxis-mcp-bridge = { path = "crates/praxis/praxis-mcp-bridge", version = "0.3.0" }
 praxis-skills = { path = "crates/praxis/praxis-skills", version = "0.3.0" }
 praxis-tools = { path = "crates/praxis/praxis-tools", version = "0.3.0" }
+# Ergon — agent harness primitive
+ergon = { path = "crates/ergon/ergon", version = "0.3.0" }
 # Facade crates
 life-aios = { path = "crates/aios/life-aios", version = "0.3.0" }
 life-arcan = { path = "crates/arcan/life-arcan", version = "0.3.0", default-features = false }
