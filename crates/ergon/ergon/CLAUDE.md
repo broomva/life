@@ -39,15 +39,23 @@ crate:
 | `hook.rs` (Hook trait, HookCtx, HookRegistry, outcome types) | BRO-997 | Done |
 | `runtime.rs` (Provider, ToolRegistry, RuntimeHandle traits — runtime extension points owned by ergon, translated by the arcan adapter) | BRO-998 | Done |
 | `step.rs` (Step, StepCtx, InferenceRequest, run_inference_streaming + autonomous loop body, dispatch_tool) | BRO-998 | Done |
+| `workflow.rs` (Workflow trait, WorkflowExecutor, SkillSet/EmptySkillSet stub) | BRO-999 | Done |
+
+**Sibling crates landed:**
+
+| Crate | BRO ticket | Notes |
+|---|---|---|
+| `ergon-life-hooks` | BRO-1000 | 4 auto-hooks (PraxisCapabilityHook / AutonomicBudgetHook / NousScoreHook / AnimaAttestHook) + 4 adapter traits. Substrate-free; arcan adapter (BRO-1001) implements adapter traits against actual substrate. |
 
 **Not yet landed** (follow-up PRs):
 
-| File | BRO ticket | Notes |
+| File / Crate | BRO ticket | Notes |
 |---|---|---|
-| `workflow.rs` | BRO-999 | Workflow + WorkflowExecutor (the outer driver that wires the auto-hook registry and calls `Workflow::execute`) |
-| `LagoSink`, `VigilSink`, `LifegwSink` | BRO-999 (or its own PR) | Substrate-coupled default sinks. Pull in `lago-journal`, `life-vigil`, `tokio::sync::mpsc`. |
-| `attestation.rs`, `budget.rs`, `score.rs`, `capability.rs` | BRO-1000 | Auto-registered hooks (anima / autonomic / nous / praxis) |
-| `LagoSink`, `VigilSink`, `LifegwSink` | BRO-998 | Default substrate sinks (deferred — pull in lago-journal / life-vigil / mpsc deps) |
+| `ergon-life-sinks` (LagoSink, VigilSink, LifegwSink) | BRO-999b (follow-up) | Substrate-coupled stream sinks. Pull in `lago-journal`, `life-vigil`, `tokio::sync::mpsc`. Sibling crate, mirrors the BRO-1000 pattern. |
+| arcan adapter | BRO-1001 | `crates/arcan/arcan/src/agent_kind/ergon.rs`: implements `Provider` against `arcan_provider`, `ToolRegistry` against `praxis_core`, all four auto-hook adapter traits against actual substrate, builds `StepCtx` + `HookRegistry` from `TickCtx`, calls `WorkflowExecutor::run`. |
+| lifed route | BRO-1002 | `Agent.StreamSession` route in `crates/life-runtime/lifed`. |
+| bookkeeping-judge port | BRO-1003 | First production workflow on ergon. Parity test against the Bellows-shipped version. |
+| docs/architecture/ergon.md | BRO-1004 | Final architecture doc. |
 
 ## Invariants (DO NOT VIOLATE)
 
@@ -116,6 +124,31 @@ crate:
    for `edit_hashline`); they don't belong in the workflow-author-facing
    surface. The trait can grow each method as a deliberate boundary
    expansion when a workflow demonstrably needs it.
+
+6. **`WorkflowExecutor::without_default_hooks` flag dropped**: spec §3.8 /
+   §8 Q3 proposed an executor flag to opt out of auto-hooks. We dropped
+   it. Rationale: the executor doesn't construct any hooks (auto or
+   otherwise), so there's nothing to opt out of. Auto-hook registration
+   lives at the *adapter* level (BRO-1001 — the arcan adapter is the
+   thing that decides which hooks to add to the registry it passes into
+   the executor). Opt-out is therefore a deployment-time decision, not
+   a per-workflow flag.
+
+7. **Caller builds StepCtx, not executor**: spec §3.8's pseudocode
+   showed `WorkflowExecutor::run` building the StepCtx + auto-hook
+   registry inside the executor. We invert that: the caller passes a
+   fully-built `StepCtx` (with hooks already in `ctx.hooks`); executor
+   only fires the workflow boundary events. This separation lets
+   workflows be tested with a hand-built StepCtx and lets the arcan
+   adapter own substrate-handle assembly without smuggling it through
+   the executor.
+
+8. **`praxis_skills::SkillSet` placeholder**: workflow.rs ships an
+   internal `SkillSet` trait + `EmptySkillSet` stub. This preserves
+   ergon's "zero substrate deps" property until BRO-1001 wires real
+   praxis skill sets via the adapter. Trait shape matches what
+   `praxis_skills::SkillSet` exposes (read-only iteration), so the
+   migration is mechanical when it lands.
 
 All deviations are recorded in `core/life/CHANGELOG.md`.
 
