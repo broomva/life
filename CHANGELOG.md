@@ -3,6 +3,29 @@
 ## Unreleased
 
 ### Added
+- `ergon-life-sinks` — new sibling crate at
+  `crates/ergon/ergon-life-sinks/` housing three Life-flavored
+  implementations of `ergon::StreamSink`:
+  * `LagoSink` — durable replay via `lago_core::Journal`. Each
+    `StreamEvent` becomes an `aios_protocol::EventKind::Custom` event
+    with `event_type = "ergon.stream"` and the full event JSON in
+    `data`. Failures propagate as `ErgonError::Internal` (durable
+    replay critical).
+  * `VigilSink` — emits each `StreamEvent` as a structured
+    `tracing::info!` (or `warn!` for `Error` variants) on the current
+    span, target `"ergon::stream"`. Despite the name it does NOT
+    depend on `life-vigil` — vigil configures the subscriber, not the
+    emitter. Infallible.
+  * `LifegwSink` — bounded `tokio::sync::mpsc` forwarder; consumer
+    disconnect surfaces as `ErgonError::StreamClosed` and propagates
+    cancellation. Default capacity 64 per spec §3.10.
+  19 unit tests across the three sinks (mock `Journal` impl for Lago,
+  in-memory event-flow tests for Vigil, send/receive + capacity +
+  closed-receiver tests for Lifegw). Crate dependency surface: only
+  `ergon`, `aios-protocol`, `lago-core`, plus standard async/serde —
+  no `arcan-*`, no `praxis-*`, no `anima-*`, no `autonomic-*`, no
+  `nous-*`, no `life-vigil`. Failure-semantics tiers documented in
+  `crates/ergon/ergon-life-sinks/CLAUDE.md`. (BRO-999b)
 - `ergon` — Layer-2 agent-harness primitive: autonomous loop body.
   Ships the third slice per spec §12: `runtime` module (`Provider`,
   `ToolRegistry`, `RuntimeHandle` traits — the substrate-independent
