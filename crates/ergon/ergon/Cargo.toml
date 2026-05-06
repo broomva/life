@@ -1,0 +1,33 @@
+[package]
+name = "ergon"
+description = "Life's agent-harness primitive: deterministic workflows orchestrating autonomous LLM steps"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Substrate contracts (no I/O — minimal surface).
+aios-protocol.workspace = true
+
+# Standard async + serialization.
+async-trait.workspace = true
+futures.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "rt"] }
+tracing.workspace = true
+
+[dev-dependencies]
+insta = { version = "1", features = ["yaml"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio-test = "0.4"
