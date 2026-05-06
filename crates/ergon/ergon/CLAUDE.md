@@ -37,13 +37,15 @@ crate:
 | `stream.rs` (StreamEvent, StreamSink, BufferSink, FanoutSink) | BRO-996 | Done |
 | `model.rs` (Message, ContentBlock, ToolCall, ToolResult, ToolDefinition, ModelRequest, ModelResponse, Usage) | BRO-997 | Done |
 | `hook.rs` (Hook trait, HookCtx, HookRegistry, outcome types) | BRO-997 | Done |
+| `runtime.rs` (Provider, ToolRegistry, RuntimeHandle traits — runtime extension points owned by ergon, translated by the arcan adapter) | BRO-998 | Done |
+| `step.rs` (Step, StepCtx, InferenceRequest, run_inference_streaming + autonomous loop body, dispatch_tool) | BRO-998 | Done |
 
 **Not yet landed** (follow-up PRs):
 
 | File | BRO ticket | Notes |
 |---|---|---|
-| `step.rs` | BRO-998 | Step + StepCtx + InferenceRequest + RuntimeHandle + autonomous loop body. Adds substrate deps (arcan-provider, praxis-core, lago-journal, life-vigil) and ships the three default sinks (LagoSink, VigilSink, LifegwSink). |
-| `workflow.rs` | BRO-999 | Workflow + WorkflowExecutor |
+| `workflow.rs` | BRO-999 | Workflow + WorkflowExecutor (the outer driver that wires the auto-hook registry and calls `Workflow::execute`) |
+| `LagoSink`, `VigilSink`, `LifegwSink` | BRO-999 (or its own PR) | Substrate-coupled default sinks. Pull in `lago-journal`, `life-vigil`, `tokio::sync::mpsc`. |
 | `attestation.rs`, `budget.rs`, `score.rs`, `capability.rs` | BRO-1000 | Auto-registered hooks (anima / autonomic / nous / praxis) |
 | `LagoSink`, `VigilSink`, `LifegwSink` | BRO-998 | Default substrate sinks (deferred — pull in lago-journal / life-vigil / mpsc deps) |
 
@@ -86,7 +88,36 @@ crate:
    compile-time push to "force the implementer to think about each
    event" — ergonomically counterproductive in practice.
 
-Both deviations are recorded in `core/life/CHANGELOG.md`.
+3. **Provider / ToolRegistry traits owned by ergon**: spec §3.4 declared
+   `StepCtx::provider: Arc<dyn arcan_provider::Provider>` and
+   `StepCtx::tools: Arc<dyn praxis_core::ToolRegistry>`. We deliberately
+   redirect both to ergon-owned traits in `runtime.rs`. Same logic that
+   drove BRO-997's wire-types decision: hook signatures depend on these
+   types, so coupling them to substrate crates ripples every substrate
+   change through every hook. The arcan adapter (BRO-1001) implements
+   `ergon::Provider` over `arcan_provider::Provider` and
+   `ergon::ToolRegistry` over `praxis_core::ToolRegistry` at the
+   boundary.
+
+4. **StepCtx fields cut**: spec §3.4 included `journal`, `homeostasis`,
+   `soul`, `skills`, `sandbox` as direct fields on `StepCtx`. We dropped
+   all five. Rationale: `journal`/`homeostasis`/`soul` are auto-hook
+   concerns (each hook holds its own substrate handle from construction
+   time); `skills` is reachable via `Workflow::skills()`; `sandbox` is
+   internal to each `ToolRegistry` impl. Cutting these makes `step.rs`
+   substrate-free — ergon compiles and tests with zero dependencies on
+   `lago-journal`, `autonomic`, `anima`, `praxis-skills`, or
+   `praxis-core`.
+
+5. **RuntimeHandle narrowed**: spec §3.12 listed `aios_caps()`, `span()`,
+   `edit_hashline()`, `operating_mode()`. v0.1 ships only
+   `operating_mode()`. The other three are exclusively used by
+   substrate-aware code (auto-hooks for `aios_caps`, the arcan adapter
+   for `edit_hashline`); they don't belong in the workflow-author-facing
+   surface. The trait can grow each method as a deliberate boundary
+   expansion when a workflow demonstrably needs it.
+
+All deviations are recorded in `core/life/CHANGELOG.md`.
 
 ## Useful commands
 
