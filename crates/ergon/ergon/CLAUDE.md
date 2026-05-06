@@ -35,13 +35,14 @@ crate:
 | `error.rs` | BRO-996 | Done |
 | `role.rs` | BRO-996 | Done |
 | `stream.rs` (StreamEvent, StreamSink, BufferSink, FanoutSink) | BRO-996 | Done |
+| `model.rs` (Message, ContentBlock, ToolCall, ToolResult, ToolDefinition, ModelRequest, ModelResponse, Usage) | BRO-997 | Done |
+| `hook.rs` (Hook trait, HookCtx, HookRegistry, outcome types) | BRO-997 | Done |
 
 **Not yet landed** (follow-up PRs):
 
 | File | BRO ticket | Notes |
 |---|---|---|
-| `hook.rs` | BRO-997 | Depends on praxis_core::Message, ToolCall, ToolResult — wire types in BRO-998's PR |
-| `step.rs` | BRO-998 | Step + StepCtx + InferenceRequest + RuntimeHandle |
+| `step.rs` | BRO-998 | Step + StepCtx + InferenceRequest + RuntimeHandle + autonomous loop body. Adds substrate deps (arcan-provider, praxis-core, lago-journal, life-vigil) and ships the three default sinks (LagoSink, VigilSink, LifegwSink). |
 | `workflow.rs` | BRO-999 | Workflow + WorkflowExecutor |
 | `attestation.rs`, `budget.rs`, `score.rs`, `capability.rs` | BRO-1000 | Auto-registered hooks (anima / autonomic / nous / praxis) |
 | `LagoSink`, `VigilSink`, `LifegwSink` | BRO-998 | Default substrate sinks (deferred — pull in lago-journal / life-vigil / mpsc deps) |
@@ -70,11 +71,22 @@ crate:
    incrementally as their consuming modules ship (per the work-order in
    spec §12).
 
-## License deviation from spec
+## Spec deviations (documented)
 
-The spec lists `license = "Apache-2.0"`. This crate uses
-`license.workspace = true` (= MIT) for monorepo coherence — life's overall
-license is MIT. Documented in `core/life/CHANGELOG.md`.
+1. **License**: spec §3.1 says `license = "Apache-2.0"`. This crate uses
+   `license.workspace = true` (= MIT) for monorepo coherence — life is
+   MIT throughout.
+
+2. **Hook event defaults**: spec §3.7 only defaults `on_workflow_start` to
+   `Continue`; the other 7 events are abstract. This crate defaults **all
+   8 events** to `Ok(_::Continue)`. Rationale: a real-world hook (e.g.
+   `NousScoreHook`) only cares about one event; forcing eight no-op
+   implementations on every hook is boilerplate without safety, since
+   the same `Continue` ships either way. The original spec choice was a
+   compile-time push to "force the implementer to think about each
+   event" — ergonomically counterproductive in practice.
+
+Both deviations are recorded in `core/life/CHANGELOG.md`.
 
 ## Useful commands
 
