@@ -3,6 +3,25 @@
 ## Unreleased
 
 ### Added
+- `ergon` — Layer-2 agent-harness primitive: autonomous loop body.
+  Ships the third slice per spec §12: `runtime` module (`Provider`,
+  `ToolRegistry`, `RuntimeHandle` traits — the substrate-independent
+  seam between ergon and the host runtime; production impls translate
+  these to `arcan_provider::Provider` / `praxis_core::ToolRegistry` /
+  `arcan_core::TickCtx` in BRO-1001); `step` module (`Step` trait,
+  `StepCtx` orchestration arena, `InferenceRequest` builder,
+  `DEFAULT_INFERENCE_MAX_TURNS` constant, `run_inference_streaming`
+  autonomous loop body that fires every Hook event per spec §5,
+  sequential tool dispatch, max-turn budget enforcement). Three more
+  spec deviations documented in `crates/ergon/ergon/CLAUDE.md`:
+  Provider/ToolRegistry are ergon-owned (not arcan_provider /
+  praxis_core direct deps); StepCtx fields trimmed (`journal`,
+  `homeostasis`, `soul`, `skills`, `sandbox` cut — moved to auto-hook
+  construction or `ToolRegistry` impl internals); `RuntimeHandle`
+  narrowed to just `operating_mode()` for v0.1. Result: ergon compiles
+  and passes 14 new loop-body unit tests (mocked Provider, ToolRegistry,
+  RuntimeHandle, plus BufferSink) with **zero substrate dependencies**.
+  43 → 59 tests. (BRO-998)
 - `ergon` — Layer-2 agent-harness primitive: hook lifecycle + wire types.
   Ships the second slice per spec §12: `model` module (provider-agnostic
   wire types — `Message` with block-structured content, `ContentBlock`

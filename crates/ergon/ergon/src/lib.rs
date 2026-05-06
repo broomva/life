@@ -32,11 +32,14 @@
 //!   [`model`] (wire types — `Message`, `ContentBlock`, `ToolCall`,
 //!   `ToolResult`, `ToolDefinition`, `ModelRequest`, `ModelResponse`,
 //!   `Usage`); [`hook`] (8-event lifecycle trait + `HookRegistry` +
-//!   `HookCtx` + outcome types).
-//! - **Coming next**: `step` (`Step` + `StepCtx` + `RuntimeHandle` +
-//!   `InferenceRequest` + autonomous loop body), `workflow` (`Workflow` +
-//!   `WorkflowExecutor`), four auto-hooks (capability / budget / score /
-//!   attestation), arcan adapter, lifed route, bookkeeping-judge port.
+//!   `HookCtx` + outcome types); [`runtime`] (`Provider`, `ToolRegistry`,
+//!   `RuntimeHandle` traits — the seam to the host runtime); [`step`]
+//!   (`Step`, `StepCtx`, `InferenceRequest`, autonomous loop body).
+//! - **Coming next**: `workflow` (`Workflow` + `WorkflowExecutor`), the
+//!   substrate sinks (`LagoSink`, `VigilSink`, `LifegwSink`), the four
+//!   auto-hooks (capability / budget / score / attestation), the arcan
+//!   adapter that translates between ergon's traits and substrate types,
+//!   the lifed route, the bookkeeping-judge port.
 //!
 //! See [Linear project BRO-994](https://linear.app/broomva/project/ergon-agent-harness-primitive-ca2a51a0fba1)
 //! for the implementation tracker.
@@ -47,6 +50,8 @@ pub mod error;
 pub mod hook;
 pub mod model;
 pub mod role;
+pub mod runtime;
+pub mod step;
 pub mod stream;
 
 pub use error::{ErgonError, Result};
@@ -56,6 +61,8 @@ pub use model::{
     ToolResult, Usage,
 };
 pub use role::{Role, RoleScope};
+pub use runtime::{Provider, RuntimeHandle, ToolRegistry};
+pub use step::{DEFAULT_INFERENCE_MAX_TURNS, InferenceRequest, Step, StepCtx};
 pub use stream::{BufferSink, FanoutSink, StopReason, StreamEvent, StreamSink};
 
 /// Re-export of [`aios_protocol::ids::SessionId`] — the canonical session
