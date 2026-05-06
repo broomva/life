@@ -3,6 +3,23 @@
 ## Unreleased
 
 ### Added
+- `ergon` — Layer-2 agent-harness primitive: workflow trait + executor.
+  Ships the fourth slice per spec §12: `workflow` module (`Workflow`
+  trait — the user-implementation surface with typed Input/Output;
+  `WorkflowExecutor` — the driver that fires `on_workflow_start` /
+  `on_workflow_end` hooks around `Workflow::execute`; placeholder
+  `SkillSet` trait + `EmptySkillSet` impl until praxis-skills wiring
+  in BRO-1001). Ten new unit tests cover: empty-hooks execution,
+  start-hook deny short-circuiting, end-hook firing on execute error,
+  end-hook errors not overriding workflow result, sequential first-deny
+  short-circuit, default skill-set behaviour. Three more spec deviations
+  documented in `crates/ergon/ergon/CLAUDE.md`: `WorkflowExecutor`
+  doesn't auto-register hooks (caller passes pre-built `StepCtx`,
+  matching the BRO-1000 separation); `without_default_hooks` flag
+  dropped (no longer meaningful); `SkillSet` placeholder trait until
+  BRO-1001 wires real praxis-skills. Result: ergon compiles and passes
+  69 unit tests with **still zero substrate dependencies**. 59 → 69
+  tests. (BRO-999)
 - `ergon` — Layer-2 agent-harness primitive: autonomous loop body.
   Ships the third slice per spec §12: `runtime` module (`Provider`,
   `ToolRegistry`, `RuntimeHandle` traits — the substrate-independent

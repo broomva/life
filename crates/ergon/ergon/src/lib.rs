@@ -34,12 +34,14 @@
 //!   `Usage`); [`hook`] (8-event lifecycle trait + `HookRegistry` +
 //!   `HookCtx` + outcome types); [`runtime`] (`Provider`, `ToolRegistry`,
 //!   `RuntimeHandle` traits — the seam to the host runtime); [`step`]
-//!   (`Step`, `StepCtx`, `InferenceRequest`, autonomous loop body).
-//! - **Coming next**: `workflow` (`Workflow` + `WorkflowExecutor`), the
-//!   substrate sinks (`LagoSink`, `VigilSink`, `LifegwSink`), the four
-//!   auto-hooks (capability / budget / score / attestation), the arcan
-//!   adapter that translates between ergon's traits and substrate types,
-//!   the lifed route, the bookkeeping-judge port.
+//!   (`Step`, `StepCtx`, `InferenceRequest`, autonomous loop body);
+//!   [`workflow`] (`Workflow` trait, `WorkflowExecutor`, `SkillSet`).
+//! - **Coming next**: substrate sinks (`LagoSink`, `VigilSink`,
+//!   `LifegwSink` — in a sibling `ergon-life-sinks` crate), the four
+//!   auto-hooks (capability / budget / score / attestation — in the
+//!   `ergon-life-hooks` sibling crate), the arcan adapter that
+//!   translates between ergon's traits and substrate types, the lifed
+//!   route, the bookkeeping-judge port.
 //!
 //! See [Linear project BRO-994](https://linear.app/broomva/project/ergon-agent-harness-primitive-ca2a51a0fba1)
 //! for the implementation tracker.
@@ -53,6 +55,7 @@ pub mod role;
 pub mod runtime;
 pub mod step;
 pub mod stream;
+pub mod workflow;
 
 pub use error::{ErgonError, Result};
 pub use hook::{Hook, HookCtx, HookOutcome, HookRegistry, InferenceHookOutcome, ToolHookOutcome};
@@ -64,6 +67,7 @@ pub use role::{Role, RoleScope};
 pub use runtime::{Provider, RuntimeHandle, ToolRegistry};
 pub use step::{DEFAULT_INFERENCE_MAX_TURNS, InferenceRequest, Step, StepCtx};
 pub use stream::{BufferSink, FanoutSink, StopReason, StreamEvent, StreamSink};
+pub use workflow::{EmptySkillSet, SkillSet, Workflow, WorkflowExecutor};
 
 /// Re-export of [`aios_protocol::ids::SessionId`] — the canonical session
 /// identifier used throughout the Life substrate. Ergon does not define its
