@@ -3,6 +3,20 @@
 ## Unreleased
 
 ### Added
+- `ergon` — Layer-2 agent-harness primitive: hook lifecycle + wire types.
+  Ships the second slice per spec §12: `model` module (provider-agnostic
+  wire types — `Message` with block-structured content, `ContentBlock`
+  enum with Text/Reasoning/ToolUse/ToolResult variants, `ToolCall`,
+  `ToolResult`, `ToolDefinition`, `ModelRequest`, `ModelResponse`,
+  `Usage`); `hook` module (8-event `Hook` trait, `HookCtx`,
+  `HookRegistry`, `HookOutcome` / `ToolHookOutcome` / `InferenceHookOutcome`).
+  Hooks observe / deny / stub at workflow / step / inference / tool seams.
+  Ergon owns these wire types so the hook contract is decoupled from any
+  specific provider crate; `step.rs` (BRO-998) translates between ergon's
+  shapes and `arcan_provider` / `praxis_core`. Spec deviation: all 8
+  events default to `Ok(_::Continue)` (spec §3.7 only defaulted
+  `on_workflow_start`); rationale documented in
+  `crates/ergon/ergon/CLAUDE.md`. 18 new unit tests; 43 total. (BRO-997)
 - `ergon` — new Layer-2 agent-harness primitive crate. First slice ships
   the foundational trait surface with no Life-substrate dependencies:
   `ErgonError` + `Result` (`error`), `Role` + `RoleScope` with

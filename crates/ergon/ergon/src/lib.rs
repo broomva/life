@@ -28,10 +28,13 @@
 //! This crate is shipping incrementally per
 //! `docs/superpowers/specs/2026-05-05-ergon-v0.1.md` (spec §12 work order):
 //!
-//! - **Landed in this slice**: [`error`], [`role`], [`stream`] — pure data
-//!   shapes with no Life-substrate dependencies (the foundation layer).
-//! - **Coming next**: [`hook`] (trait + registry), [`step`] (`Step` +
-//!   `StepCtx` + `RuntimeHandle`), [`workflow`] (`Workflow` +
+//! - **Landed**: [`error`], [`role`], [`stream`] (foundation layer);
+//!   [`model`] (wire types — `Message`, `ContentBlock`, `ToolCall`,
+//!   `ToolResult`, `ToolDefinition`, `ModelRequest`, `ModelResponse`,
+//!   `Usage`); [`hook`] (8-event lifecycle trait + `HookRegistry` +
+//!   `HookCtx` + outcome types).
+//! - **Coming next**: `step` (`Step` + `StepCtx` + `RuntimeHandle` +
+//!   `InferenceRequest` + autonomous loop body), `workflow` (`Workflow` +
 //!   `WorkflowExecutor`), four auto-hooks (capability / budget / score /
 //!   attestation), arcan adapter, lifed route, bookkeeping-judge port.
 //!
@@ -41,10 +44,17 @@
 #![doc(html_no_source)]
 
 pub mod error;
+pub mod hook;
+pub mod model;
 pub mod role;
 pub mod stream;
 
 pub use error::{ErgonError, Result};
+pub use hook::{Hook, HookCtx, HookOutcome, HookRegistry, InferenceHookOutcome, ToolHookOutcome};
+pub use model::{
+    ContentBlock, Message, MessageRole, ModelRequest, ModelResponse, ToolCall, ToolDefinition,
+    ToolResult, Usage,
+};
 pub use role::{Role, RoleScope};
 pub use stream::{BufferSink, FanoutSink, StopReason, StreamEvent, StreamSink};
 
