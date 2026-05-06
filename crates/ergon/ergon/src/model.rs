@@ -115,6 +115,11 @@ pub struct Message {
 }
 
 impl Message {
+    /// Construct a message with the given role and content blocks.
+    pub fn new(role: MessageRole, content: Vec<ContentBlock>) -> Self {
+        Self { role, content }
+    }
+
     /// Helper: a user message with a single text block.
     pub fn user_text(text: impl Into<String>) -> Self {
         Self {
@@ -323,6 +328,24 @@ pub struct ModelResponse {
 }
 
 impl ModelResponse {
+    /// Construct a response with the given content blocks and stop
+    /// reason. Defaults [`Usage`] to zeros — populate it via
+    /// [`Self::with_usage`] if needed.
+    pub fn new(content: Vec<ContentBlock>, stop_reason: StopReason) -> Self {
+        Self {
+            content,
+            stop_reason,
+            usage: Usage::default(),
+        }
+    }
+
+    /// Builder: attach token / cost accounting.
+    #[must_use]
+    pub fn with_usage(mut self, usage: Usage) -> Self {
+        self.usage = usage;
+        self
+    }
+
     /// Iterate over the response's tool-use blocks.
     pub fn tool_uses(&self) -> impl Iterator<Item = &ContentBlock> {
         self.content.iter().filter(|b| b.is_tool_use())
