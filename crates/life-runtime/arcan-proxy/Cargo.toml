@@ -25,5 +25,21 @@ tower = { workspace = true }
 hyper-util = { version = "0.1", features = ["tokio"] }
 tracing.workspace = true
 
+# Stage 3b (May 2026): VercelAiGatewayArcan — streams real chat
+# completions from Vercel AI Gateway (or any OpenAI-compatible
+# provider) so lifed can dispatch real LLM tokens without a full
+# arcand UDS substrate. Bridges directly to AIGateway via reqwest's
+# streaming body. `prost-types` for `Timestamp` on emitted EventRecords.
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+prost-types = "0.14"
+bytes = { workspace = true }
+
+[dev-dependencies]
+# Mock HTTP server so the VercelAiGatewayArcan tests never touch a real network.
+wiremock = { workspace = true }
+tokio = { workspace = true, features = ["full", "test-util"] }
+
 [lints]
 workspace = true

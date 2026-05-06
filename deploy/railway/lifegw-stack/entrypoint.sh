@@ -91,7 +91,11 @@ LIFEGW_TIER2_SIGNING_KEY_PEM="$(cat "${TIER2_PEM_PATH}")"
 export LIFEGW_TIER2_SIGNING_KEY_PEM
 
 # ── 3. Start lifed ──────────────────────────────────────────────────────────
-echo "[entrypoint] starting lifed (mock-fallback=${LIFED_ALLOW_MOCK_FALLBACK:-false})"
+# Stage 3b: announce which arcan substrate backend lifed will pick.
+# `LIFED_ARCAN_BACKEND=vercel_ai_gateway` requires `OPENAI_API_KEY`
+# (and optionally `OPENAI_BASE_URL`, `OPENAI_MODEL`); failures surface
+# as `LifedError::Substrate` at boot rather than silent fallback.
+echo "[entrypoint] starting lifed (mock-fallback=${LIFED_ALLOW_MOCK_FALLBACK:-false}, arcan-backend=${LIFED_ARCAN_BACKEND:-mock})"
 runuser --preserve-environment -u life -g life-runtime -- \
   /usr/local/bin/lifed daemon \
     --config "${LIFED_CONFIG:-/etc/lifed/config.toml}" \

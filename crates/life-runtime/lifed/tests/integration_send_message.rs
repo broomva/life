@@ -49,6 +49,10 @@ async fn send_message_streams_at_least_one_event() {
     env.shutdown().await;
 }
 
+/// Stage 3b-bis (May 2026): `stream_session` is a passive subscribe;
+/// the pump only spawns from `send_message`. This test attaches the
+/// stream first, then fires a `send_message` to drive the pump, then
+/// verifies events flow back to the subscriber.
 #[tokio::test]
 async fn stream_session_returns_canned_events() {
     let env = TestEnv::start_with_mocks().await;
@@ -58,19 +62,36 @@ async fn stream_session_returns_canned_events() {
         .expect("create_session");
     let sid = session.sid.expect("sid");
 
-    let mut client = env.agent_client().await;
+    let mut subscriber = env.agent_client().await;
     let mut req = tonic::Request::new(SessionRef {
-        sid: Some(sid),
+        sid: Some(sid.clone()),
         from_sequence: None,
     });
     req.metadata_mut().insert(
         "authorization",
         "Bearer test-token-for-alice".parse().unwrap(),
     );
-    let mut stream = client
+    let mut stream = subscriber
         .stream_session(req)
         .await
         .expect("stream_session")
+        .into_inner();
+
+    // Drive a turn via send_message. Mock substrate emits Token+Finish.
+    let mut driver = env.agent_client().await;
+    let mut send_req = tonic::Request::new(life_runtime_proto::life::v1::SendMessageReq {
+        sid: Some(sid),
+        content: "drive".to_string(),
+        attachment_blob_ref: vec![],
+    });
+    send_req.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    let _ = driver
+        .send_message(send_req)
+        .await
+        .expect("send_message")
         .into_inner();
 
     let _ = stream.next().await; // consume at least one
@@ -112,8 +133,28 @@ async fn multi_tab_fanout_emits_to_all_attached_streams() {
     let mut s1 = c1.stream_session(req1).await.expect("s1").into_inner();
     let mut s2 = c2.stream_session(req2).await.expect("s2").into_inner();
 
-    // Each stream_session call attaches its own arcan dispatch + broadcast,
-    // so each receives at least one event from its own pump.
+    // Stage 3b-bis (May 2026): `stream_session` is a passive subscribe.
+    // Drive a single `send_message` to kick off the pump; lifed's
+    // fanout broadcasts the resulting events to BOTH attached
+    // subscribers (one pump, two attached tabs — Spec C₂ §6.4).
+    let mut driver = env.agent_client().await;
+    let mut send_req = tonic::Request::new(life_runtime_proto::life::v1::SendMessageReq {
+        sid: Some(sid),
+        content: "fanout driver".to_string(),
+        attachment_blob_ref: vec![],
+    });
+    send_req.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    let _ = driver
+        .send_message(send_req)
+        .await
+        .expect("send_message")
+        .into_inner();
+
+    // Both attached streams receive the broadcasted Token+Finish events
+    // from the single shared pump — one pump, two readers (Spec C₂ §6.4).
     let r1 = s1.next().await.expect("e1");
     let r2 = s2.next().await.expect("e2");
     assert!(r1.is_ok());

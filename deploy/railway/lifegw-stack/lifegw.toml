@@ -37,23 +37,24 @@ unix_socket_group = "life-runtime"
 unix_socket_mode  = 0o660
 
 [auth]
-# Stage 2: Tier-2 mint is operator-key-backed via
-# `KmsProvider::StaticPem` (see `[auth.static_pem]` below). The kid is
-# stable across container restarts; the public half is published
-# atomically to `publish_jwks_path` on boot.
+# Stage 4 (May 2026): production posture — `dev_signer_enabled = false`
+# so the `Bearer dev-token-for-{user_id}` shortcut is rejected
+# outright. Real Tier-1 JWS minted by broomva.tech via
+# `lib/auth/lifegw-jwt.ts` is the only accepted path. Tier-2 mint
+# remains operator-key-backed via `KmsProvider::StaticPem` (see
+# `[auth.static_pem]` below) — the kid is stable across container
+# restarts, the public half is published atomically to
+# `publish_jwks_path` on boot.
 #
-# Tier-1 verification accepts BOTH real ES256 JWS (verified against
-# broomva.tech's `/api/auth/jwks.json`) AND the dev shortcut
-# `Bearer dev-token-for-{user_id}`. lifegw's
-# `JwksCache::new_with_dev_shortcut` makes the two additive — real JWS
-# tokens get JWKS verification, and the dev shortcut still works for
-# ops smoke tests during the Stage 1 → Stage 2 transition. Flip
-# `dev_signer_enabled` to `false` once every caller mints real JWS.
+# To reactivate dev shortcuts (e.g. for an ops debug session) flip
+# `dev_signer_enabled = true` here AND the matching field in
+# `lifed.toml`. lifegw's `JwksCache::new_with_dev_shortcut` makes the
+# real-JWS path additive in either direction.
 jwks_url            = "https://broomva.tech/api/auth/jwks.json"
 tier1_audience      = "lifegw"
 tier1_issuer        = "https://broomva.tech"
 kms_provider        = "static_pem"
-dev_signer_enabled  = true
+dev_signer_enabled  = false
 publish_jwks_path   = "/run/life/lifegw-jwks.json"
 tier2_audience      = "lifed"
 tier2_issuer        = "lifegw"

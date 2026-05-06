@@ -1,6 +1,6 @@
 # life-perturb — Controlled Perturbation Injection for RCS λ̂ Validation
 
-**Status:** DRAFT — design doc + scaffold (this PR). Implementation deferred to v0.1+.
+**Status:** v0.1-L0 IN PROGRESS — design + scaffold landed in PR #1088, single-kind L0 injector + autonomic-derived V_0 probe + simulation harness landing in follow-up PR.
 **Date:** 2026-05-04
 **Owner:** Carlos Escobar
 **Linear:** [BRO-947](https://linear.app/broomva/issue/BRO-947)
@@ -283,6 +283,24 @@ Stored verbatim in `lago-journal`; the recovery tracker subscribes via `lago-aio
 - Tests: integration test asserting `λ̂_0 > 0` after a sandboxed rate-limit storm.
 
 **Goal:** a single, reproducible λ̂_0 estimate from a controlled perturbation, even if it's far from 1.45.
+
+#### v0.1 progress (2026-05-05)
+
+| Item | Status |
+|------|--------|
+| Crate scaffold + spec | ✅ Shipped (PR #1088) |
+| `LambdaEstimator::fit_recovery` OLS | ✅ Shipped (PR #1088) |
+| `L0ProviderInjector::inject(ToolLatencyJitter)` | ✅ Shipped (this PR, behind `inject-l0` feature) |
+| `L0ProviderInjector::revert` | ✅ Shipped (this PR) |
+| `L0AutonomicProbe` (V_0 from `HomeostaticState`) | ✅ Shipped (this PR) |
+| `L0SimRuntime` closed-loop test harness | ✅ Shipped (this PR) — pure-Rust simulator until live `arcan-provider` Tower-layer wiring lands in v0.5 |
+| End-to-end `λ̂_0 > 0` integration test | ✅ Shipped (this PR) — `end_to_end_lambda_hat_zero_is_positive` |
+| `RateLimitStorm` injector body | ⏳ Deferred to v0.5 |
+| `RequestDrop` injector body | ⏳ Deferred to v0.5 |
+| Live `arcan-provider` Tower-layer integration | ⏳ Deferred to v0.5 |
+| `life-perturb inject` CLI binary | ⏳ Deferred to v0.5 |
+
+**Deviations from spec.** v0.1 picks `ToolLatencyJitter` as the *single* perturbation kind (rather than landing both `ToolLatencyJitter` and `RateLimitStorm` together) to keep the first PR landable in one sitting; `RateLimitStorm` is the next thing the v0.5 PR adds. The live arcand integration is also deferred — the simulation harness (`L0SimRuntime`) is what gives us the closed-loop `inject → V_0(t) → fit λ̂_0` pipeline today, and the Tower-layer hook lands once the wire-shape is settled.
 
 ### v0.5 — closed-loop single-level (3 weeks)
 

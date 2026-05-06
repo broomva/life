@@ -112,22 +112,52 @@ async fn smoke_test_full_daemon_lifecycle() {
         );
     }
 
-    // ── 3. StreamSession → at least one event from the canned mock pump
+    // ── 3. StreamSession → at least one event from the mock pump.
+    //
+    // Stage 3b-bis (May 2026): `stream_session` is now a passive
+    // subscribe — it does NOT auto-spawn a fanout pump on attach. To
+    // drive events, fire a `send_message` first (kicks off the pump),
+    // then attach with `stream_session` to read the broadcast events.
+    // (Mirrors the production pattern: WS upgrade → user types →
+    // `send_message` frame → both the SendMessage caller and the
+    // StreamSession subscriber observe the same fanout.)
     {
         let mut client = env.agent_client().await;
-        let mut req = tonic::Request::new(SessionRef {
+        // Attach the subscriber FIRST so we don't miss the early
+        // events the pump emits.
+        let mut subscribe_req = tonic::Request::new(SessionRef {
             sid: Some(sid.clone()),
             from_sequence: None,
         });
-        req.metadata_mut().insert(
+        subscribe_req.metadata_mut().insert(
             "authorization",
             format!("Bearer test-token-for-{USER}").parse().unwrap(),
         );
         let mut stream = client
-            .stream_session(req)
+            .stream_session(subscribe_req)
             .await
             .expect("StreamSession opens")
             .into_inner();
+
+        // Now drive a turn via send_message.
+        let mut driver = env.agent_client().await;
+        let mut send_req = tonic::Request::new(SendMessageReq {
+            sid: Some(sid.clone()),
+            content: "stream_session driver".to_string(),
+            attachment_blob_ref: vec![],
+        });
+        send_req.metadata_mut().insert(
+            "authorization",
+            format!("Bearer test-token-for-{USER}").parse().unwrap(),
+        );
+        // Fire-and-forget — the response stream is also a fanout
+        // subscriber but we only care that it kicks the pump.
+        let _ = driver
+            .send_message(send_req)
+            .await
+            .expect("send_message kicks the pump")
+            .into_inner();
+
         let first = stream.next().await.expect("at least one event yielded");
         assert!(first.is_ok(), "StreamSession event ok");
     }

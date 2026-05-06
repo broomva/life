@@ -931,11 +931,34 @@ fn event_to_outbound_frame(event: pb::AgentEvent) -> OutboundFrame {
     let record = event
         .record
         .map(|r| {
+            // Stage 3b (May 2026): the substrate-side `EventRecord.payload`
+            // is `bytes` per `aios.v1.EventRecord`. Substrates emit
+            // structured JSON (e.g. `{"text": "Hello"}` for token deltas,
+            // `{"call_id": "...", ...}` for tool calls); the lifed→lifegw
+            // tonic stream preserves it as bytes. The browser-side
+            // `LifedWsAgentSessionClient.decodeAgentEvent` expects
+            // `frame.record.payload` to be the structured object so it
+            // can read `payload.text` / `payload.call_id` / etc.
+            //
+            // We try to decode the bytes as JSON first; if that succeeds
+            // the structured value is inlined as `payload`. If it fails
+            // (raw binary payload — not used today but reserved for
+            // future substrates) we fall back to a base64-wrapped object
+            // so the field shape stays uniform: `payload` is always an
+            // object, callers either read structured fields or
+            // `payload.payload_b64`.
+            let payload_value = match serde_json::from_slice::<serde_json::Value>(&r.payload) {
+                Ok(v) if v.is_object() => v,
+                Ok(non_object) => serde_json::json!({ "value": non_object }),
+                Err(_) => serde_json::json!({
+                    "payload_b64": base64::engine::general_purpose::STANDARD.encode(&r.payload),
+                }),
+            };
             serde_json::json!({
                 "session_id": r.session_id.map(|s| s.value),
                 "sequence": r.sequence,
                 "kind": r.kind,
-                "payload_b64": base64::engine::general_purpose::STANDARD.encode(&r.payload),
+                "payload": payload_value,
             })
         })
         .unwrap_or(serde_json::Value::Null);
@@ -1002,16 +1025,30 @@ async fn run_send_message_dispatcher(
                 match agent_client.send_message(req).await {
                     Ok(resp) => {
                         let mut s = resp.into_inner();
-                        // Drain the upstream stream synchronously
-                        // within this dispatcher task — that's what
-                        // serialises subsequent SendMessage frames.
+                        // Stage 3b-bis (May 2026): drain the upstream
+                        // SendMessage response stream but DROP normal
+                        // AgentEvents. The canonical browser-facing
+                        // event stream is `Agent.StreamSession` — the
+                        // upstream-tail task already pumps events from
+                        // there into `outbound_tx`. Forwarding
+                        // SendMessage events here would duplicate every
+                        // token (lifed's fanout broadcasts to BOTH
+                        // subscribers — see
+                        // `lifed::services::agent::send_message`).
+                        //
+                        // We still drain the stream synchronously
+                        // because that's what serialises subsequent
+                        // SendMessage frames per Sub-phase D D9. We
+                        // only forward Closing frames on upstream
+                        // error so the WS observes auth/rate-limit/etc.
+                        // failures and tears down cleanly.
                         while let Some(item) = s.next().await {
                             match item {
-                                Ok(event) => {
-                                    let frame = event_to_outbound_frame(event);
-                                    if outbound_tx.send(frame).await.is_err() {
-                                        return;
-                                    }
+                                Ok(_event) => {
+                                    // Intentionally dropped — the
+                                    // StreamSession fanout subscriber
+                                    // delivers this same event to the
+                                    // outbound channel.
                                 }
                                 Err(status) => {
                                     let reason = map_status_to_close(&status);
@@ -1513,6 +1550,115 @@ mod tests {
         assert_eq!(CloseReason::IpBlocked.code(), 4003);
         assert_eq!(CloseReason::LifedUnavailable.code(), 4004);
         assert_eq!(CloseReason::SequenceRetired.code(), 4005);
+    }
+
+    /// Stage 3b (May 2026): the substrate sends `EventRecord.payload`
+    /// as bytes containing UTF-8 JSON. lifegw decodes that into a
+    /// structured object so the browser-side `decodeAgentEvent` can
+    /// read `payload.text` directly without base64 round-tripping.
+    #[test]
+    fn event_to_outbound_frame_inlines_json_payload() {
+        let payload_bytes = serde_json::to_vec(&serde_json::json!({
+            "text": "Hello from arcan"
+        }))
+        .expect("encode payload");
+        let event = pb::AgentEvent {
+            record: Some(life_runtime_proto::life::v1::EventRecord {
+                session_id: Some(aios_proto::aios::v1::SessionId {
+                    value: "sess_x".to_string(),
+                }),
+                sequence: 7,
+                kind: "TOKEN".to_string(),
+                payload: payload_bytes,
+                at: None,
+            }),
+            kind: pb::AgentEventKind::Token as i32,
+        };
+        let frame = event_to_outbound_frame(event);
+        match frame {
+            OutboundFrame::AgentEvent {
+                seq_no,
+                record,
+                agent_kind,
+            } => {
+                assert_eq!(seq_no, 7);
+                assert_eq!(agent_kind, "TOKEN");
+                let payload = record.get("payload").expect("payload field");
+                assert_eq!(
+                    payload.get("text").and_then(|v| v.as_str()),
+                    Some("Hello from arcan"),
+                    "payload.text inlined as a structured field for the TS decoder",
+                );
+                // payload_b64 must NOT appear when the bytes are valid JSON.
+                assert!(
+                    payload.get("payload_b64").is_none(),
+                    "JSON payload should not be re-encoded as base64",
+                );
+            }
+            other => panic!("expected AgentEvent, got {other:?}"),
+        }
+    }
+
+    /// Non-JSON payload (e.g. raw binary from a future substrate) falls
+    /// back to a base64-wrapped object so the wire shape stays uniform:
+    /// `payload` is always an object, never raw bytes.
+    #[test]
+    fn event_to_outbound_frame_falls_back_to_base64_for_binary_payload() {
+        let event = pb::AgentEvent {
+            record: Some(life_runtime_proto::life::v1::EventRecord {
+                session_id: None,
+                sequence: 1,
+                kind: "TOKEN".to_string(),
+                // 0xff is invalid as the leading byte of UTF-8 JSON.
+                payload: vec![0xff, 0xfe, 0xfd],
+                at: None,
+            }),
+            kind: pb::AgentEventKind::Token as i32,
+        };
+        let frame = event_to_outbound_frame(event);
+        match frame {
+            OutboundFrame::AgentEvent { record, .. } => {
+                let payload = record.get("payload").expect("payload field");
+                assert!(
+                    payload.get("payload_b64").is_some(),
+                    "binary payload must surface as base64 fallback",
+                );
+            }
+            other => panic!("expected AgentEvent, got {other:?}"),
+        }
+    }
+
+    /// Records with `payload = []` (no body — used for Finish events
+    /// without usage info) decode successfully — empty bytes parse as
+    /// the empty JSON `{}` after our fallback (or trigger the binary
+    /// fallback). Either way the wire shape stays valid.
+    #[test]
+    fn event_to_outbound_frame_handles_empty_payload() {
+        let event = pb::AgentEvent {
+            record: Some(life_runtime_proto::life::v1::EventRecord {
+                session_id: None,
+                sequence: 99,
+                kind: "FINISH".to_string(),
+                payload: vec![],
+                at: None,
+            }),
+            kind: pb::AgentEventKind::Finish as i32,
+        };
+        let frame = event_to_outbound_frame(event);
+        match frame {
+            OutboundFrame::AgentEvent {
+                record, agent_kind, ..
+            } => {
+                assert_eq!(agent_kind, "FINISH");
+                // Either the JSON parse succeeded (empty bytes are
+                // technically not valid JSON but `from_slice::<Value>`
+                // returns an EOF error → falls into `payload_b64`
+                // branch with empty string) or the field shape carries
+                // payload_b64. Both are acceptable.
+                assert!(record.get("payload").is_some(), "payload field present");
+            }
+            other => panic!("expected AgentEvent, got {other:?}"),
+        }
     }
 
     #[test]

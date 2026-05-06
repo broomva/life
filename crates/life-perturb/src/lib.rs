@@ -18,10 +18,12 @@
 //!
 //! ## Status
 //!
-//! This is the v0.0 scaffold — design + traits + types only. No injectors
-//! actually wire into the daemons yet. See
-//! [`docs/superpowers/specs/2026-05-04-life-perturb-design.md`][spec] for
-//! the full design and phasing plan. Linear ticket: [BRO-947].
+//! v0.1-L0 (current): single-level smoke. Real `L0ProviderInjector` for
+//! `ToolLatencyJitter` + autonomic-derived V_0 probe + reproducible
+//! simulation harness behind the `inject-l0` Cargo feature.
+//!
+//! See [`docs/superpowers/specs/2026-05-04-life-perturb-design.md`][spec]
+//! for the full design and phasing plan. Linear ticket: [BRO-947].
 //!
 //! ## Module layout
 //!
@@ -48,11 +50,18 @@
 pub mod error;
 pub mod estimator;
 pub mod injector;
+#[cfg(feature = "inject-l0")]
+pub mod l0;
 pub mod lyapunov;
 pub mod perturbation;
 
 pub use error::{PerturbError, PerturbResult};
 pub use estimator::{LambdaEstimator, RecoveryFit};
 pub use injector::{Injector, PerturbationHandle};
-pub use lyapunov::{LyapunovFn, LyapunovSample, SystemSnapshot};
+#[cfg(feature = "inject-l0")]
+pub use l0::{L0AutonomicProbe, L0LatencyInjectionState, L0ProviderInjector, L0SimRuntime};
+pub use lyapunov::{
+    L0Probe, L1Probe, L2Probe, L3Probe, LyapunovFn, LyapunovSample, SystemSnapshot, V0Plant,
+    V1Autonomic, V2Autoany, V3Governance,
+};
 pub use perturbation::{Level, Perturbation, PerturbationId, PerturbationKind, Severity};
