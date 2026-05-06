@@ -3,6 +3,31 @@
 ## Unreleased
 
 ### Added
+- `ergon-life-hooks` — new sibling crate at `crates/ergon/ergon-life-hooks/`
+  housing the four "Life-native" auto-registered hooks (spec §3.8):
+  `PraxisCapabilityHook` (`on_pre_tool_use`),
+  `AutonomicBudgetHook` (`on_pre_inference`),
+  `NousScoreHook` (`on_post_inference`),
+  `AnimaAttestHook` (`on_workflow_start` / `on_workflow_end`).
+  Each hook is paired with a small **adapter trait**
+  (`CapabilityResolver`, `BudgetGate`, `ResponseScorer`, `SoulAttester`)
+  the hook consumes via `Arc<dyn _>` at construction. The arcan
+  adapter (BRO-1001) implements those traits against `aios_protocol::PolicySet`,
+  `autonomic::AutonomicGatingProfile`, `nous_core::NousEvaluator`,
+  and `anima_core::AgentSoul`.
+  Architectural win: the crate has **zero substrate dependencies** —
+  Cargo.toml lists only `ergon` + standard async/serde. Substrate dep
+  lives in BRO-1001's adapter, where it belongs. 15 unit tests across
+  the four modules (mocked adapters); `ergon` itself unchanged.
+  Failure semantics differ by hook: capability and budget denials are
+  hard veto (`Deny` outcome); score and attestation failures are
+  observe-only (`tracing::warn!` + `Continue`) — design rationale
+  documented in `crates/ergon/ergon-life-hooks/CLAUDE.md`.
+  Spec deviation: this crate replaces the spec's "auto-hooks live in
+  ergon itself" placement (§3.8). Reason: ergon stays vendor-neutral;
+  Life-specific governance hooks belong in their own crate so a future
+  ergon consumer (TS port, alternate agent OS) can ship its own
+  governance set without forking. (BRO-1000)
 - `ergon` — Layer-2 agent-harness primitive: hook lifecycle + wire types.
   Ships the second slice per spec §12: `model` module (provider-agnostic
   wire types — `Message` with block-structured content, `ContentBlock`
