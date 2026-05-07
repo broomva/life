@@ -3406,6 +3406,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ergon-life-hooks"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "ergon",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
