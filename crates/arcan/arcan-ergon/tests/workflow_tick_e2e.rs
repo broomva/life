@@ -239,12 +239,18 @@ async fn workflow_tick_emits_output_event() {
             .collect::<Vec<_>>()
     );
 
-    if let Some(event) = workflow_output_event
-        && let EventKind::Custom { data, .. } = &event.kind
-    {
-        assert_eq!(data["workflow"], "test.greeter");
-        assert_eq!(data["output"]["message"], "hello, ergon");
-    }
+    // Hard-unwrap rather than if-let so a regression that drops the
+    // expected event or changes its shape fails the test loudly
+    // instead of silently passing on a no-op assertion.
+    let event = workflow_output_event.expect("workflow_output event present");
+    let EventKind::Custom { data, .. } = &event.kind else {
+        panic!(
+            "expected EventKind::Custom for ergon.workflow_output, got {:?}",
+            event.kind
+        );
+    };
+    assert_eq!(data["workflow"], "test.greeter");
+    assert_eq!(data["output"]["message"], "hello, ergon");
 }
 
 #[tokio::test]
@@ -278,7 +284,9 @@ async fn direct_tick_still_works_after_dispatcher_registration() {
 }
 
 #[tokio::test]
-async fn unknown_workflow_yields_error() {
+async fn unknown_workflow_routes_to_run_errored_and_recover_mode() {
+    use aios_protocol::{EventKind, OperatingMode};
+
     let runtime = build_runtime_with_dispatcher(unique_root("unknown-workflow"));
     let session_id = SessionId::from_string("unknown-workflow".to_owned());
     runtime
@@ -291,7 +299,13 @@ async fn unknown_workflow_yields_error() {
         .await
         .expect("create session");
 
-    let err = runtime
+    // Per BRO-1001 + CodeRabbit feedback: dispatch failures (including
+    // unknown workflow names) are folded into the kernel's standard
+    // terminal lifecycle rather than bubbling out as Err. The tick
+    // returns Ok(TickOutput) with mode=Recover, an RunErrored event
+    // mentioning the workflow name, and the same Commit/Reflect/Sleep
+    // finalize trail every other tick produces.
+    let output = runtime
         .tick_on_branch(
             &session_id,
             &BranchId::main(),
@@ -307,12 +321,31 @@ async fn unknown_workflow_yields_error() {
             },
         )
         .await
-        .expect_err("unknown workflow must error");
+        .expect("tick still completes (errors fold into journal, not bubble out)");
 
-    let err_str = format!("{err:#}");
+    assert_eq!(
+        output.mode,
+        OperatingMode::Recover,
+        "dispatch error must drop the runtime into Recover"
+    );
     assert!(
-        err_str.contains("no.such.workflow"),
-        "error should mention workflow name, got: {err_str}"
+        output.state.error_streak >= 1,
+        "dispatch error must increment error_streak, got {}",
+        output.state.error_streak
+    );
+
+    let events = runtime
+        .read_events_on_branch(&session_id, &BranchId::main(), 0, 1024)
+        .await
+        .expect("read events");
+    let run_errored = events.iter().find_map(|e| match &e.kind {
+        EventKind::RunErrored { error } => Some(error.clone()),
+        _ => None,
+    });
+    let error_message = run_errored.expect("RunErrored event present after dispatch failure");
+    assert!(
+        error_message.contains("no.such.workflow"),
+        "RunErrored.error should mention the missing workflow name, got: {error_message}"
     );
 }
 

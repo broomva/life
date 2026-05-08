@@ -51,10 +51,9 @@ pub struct TickInput {
     /// existing default) or workflow (an `ergon::Workflow` runs as the
     /// tick body via an externally-registered handler).
     ///
-    /// `TickKind::default() == TickKind::Direct` so callers that build
-    /// a `TickInput` without explicitly setting this field can spread
-    /// `..Default::default()` (or use the [`TickInput::direct`] helper)
-    /// to keep prior behaviour unchanged.
+    /// `TickKind::default() == TickKind::Direct` so call sites that
+    /// don't care about workflow dispatch can pass
+    /// `kind: TickKind::Direct` to preserve prior behaviour.
     ///
     /// See `core/life/docs/superpowers/specs/2026-05-08-bro-1001-ergon-tick-body.md`
     /// and `core/life/docs/architecture/agent-harness.md` (§ "Where evaluators live").
@@ -727,6 +726,9 @@ impl KernelRuntime {
             )
             .await?;
             emitted += 1;
+            self.append_event(session_id, branch_id, EventKind::StepStarted { index: 0 })
+                .await?;
+            emitted += 1;
 
             let allowed_tools_slice = input.allowed_tools.as_deref();
             let invocation = WorkflowTickInvocation {
@@ -747,29 +749,74 @@ impl KernelRuntime {
                 event_store: &self.event_store,
             };
 
-            let outcome = dispatcher
-                .dispatch(invocation)
-                .await
-                .with_context(|| format!("workflow `{workflow_name}` dispatch failed"))?;
+            // Mirror the Direct path's terminal lifecycle: on success
+            // emit Custom(workflow_output) + StepFinished + RunFinished;
+            // on error emit RunErrored, update state.error_streak /
+            // uncertainty / error_budget, then run the same
+            // Commit/Reflect/Sleep finalize path so the tick produces
+            // a coherent journal regardless of which body shape ran.
+            match dispatcher.dispatch(invocation).await {
+                Ok(outcome) => {
+                    emitted += outcome.events_emitted;
+                    if let Some(next_mode) = outcome.next_mode {
+                        mode = next_mode;
+                    }
 
-            emitted += outcome.events_emitted;
-            if let Some(next_mode) = outcome.next_mode {
-                mode = next_mode;
+                    self.append_event(
+                        session_id,
+                        branch_id,
+                        EventKind::Custom {
+                            event_type: "ergon.workflow_output".to_owned(),
+                            data: serde_json::json!({
+                                "workflow": workflow_name,
+                                "output": outcome.output,
+                            }),
+                        },
+                    )
+                    .await?;
+                    emitted += 1;
+
+                    self.append_event(
+                        session_id,
+                        branch_id,
+                        EventKind::StepFinished {
+                            index: 0,
+                            stop_reason: "workflow_completed".to_owned(),
+                            directive_count: 1,
+                        },
+                    )
+                    .await?;
+                    emitted += 1;
+                    self.append_event(
+                        session_id,
+                        branch_id,
+                        EventKind::RunFinished {
+                            reason: "workflow_completed".to_owned(),
+                            total_iterations: 1,
+                            final_answer: None,
+                            usage: None,
+                        },
+                    )
+                    .await?;
+                    emitted += 1;
+                }
+                Err(error) => {
+                    mode = OperatingMode::Recover;
+                    state.error_streak += 1;
+                    state.uncertainty = (state.uncertainty + 0.15).min(1.0);
+                    state.budget.error_budget_remaining =
+                        state.budget.error_budget_remaining.saturating_sub(1);
+                    self.append_event(
+                        session_id,
+                        branch_id,
+                        EventKind::RunErrored {
+                            error: format!("workflow `{workflow_name}`: {error:#}"),
+                        },
+                    )
+                    .await?;
+                    emitted += 1;
+                }
             }
-
-            self.append_event(
-                session_id,
-                branch_id,
-                EventKind::Custom {
-                    event_type: "ergon.workflow_output".to_owned(),
-                    data: serde_json::json!({
-                        "workflow": workflow_name,
-                        "output": outcome.output,
-                    }),
-                },
-            )
-            .await?;
-            emitted += 1;
 
             emitted += self
                 .emit_phase(session_id, branch_id, LoopPhase::Commit)

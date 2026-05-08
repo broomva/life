@@ -108,7 +108,14 @@ impl Provider for ModelProviderAdapter {
         // 4. Replay directives onto the sink as canonical StreamEvents,
         //    while assembling the ergon ContentBlocks for the returned
         //    ModelResponse. The two views must agree.
+        //
+        //    Per-directive `id`s must be unique across the stream so
+        //    sinks (lago durable replay, vigil tracing, lifegw SSE)
+        //    can pair Start/Delta/End events. We synthesize them from
+        //    a directive-local counter; the upstream `index` (when
+        //    present on TextDelta) is folded in for stable ordering.
         let mut content: Vec<ContentBlock> = Vec::new();
+        let mut message_idx: u32 = 0;
         for directive in &completion.directives {
             match directive {
                 ModelDirective::TextDelta { delta, index } => {
@@ -126,7 +133,8 @@ impl Provider for ModelProviderAdapter {
                     role: _,
                     content: text,
                 } => {
-                    let id = "message".to_owned();
+                    let id = format!("message-{message_idx}");
+                    message_idx += 1;
                     sink.emit(StreamEvent::TextStart { id: id.clone() }).await?;
                     sink.emit(StreamEvent::TextDelta {
                         id: id.clone(),

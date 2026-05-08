@@ -212,6 +212,31 @@ mod tests {
         }
     }
 
+    struct AlwaysRequiresApproval;
+
+    #[async_trait]
+    impl PolicyGatePort for AlwaysRequiresApproval {
+        async fn evaluate(
+            &self,
+            _session_id: KernelSessionId,
+            requested: Vec<Capability>,
+        ) -> KernelResult<PolicyGateDecision> {
+            Ok(PolicyGateDecision {
+                allowed: Vec::new(),
+                requires_approval: requested,
+                denied: Vec::new(),
+            })
+        }
+
+        async fn set_policy(
+            &self,
+            _session_id: KernelSessionId,
+            _policy: PolicySet,
+        ) -> KernelResult<()> {
+            Ok(())
+        }
+    }
+
     struct AlwaysDeny;
 
     #[async_trait]
@@ -275,6 +300,27 @@ mod tests {
             map("read", vec![Capability::fs_read("/**")]),
         );
         assert!(r.can_invoke("read", &serde_json::Value::Null).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn approval_required_tool_fails_until_flow_lands() {
+        // BRO-1001 minimum doesn't bridge ergon's hooks into the
+        // kernel's approval flow, so `requires_approval` is treated
+        // as fail-closed at the hook boundary. A follow-up will route
+        // this through the ApprovalPort.
+        let r = KernelCapabilityResolver::new(
+            Arc::new(AlwaysRequiresApproval),
+            KernelSessionId::default(),
+            map("dangerous", vec![Capability::exec("rm")]),
+        );
+        let err = r
+            .can_invoke("dangerous", &serde_json::Value::Null)
+            .await
+            .expect_err("requires_approval must fail-close in BRO-1001");
+        assert!(
+            err.contains("requires approval"),
+            "error should mention approval requirement, got: {err}"
+        );
     }
 
     #[tokio::test]

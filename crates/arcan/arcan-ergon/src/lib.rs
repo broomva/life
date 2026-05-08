@@ -58,6 +58,6 @@ pub use error::{AdapterError, Result};
 pub use hooks::{KernelCapabilityResolver, NoopBudgetGate, NoopResponseScorer, NoopSoulAttester};
 pub use provider::ModelProviderAdapter;
 pub use registry::{BoxedWorkflowExecutor, WorkflowRegistry};
-pub use runner::run_workflow_as_tick;
+pub use runner::{WorkflowRunInputs, run_workflow_as_tick};
 pub use runtime_handle::ModeRuntimeHandle;
 pub use tools::ToolHarnessAdapter;
