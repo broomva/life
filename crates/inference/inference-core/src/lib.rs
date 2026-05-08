@@ -18,6 +18,7 @@ pub mod kv_inmem;
 pub mod router;
 pub mod types;
 
+pub use error::InferenceError;
 pub use types::{CloseCode, FinishReason, Token, ToolCall, ToolResult};
 
 #[cfg(test)]
@@ -66,5 +67,39 @@ mod types_tests {
             FinishReason::Cancelled,
         ];
         assert_eq!(variants.len(), 5);
+    }
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::error::InferenceError;
+    use super::types::CloseCode;
+
+    #[test]
+    fn backend_error_carries_close_code() {
+        let e = InferenceError::backend(CloseCode::Deadline, "took too long");
+        assert!(matches!(e.close_code(), Some(CloseCode::Deadline)));
+        assert!(format!("{e}").contains("took too long"));
+    }
+
+    #[test]
+    fn cancelled_has_no_close_code() {
+        let e = InferenceError::Cancelled;
+        assert!(e.close_code().is_none());
+    }
+
+    #[test]
+    fn network_wraps_io() {
+        let io = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset");
+        let e = InferenceError::Network(io);
+        assert!(format!("{e}").contains("network"));
+    }
+
+    #[test]
+    fn error_is_non_exhaustive() {
+        // Documents that the enum is `#[non_exhaustive]` so downstream
+        // crates must use a wildcard arm. Catching this at the type
+        // level is the goal — this test just sanity-checks construction.
+        let _ = InferenceError::backend(CloseCode::Normal, "fine");
     }
 }
