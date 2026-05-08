@@ -19,6 +19,7 @@ pub mod router;
 pub mod types;
 
 pub use error::InferenceError;
+pub use ids::{KvKey, ModelId};
 pub use types::{CloseCode, FinishReason, Token, ToolCall, ToolResult};
 
 #[cfg(test)]
@@ -101,5 +102,39 @@ mod error_tests {
         // crates must use a wildcard arm. Catching this at the type
         // level is the goal — this test just sanity-checks construction.
         let _ = InferenceError::backend(CloseCode::Normal, "fine");
+    }
+}
+
+#[cfg(test)]
+mod ids_tests {
+    use super::ids::*;
+
+    #[test]
+    fn model_id_round_trip() {
+        let id = ModelId::new("anthropic/claude-sonnet-4.6");
+        assert_eq!(id.as_str(), "anthropic/claude-sonnet-4.6");
+        assert_eq!(id.to_string(), "anthropic/claude-sonnet-4.6");
+    }
+
+    #[test]
+    fn model_id_rejects_empty() {
+        assert!(ModelId::try_new("").is_err());
+        assert!(ModelId::try_new("   ").is_err());
+    }
+
+    #[test]
+    fn kv_key_is_stable_for_same_inputs() {
+        let a = KvKey::derive("model/a", "did:key:z6Mk…", b"prompt-bytes", 0..128);
+        let b = KvKey::derive("model/a", "did:key:z6Mk…", b"prompt-bytes", 0..128);
+        assert_eq!(a, b, "key derivation must be deterministic");
+    }
+
+    #[test]
+    fn kv_key_changes_with_inputs() {
+        let base = KvKey::derive("m", "d", b"p", 0..1);
+        assert_ne!(base, KvKey::derive("m2", "d", b"p", 0..1));
+        assert_ne!(base, KvKey::derive("m", "d2", b"p", 0..1));
+        assert_ne!(base, KvKey::derive("m", "d", b"p2", 0..1));
+        assert_ne!(base, KvKey::derive("m", "d", b"p", 0..2));
     }
 }
