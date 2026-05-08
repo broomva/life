@@ -24,6 +24,7 @@ pub use error::InferenceError;
 pub use ids::{KvKey, ModelId};
 pub use kv::{AnimaIdRef, KvCache, KvHandle, KvPinGuard, LagoOidRef};
 pub use kv_inmem::InMemoryKvCache;
+pub use router::{InferencePolicy, InferenceRouter, RoutingHint, WorkloadClass};
 pub use types::{CloseCode, FinishReason, Token, ToolCall, ToolResult};
 
 #[cfg(test)]
@@ -200,5 +201,50 @@ mod backend_tests {
         assert!(c.spec_decode);
         assert!(c.fast_swap);
         assert_eq!(c.max_context_tokens, 128_000);
+    }
+}
+
+#[cfg(test)]
+mod router_tests {
+    use std::sync::Arc;
+
+    use super::backend::InferenceBackend;
+    use super::backend_inprocess::InProcessInferenceBackend;
+    use super::ids::ModelId;
+    use super::router::*;
+
+    #[test]
+    fn single_backend_router_routes_to_only_backend() {
+        let b: Arc<dyn InferenceBackend> =
+            Arc::new(InProcessInferenceBackend::new_for_test(vec!["fake"]));
+        let router = InferenceRouter::new(vec![b.clone()], InferencePolicy::single());
+        let hint = RoutingHint {
+            model: ModelId::new("fake"),
+            workload: WorkloadClass::Synthesis,
+            deadline: None,
+        };
+        let chosen = router.route(&hint).expect("routes");
+        assert_eq!(chosen.backend_id(), b.backend_id());
+    }
+
+    #[test]
+    fn router_returns_err_when_no_backend_supports_model() {
+        let b: Arc<dyn InferenceBackend> =
+            Arc::new(InProcessInferenceBackend::new_for_test(vec!["only-this"]));
+        let router = InferenceRouter::new(vec![b], InferencePolicy::strict_model_match());
+        let hint = RoutingHint {
+            model: ModelId::new("not-supported"),
+            workload: WorkloadClass::Synthesis,
+            deadline: None,
+        };
+        assert!(router.route(&hint).is_err());
+    }
+
+    #[test]
+    fn workload_class_variants() {
+        let _ = WorkloadClass::Routing;
+        let _ = WorkloadClass::Synthesis;
+        let _ = WorkloadClass::ToolEmit;
+        let _ = WorkloadClass::Embed;
     }
 }
