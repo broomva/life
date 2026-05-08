@@ -542,6 +542,9 @@ dependencies = [
  "aios-sandbox",
  "aios-tools",
  "anyhow",
+ "arcan-aios-adapters",
+ "arcan-core",
+ "arcan-provider",
  "async-trait",
  "chrono",
  "ergon",
@@ -552,6 +555,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
