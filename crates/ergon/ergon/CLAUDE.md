@@ -1,28 +1,49 @@
 # CLAUDE.md — `ergon` crate
 
 > Instructions for AI agents working in this crate.
-> Last updated: 2026-05-06.
+> Last updated: 2026-05-08.
 
 ## What this crate is
 
-**ergon** is Life's Layer-2 agent-harness primitive. The trait set that lets
-a Broomva developer write a `Workflow` in Rust whose deterministic outer body
-orchestrates autonomous inner LLM steps, integrated end-to-end with the Life
-substrate.
+**ergon** is the workflow primitive for Life's agent harness. It's a small
+trait crate (`Workflow`, `Step`, `StepCtx`, `Hook`, `StreamSink`,
+`InferenceRequest`) that a Broomva developer implements to express a
+**bounded multi-turn agent operation** as plain async Rust whose body
+delegates to autonomous model + tool calls.
 
-**Layered position** (locked):
+A workflow is **not a long-horizon agent**. It is **one shape of tick
+body** (see `docs/architecture/agent-harness.md`): the kernel runs it as
+the contents of a single tick. The kernel still owns the agent loop;
+ergon just supplies a richer alternative to the existing single-call
+tick body.
+
+**Position in the harness stack** (canonical):
 
 ```
-Layer 4 — Life (Agent OS substrate)
-Layer 3 — arcan (runtime daemon)
-Layer 2 — ergon (HARNESS — this crate)
-Layer 1 — arcan-provider (model wire connectors)
-Layer 0 — model
+L5 — Session orchestration (arcand::ConsciousnessActor)
+L4 — Tick engine (aios_runtime::KernelRuntime)
+L3.5 — Tick body — direct OR ergon::Workflow      ← THIS CRATE supplies the workflow shape
+L3 — Port traits (aios-runtime)
+L2 — Substrate adapters (incl. arcan-ergon)
+L1 — Substrate primitives (lago, praxis, anima, ...)
+L0 — Kernel contract (aios-protocol)
 ```
+
+See `docs/architecture/agent-harness.md` for the full 7-layer stack and
+the two scopes of the agent loop (outer / session vs inner / tick).
+
+**Critical invariant**: ergon does NOT replace `KernelRuntime`. It does
+NOT replace `arcan-harness` (which isn't the harness anyway — it's a
+~300 LOC utility crate). It does NOT compete with the tick engine.
+Workflows are **bounded operations that run inside one kernel tick**.
 
 ## Spec & tracker
 
 - Spec: `core/life/docs/superpowers/specs/2026-05-05-ergon-v0.1.md`
+  (§§0-5, 7-9, 11-13 valid; §6 + §10 superseded)
+- Adapter spec: `core/life/docs/superpowers/specs/2026-05-08-bro-1001-ergon-tick-body.md`
+  (the corrected §6 + §10 framing)
+- Architecture: `core/life/docs/architecture/agent-harness.md`
 - Linear umbrella: BRO-994 — https://linear.app/broomva/issue/BRO-994
 
 ## Status (2026-05-06)
