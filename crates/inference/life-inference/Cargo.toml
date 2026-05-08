@@ -1,0 +1,30 @@
+[package]
+name = "life-inference"
+description = "Facade aggregator for the Life Agent OS inference layer (Spec E)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Only the in-process reference backend by default — no external deps.
+default = ["in-process"]
+in-process = []
+# Spec E sub-phases B, C, D, E reserve these feature names but do not
+# wire them in E-Sub-A. Listed here so the facade's feature surface is
+# the canonical place to enable a backend.
+mlx = []
+vllm = []
+vigil = []
+autonomic = []
+
+[dependencies]
+inference-core.workspace = true

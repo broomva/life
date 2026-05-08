@@ -4781,6 +4781,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "inference-core"
+version = "0.3.0"
+dependencies = [
+ "blake3",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5939,6 +5951,13 @@ dependencies = [
  "haima-core",
  "haima-wallet",
  "haima-x402",
+]
+
+[[package]]
+name = "life-inference"
+version = "0.3.0"
+dependencies = [
+ "inference-core",
 ]
 
 [[package]]
