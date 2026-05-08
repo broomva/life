@@ -310,6 +310,140 @@ tick. Replay can choose:
 - Workflow-level granularity: re-stream every `TextDelta`,
   `ToolUseStart`, etc. (this is for inner-loop debugging)
 
+## Where evaluators live (nous metacognition)
+
+Nous evaluators come in two shapes that map cleanly onto the two scopes
+above. **Choosing the right shape per evaluator is an architectural
+decision, not a stylistic one** — it determines whether the evaluator
+gets per-tick traceability, autonomic gating, anima attestation, and
+spec-E silicon routing for free.
+
+### Scope A — Inline scoring (per-turn hook)
+
+For evaluators that score **a single model response** with cheap
+deterministic logic (token counts, structural checks) or with a single
+LLM-as-judge call: stay as a `nous_core::NousEvaluator` direct impl,
+invoked through the `NousScoreHook` (`crates/ergon/ergon-life-hooks/`)
+that fires on every `on_post_inference` event inside any workflow.
+
+```text
+inside Workflow::execute:
+  ctx.run_inference_streaming(req)
+    └── provider.stream(...)
+         ├── tokens stream out
+         └── on_post_inference fires
+               └── NousScoreHook
+                     └── adapter calls nous_core::NousEvaluator
+                           └── score recorded as tracing event +
+                               (future) lago Custom event
+```
+
+Failure semantics: **observe-only**. A failing scorer logs a warning
+and the workflow continues — score availability is not a precondition
+for the agent's progress.
+
+### Scope B — Block-level evaluation (workflow-bodied tick)
+
+For evaluators that need the **autonomous loop** — multi-step LLM
+reasoning, tool dispatch, structured output parsing, journal lookups —
+implement them as `ergon::Workflow` impls and run them as workflow
+ticks. They become first-class agents:
+
+| Evaluator profile | Right home |
+|---|---|
+| Pure heuristic (token count, regex, deterministic metric) | `nous_core::NousEvaluator` impl in `nous-heuristics` |
+| Single rule check ("did response cite ≥1 source?") | `nous_core::NousEvaluator` impl in `nous-judge` |
+| LLM-as-judge with structured verdict (novelty + specificity + relevance) | `ergon::Workflow` in `apps/<judge-name>/` |
+| Multi-step LLM evaluation with tool dispatch (read PR, run tests, score code) | `ergon::Workflow` |
+| Cross-session pattern detection over the journal | `ergon::Workflow` running in a `Verify` tick |
+
+The dividing line: **does the evaluator need the autonomous loop?**
+If yes, it's a workflow. If no, it's a direct `NousEvaluator` impl.
+
+### Verify-mode composition (deferred enhancement)
+
+The kernel's `OperatingMode::Verify` is the seam where post-execution
+evaluation runs. Today it dispatches via direct nous calls. Once
+workflow-bodied ticks ship (BRO-1001), Verify mode can dispatch
+naturally to a workflow tick body whose workflow is itself a nous
+evaluator:
+
+```text
+KernelRuntime in mode=Execute
+  └── tick N: workflow body produces a verdict, writes a file, etc.
+       └── TickCompleted{mode_after=Verify}
+KernelRuntime in mode=Verify
+  └── tick N+1: kind=Workflow{name="session.evaluator", input=<prior>}
+       └── arcan-ergon::run_workflow_as_tick(...)
+            └── nous-evaluator workflow runs as the tick body
+            └── produces score, decision
+       └── TickCompleted{output=score, mode_after=Sleep|Recover|Execute}
+```
+
+Verify mode becomes "run the verify-workflow." The evaluator is just
+another workflow. Everything composes:
+
+- The Verify tick produces kernel-typed `TickStarted{Verify}` /
+  `TickCompleted` events
+- The evaluator workflow's internal stream events nest under that
+  tick's `run_id`
+- `AnimaAttestHook` signs the start/end of the evaluator workflow
+- `AutonomicBudgetHook` gates model calls inside it
+- The outcome feeds back into `AgentStateVector` exactly as today's
+  Verify-mode evaluations do
+
+This is **not v0.1 scope**. v0.1 lands the workflow-tick mechanism
+(BRO-1001 + BRO-1001b) and the first concrete evaluator workflow
+(`bookkeeping-judge`, BRO-1003). Verify-mode dispatch becomes the
+natural next composition once those prove the pattern.
+
+### Optional `WorkflowAsNousEvaluator` adapter
+
+A future ~50 LOC adapter could wrap any `ergon::Workflow` as a
+`nous_core::NousEvaluator` so existing nous-routing code
+(`EvaluatorRegistry`, `NousJudge` selection) can dispatch to workflows
+through the existing trait surface:
+
+```rust
+// crates/nous/nous-ergon/ (potential, not committed)
+pub struct WorkflowAsNousEvaluator<W: ergon::Workflow> {
+    executor: ergon::WorkflowExecutor<W>,
+    // + adapter context for building StepCtx
+}
+
+impl<W: ergon::Workflow> nous_core::NousEvaluator for WorkflowAsNousEvaluator<W> {
+    async fn evaluate(&self, ctx: &EvalContext) -> NousResult<EvalResult> {
+        // marshal EvalContext → W::Input, call executor.run, marshal
+        // W::Output → EvalResult
+    }
+}
+```
+
+Cheap composition. Write it when the first workflow needs to be
+addressable through nous-routing. Not before.
+
+### What this gives us
+
+Three architectural wins land at once when nous metacognition runs as
+workflows:
+
+1. **Per-tick traceability for evaluations.** Replay shows "evaluated
+   session S1 at tick R7-T12; evaluator did 3 model calls; scored
+   7/9; decision=promote." Direct-call evaluators today don't get
+   this.
+2. **Composable evaluators.** A meta-evaluator workflow can call
+   sub-evaluator workflows. "Score this extract on novelty / specificity
+   / relevance" becomes three child workflows whose outputs an
+   aggregator workflow combines. No custom orchestration.
+3. **Substrate inheritance.** Evaluators automatically get anima
+   attestation, autonomic gating, lago durability, vigil tracing, and
+   (when Spec E ships) silicon routing — without writing any
+   integration code.
+
+The deeper truth: **nous evaluators that need to think (vs just
+compute) are themselves agents**. Treating them as workflows isn't a
+shoehorn — it's recognizing what they always were.
+
 ## Bottom-up dependency chain
 
 Each layer depends only on layers below it. **No backwards arrows. No

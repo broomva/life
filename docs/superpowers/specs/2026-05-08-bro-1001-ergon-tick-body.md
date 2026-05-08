@@ -358,6 +358,34 @@ diff (~20 LOC) but it's the **seam** that makes ergon useful.
 This change is part of BRO-1001's scope. Not deferred to BRO-1001b
 (that's the *daemon*-side wiring; this is the *kernel*-side seam).
 
+## 6.1 Composition with `OperatingMode::Verify` (forward-compatible note)
+
+`TickKind::Workflow` is what enables a clean future composition where
+the kernel's `Verify` mode dispatches to evaluator workflows directly.
+That's not in v0.1 scope, but the `TickKind` enum is intentionally
+non-exhaustive so the kernel can grow:
+
+```rust
+#[non_exhaustive]
+pub enum TickKind {
+    Direct,
+    Workflow { name: String, input: serde_json::Value },
+    // Future variants (NOT in v0.1):
+    // VerifyWorkflow { evaluator: String, target: RunId }
+    // RecoverWorkflow { strategy: String, error_summary: String }
+}
+```
+
+When this composition lands (post-v0.1, post-BRO-1003 proves the
+pattern), evaluator workflows like `bookkeeping.promotion-judge` and
+`session.evaluator` can be invoked by the kernel automatically when
+`mode == Verify`. See `docs/architecture/agent-harness.md` § "Where
+evaluators live (nous metacognition)" for the detailed composition.
+
+This is mentioned here so future agents reading this spec understand
+that `TickKind`'s shape is anticipating evaluator-workflow dispatch
+without committing to it. v0.1 ships only `Direct` and `Workflow`.
+
 ## 7. Definition of done — v0.1 ships when
 
 ALL of the following are true:
