@@ -1,0 +1,1 @@
+//! Inference router. Stub.

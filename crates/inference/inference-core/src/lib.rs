@@ -18,11 +18,53 @@ pub mod kv_inmem;
 pub mod router;
 pub mod types;
 
-pub use backend::{BackendCapabilities, InferenceBackend, SpeculativeStepContext, StepContext};
-pub use backend_inprocess::InProcessInferenceBackend;
-pub use error::InferenceError;
-pub use ids::{KvKey, ModelId};
-pub use kv::{AnimaIdRef, KvCache, KvHandle, KvPinGuard, LagoOidRef};
-pub use kv_inmem::InMemoryKvCache;
-pub use router::{InferencePolicy, InferenceRouter, RoutingHint, WorkloadClass};
 pub use types::{CloseCode, FinishReason, Token, ToolCall, ToolResult};
+
+#[cfg(test)]
+mod types_tests {
+    use super::types::*;
+
+    #[test]
+    fn close_code_round_trip() {
+        for code in [
+            CloseCode::Normal,
+            CloseCode::UnsupportedFrame,
+            CloseCode::Deadline,
+            CloseCode::KvEvicted,
+            CloseCode::ModelSwap,
+            CloseCode::BackendUnavailable,
+            CloseCode::AnimaInvalidated,
+            CloseCode::ToolAwait,
+        ] {
+            let n: u16 = code.into();
+            let back = CloseCode::try_from(n).expect("known code");
+            assert_eq!(code, back, "round-trip failed for {code:?}");
+        }
+    }
+
+    #[test]
+    fn close_code_unknown_rejected() {
+        assert!(CloseCode::try_from(9999u16).is_err());
+    }
+
+    #[test]
+    fn token_serializes() {
+        let t = Token::Text("hello".into());
+        let s = serde_json::to_string(&t).unwrap();
+        let back: Token = serde_json::from_str(&s).unwrap();
+        assert_eq!(t, back);
+    }
+
+    #[test]
+    fn finish_reason_variants() {
+        // Locks the public enum surface — adding a variant must update this list.
+        let variants = [
+            FinishReason::Stop,
+            FinishReason::Length,
+            FinishReason::ToolCallEmitted,
+            FinishReason::DeadlineExceeded,
+            FinishReason::Cancelled,
+        ];
+        assert_eq!(variants.len(), 5);
+    }
+}
