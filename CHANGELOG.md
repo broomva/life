@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Changed
+- **Architectural correction (docs only, no code)**: the framing in
+  `docs/superpowers/specs/2026-05-05-ergon-v0.1.md` §6 (Composition with
+  arcan) and §10 (Migration plan) was structurally wrong. Both sections
+  assumed ergon would replace `arcan-harness` as a parallel session-level
+  runtime via an `AgentKind` trait abstraction. Reality:
+  1. `arcan-harness` is a ~300 LOC tool/sandbox utility crate, not the
+     agent harness. The actual agent harness is a 7-layer runtime stack
+     across ~25 crates.
+  2. Ergon's `Workflow::execute()` is one async fn — it cannot replace
+     the long-horizon tick engine (`aios_runtime::KernelRuntime`)
+     without losing per-tick journal traceability that autonomic /
+     EGRI / branching depend on.
+  Corrected framing: ergon is **one shape of tick body** alongside the
+  existing direct-call tick body. Both compose with KernelRuntime; both
+  produce per-tick events; **neither replaces anything**. Documented
+  comprehensively in:
+  - `docs/architecture/agent-harness.md` — new canonical 7-layer
+    runtime architecture (didn't exist before)
+  - `docs/superpowers/specs/2026-05-08-bro-1001-ergon-tick-body.md` —
+    new corrected BRO-1001 design (supersedes §6 + §10 of the original
+    ergon spec)
+  - In-place SUPERSEDED markers on §6 and §10 of
+    `2026-05-05-ergon-v0.1.md`
+  - Updated `crates/ergon/ergon/CLAUDE.md` with the corrected
+    positioning
+  No ergon code changes. The trait surface, hook lifecycle, wire types,
+  auto-hooks, and stream sinks are all correct as-shipped — they're
+  precisely what a tick-body adapter needs. What changes is the
+  positioning of BRO-1001 (the integration adapter), which becomes
+  `arcan-ergon::run_workflow_as_tick(...)` rather than a session-level
+  `ErgonAgentKind`. (BRO-1001)
+
 ### Added
 - `ergon-life-hooks` — new sibling crate at `crates/ergon/ergon-life-hooks/`
   housing the four "Life-native" auto-registered hooks (spec §3.8):
