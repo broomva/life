@@ -19,6 +19,7 @@ pub mod router;
 pub mod types;
 
 pub use backend::{BackendCapabilities, InferenceBackend, SpeculativeStepContext, StepContext};
+pub use backend_inprocess::InProcessInferenceBackend;
 pub use error::InferenceError;
 pub use ids::{KvKey, ModelId};
 pub use kv::{AnimaIdRef, KvCache, KvHandle, KvPinGuard, LagoOidRef};
