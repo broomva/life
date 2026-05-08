@@ -72,7 +72,7 @@ impl std::fmt::Display for ModelId {
 ///
 /// Derivation: BLAKE3 over a length-prefixed concatenation of
 /// `(model_id, anima_did, prompt_bytes, range.start, range.end)`. The
-/// 32-byte digest is the key. AnimaId is part of the key so KV is
+/// 32-byte digest is the key. `AnimaId` is part of the key so KV is
 /// scoped to identity per L5-D6.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct KvKey([u8; 32]);
@@ -113,9 +113,10 @@ impl KvKey {
     /// Hex-encoded 32-byte digest (64 chars).
     #[must_use]
     pub fn hex(&self) -> String {
+        use std::fmt::Write as _;
         let mut s = String::with_capacity(64);
         for b in self.0 {
-            s.push_str(&format!("{b:02x}"));
+            write!(s, "{b:02x}").expect("writing to a String never fails");
         }
         s
     }

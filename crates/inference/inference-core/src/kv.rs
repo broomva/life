@@ -38,7 +38,7 @@ impl Drop for KvPinGuard {
     }
 }
 
-/// Opaque AnimaId reference used as the scoping key for [`KvCache::persist`]
+/// Opaque `AnimaId` reference used as the scoping key for [`KvCache::persist`]
 /// and [`KvCache::rehydrate`]. Backends do not validate this — Anima
 /// (`crates/anima/anima-identity`) is the source of truth; this is
 /// passed-through.
@@ -67,7 +67,7 @@ pub struct LagoOidRef(pub Arc<str>);
 /// The KV cache contract. Backends provide their own impl; the dev /
 /// test impl is [`crate::InMemoryKvCache`].
 ///
-/// Locked decisions: L5-D2 (Lago-backed by default), L5-D6 (AnimaId-
+/// Locked decisions: L5-D2 (Lago-backed by default), L5-D6 (`AnimaId`-
 /// scoped), L5-D5 (no tool runtime — KV is for model state only).
 pub trait KvCache: Send + Sync + 'static {
     /// Look up a cached slice. `None` on miss.

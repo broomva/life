@@ -104,7 +104,7 @@ pub enum CloseCode {
     ModelSwap = 4003,
     /// Backend lost upstream provider; router should pick another.
     BackendUnavailable = 4004,
-    /// AnimaId bound to this stream was rotated; KV is invalidated.
+    /// `AnimaId` bound to this stream was rotated; KV is invalidated.
     /// Caller resolves the new DID and restarts.
     AnimaInvalidated = 4005,
     /// L5-D5: model emitted a tool call. Stream closes; caller runs
