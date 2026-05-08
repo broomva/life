@@ -1,0 +1,33 @@
+[package]
+name = "ergon-life-sinks"
+description = "Life-flavored stream sinks for the ergon harness — durable replay (lago), OTel tracing (vigil-compatible), and bounded mpsc fanout (lifegw)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ergon.workspace = true
+
+# LagoSink — durable replay via lago-core's Journal trait.
+aios-protocol.workspace = true
+lago-core.workspace = true
+
+# Wire shapes / async / serialization.
+async-trait.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "rt"] }
+tracing.workspace = true
+ulid = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }

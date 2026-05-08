@@ -3418,6 +3418,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ergon-life-sinks"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "async-trait",
+ "ergon",
+ "lago-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
