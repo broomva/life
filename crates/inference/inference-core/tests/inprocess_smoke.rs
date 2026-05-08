@@ -13,8 +13,7 @@ use inference_core::{
 
 #[tokio::test]
 async fn inprocess_emits_done_token() {
-    let backend =
-        inference_core::InProcessInferenceBackend::new_for_test(vec!["fake-model"]);
+    let backend = inference_core::InProcessInferenceBackend::new_for_test(vec!["fake-model"]);
     let cache = InMemoryKvCache::new();
     let anima = AnimaIdRef::new("did:key:zDn-test");
     let kv_root = cache.allocate_for_test();
@@ -45,8 +44,7 @@ async fn inprocess_emits_done_token() {
 
 #[test]
 fn inprocess_advertises_capabilities() {
-    let backend =
-        inference_core::InProcessInferenceBackend::new_for_test(vec!["fake-model"]);
+    let backend = inference_core::InProcessInferenceBackend::new_for_test(vec!["fake-model"]);
     let caps = backend.capabilities();
     assert!(!caps.spec_decode, "in-process wraps aisdk; no spec decode");
     assert!(!caps.fast_swap);
@@ -60,8 +58,7 @@ fn inprocess_advertises_capabilities() {
 #[test]
 #[should_panic(expected = "does not support speculative decoding")]
 fn inprocess_step_speculative_panics_when_unsupported() {
-    let backend =
-        inference_core::InProcessInferenceBackend::new_for_test(vec!["fake-model"]);
+    let backend = inference_core::InProcessInferenceBackend::new_for_test(vec!["fake-model"]);
     let cache = InMemoryKvCache::new();
     let anima = AnimaIdRef::new("did:key:zDn-test");
     let kv_root = cache.allocate_for_test();

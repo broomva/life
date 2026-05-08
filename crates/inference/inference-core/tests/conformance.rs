@@ -16,9 +16,7 @@
 use std::time::Duration;
 
 use futures::StreamExt;
-use inference_core::{
-    AnimaIdRef, InMemoryKvCache, InferenceBackend, ModelId, StepContext, Token,
-};
+use inference_core::{AnimaIdRef, InMemoryKvCache, InferenceBackend, ModelId, StepContext, Token};
 
 /// Conformance assertion: backend emits `Token::Done` before stream end.
 async fn assert_emits_done<B: InferenceBackend>(backend: &B, model_str: &str) {
@@ -66,8 +64,7 @@ fn assert_stable_id<B: InferenceBackend>(backend: &B) {
 
 #[tokio::test]
 async fn conformance_in_process_backend() {
-    let backend =
-        inference_core::InProcessInferenceBackend::new_for_test(vec!["conf-model"]);
+    let backend = inference_core::InProcessInferenceBackend::new_for_test(vec!["conf-model"]);
     assert_stable_id(&backend);
     assert_emits_done(&backend, "conf-model").await;
 }
