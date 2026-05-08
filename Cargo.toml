@@ -92,6 +92,9 @@ members = [
     "crates/anima/anima-core",
     "crates/anima/anima-identity",
     "crates/anima/anima-lago",
+    # Inference — Agent-Loop Compute Contract (Spec E)
+    "crates/inference/inference-core",
+    "crates/inference/life-inference",
     # Vigil — observability
     "crates/vigil/life-vigil",
     # Spaces — networking (excluded: needs spacetime generate to update bindings)
