@@ -198,6 +198,7 @@ haima-outcome = { path = "crates/haima/haima-outcome", version = "0.3.0" }
 haima-lago = { path = "crates/haima/haima-lago", version = "0.3.0" }
 haima-wallet = { path = "crates/haima/haima-wallet", version = "0.3.0" }
 haima-x402 = { path = "crates/haima/haima-x402", version = "0.3.0" }
+inference-core = { path = "crates/inference/inference-core", version = "0.3.0" }
 lago-aios-eventstore-adapter = { path = "crates/lago/lago-aios-eventstore-adapter", version = "0.3.0" }
 lago-ingest = { path = "crates/lago/lago-ingest", version = "0.3.0" }
 lago-knowledge = { path = "crates/lago/lago-knowledge", version = "0.3.0" }
@@ -212,6 +213,7 @@ lago-store = { path = "crates/lago/lago-store", version = "0.3.0" }
 life-kernel-core = { path = "crates/life-kernel/life-kernel-core", version = "0.3.0" }
 life-kernel-gate = { path = "crates/life-kernel/life-kernel-gate", version = "0.3.0" }
 life-kernel-proto = { path = "crates/life-kernel/life-kernel-proto", version = "0.3.0" }
+life-inference = { path = "crates/inference/life-inference", version = "0.3.0" }
 life-vigil = { path = "crates/vigil/life-vigil", version = "0.3.0" }
 nous-api = { path = "crates/nous/nous-api", version = "0.3.0" }
 nous-core = { path = "crates/nous/nous-core", version = "0.3.0" }

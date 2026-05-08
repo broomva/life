@@ -14,4 +14,17 @@ categories.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Only the in-process reference backend by default — no external deps.
+default = ["in-process"]
+in-process = []
+# Spec E sub-phases B, C, D, E reserve these feature names but do not
+# wire them in E-Sub-A. Listed here so the facade's feature surface is
+# the canonical place to enable a backend.
+mlx = []
+vllm = []
+vigil = []
+autonomic = []
+
 [dependencies]
+inference-core.workspace = true

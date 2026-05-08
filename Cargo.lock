@@ -5955,6 +5955,9 @@ dependencies = [
 [[package]]
 name = "life-inference"
 version = "0.3.0"
+dependencies = [
+ "inference-core",
+]
 
 [[package]]
 name = "life-kernel-conformance"
