@@ -2,7 +2,70 @@
 
 ## Unreleased
 
+### Added
+- `arcan-ergon` — new sibling crate at `crates/arcan/arcan-ergon/`
+  delivering the kernel-side adapter that runs an `ergon::Workflow`
+  as the body of a single `aios_runtime::KernelRuntime` tick. Resolves
+  BRO-1001's "ergon tick-body adapter" deliverable. Modules:
+  * `dispatcher` — `ErgonWorkflowDispatcher` implements the new
+    `aios_runtime::WorkflowTickDispatcher` trait the kernel calls per
+    `TickKind::Workflow` invocation.
+  * `registry` — `WorkflowRegistry` holds typed
+    `Arc<W: ergon::Workflow>` impls behind a `BoxedWorkflowExecutor`
+    trait that erases the `Input`/`Output` generics so the kernel can
+    address workflows by string name.
+  * `provider` — `ModelProviderAdapter` wraps
+    `aios_protocol::ModelProviderPort` as `ergon::Provider`,
+    translating between the kernel's flat `ModelCompletionRequest`
+    shape and ergon's structured `Vec<Message>` form, and synthesizing
+    canonical `StreamEvent` sequences from the port's directives.
+  * `tools` — `ToolHarnessAdapter` wraps `ToolHarnessPort` as
+    `ergon::ToolRegistry`. Capability gating is intentionally NOT
+    duplicated here — it fires on `Hook::on_pre_tool_use` via the
+    dedicated capability hook so it doesn't double-trigger.
+  * `runtime_handle` — `ModeRuntimeHandle` exposes a per-tick captured
+    `OperatingMode` as `ergon::RuntimeHandle`.
+  * `hooks` — provides `KernelCapabilityResolver` (real
+    `PolicyGatePort`-backed adapter for `CapabilityResolver`, with a
+    `ToolCapabilityMap` declaring per-tool capability requirements
+    and fail-closed behavior on unknown tools), plus `NoopBudgetGate`
+    / `NoopResponseScorer` / `NoopSoulAttester` permissive stand-ins
+    for `BudgetGate` / `ResponseScorer` / `SoulAttester`. Real
+    autonomic / nous / anima implementations are deliberately left
+    for follow-up tickets — the BRO-1001 minimum-viable adapter ships
+    the only adapter that must be functional (capability gating).
+  * `runner::run_workflow_as_tick` — composes a fully-built
+    `ergon::StepCtx` from a `WorkflowTickInvocation` and drives the
+    workflow body, returning a typed `WorkflowTickOutcome` with the
+    workflow's JSON output and the count of stream events emitted.
+  16 unit tests + 4 end-to-end integration tests
+  (`tests/workflow_tick_e2e.rs`) verifying the workflow tick path
+  against a real `KernelRuntime` over file-backed event storage:
+  workflow runs, JSON output ends up in an `ergon.workflow_output`
+  `Custom` event in the journal, direct ticks still work alongside
+  the dispatcher, unknown workflows surface clear errors. (BRO-1001)
+- arcan binary now installs an `ErgonWorkflowDispatcher` (with an
+  empty registry by default) on the kernel runtime at startup.
+  Adopting daemons override this section to register their concrete
+  `ergon::Workflow` impls before the runtime starts serving.
+  (BRO-1001)
+
 ### Changed
+- `aios_runtime::TickInput` now carries a new `kind: TickKind` field
+  (default `TickKind::Direct`). `TickKind::Workflow { name, input }`
+  routes the tick body through a registered
+  `WorkflowTickDispatcher` (see arcan-ergon) instead of the kernel's
+  built-in single-call body. Existing `TickInput` constructors must
+  set `kind`; all in-tree call sites updated to `TickKind::Direct`
+  for behavior parity. (BRO-1001)
+- `aios_runtime::KernelRuntime` gained two builder-style methods —
+  `with_workflow_dispatcher(dispatcher)` and
+  `has_workflow_dispatcher()` — for hosts that want to wire a
+  non-direct tick body. The dispatcher trait
+  (`WorkflowTickDispatcher` / `WorkflowTickInvocation` /
+  `WorkflowTickOutcome`) lives in `aios-runtime` so workflow runners
+  (arcan-ergon today, future shapes later) plug in without the
+  kernel taking on substrate dependencies. (BRO-1001)
 - **Architectural correction (docs only, no code)**: the framing in
   `docs/superpowers/specs/2026-05-05-ergon-v0.1.md` §6 (Composition with
   arcan) and §10 (Migration plan) was structurally wrong. Both sections
