@@ -18,6 +18,7 @@ pub mod kv_inmem;
 pub mod router;
 pub mod types;
 
+pub use backend::{BackendCapabilities, InferenceBackend, SpeculativeStepContext, StepContext};
 pub use error::InferenceError;
 pub use ids::{KvKey, ModelId};
 pub use kv::{AnimaIdRef, KvCache, KvHandle, KvPinGuard, LagoOidRef};
@@ -171,5 +172,32 @@ mod kv_tests {
             assert_eq!(cache.pin_count(h), 1);
         }
         assert_eq!(cache.pin_count(h), 0);
+    }
+}
+
+#[cfg(test)]
+mod backend_tests {
+    use super::backend::*;
+
+    #[test]
+    fn capabilities_default_is_minimal() {
+        let c = BackendCapabilities::minimal();
+        assert!(!c.spec_decode);
+        assert!(!c.fast_swap);
+        assert!(!c.on_chip_kv_persist);
+        assert!(!c.native_tool_emit);
+        assert_eq!(c.max_context_tokens, 0);
+        assert!(c.supported_models.is_empty());
+    }
+
+    #[test]
+    fn capabilities_with_helpers_compose() {
+        let c = BackendCapabilities::minimal()
+            .with_spec_decode(true)
+            .with_fast_swap(true)
+            .with_max_context_tokens(128_000);
+        assert!(c.spec_decode);
+        assert!(c.fast_swap);
+        assert_eq!(c.max_context_tokens, 128_000);
     }
 }
