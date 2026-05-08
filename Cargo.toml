@@ -17,6 +17,7 @@ members = [
     "crates/arcan/arcan-aios-adapters",
     "crates/arcan/arcan-anima",
     "crates/arcan/arcan-commands",
+    "crates/arcan/arcan-ergon",
     "crates/arcan/arcan-console",
     "crates/arcan/arcan-core",
     "crates/arcan/arcan-fleet",
@@ -178,6 +179,7 @@ aios-tools = { path = "crates/aios/aios-tools", version = "0.3.0" }
 anima-core = { path = "crates/anima/anima-core", version = "0.3.0" }
 anima-lago = { path = "crates/anima/anima-lago", version = "0.3.0" }
 arcan-core = { path = "crates/arcan/arcan-core", version = "0.3.0" }
+arcan-ergon = { path = "crates/arcan/arcan-ergon", version = "0.3.0" }
 arcan-provider-bubblewrap = { path = "crates/arcan/arcan-provider-bubblewrap", version = "0.3.0" }
 arcan-provider-local = { path = "crates/arcan/arcan-provider-local", version = "0.3.0" }
 arcan-provider-vercel = { path = "crates/arcan/arcan-provider-vercel", version = "0.3.0" }

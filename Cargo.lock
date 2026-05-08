@@ -367,6 +367,7 @@ dependencies = [
  "arcan-commands",
  "arcan-console",
  "arcan-core",
+ "arcan-ergon",
  "arcan-harness",
  "arcan-lago",
  "arcan-opsis",
@@ -528,6 +529,29 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "wait-timeout",
+]
+
+[[package]]
+name = "arcan-ergon"
+version = "0.3.0"
+dependencies = [
+ "aios-events",
+ "aios-policy",
+ "aios-protocol",
+ "aios-runtime",
+ "aios-sandbox",
+ "aios-tools",
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "ergon",
+ "ergon-life-hooks",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
