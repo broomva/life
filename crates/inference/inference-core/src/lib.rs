@@ -20,6 +20,7 @@ pub mod types;
 
 pub use error::InferenceError;
 pub use ids::{KvKey, ModelId};
+pub use kv::{AnimaIdRef, KvCache, KvHandle, KvPinGuard, LagoOidRef};
 pub use types::{CloseCode, FinishReason, Token, ToolCall, ToolResult};
 
 #[cfg(test)]
@@ -136,5 +137,38 @@ mod ids_tests {
         assert_ne!(base, KvKey::derive("m", "d2", b"p", 0..1));
         assert_ne!(base, KvKey::derive("m", "d", b"p2", 0..1));
         assert_ne!(base, KvKey::derive("m", "d", b"p", 0..2));
+    }
+}
+
+#[cfg(test)]
+mod kv_tests {
+    use super::kv::KvCache;
+    use super::kv_inmem::InMemoryKvCache;
+
+    #[tokio::test]
+    async fn handle_lifecycle_lookup_miss() {
+        let cache = InMemoryKvCache::new();
+        let key = super::ids::KvKey::derive("m", "d", b"p", 0..1);
+        assert!(cache.lookup(&key).is_none());
+    }
+
+    #[tokio::test]
+    async fn fork_yields_distinct_handle() {
+        let cache = InMemoryKvCache::new();
+        let h0 = cache.allocate_for_test();
+        let h1 = cache.fork(h0);
+        assert_ne!(h0, h1);
+    }
+
+    #[tokio::test]
+    async fn pin_guard_drops_pin_on_scope_exit() {
+        let cache = InMemoryKvCache::new();
+        let h = cache.allocate_for_test();
+        assert_eq!(cache.pin_count(h), 0);
+        {
+            let _guard = cache.pin(h);
+            assert_eq!(cache.pin_count(h), 1);
+        }
+        assert_eq!(cache.pin_count(h), 0);
     }
 }
