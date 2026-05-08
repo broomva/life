@@ -20,7 +20,10 @@ struct Slot {
     persisted_anima: Option<AnimaIdRef>,
 }
 
-#[derive(Default)]
+// `Default` is intentionally NOT derived here. The auto-derive would
+// initialise `next_handle` to `AtomicU64::new(0)` but the cache reserves
+// `0` as a sentinel — handles must start at `1`. Construct via
+// [`InMemoryKvCache::new`] only.
 struct Inner {
     next_handle: AtomicU64,
     by_key: Mutex<HashMap<KvKey, KvHandle>>,
@@ -81,10 +84,18 @@ impl KvCache for InMemoryKvCache {
         self.inner.by_key.lock().unwrap().get(key).copied()
     }
 
-    fn fork(&self, _base: KvHandle) -> KvHandle {
-        // Real CoW would observe reads from `_base` until divergence.
+    fn fork(&self, base: KvHandle) -> KvHandle {
+        // Real CoW would observe reads from `base` until divergence.
         // The in-mem cache stores nothing useful, so a fresh handle
-        // is sufficient for trait-shape tests.
+        // is sufficient for trait-shape tests. Defensively assert in
+        // debug builds that the caller is forking a known handle —
+        // catches obvious test-setup mistakes.
+        debug_assert!(
+            self.inner.slots.lock().unwrap().contains_key(&base),
+            "fork called with unknown KvHandle({:?})",
+            base.0,
+        );
+        let _ = base;
         self.fresh_handle()
     }
 

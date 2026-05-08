@@ -23,9 +23,16 @@ pub struct InProcessInferenceBackend {
 }
 
 impl InProcessInferenceBackend {
-    /// Construct for production use. The actual aisdk wiring is
-    /// deferred to a follow-up sub-phase; today this delegates to
-    /// the test path.
+    /// Construct for production use.
+    ///
+    /// **Today (E-Sub-A)** this constructor returns a backend whose
+    /// [`step`] method always emits an [`InferenceError::Backend`] with
+    /// [`crate::CloseCode::BackendUnavailable`]. The real `arcan-core::aisdk`
+    /// wiring lands in E-Sub-A.1 once the trait shape has cooled in main.
+    /// Use [`Self::new_for_test`] for tests; use a vendor backend
+    /// (E-Sub-B MLX, E-Sub-C vLLM, or later) for production traffic.
+    ///
+    /// [`step`]: InferenceBackend::step
     #[must_use]
     pub fn new(supported: Vec<ModelId>) -> Self {
         Self {
@@ -50,8 +57,13 @@ impl InProcessInferenceBackend {
 
 impl InferenceBackend for InProcessInferenceBackend {
     fn backend_id(&self) -> &str {
-        // Static literal — the trait API binds the lifetime to &self,
-        // so we explicitly cast to a `&'static str` slice via let.
+        // The trait method returns `&str` (lifetime tied to `&self`)
+        // because future backends may compose a dynamic id from loaded
+        // model state. Returning a string literal directly trips
+        // `clippy::unnecessary_literal_bound` (which wants
+        // `-> &'static str`) — but that lint is wrong for trait impls
+        // here. The `const` indirection narrows the literal to a place
+        // the lint doesn't fire while keeping the trait shape unchanged.
         const ID: &str = "in-process";
         ID
     }

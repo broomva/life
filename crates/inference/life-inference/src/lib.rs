@@ -5,5 +5,6 @@
 //! enable/disable goes through this crate's feature flags.
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs, rust_2018_idioms, clippy::pedantic)]
 
 pub use inference_core::*;

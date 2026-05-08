@@ -1,11 +1,14 @@
 //! Public token-stream types and close-code vocabulary.
 //!
-//! Close codes mirror Spec C₃ §6.5 (lifegw WebSocket close vocabulary)
-//! so reconnect-by-`last_token_no` works consistently across the runtime.
+//! Close codes are inspired by the Spec C₃ §6.5 lifegw WebSocket vocabulary
+//! but live in a *distinct numeric namespace* — the inference layer (L0/L1)
+//! sits below the lifegw boundary, and the same numeric values may carry
+//! different meanings here. See the [`CloseCode`] doc-comment for the
+//! authoritative inference-layer assignments.
 
 use serde::{Deserialize, Serialize};
 
-/// One token (or token-equivalent event) emitted by an [`InferenceBackend`].
+/// One token (or token-equivalent event) emitted by an [`crate::InferenceBackend`].
 ///
 /// Streams of `Result<Token, InferenceError>` are the primary return type
 /// of [`crate::InferenceBackend::step`]. Variants other than `Text` carry
@@ -85,9 +88,17 @@ pub struct ToolResult {
     pub is_error: bool,
 }
 
-/// Spec C₃ §6.5-aligned WebSocket close codes adapted for inference
-/// streams. Used by [`crate::InferenceError::Backend`] and re-export
-/// to caller streams via the wire format.
+/// Inference-layer close codes — vocabulary inspired by Spec C₃ §6.5
+/// but living in a distinct numeric namespace.
+///
+/// The lifegw layer (Spec C₃) emits its own close codes on its
+/// WebSocket boundary; those values may overlap numerically with the
+/// values here but carry *different meanings* (e.g., `4001` is
+/// `RateLimit` at lifegw vs. `Deadline` here). Callers translating
+/// between layers must do so via explicit mapping, not numeric reuse.
+///
+/// Used by [`crate::InferenceError::Backend`] and re-exported to
+/// caller streams via the wire format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u16)]
 pub enum CloseCode {

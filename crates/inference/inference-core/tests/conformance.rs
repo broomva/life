@@ -4,6 +4,14 @@
 //! we run the suite against `InProcessInferenceBackend::new_for_test`
 //! to lock the *contract* — a real backend that fails any of these
 //! is non-conforming.
+//!
+//! TODO(E-Sub-F): expand this scaffold with the full backend × model ×
+//! mode matrix from Spec E §"Sub-phases" → E-Sub-F:
+//!   * greedy / sampled (seed-pinned) / spec-decode modes
+//!   * tool-await reconnect (verify L5-D5)
+//!   * KV-evict reconnect (verify L5-D2 + L5-D6)
+//!   * deadline expiry
+//!   * cross-backend digest equivalence (BLAKE3 over token streams)
 
 use std::time::Duration;
 

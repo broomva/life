@@ -4780,15 +4780,12 @@ dependencies = [
 name = "inference-core"
 version = "0.3.0"
 dependencies = [
- "async-trait",
  "blake3",
  "futures",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
- "ulid",
 ]
 
 [[package]]

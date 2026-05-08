@@ -15,16 +15,11 @@ categories.workspace = true
 workspace = true
 
 [dependencies]
-async-trait.workspace = true
 blake3.workspace = true
 futures.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["sync", "time"] }
-tracing.workspace = true
-ulid.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "time"] }
