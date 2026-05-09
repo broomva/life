@@ -59,8 +59,10 @@ crate:
 | `model.rs` (Message, ContentBlock, ToolCall, ToolResult, ToolDefinition, ModelRequest, ModelResponse, Usage) | BRO-997 | Done |
 | `hook.rs` (Hook trait, HookCtx, HookRegistry, outcome types) | BRO-997 | Done |
 | `runtime.rs` (Provider, ToolRegistry, RuntimeHandle traits — runtime extension points owned by ergon, translated by the arcan adapter) | BRO-998 | Done |
-| `step.rs` (Step, StepCtx, InferenceRequest, run_inference_streaming + autonomous loop body, dispatch_tool) | BRO-998 | Done |
+| `step.rs` (Step, StepCtx, InferenceRequest, run_inference_streaming + autonomous loop body, dispatch_tool, swap_scope) | BRO-998 / BRO-1005 | Done |
 | `workflow.rs` (Workflow trait, WorkflowExecutor, SkillSet/EmptySkillSet stub) | BRO-999 | Done |
+| `agent.rs` (Agent trait, AgentSpec, AgentError, run_spec interpreter, ChainedToolRegistry, AnswerRecorderTools) | BRO-1005 | Done |
+| `typed_agent.rs` (TypedAgent trait + auto-Agent impl, typed_schema sanitization, AgentStep/TypedAgentStep wrappers) | BRO-1005 | Done |
 
 **Sibling crates landed:**
 

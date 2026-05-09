@@ -48,6 +48,7 @@
 
 #![doc(html_no_source)]
 
+pub mod agent;
 pub mod error;
 pub mod hook;
 pub mod model;
@@ -55,8 +56,10 @@ pub mod role;
 pub mod runtime;
 pub mod step;
 pub mod stream;
+pub mod typed_agent;
 pub mod workflow;
 
+pub use agent::{Agent, AgentError, AgentSpec, RECORD_ANSWER_TOOL, run_spec};
 pub use error::{ErgonError, Result};
 pub use hook::{Hook, HookCtx, HookOutcome, HookRegistry, InferenceHookOutcome, ToolHookOutcome};
 pub use model::{
@@ -67,6 +70,10 @@ pub use role::{Role, RoleScope};
 pub use runtime::{Provider, RuntimeHandle, ToolRegistry};
 pub use step::{DEFAULT_INFERENCE_MAX_TURNS, InferenceRequest, Step, StepCtx};
 pub use stream::{BufferSink, FanoutSink, StopReason, StreamEvent, StreamSink};
+pub use typed_agent::{
+    AgentStep, DEFAULT_TYPED_AGENT_MAX_RETRIES, DEFAULT_TYPED_AGENT_MAX_TURNS, TypedAgent,
+    TypedAgentStep, typed_schema,
+};
 pub use workflow::{EmptySkillSet, SkillSet, Workflow, WorkflowExecutor};
 
 /// Re-export of [`aios_protocol::ids::SessionId`] — the canonical session

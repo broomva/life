@@ -242,6 +242,25 @@ impl<'a> StepCtx<'a> {
         &self.history
     }
 
+    /// Atomically replace the conversation scope (message history + tool
+    /// registry) and return the previous values.
+    ///
+    /// Used by the [`crate::agent::run_spec`] interpreter to give each
+    /// agent invocation its own isolated conversation while sharing the
+    /// rest of the [`StepCtx`] (provider, hooks, sink, runtime, trace).
+    /// Most workflow authors should never call this directly; prefer
+    /// [`Self::step`] (with an `Agent` or any other `Step` impl), which
+    /// handles scope management for you.
+    pub fn swap_scope(
+        &mut self,
+        new_history: Vec<Message>,
+        new_tools: Arc<dyn ToolRegistry>,
+    ) -> (Vec<Message>, Arc<dyn ToolRegistry>) {
+        let prev_history = std::mem::replace(&mut self.history, new_history);
+        let prev_tools = std::mem::replace(&mut self.tools, new_tools);
+        (prev_history, prev_tools)
+    }
+
     /// Run a sub-step. Fires `on_step_start` / `on_step_end` hooks
     /// automatically.
     pub async fn step<S>(&mut self, s: &S, input: S::Input) -> Result<S::Output>
