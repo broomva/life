@@ -396,10 +396,21 @@ pub async fn run_spec(spec: &AgentSpec, ctx: &mut StepCtx<'_>, input: Value) -> 
         spec.output_schema.clone(),
         Arc::clone(&answer_slot),
     ));
+    // Advertise the spawn_agent builtin in the model's tool list iff
+    // the StepCtx has an `AgentRegistry` configured. The actual
+    // dispatch happens at the `StepCtx::dispatch_tool` level
+    // (intercept before delegating to the registry), so this is
+    // pure advertisement — the model needs to know spawn_agent is
+    // available so it can decide to call it.
+    let spawn_tool_for_chain = ctx
+        .agent_registry
+        .as_ref()
+        .map(|reg| Arc::new(crate::builtin_tools::SpawnAgentTool::new(Arc::clone(reg))));
     let chained: Arc<dyn ToolRegistry> = Arc::new(ChainedToolRegistry::new(
         Arc::clone(&ctx.tools),
         recorder,
         spec.allowed_tools.clone(),
+        spawn_tool_for_chain,
     ));
 
     // Open the sub-context with the chained registry. The Drop impl
@@ -551,11 +562,20 @@ impl<'a, 'p> Drop for SubCtx<'a, 'p> {
 /// Wraps a user-supplied [`ToolRegistry`] with an
 /// [`AnswerRecorderTools`] so the synthetic `record_answer` tool is
 /// available to the agent. Optionally filters the user's tools by an
-/// allow-list (the `allowed_tools` field on [`AgentSpec`]).
+/// allow-list (the `allowed_tools` field on [`AgentSpec`]) and
+/// optionally advertises the [`crate::SpawnAgentTool`] when the
+/// StepCtx has an `AgentRegistry` configured.
 struct ChainedToolRegistry {
     user: Arc<dyn ToolRegistry>,
     recorder: Arc<AnswerRecorderTools>,
     allow: Option<Vec<String>>,
+    /// When `Some`, the model sees `spawn_agent` in its tool list.
+    /// Dispatch is intercepted at `StepCtx::dispatch_tool` level —
+    /// the chained registry's `invoke` should never receive a
+    /// `spawn_agent` call in production. Defensively returns a clear
+    /// internal error if it does (means the host runtime is
+    /// bypassing the dispatch layer).
+    spawn_tool: Option<Arc<crate::builtin_tools::SpawnAgentTool>>,
 }
 
 impl ChainedToolRegistry {
@@ -563,11 +583,13 @@ impl ChainedToolRegistry {
         user: Arc<dyn ToolRegistry>,
         recorder: Arc<AnswerRecorderTools>,
         allow: Option<Vec<String>>,
+        spawn_tool: Option<Arc<crate::builtin_tools::SpawnAgentTool>>,
     ) -> Self {
         Self {
             user,
             recorder,
             allow,
+            spawn_tool,
         }
     }
 
@@ -583,10 +605,24 @@ impl ChainedToolRegistry {
 impl ToolRegistry for ChainedToolRegistry {
     fn definitions(&self) -> Vec<ToolDefinition> {
         let mut defs = self.recorder.definitions();
+        if let Some(spawn) = &self.spawn_tool {
+            defs.extend(spawn.definitions());
+        }
+        // Track names already advertised by THIS chain layer so an
+        // inner ChainedToolRegistry (the case during nested sub-agent
+        // dispatch) doesn't double-advertise framework tools like
+        // `record_answer` and `spawn_agent`.
+        let mut seen: std::collections::HashSet<String> =
+            defs.iter().map(|d| d.name.clone()).collect();
         for d in self.user.definitions() {
-            if self.user_tool_allowed(&d.name) {
-                defs.push(d);
+            if seen.contains(&d.name) {
+                continue;
             }
+            if !self.user_tool_allowed(&d.name) {
+                continue;
+            }
+            seen.insert(d.name.clone());
+            defs.push(d);
         }
         defs
     }
@@ -594,6 +630,16 @@ impl ToolRegistry for ChainedToolRegistry {
     async fn invoke(&self, call: ToolCall) -> Result<ToolResult> {
         if call.name == RECORD_ANSWER_TOOL {
             return self.recorder.invoke(call).await;
+        }
+        if call.name == crate::builtin_tools::SPAWN_AGENT_TOOL {
+            // Should never happen — `StepCtx::dispatch_tool` is
+            // supposed to intercept this before delegating to the
+            // chained registry. If we got here, the framework is
+            // misconfigured.
+            return Err(ErgonError::internal(
+                "spawn_agent reached ChainedToolRegistry::invoke; \
+                 dispatch_tool must intercept before this path",
+            ));
         }
         if !self.user_tool_allowed(&call.name) {
             return Ok(ToolResult::model_error(

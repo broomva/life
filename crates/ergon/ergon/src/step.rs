@@ -193,6 +193,20 @@ pub struct StepCtx<'a> {
     /// record events on this span.
     pub trace: tracing::Span,
 
+    /// Optional agent registry — name → `Arc<dyn Agent>` lookup.
+    /// Required for `spawn_agent` tool dispatch (see BRO-1007b). If
+    /// `None`, the dispatch path returns a model-visible error
+    /// telling the agent that no registry is configured.
+    pub agent_registry: Option<Arc<dyn crate::agent_registry::AgentRegistry>>,
+
+    /// Optional recursion guardrail — depth limit, invocation count,
+    /// budget propagation, cycle detection. Required for safe
+    /// `spawn_agent` dispatch. Built by the host runtime
+    /// ([`arcan-ergon`]) at workflow tick start with policy from
+    /// `WorkflowRunInputs`. If `None`, spawn_agent dispatch declines
+    /// fail-closed.
+    pub recursion: Option<crate::recursion::RecursionContext>,
+
     /// Conversation history accumulated across `run_inference_streaming`
     /// calls. Workflow authors can push initial messages via
     /// [`Self::push_message`].
@@ -224,8 +238,33 @@ impl<'a> StepCtx<'a> {
             sink,
             runtime,
             trace,
+            agent_registry: None,
+            recursion: None,
             history: Vec::new(),
         }
+    }
+
+    /// Builder: attach an [`AgentRegistry`] so `spawn_agent` tool
+    /// calls can resolve sub-agents by name. Without one, the
+    /// dispatch path returns a model-visible "no registry" error.
+    #[must_use]
+    pub fn with_agent_registry(
+        mut self,
+        registry: Arc<dyn crate::agent_registry::AgentRegistry>,
+    ) -> Self {
+        self.agent_registry = Some(registry);
+        self
+    }
+
+    /// Builder: attach a [`RecursionContext`] for spawn-safety
+    /// guardrails (depth, cycle, budget). Use
+    /// [`crate::RecursionContext::root`] for the workflow tick's
+    /// top-level frame; the dispatch path opens children
+    /// automatically.
+    #[must_use]
+    pub fn with_recursion(mut self, rec: crate::recursion::RecursionContext) -> Self {
+        self.recursion = Some(rec);
+        self
     }
 
     /// Append a message to the autonomous-loop history.
@@ -425,7 +464,14 @@ impl<'a> StepCtx<'a> {
     }
 
     /// Dispatch a single tool call through the registered hooks.
-    async fn dispatch_tool(&self, mut call: ToolCall) -> Result<ToolResult> {
+    ///
+    /// Takes `&mut self` because the [`crate::builtin_tools::SPAWN_AGENT_TOOL`]
+    /// intercept (BRO-1007b) recursively invokes a sub-agent's
+    /// [`crate::Agent::run`], which itself takes `&mut StepCtx`. All
+    /// other tool dispatches only need `&self`-equivalent access; the
+    /// `&mut` upgrade is harmless because the autonomous loop already
+    /// holds `&mut self` and dispatches tools serially.
+    async fn dispatch_tool(&mut self, mut call: ToolCall) -> Result<ToolResult> {
         let hook_ctx = HookCtx::new(self.session_id.clone(), self.workflow_name, &self.trace);
 
         // Fire on_pre_tool_use. Hooks may rewrite call args, deny, or stub.
@@ -452,6 +498,15 @@ impl<'a> StepCtx<'a> {
             }
         }
 
+        // Spawn intercept (BRO-1007b): if the model emits a tool_use
+        // for the synthetic `spawn_agent` builtin, we DON'T delegate
+        // to the registry — we resolve the target agent ourselves
+        // and run it as a sub-agent against a child `StepCtx` scope.
+        if call.name == crate::builtin_tools::SPAWN_AGENT_TOOL {
+            let result = self.dispatch_spawn_agent(&call).await?;
+            return self.run_post_tool_hooks(&call, result).await;
+        }
+
         // Fall through: invoke the registry.
         let mut result = self.tools.invoke(call.clone()).await?;
         // Fire on_post_tool_use (may mutate the result).
@@ -460,6 +515,111 @@ impl<'a> StepCtx<'a> {
             let _ = hook.on_post_tool_use(&hook_ctx, &call, &mut result).await;
         }
         Ok(result)
+    }
+
+    /// Resolve and run a sub-agent invoked via the synthetic
+    /// `spawn_agent` builtin tool.
+    ///
+    /// Failure modes are surfaced as [`ToolResult::model_error`] (not
+    /// `Err`) so the parent agent sees them in-band and can adapt on
+    /// the next turn. Hard errors (e.g. agent runtime errors that
+    /// should abort) propagate as `Err`.
+    async fn dispatch_spawn_agent(&mut self, call: &ToolCall) -> Result<ToolResult> {
+        // 1. Parse args.
+        let args: crate::builtin_tools::SpawnArgs = match serde_json::from_value(call.input.clone())
+        {
+            Ok(a) => a,
+            Err(e) => {
+                return Ok(ToolResult::model_error(
+                    call.id.clone(),
+                    serde_json::json!({
+                        "error": "invalid_arguments",
+                        "detail": format!(
+                            "spawn_agent arguments failed validation: {e}"
+                        ),
+                    }),
+                ));
+            }
+        };
+
+        // 2. Recursion check (only if a context is configured).
+        if let Some(rec) = self.recursion.as_ref()
+            && let Err(err) = rec.check_can_spawn(&args.name)
+        {
+            return Ok(ToolResult::model_error(
+                call.id.clone(),
+                crate::builtin_tools::spawn_error_payload(&args.name, &err),
+            ));
+        }
+
+        // 3. Resolve the target agent.
+        let registry = match self.agent_registry.as_ref() {
+            Some(r) => Arc::clone(r),
+            None => {
+                return Ok(ToolResult::model_error(
+                    call.id.clone(),
+                    serde_json::json!({
+                        "error": "no_registry_configured",
+                        "detail": "this StepCtx has no AgentRegistry; spawn_agent cannot resolve sub-agents",
+                        "agent": args.name,
+                    }),
+                ));
+            }
+        };
+        let agent = match registry.get(&args.name).await {
+            Some(a) => a,
+            None => {
+                let known = registry.names().await;
+                return Ok(ToolResult::model_error(
+                    call.id.clone(),
+                    serde_json::json!({
+                        "error": "unknown_agent",
+                        "detail": format!(
+                            "no agent named `{}` is registered",
+                            args.name
+                        ),
+                        "agent": args.name,
+                        "available": known,
+                    }),
+                ));
+            }
+        };
+
+        // 4. Open a child recursion frame for the sub-agent. Restore
+        //    the parent frame after the sub-agent run completes (or
+        //    errors). Builds the child via `RecursionContext::child`,
+        //    which atomically increments the shared invocation
+        //    counter (already done by `check_can_spawn`).
+        let child_recursion = self.recursion.as_ref().map(|r| r.child(&args.name));
+        let parent_recursion = std::mem::replace(&mut self.recursion, child_recursion);
+
+        // 5. Run the sub-agent. `Agent::run` calls into `run_spec`
+        //    which opens its own `SubCtx` (history + tools scope
+        //    swap), so we don't need to manage that here.
+        let run_result = agent.run(self, args.input.clone()).await;
+
+        // 6. Restore parent recursion frame.
+        self.recursion = parent_recursion;
+
+        // 7. Wrap the result.
+        match run_result {
+            Ok(output) => Ok(ToolResult::success(
+                call.id.clone(),
+                serde_json::json!({
+                    "ok": true,
+                    "agent": args.name,
+                    "output": output,
+                }),
+            )),
+            Err(e) => Ok(ToolResult::model_error(
+                call.id.clone(),
+                serde_json::json!({
+                    "error": "sub_agent_error",
+                    "detail": e.to_string(),
+                    "agent": args.name,
+                }),
+            )),
+        }
     }
 
     /// Helper: run on_post_tool_use against a result (used by Deny/Stub
