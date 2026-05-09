@@ -237,6 +237,41 @@ spacetime generate --lang rust --out-dir src/module_bindings --module-path space
 (cd spaces && cargo fmt && cargo clippy --workspace -- -D warnings && cargo check)
 ```
 
+## Where does new behavior live? (Crate vs. Authored Agent)
+
+Life follows a three-layer architecture for the agent substrate. When
+adding new behavior, consult this decision tree first. Full spec at
+`docs/superpowers/specs/2026-05-09-bro-1006-authored-agents-architecture.md`.
+
+| Property of the behavior | Layer | Form |
+|---|---|---|
+| Universal across agents (loop driver, hook firing, stream events, type system) | L1 — Primitive | **Rust crate** (`ergon`, `aios-protocol`, etc.) |
+| Substrate plumbing (registry, spawn dispatch, depth tracking, validation) | L2 — Substrate | **Rust crate** (e.g. registry/spawn live in `ergon`; nous-tools) |
+| Stable + hot-path + performance-critical (every-tick, runs at 100Hz+) | L1.5 — TypedAgent | **Rust crate** with `impl TypedAgent` |
+| Domain-specific OR evolving OR experimental (judges, scorers, goal-pursuers, panel synthesizers) | **L3 — Authored** | **`agents/<name>.md`** with YAML frontmatter |
+| Self-modifying / agent-authored | **L3 — Authored** | **lago `Custom("agent.spec")` events** (experimental tier); promoted to filesystem via human PR (blessed tier) |
+
+**Rule of thumb**: if it's a *prompt* (instructions, rubric, schema),
+it's data (`agents/<name>.md`). If it's a *mechanism* (loop driver,
+dispatch plumbing, type system), it's code.
+
+**Authoring format**: Markdown with YAML frontmatter. NOT JSON, NOT
+TOML, NOT raw YAML. The pattern Claude Code skills use, that every
+modern agent ecosystem has converged on. JSON is reserved as the
+**internal wire format** (lago events, network transports). The
+authoring surface is markdown.
+
+**Migration paths**: stable AgentSpecs can be promoted to TypedAgent
+when usage stabilizes (`arcan agent promote-to-rust <name>`).
+TypedAgents can be ejected to AgentSpec when prompt iteration becomes
+the bottleneck. Both directions are supported; both compile through
+the same `run_spec` interpreter.
+
+**Meta-agents (nous-promoter, agent-improver, etc.) are themselves
+human-authored via PR** and CANNOT self-modify in production. This
+prevents the metacognition deadlock (a meta-agent improving itself
+into a corrupt state).
+
 ## Shared Conventions
 
 All projects follow these rules (Spaces WASM module uses Rust 2021 edition due to SpacetimeDB requirements):
