@@ -361,14 +361,16 @@ async fn schema_violation_then_retry_succeeds() {
 
 #[tokio::test]
 async fn retry_exhaustion_surfaces_schema_violation() {
+    // max_retries=1 means "1 corrective retry on top of the initial
+    // attempt" — i.e., 2 attempts total. Both bad → SchemaViolation.
     let agent = StaticScorer {
-        max_retries: 2,
+        max_retries: 1,
         ..Default::default()
     };
     let provider = Arc::new(ScriptedProvider::new(vec![
-        // Attempt 1 — invalid
+        // Attempt 1 (initial) — invalid
         record_answer_call("tu-1", serde_json::json!({"novelty": 2})),
-        // Attempt 2 — still invalid
+        // Attempt 2 (1st corrective retry) — still invalid
         record_answer_call("tu-2", serde_json::json!({})),
     ]));
     let sink = Arc::new(BufferSink::new());

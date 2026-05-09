@@ -39,8 +39,11 @@
   * **Sub-context isolation**: each agent invocation opens an isolated
     sub-scope via `StepCtx::swap_scope` — separate message history,
     chained tool registry, but shared provider/hooks/sink/runtime.
-    Parallel `try_join_all` over multiple agents from a workflow body
-    works correctly without history pollution.
+    This isolation is for **serial** reuse of one `StepCtx` so a
+    follow-up step doesn't inherit the previous agent's conversation.
+    Parallel fan-out over multiple agents (e.g. `try_join_all`)
+    requires the workflow author to clone the substrate Arcs and
+    construct independent `StepCtx` instances — one per branch.
   * **Forward-compat slot**: `AgentSpec.extensions: HashMap<String, Value>`
     plus `#[non_exhaustive]` lets future patterns (recursion configs,
     identity constraints, scheduling hints, remote refs, Spec E backend

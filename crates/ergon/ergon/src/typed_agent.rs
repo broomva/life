@@ -208,14 +208,25 @@ fn sanitize_schema_for_llm(value: &mut Value) {
 /// Trait coherence — a blanket impl would collide with future blanket
 /// `Step` impls and prevent users from writing their own
 /// non-LLM-Step types. The wrapper is explicit and intentional.
+///
+/// The wrapped agent's `spec().name` is cached at construction so
+/// `Step::name()` produces per-agent telemetry rather than a
+/// collapsed `"agent"` literal — important for tracing, hook
+/// filtering, and lago provenance.
 pub struct AgentStep<A: Agent + 'static> {
     inner: Arc<A>,
+    cached_name: String,
 }
 
 impl<A: Agent + 'static> AgentStep<A> {
-    /// Construct from an Arc-wrapped agent.
+    /// Construct from an Arc-wrapped agent. The agent's
+    /// `spec().name` is read once and cached for `Step::name()`.
     pub fn new(agent: Arc<A>) -> Self {
-        Self { inner: agent }
+        let cached_name = agent.spec().name;
+        Self {
+            inner: agent,
+            cached_name,
+        }
     }
 
     /// Convenience: construct from a boxed agent.
@@ -235,11 +246,7 @@ impl<A: Agent + 'static> crate::Step for AgentStep<A> {
     type Output = Value;
 
     fn name(&self) -> &str {
-        // Borrow the AgentSpec name. We can't return a &str borrowed
-        // from a temporary, so we cache by deferring to the trait
-        // object's instance. This produces a `<agent>:<name>` label
-        // — descriptive and stable.
-        "agent"
+        &self.cached_name
     }
 
     async fn run(&self, ctx: &mut StepCtx<'_>, input: Self::Input) -> Result<Self::Output> {

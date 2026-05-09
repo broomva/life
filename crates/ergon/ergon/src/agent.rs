@@ -116,7 +116,11 @@ pub struct AgentSpec {
     /// planning), low for single-shot judges.
     pub max_turns: u32,
 
-    /// Maximum retries on output schema validation failure.
+    /// Maximum *corrective retries* on output schema validation
+    /// failure (in addition to the initial attempt). A value of `3`
+    /// means up to `1 + 3 = 4` total attempts at producing a
+    /// schema-conformant answer before [`AgentError::SchemaViolation`]
+    /// is surfaced.
     pub max_retries: u8,
 
     /// Optional whitelist of tool names the agent may invoke. `None`
@@ -442,7 +446,11 @@ pub async fn run_spec(spec: &AgentSpec, ctx: &mut StepCtx<'_>, input: Value) -> 
             match validate_against_schema(&answer, &spec.output_schema) {
                 Ok(()) => return Ok(answer),
                 Err(err) => {
-                    if attempts >= spec.max_retries.max(1) {
+                    // `max_retries` is *corrective retries on top of
+                    // the initial attempt*, so we exhaust at
+                    // `attempts > max_retries` (e.g. max_retries=3
+                    // permits attempts 1, 2, 3, 4).
+                    if attempts > spec.max_retries.max(1) {
                         return Err(AgentError::SchemaViolation {
                             agent: spec.name.clone(),
                             attempts,
@@ -502,11 +510,19 @@ pub async fn run_spec(spec: &AgentSpec, ctx: &mut StepCtx<'_>, input: Value) -> 
 /// duration of an agent run, then restored on drop. The parent's
 /// history and tools registry are swapped back atomically.
 ///
-/// Why isolated? Each agent invocation needs its own conversation —
-/// otherwise parallel `try_join_all` over multiple agents would
-/// braid their histories together. The other StepCtx fields
-/// (provider, hooks, sink, runtime, trace) are SHARED by reference
-/// since they're already `Arc`-based.
+/// Why isolated? When a workflow body runs multiple agents *in
+/// sequence* against the same `StepCtx`, the sub-scope ensures the
+/// next agent doesn't inherit the previous agent's conversation. The
+/// `Agent::run` signature takes `&mut StepCtx`, so this isolation is
+/// for **serial** reuse of one ctx — concurrent invocations against
+/// the same ctx are precluded by the borrow checker.
+///
+/// For genuine parallel fan-out (e.g. running N agents over a
+/// `Vec<Item>` via `try_join_all`), the workflow author should clone
+/// the underlying `Provider`/`HookRegistry`/`StreamSink`/`RuntimeHandle`
+/// (all `Arc`-based already) and construct N independent
+/// `StepCtx` instances — one per branch. This mirrors how
+/// `arcan-ergon`'s runner builds a fresh ctx per workflow tick.
 struct SubCtx<'a, 'p> {
     ctx: &'a mut StepCtx<'p>,
     saved: Option<(Vec<crate::model::Message>, Arc<dyn ToolRegistry>)>,
