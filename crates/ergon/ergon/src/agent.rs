@@ -693,34 +693,24 @@ fn validate_against_schema(value: &Value, schema: &Value) -> std::result::Result
                 }
             }
         }
-        "array" => {
-            if !value.is_array() {
-                return Err(format!("expected array, got {}", json_kind(value)));
-            }
+        "array" if !value.is_array() => {
+            return Err(format!("expected array, got {}", json_kind(value)));
         }
-        "string" => {
-            if !value.is_string() {
-                return Err(format!("expected string, got {}", json_kind(value)));
-            }
+        "string" if !value.is_string() => {
+            return Err(format!("expected string, got {}", json_kind(value)));
         }
-        "number" | "integer" => {
-            if !value.is_number() {
-                return Err(format!("expected number, got {}", json_kind(value)));
-            }
+        "number" | "integer" if !value.is_number() => {
+            return Err(format!("expected number, got {}", json_kind(value)));
         }
-        "boolean" => {
-            if !value.is_boolean() {
-                return Err(format!("expected boolean, got {}", json_kind(value)));
-            }
+        "boolean" if !value.is_boolean() => {
+            return Err(format!("expected boolean, got {}", json_kind(value)));
         }
-        "null" => {
-            if !value.is_null() {
-                return Err(format!("expected null, got {}", json_kind(value)));
-            }
+        "null" if !value.is_null() => {
+            return Err(format!("expected null, got {}", json_kind(value)));
         }
-        _ => {
-            // No type field or unknown — be permissive at v0.1.
-        }
+        // Matched type AND value passes that type check, OR no type
+        // field / unknown type — both pass through. Permissive at v0.1.
+        _ => {}
     }
     Ok(())
 }
