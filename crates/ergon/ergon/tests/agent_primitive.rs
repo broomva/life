@@ -687,3 +687,66 @@ fn agentspec_validate_rejects_zero_max_turns() {
     .with_max_turns(0);
     assert!(spec.validate().is_err());
 }
+
+// ── 14. jsonschema-backed validation rejects out-of-range integers ──
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Debug, Clone)]
+struct StrictScore {
+    /// Constrained 0-3 via JsonSchema's range support — exercises the
+    /// jsonschema-backed validator landed in BRO-1007.
+    #[schemars(range(min = 0, max = 3))]
+    novelty: u8,
+}
+
+struct StrictScorer;
+impl TypedAgent for StrictScorer {
+    type Input = ScoreInput;
+    type Output = StrictScore;
+    fn name(&self) -> &str {
+        "test.strict-scorer"
+    }
+    fn instructions(&self) -> Cow<'_, str> {
+        Cow::Borrowed("Score 0-3.")
+    }
+    fn model(&self) -> &str {
+        "test-model"
+    }
+    fn max_turns(&self) -> u32 {
+        1
+    }
+    fn max_retries(&self) -> u8 {
+        1
+    }
+}
+
+#[tokio::test]
+async fn jsonschema_rejects_out_of_range_integer() {
+    // The hand-rolled validator at v0.1 would have allowed any
+    // integer in `novelty`; the jsonschema-backed validator (BRO-1007)
+    // enforces the `range(min=0, max=3)` constraint declared on the
+    // type. Two consecutive bad attempts → SchemaViolation.
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        record_answer_call("tu-1", serde_json::json!({"novelty": 5})),
+        record_answer_call("tu-2", serde_json::json!({"novelty": 99})),
+    ]));
+    let sink = Arc::new(BufferSink::new());
+    let mut ctx = make_ctx("test-workflow", provider as Arc<dyn Provider>, sink);
+
+    let err = StrictScorer
+        .run(
+            &mut ctx,
+            serde_json::to_value(ScoreInput { text: "x".into() }).unwrap(),
+        )
+        .await
+        .expect_err("must fail with SchemaViolation on out-of-range");
+
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("schema validation"),
+        "expected SchemaViolation, got: {msg}"
+    );
+    assert!(
+        msg.contains("maximum") || msg.contains("greater"),
+        "expected `maximum`/`greater` in message, got: {msg}"
+    );
+}

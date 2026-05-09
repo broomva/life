@@ -24,9 +24,14 @@ futures.workspace = true
 schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+serde_yaml.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["sync", "macros", "rt"] }
+tokio = { workspace = true, features = ["sync", "macros", "rt", "fs"] }
 tracing.workspace = true
+
+# Authored-agent substrate (BRO-1007).
+gray_matter.workspace = true
+jsonschema.workspace = true
 
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }
