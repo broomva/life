@@ -3,8 +3,22 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "**/CLAUDE.md"
+      - "**/AGENTS.md"
+      - "**/CHANGELOG.md"
+      - "docs/**"
+      - "research/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "**/CLAUDE.md"
+      - "**/AGENTS.md"
+      - "**/CHANGELOG.md"
+      - "docs/**"
+      - "research/**"
   workflow_dispatch:
 
 concurrency:
@@ -13,6 +27,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Reduce dev-profile compile noise across the workspace. Release
+  # builds (gate 11) override these via --release.
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUST_BACKTRACE: "1"
 
 jobs:
   # ── Gate 1: Formatting ────────────────────────────────────────────
@@ -53,9 +72,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
 
-  # ── Gate 4: Tests (macOS) ─────────────────────────────────────────
+  # ── Gate 4: Tests (macOS) — post-merge only ──────────────────────
+  #
+  # Same rationale as Gate 11: macOS-latest runners are slower than
+  # ubuntu and the test stage already takes ~12 minutes on macOS
+  # (vs ~11 on Linux). Linux is the production target; macOS is a
+  # cross-platform safety net. Running it on PR adds time without
+  # catching anything Linux tests don't (in 99% of cases).
+  #
+  # Post-merge means: if a macOS-only regression lands, this catches
+  # it within the first push, and we revert. Same trade-off as
+  # Build Release.
   test-macos:
     name: Test (macOS)
+    if: github.event_name == 'push'
     needs: [format, lint]
     runs-on: macos-latest
     steps:
@@ -195,9 +225,21 @@ jobs:
       - name: Production build
         run: bun run build
 
-  # ── Gate 11: Release Build ────────────────────────────────────────
+  # ── Gate 11: Release Build (post-merge only, not PR-blocking) ─────
+  #
+  # Why post-merge only: `cargo build --workspace --release` takes
+  # ~21 minutes on this monorepo. Running on every PR added that to
+  # the dev loop without catching anything tests didn't already
+  # catch (debug builds + `cargo test --workspace` exercise every
+  # crate's compilation path; release-specific issues are rare).
+  #
+  # By moving this to push-to-main only, PR feedback loop drops from
+  # ~30+ min to ~12-14 min. If a release-only issue does land on
+  # main, this canary catches it within the first push and we
+  # revert. Trade-off favors dev velocity; canary keeps safety net.
   build:
     name: Build Release
+    if: github.event_name == 'push'
     needs: [test-linux, test-macos]
     runs-on: ubuntu-latest
     steps:
