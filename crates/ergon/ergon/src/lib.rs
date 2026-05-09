@@ -49,9 +49,12 @@
 #![doc(html_no_source)]
 
 pub mod agent;
+pub mod agent_registry;
+pub mod builtin_tools;
 pub mod error;
 pub mod hook;
 pub mod model;
+pub mod recursion;
 pub mod role;
 pub mod runtime;
 pub mod step;
@@ -60,11 +63,20 @@ pub mod typed_agent;
 pub mod workflow;
 
 pub use agent::{Agent, AgentError, AgentSpec, RECORD_ANSWER_TOOL, run_spec};
+pub use agent_registry::{
+    AgentRegistry, ChainedAgentRegistry, FsAgentRegistry, InMemoryAgentRegistry, ParseError,
+    RegistryError, parse_agent_md,
+};
+pub use builtin_tools::{SPAWN_AGENT_TOOL, SpawnAgentTool, SpawnArgs, spawn_error_payload};
 pub use error::{ErgonError, Result};
 pub use hook::{Hook, HookCtx, HookOutcome, HookRegistry, InferenceHookOutcome, ToolHookOutcome};
 pub use model::{
     ContentBlock, Message, MessageRole, ModelRequest, ModelResponse, ToolCall, ToolDefinition,
     ToolResult, Usage,
+};
+pub use recursion::{
+    DEFAULT_MAX_INVOCATIONS, DEFAULT_MAX_RECURSION_DEPTH, RecursionContext, RecursionError,
+    UNLIMITED_BUDGET,
 };
 pub use role::{Role, RoleScope};
 pub use runtime::{Provider, RuntimeHandle, ToolRegistry};

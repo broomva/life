@@ -3,6 +3,57 @@
 ## Unreleased
 
 ### Added
+- `ergon::AgentRegistry` / `ergon::SpawnAgentTool` / `ergon::RecursionContext` —
+  the substrate layer that lets authored AgentSpecs be invoked by name from
+  within an agent's loop. (BRO-1007)
+  * **`AgentRegistry` trait** — name → `Arc<dyn Agent>` lookup. Three impls:
+    `InMemoryAgentRegistry` (programmatic), `FsAgentRegistry` (loads
+    `agents/<name>.md` files recursively from a root directory), and
+    `ChainedAgentRegistry` (composes multiple sources in order; future
+    `LagoAgentRegistry` slots in via the same trait). Filenames must match
+    spec `name` field — the registry rejects mismatches at load time.
+  * **`parse_agent_md`** — parses Markdown with YAML frontmatter into an
+    `AgentSpec`. Frontmatter holds structured fields; body becomes
+    `instructions`. Format chosen per architecture spec
+    `docs/superpowers/specs/2026-05-09-bro-1006-authored-agents-architecture.md`
+    §4 (Claude Code skills convention; same pattern as Anthropic / Vercel /
+    every modern agent ecosystem). JSON remains the wire format for lago
+    events and network transports; Markdown is the authoring surface.
+  * **`SpawnAgentTool`** — builtin tool definition (synthesized into every
+    workflow's `ToolRegistry`) that lets agents invoke registered sub-
+    agents from within their autonomous loop. The tool definition ships
+    here; the actual dispatch (with live `&mut StepCtx` access) is wired
+    in a fast-follow PR. The tool emits structured
+    `ToolResult::model_error` payloads on failure (unknown agent,
+    recursion-context refusal) so the parent sees them in-band.
+  * **`RecursionContext`** — per-tick recursion guardrail with depth
+    limit (default 8), invocation count limit (default 256), token
+    budget propagation, wall-clock budget propagation, and cycle
+    detection (rejects `spawn_agent("foo")` if `foo` is already on the
+    invocation stack). Atomic counters shared via `Arc` so siblings see
+    each other's consumption. `RecursionError` variants surface as
+    model-visible tool errors, never panics. Per architecture spec §6,
+    this hardening is non-negotiable and ships with the spawn primitive.
+  * **JSON Schema validation upgrade** — replaces the v0.1 hand-rolled
+    `validate_against_schema` (structural-only) with the full
+    `jsonschema` crate (draft-7 / 2019-09 / 2020-12). Now catches
+    `range(min, max)`, `oneOf`/`anyOf`/`allOf`, `pattern`, `enum`,
+    `format`, etc. Errors carry structured paths the model can use to
+    self-correct. New test: `jsonschema_rejects_out_of_range_integer`.
+  * **Workspace deps**: `jsonschema = 0.18` and `gray_matter = 0.2`
+    in `[workspace.dependencies]`. ergon also gains `serde_yaml` for
+    frontmatter parsing.
+  31 new tests (12 recursion + 14 registry/parse + 5 builtin_tools) +
+  1 new integration test for schema validation. Total ergon test count:
+  113 passing (98 unit + 15 integration).
+
+  **What this PR does NOT do** (deferred to fast-follow):
+  - Wire `spawn_agent` dispatch into the autonomous loop —
+    requires `&mut StepCtx` at the dispatch site, meaningful change to
+    `run_inference_streaming`.
+  - Plumb `AgentRegistry` through `WorkflowRunInputs` / arcan-ergon.
+  - Add `arcan agent new/list/show/test` CLI tooling (BRO-1008).
+
 - `ergon::Agent` / `ergon::AgentSpec` / `ergon::TypedAgent` — first-class
   typed-I/O agent primitive for the Life agent harness. (BRO-1005)
   * **`AgentSpec`** is data: serializable, `JsonSchema`-derivable,
