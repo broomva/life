@@ -360,6 +360,16 @@ walkdir = "2"
 zeroize = { version = "1", features = ["derive"] }
 spacetimedb-sdk = "2.0"
 zstd = "0.13"
+# Production JSON Schema validator (draft 7 / 2019-09 / 2020-12).
+# Used by `ergon::AgentSpec` to validate model-emitted answers
+# against the declared `output_schema`. Replaces the v0.1
+# hand-rolled validator. See
+# `docs/superpowers/specs/2026-05-09-bro-1006-authored-agents-architecture.md` §6.
+jsonschema = { version = "0.18", default-features = false }
+# YAML-frontmatter splitter for parsing `agents/<name>.md` files.
+# Body becomes `AgentSpec.instructions`; frontmatter becomes the
+# structured fields. See spec §4.
+gray_matter = { version = "0.2", default-features = false, features = ["yaml"] }
 
 [workspace.lints.clippy]
 too_many_arguments = "allow"

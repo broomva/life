@@ -685,59 +685,35 @@ fn compose_instructions(spec: &AgentSpec) -> String {
     )
 }
 
-/// Lightweight schema validation. We don't pull a full JSON-schema
-/// validator dep at v0.1 — we check structural fit (object vs array,
-/// required keys present, scalar types match). Strict validation is
-/// left to consumers that want it; the typed-output `serde::Deserialize`
-/// at the static-typed boundary is the real check there.
+/// Schema validation backed by the [`jsonschema`] crate (full
+/// draft-7 / 2019-09 / 2020-12 support). Replaces the v0.1
+/// hand-rolled validator per architecture spec
+/// `docs/superpowers/specs/2026-05-09-bro-1006-authored-agents-architecture.md`
+/// §6 / §M5.
+///
+/// Returns a structured human-readable error joining all schema
+/// violations into a single string the model can read and adapt to
+/// (e.g. `/score: 5 is greater than the maximum of 3; /relevance: is
+/// a required property`). On schema-compile failure, returns a clear
+/// "schema is malformed" message — this is rare since
+/// `AgentSpec::validate()` structurally checks the schema first.
 fn validate_against_schema(value: &Value, schema: &Value) -> std::result::Result<(), String> {
-    let kind = schema.get("type").and_then(Value::as_str).unwrap_or("");
-    match kind {
-        "object" => {
-            if !value.is_object() {
-                return Err(format!("expected object, got {}", json_kind(value)));
-            }
-            if let (Some(Value::Array(required)), Some(obj)) =
-                (schema.get("required"), value.as_object())
-            {
-                for r in required {
-                    if let Some(key) = r.as_str()
-                        && !obj.contains_key(key)
-                    {
-                        return Err(format!("missing required key `{key}`"));
-                    }
+    let compiled = match jsonschema::JSONSchema::options().compile(schema) {
+        Ok(c) => c,
+        Err(e) => return Err(format!("malformed output_schema (compile error): {e}")),
+    };
+    if let Err(errors) = compiled.validate(value) {
+        let messages: Vec<String> = errors
+            .map(|e| {
+                let path = e.instance_path.to_string();
+                if path.is_empty() {
+                    format!("{e}")
+                } else {
+                    format!("{path}: {e}")
                 }
-            }
-        }
-        "array" if !value.is_array() => {
-            return Err(format!("expected array, got {}", json_kind(value)));
-        }
-        "string" if !value.is_string() => {
-            return Err(format!("expected string, got {}", json_kind(value)));
-        }
-        "number" | "integer" if !value.is_number() => {
-            return Err(format!("expected number, got {}", json_kind(value)));
-        }
-        "boolean" if !value.is_boolean() => {
-            return Err(format!("expected boolean, got {}", json_kind(value)));
-        }
-        "null" if !value.is_null() => {
-            return Err(format!("expected null, got {}", json_kind(value)));
-        }
-        // Matched type AND value passes that type check, OR no type
-        // field / unknown type — both pass through. Permissive at v0.1.
-        _ => {}
+            })
+            .collect();
+        return Err(messages.join("; "));
     }
     Ok(())
-}
-
-fn json_kind(v: &Value) -> &'static str {
-    match v {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
 }
