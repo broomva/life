@@ -21,6 +21,7 @@ aios-protocol.workspace = true
 # Standard async + serialization.
 async-trait.workspace = true
 futures.workspace = true
+schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true

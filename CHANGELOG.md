@@ -3,6 +3,69 @@
 ## Unreleased
 
 ### Added
+- `ergon::Agent` / `ergon::AgentSpec` / `ergon::TypedAgent` — first-class
+  typed-I/O agent primitive for the Life agent harness. (BRO-1005)
+  * **`AgentSpec`** is data: serializable, `JsonSchema`-derivable,
+    constructible at runtime, returnable as the typed `Output` of
+    another agent (the "factory" pattern that enables agent-emits-agent
+    composition without recursion machinery), and embeddable in
+    streams or lago events.
+  * **`Agent` trait** is the unifying contract: `fn spec()` + `async fn
+    run(ctx, input: Value) -> Output: Value`. Implemented for
+    `AgentSpec` directly (dynamic path) and auto-derived for any
+    `T: TypedAgent` (static path). Both lower to the same engine —
+    `ergon::run_spec`.
+  * **`TypedAgent` trait** is the static-typed convenience: declare
+    `Input` / `Output` as Rust types with `Serialize` + `Deserialize`
+    + `JsonSchema` bounds plus a few config methods, and the framework
+    auto-derives an `AgentSpec` (with sanitized JSON Schemas) and
+    auto-impls `Agent` over it.
+  * **`AgentStep<A>` / `TypedAgentStep<T>`** wrappers bridge agents
+    into `ergon::Step` so workflow bodies compose them via the standard
+    `ctx.step(&agent_step, input)` API. Explicit wrappers (rather than
+    a blanket `impl<A: Agent> Step for A`) preserve trait coherence
+    so future blanket Step impls remain possible.
+  * **The interpreter** (`ergon::run_spec`) drives the autonomous loop
+    with a synthetic `record_answer` tool injected into the workflow's
+    `ToolRegistry` (via `ChainedToolRegistry`). The model's final act
+    must be `record_answer({"answer": <typed value>})`; the interpreter
+    captures the args via a side channel, validates against the output
+    schema, deserializes, and returns. On schema violation a corrective
+    user message is appended and the loop retries up to `max_retries`;
+    exhausted retries surface as `AgentError::SchemaViolation`. Other
+    typed failures: `AgentError::AnswerNotEmitted` (model never
+    recorded), `AgentError::Refusal` (provider stop_reason=Refusal),
+    `AgentError::InvalidSpec` (pre-flight validation).
+  * **Sub-context isolation**: each agent invocation opens an isolated
+    sub-scope via `StepCtx::swap_scope` — separate message history,
+    chained tool registry, but shared provider/hooks/sink/runtime.
+    Parallel `try_join_all` over multiple agents from a workflow body
+    works correctly without history pollution.
+  * **Forward-compat slot**: `AgentSpec.extensions: HashMap<String, Value>`
+    plus `#[non_exhaustive]` lets future patterns (recursion configs,
+    identity constraints, scheduling hints, remote refs, Spec E backend
+    hints) land additively without breaking changes.
+  * Adds `schemars = "0.8"` dependency to ergon (already in workspace).
+  14 integration tests with `ScriptedProvider` covering: happy path
+  single-turn, multi-turn with workflow tool dispatch, schema-violation
+  retry success, retry exhaustion → typed error, refusal, answer-not-
+  emitted, dynamic `AgentSpec::run` parity with TypedAgent, agent-emits-
+  AgentSpec factory pattern, sub-context isolation, schema sanitization.
+
+  **Why this shape**: an agentic OS needs primitives for identity,
+  capability, state, budget, observability, trust, communication,
+  discovery, and lifecycle. The Agent primitive's job is small and
+  precise — only the typed-I/O contract + first-class spec value +
+  agent-loop discipline. Identity/capability/state/budget/observability
+  /trust are delegated to existing substrates (anima, autonomic, vigil,
+  lago, nous) via the existing hook + sink + port architecture.
+  Communication patterns (mailboxes, pub/sub, remote dispatch) compose
+  via `AgentSpec`'s serializability without primitive changes.
+  Discovery, recursion, and long-lived agents are deferred to follow-
+  up primitives that compose with — rather than mutate — the Agent
+  trait. The first workflow that genuinely needs in-loop spawning
+  will land that as a narrow follow-up.
+
 - `arcan-ergon` — new sibling crate at `crates/arcan/arcan-ergon/`
   delivering the kernel-side adapter that runs an `ergon::Workflow`
   as the body of a single `aios_runtime::KernelRuntime` tick. Resolves
