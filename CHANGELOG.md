@@ -47,6 +47,53 @@
   BRO-1009 is merged. BRO-1011's `nous-judge` references the
   bookkeeping scorers shipped in BRO-1012 (already merged).
 
+- **`nous-tools` crate** — lineage primitives + the three praxis tools
+  authored agents (BRO-1011 nous-promoter, BRO-1012 bookkeeping
+  scorers) need to consume nous output. (BRO-1009)
+  * **`NousLineage` trait + `LineageEvent` / `LineageFilter`** — the
+    provenance contract for nous decisions: which scorer ran, with what
+    input, what output, against which target, when, and (optionally)
+    against which lago `EventId`. `LineageFilter` matches by session,
+    agent, target, time window, and limit.
+  * **`InMemoryNousLineage`** — `Arc<RwLock<Vec<_>>>`-backed reference
+    implementation. Sequential `lineage-N` ids; preserves insertion
+    order on `query`. The lago-backed implementation is intentionally
+    deferred to a follow-up so the trait + in-memory ref ship as a
+    clean unit.
+  * **`nous_aggregate` praxis tool** — descriptive statistics
+    (`count`, `mean`, `median`, `min`, `max`, sample-stddev) over a
+    `Vec<f64>` of scores. Hand-rolled (no `statrs` / `medians`
+    workspace dep for ~20 LOC of arithmetic). Empty input returns
+    zeroes; `count == 1` returns `stddev == 0.0` (Bessel correction
+    undefined). Rejects NaN / inf / non-numeric entries with
+    `ToolError::InvalidInput`.
+  * **`nous_compare` praxis tool** — typed verdict over
+    `(a, b, threshold)`: `greater` / `lesser` / `equal` /
+    `within_threshold`. Default threshold `0.001`. Strict equality
+    returns `Equal` even inside the threshold band so the verdict
+    stays informative; `threshold = 0.0` collapses to strict
+    comparison.
+  * **`lago_query` praxis tool** — read-only event-journal queries
+    over `Arc<dyn lago_core::Journal>`. Filters by `event_kind`
+    discriminant (delegated to `EventQuery::with_kind`), `after_ts_ms`
+    / `before_ts_ms` window (lago stores microseconds; the tool
+    exposes ms for parity with `LineageEvent`), and `limit` (default
+    50, hard cap 500 to bound memory for untrusted agents). The sync
+    `Tool::execute` ↔ async `Journal::read` boundary is bridged via
+    a stashed `tokio::runtime::Handle` and `block_in_place` +
+    `block_on` (mirrors `praxis-mcp-bridge::McpTool`); falls back to
+    plain `block_on` outside an active runtime so the tool also works
+    from sync callers.
+  * **Tests** — 18 unit tests + 1 integration test
+    (`tests/tools.rs`) that exercises all three tools end-to-end
+    through the canonical `Tool::execute` path: record → query →
+    aggregate → compare. The integration test pins a real `Journal`
+    impl in-test (`VecJournal` over `Arc<RwLock<Vec<_>>>`) so the
+    `Arc<dyn Journal>` interface is exercised.
+  * **NOT in scope** — the lago-backed `NousLineage` impl and the
+    BRO-1011 `nous-promoter` authored agent that consumes these tools
+    land in follow-up tickets.
+
 - **First authored agents** at `agents/<name>.md` — the Layer-3 data
   files that prove the substrate end-to-end. (BRO-1010)
   * `agents/general.md` — multi-turn generalist (max 16 turns).

@@ -87,6 +87,7 @@ members = [
     "crates/nous/nous-judge",
     "crates/nous/nous-lago",
     "crates/nous/nous-middleware",
+    "crates/nous/nous-tools",
     "crates/nous/nousd",
     # Anima — identity
     "crates/anima/anima-core",
@@ -221,6 +222,7 @@ nous-heuristics = { path = "crates/nous/nous-heuristics", version = "0.3.0" }
 nous-judge = { path = "crates/nous/nous-judge", version = "0.3.0" }
 nous-lago = { path = "crates/nous/nous-lago", version = "0.3.0" }
 nous-middleware = { path = "crates/nous/nous-middleware", version = "0.3.0" }
+nous-tools = { path = "crates/nous/nous-tools", version = "0.3.0" }
 # Opsis
 opsis-core = { path = "crates/opsis/opsis-core", version = "0.3.0" }
 opsis-engine = { path = "crates/opsis/opsis-engine", version = "0.3.0" }

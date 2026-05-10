@@ -1,0 +1,26 @@
+[package]
+name = "nous-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Nous lineage primitives + praxis tools (nous_aggregate, nous_compare, lago_query) for authored agents"
+
+[dependencies]
+aios-protocol.workspace = true
+lago-core.workspace = true
+async-trait.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+
+[lints]
+workspace = true
