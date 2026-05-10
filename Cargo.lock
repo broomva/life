@@ -7043,6 +7043,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nous-tools"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "async-trait",
+ "futures",
+ "lago-core",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "nousd"
 version = "0.3.0"
 dependencies = [
