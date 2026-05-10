@@ -55,6 +55,23 @@ name and one place to find it.
 | [`goal-pursuer.md`](goal-pursuer.md) | Multi-turn goal pursuer — takes a goal + success criteria, plans, executes tools, reports structured progress. | Multi-turn (max 32), inherits all workflow tools, uses `spawn_agent` for sub-tasks. |
 | [`goal-judge.md`](goal-judge.md) | Single-shot judge that scores a `goal-pursuer`'s output against the original criteria. Designed to run after a pursuer to enforce honesty. | Single-shot (max_turns 1), no tools needed (judging from text alone). |
 
+## Currently shipped (BRO-1012 — bookkeeping)
+
+The Nous gate (per `skills/bookkeeping/references/scoring-rubric.md`) is
+a three-dimension scoring system that decides whether a knowledge item
+is promoted from Layer 2 (raw extract) to Layer 3 (entity page). Each
+dimension is scored independently by its own single-shot agent. A
+fourth agent synthesizes Layer-4 notes from ≥ 3 Layer-3 entities.
+
+| Agent | Purpose | Shape |
+|-------|---------|-------|
+| [`bookkeeping-novelty.md`](bookkeeping-novelty.md) | Score the Novelty dimension (0–3) against the existing entity graph. | Single-shot (max 1), no tools, claude-haiku-4-5. |
+| [`bookkeeping-specificity.md`](bookkeeping-specificity.md) | Score the Specificity dimension (0–3) against the item's concrete grounding. | Single-shot (max 1), no tools, claude-haiku-4-5. |
+| [`bookkeeping-relevance.md`](bookkeeping-relevance.md) | Score the Relevance dimension (0–3) against active projects + open questions. | Single-shot (max 1), no tools, claude-haiku-4-5. |
+| [`bookkeeping-synthesizer.md`](bookkeeping-synthesizer.md) | Layer-4 synthesizer — combines ≥ 3 entity pages around a topic into a structured synthesis with `[[type/slug]]` citations. Self-flags `blog_post_candidate`. | Multi-turn (max 8), no tools, claude-sonnet-4-5. |
+
+The three scorers share an output shape (`{score, reasoning, anti_pattern_warnings, …}`) so the bookkeeping pipeline (P8) can fan out the same item across all three in parallel and aggregate the raw score.
+
 ## Self-validation
 
 When you change an agent in this directory:

@@ -3,6 +3,45 @@
 ## Unreleased
 
 ### Added
+- **Bookkeeping authored agents** — four new blessed-tier agents at
+  `agents/bookkeeping-{novelty,specificity,relevance,synthesizer}.md`
+  validating the use case for the Nous gate (P8 scoring pipeline) as
+  authored agents rather than embedded prompts. (BRO-1012)
+  * `bookkeeping-novelty.md` — single-shot Novelty scorer (0–3).
+    Inputs: `{item_text, source_type, existing_entity_slugs?,
+    project_modules?}`. Output: `{score, closest_existing_slug,
+    reasoning, anti_pattern_warnings[]}`. Implements the rubric in
+    `skills/bookkeeping/references/scoring-rubric.md` §1 verbatim.
+  * `bookkeeping-specificity.md` — single-shot Specificity scorer
+    (0–3). Output adds a `concrete_evidence[]` array of verbatim
+    extracts from the input that justify the score, capped at 0
+    iff none.
+  * `bookkeeping-relevance.md` — single-shot Relevance scorer (0–3).
+    Inputs include `active_projects[]`, `open_questions[]`,
+    `archived_or_paused_projects[]`. Output captures
+    `connected_projects[]` + (iff score=3) the verbatim
+    `addresses_open_question` text.
+  * `bookkeeping-synthesizer.md` — multi-turn Layer-4 synthesizer
+    (max 8 turns). Inputs: `{topic, entities[≥3], audience}`.
+    Outputs structured markdown sections with `[[type/slug]]`
+    wikilink citations. Self-flags `blog_post_candidate` against
+    a high bar.
+  * **Cross-agent invariant**: the three scorers share output shape
+    (`{score, reasoning, anti_pattern_warnings, …}`) so P8 can fan
+    out the same item to all three in parallel and aggregate the
+    raw score 0..=9. The synthesizer intentionally cannot cite
+    entities it wasn't given (`cited_entities ⊆ input.entities`).
+  * **Fixture coverage**: `crates/arcan/arcan-ergon/tests/agents_fixtures.rs`
+    grew its `REQUIRED_BLESSED_AGENTS` constant from 3 to 7. The
+    existing 6 fixture tests now validate all 7 blessed agents
+    (FsAgentRegistry load, well-formed spec, schema compiles under
+    production validator). No new tests; existing assertions cover
+    the new agents uniformly.
+  * **`agents/README.md`** gained a "Currently shipped (BRO-1012 —
+    bookkeeping)" section documenting purpose, shape, and the
+    aggregator design. Naming convention `bookkeeping-<dimension>`
+    keeps related agents adjacent in directory listings.
+
 - **First authored agents** at `agents/<name>.md` — the Layer-3 data
   files that prove the substrate end-to-end. (BRO-1010)
   * `agents/general.md` — multi-turn generalist (max 16 turns).
