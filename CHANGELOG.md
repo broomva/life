@@ -3,6 +3,53 @@
 ## Unreleased
 
 ### Added
+- `ergon::StepCtx::dispatch_spawn_agent` — wires the
+  `spawn_agent(name, input)` builtin tool through to actual sub-agent
+  execution. Closes the substrate-to-runtime gap that BRO-1007 left as
+  a fast-follow. (BRO-1007b)
+  * **`StepCtx::agent_registry`** and **`StepCtx::recursion`** — two new
+    optional fields (with `with_agent_registry` / `with_recursion`
+    builder methods) so the host runtime can plumb a registry and
+    recursion frame in per tick.
+  * **`StepCtx::dispatch_tool` is now `&mut self`** — required because
+    the spawn intercept calls `agent.run(&mut self, input)`. All other
+    tool dispatch paths only need `&self`-equivalent access; the
+    upgrade is harmless because the autonomous loop already holds
+    `&mut self` and dispatches tools serially.
+  * **Spawn intercept** — when the model emits a tool_use for
+    `SPAWN_AGENT_TOOL`, dispatch resolves args via `SpawnArgs`,
+    validates via `RecursionContext::check_can_spawn`, looks up the
+    target via `AgentRegistry::get`, opens a child recursion frame via
+    `mem::replace`, runs the sub-agent (`Agent::run`), restores the
+    parent frame, and wraps the result as
+    `ToolResult::success({ok, agent, output})` or in-band
+    `ToolResult::model_error({error: <category>, detail, agent})`. All
+    failure modes (unknown agent, missing registry, depth/cycle/
+    invocation/budget refusal, sub-agent runtime error) surface to the
+    parent agent in-band so it can adapt on the next turn rather than
+    aborting the workflow.
+  * **`ChainedToolRegistry::spawn_tool`** — when a registry is configured
+    on `StepCtx`, `run_spec` injects a `SpawnAgentTool` into the
+    chained registry so the model sees `spawn_agent` advertised in its
+    tool list. Definitions de-duplicate framework tools across nested
+    chain layers (the case during nested sub-agent dispatch).
+  * **`arcan-ergon::WorkflowRunInputs`** gained `agent_registry`,
+    `max_recursion_depth`, `max_invocations` fields (with builders
+    `with_agent_registry` / `with_max_recursion_depth` /
+    `with_max_invocations`); `run_workflow_as_tick` constructs a fresh
+    root `RecursionContext` per tick and attaches it + the registry to
+    the `StepCtx`. Recursion limits are per-tick (a tick is a bounded
+    computation), never carried across ticks.
+  * **arcan binary** constructs an empty `InMemoryAgentRegistry` at
+    startup and attaches it via `WorkflowRunInputs::with_agent_registry`,
+    establishing the wiring shape. First authored agents land in
+    BRO-1010 (`agents/goal-pursuer.md` etc.) and populate this registry.
+  8 new integration tests (`tests/spawn_dispatch.rs`): happy path,
+  unknown agent, no registry configured, depth-limit refusal, cycle
+  detection, two-level recursion, invalid arguments, sub-agent error.
+  Total ergon test count: 121 passing (98 unit + 15 agent_primitive +
+  8 spawn_dispatch).
+
 - `ergon::AgentRegistry` / `ergon::SpawnAgentTool` / `ergon::RecursionContext` —
   the substrate layer that lets authored AgentSpecs be invoked by name from
   within an agent's loop. (BRO-1007)
