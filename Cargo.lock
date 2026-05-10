@@ -552,6 +552,7 @@ dependencies = [
  "ergon",
  "ergon-life-hooks",
  "futures",
+ "jsonschema",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

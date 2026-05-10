@@ -3,6 +3,63 @@
 ## Unreleased
 
 ### Added
+- **First authored agents** at `agents/<name>.md` — the Layer-3 data
+  files that prove the substrate end-to-end. (BRO-1010)
+  * `agents/general.md` — multi-turn generalist (max 16 turns).
+    Inherits the workflow's full tool set; emits typed
+    `{response, confidence, used_tools}`.
+  * `agents/goal-pursuer.md` — multi-turn goal pursuer (max 32
+    turns). Receives `{goal, success_criteria, constraints,
+    prior_context}`; plans, executes tools, may delegate via
+    `spawn_agent`; emits typed
+    `{outcome, evidence, unmet_criteria, next_steps, reasoning}`
+    with `outcome` ∈ {`success`, `partial`, `failure`}.
+  * `agents/goal-judge.md` — single-shot judge (max_turns 1) that
+    scores a `goal-pursuer` run against the original criteria.
+    Outputs `{score (0..3), honest, criteria_assessment[],
+    suggestions[], summary}`. The `criteria_assessment` array
+    pins one verdict per success criterion (`met` / `partly_met`
+    / `not_met` / `unverifiable`).
+  * `agents/README.md` — the authoring contract: format, the
+    filename↔name match rule, the self-validation workflow, and the
+    "human-PR-authored only, no production self-modification" rule
+    from architecture spec §7.3.
+  * **arcan binary**: new global flag `--agents-dir <DIR>` (env
+    `ARCAN_AGENTS_DIR`) defaulting to `./agents/`. On `arcan serve`
+    boot the binary calls `ergon::FsAgentRegistry::load`, logs the
+    loaded agent count at INFO, and falls back to an empty
+    `InMemoryAgentRegistry` with a warning if the directory is
+    missing — boot is never blocked by missing agents, but
+    `spawn_agent` calls then fail-closed in-band with
+    `unknown_agent`.
+  * **`ergon::FsAgentRegistry`** now silently skips markdown files
+    that lack YAML frontmatter or have an empty body — these are
+    documentation files (e.g. `agents/README.md`,
+    `agents/CHANGELOG.md`), not agents. Genuine YAML / schema
+    errors in actual agent files still fail loud at load time.
+    The previous behavior treated `README.md` as a malformed agent
+    and refused to load the entire directory.
+  * **Fixture tests** — `crates/arcan/arcan-ergon/tests/agents_fixtures.rs`
+    runs offline (no LLM, no API key) on every `cargo test`,
+    asserting per the architecture spec §M7 (prompt-fragility
+    hardening):
+    1. The `agents/` directory loads cleanly through
+       `FsAgentRegistry`.
+    2. All required blessed agents (`general`, `goal-pursuer`,
+       `goal-judge`) are present.
+    3. Each agent's spec is well-formed (validates,
+       non-empty model/instructions, object-typed schemas).
+    4. Each input/output schema compiles under the production
+       `jsonschema` validator (so a malformed schema fails at test
+       time, not at first inference call).
+    5. `goal-pursuer.outcome` declares the concrete enum
+       `{success, partial, failure}`.
+    6. `goal-judge.claimed_outcome` mirrors `goal-pursuer.outcome`
+       byte-for-byte (so a maintainer who edits one without the
+       other fails CI rather than producing a workflow that
+       silently rejects every pursuer answer).
+
+
 - `ergon::StepCtx::dispatch_spawn_agent` — wires the
   `spawn_agent(name, input)` builtin tool through to actual sub-agent
   execution. Closes the substrate-to-runtime gap that BRO-1007 left as

@@ -227,6 +227,25 @@ impl FsAgentRegistry {
                                 }
                                 specs.push((spec.name.clone(), spec));
                             }
+                            // Files without YAML frontmatter are
+                            // documentation (e.g. `agents/README.md`,
+                            // `CHANGELOG.md`), not agents — skip them
+                            // silently rather than failing the whole
+                            // registry load. Same goes for empty-body
+                            // files: a stub README without a real body
+                            // shouldn't take down the kernel boot.
+                            // Genuine agent files have BOTH frontmatter
+                            // AND a body, and any other parse error
+                            // (malformed YAML, unknown field, …) is
+                            // still a hard error so typos in real
+                            // agents still fail loud.
+                            Err(ParseError::MissingFrontmatter | ParseError::EmptyBody) => {
+                                tracing::debug!(
+                                    target: "ergon.agent_registry",
+                                    path = %path.display(),
+                                    "skipping non-agent markdown file (no frontmatter or empty body)",
+                                );
+                            }
                             Err(e) => errors.push(RegistryError::Parse {
                                 path: path.clone(),
                                 source: Box::new(e),
@@ -749,10 +768,33 @@ Body.
         }
     }
 
+    #[tokio::test]
+    async fn fs_registry_skips_files_without_frontmatter() {
+        // Files without YAML frontmatter are documentation
+        // (e.g. README.md, CHANGELOG.md), not agents. The registry
+        // should silently skip them rather than failing the entire
+        // load — otherwise any project that ships an agents/ folder
+        // can't also ship docs alongside.
+        let dir = make_temp_dir("docs");
+        write_agent(&dir, "README.md", "# Just docs\n\nNo frontmatter.");
+        write_agent(&dir, "real-agent.md", &valid_agent_md("real-agent"));
+
+        let reg = FsAgentRegistry::load(&dir).expect("load skips README, accepts real agent");
+        assert_eq!(reg.len().await, 1);
+        assert!(reg.get("real-agent").await.is_some());
+    }
+
     #[test]
-    fn fs_registry_rejects_malformed_md() {
+    fn fs_registry_rejects_malformed_frontmatter() {
+        // Genuine errors in frontmatter (broken YAML, unknown field)
+        // are still hard failures — typos in real agents must fail
+        // loud at load time, not silently.
         let dir = make_temp_dir("malformed");
-        write_agent(&dir, "broken.md", "no frontmatter here at all");
+        write_agent(
+            &dir,
+            "broken.md",
+            "---\nname: broken\n  bad: indentation\n---\n\n# Body\n",
+        );
 
         let err = FsAgentRegistry::load(&dir).expect_err("must reject");
         if let RegistryError::AggregateLoad { errors, .. } = err {
