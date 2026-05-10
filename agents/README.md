@@ -55,6 +55,24 @@ name and one place to find it.
 | [`goal-pursuer.md`](goal-pursuer.md) | Multi-turn goal pursuer — takes a goal + success criteria, plans, executes tools, reports structured progress. | Multi-turn (max 32), inherits all workflow tools, uses `spawn_agent` for sub-tasks. |
 | [`goal-judge.md`](goal-judge.md) | Single-shot judge that scores a `goal-pursuer`'s output against the original criteria. Designed to run after a pursuer to enforce honesty. | Single-shot (max_turns 1), no tools needed (judging from text alone). |
 
+## Currently shipped (BRO-1011 — meta-agents)
+
+The two meta-agents that watch the bookkeeping pipeline. Both are
+**human-PR-authored only** per architecture spec §7.3 — there is no
+production code path that lets them edit themselves or each other,
+which prevents the metacognition deadlock (a meta-agent rewriting
+itself into a corrupt state).
+
+| Agent | Purpose | Shape |
+|-------|---------|-------|
+| [`nous-promoter.md`](nous-promoter.md) | Reads recent scoring runs from lago, decides what to promote/demote/refresh/synthesize next at the graph level. Allowed tools: `lago_query`, `nous_aggregate`, `nous_compare`. | Multi-turn (max 12), claude-sonnet-4-5. |
+| [`nous-judge.md`](nous-judge.md) | Calibration meta-judge for the bookkeeping scorers. Reads a sample of one scorer's runs and verdicts the scorer (`calibrated` / `drifting` / `miscalibrated` / `insufficient_signal`). Suggests prompt edits — never applies them. | Multi-turn (max 4), claude-sonnet-4-5. |
+
+The promoter operates at the **graph level** (entities, slugs, syntheses);
+the judge operates at the **scorer level** (the prompts that produce
+the scores). They compose: judge → fixes scorer prompts → better
+scores → promoter sees better signal → cleaner graph.
+
 ## Currently shipped (BRO-1012 — bookkeeping)
 
 The Nous gate (per `skills/bookkeeping/references/scoring-rubric.md`) is
@@ -70,7 +88,7 @@ fourth agent synthesizes Layer-4 notes from ≥ 3 Layer-3 entities.
 | [`bookkeeping-relevance.md`](bookkeeping-relevance.md) | Score the Relevance dimension (0–3) against active projects + open questions. | Single-shot (max 1), no tools, claude-haiku-4-5. |
 | [`bookkeeping-synthesizer.md`](bookkeeping-synthesizer.md) | Layer-4 synthesizer — combines ≥ 3 entity pages around a topic into a structured synthesis with `[[type/slug]]` citations. Self-flags `blog_post_candidate`. | Multi-turn (max 8), no tools, claude-sonnet-4-5. |
 
-The three scorers share an output shape (`{score, reasoning, anti_pattern_warnings, …}`) so the bookkeeping pipeline (P8) can fan out the same item across all three in parallel and aggregate the raw score.
+The three scorers share an output shape (`{score, reasoning, anti_pattern_warnings, …}`) so the bookkeeping pipeline (P8) can fan out the same item across all three in parallel and aggregate the raw score. The meta-agents above (BRO-1011) consume these scorers' outputs to detect drift and surface graph-level promotion decisions.
 
 ## Self-validation
 

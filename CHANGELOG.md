@@ -3,44 +3,49 @@
 ## Unreleased
 
 ### Added
-- **Bookkeeping authored agents** — four new blessed-tier agents at
-  `agents/bookkeeping-{novelty,specificity,relevance,synthesizer}.md`
-  validating the use case for the Nous gate (P8 scoring pipeline) as
-  authored agents rather than embedded prompts. (BRO-1012)
-  * `bookkeeping-novelty.md` — single-shot Novelty scorer (0–3).
-    Inputs: `{item_text, source_type, existing_entity_slugs?,
-    project_modules?}`. Output: `{score, closest_existing_slug,
-    reasoning, anti_pattern_warnings[]}`. Implements the rubric in
-    `skills/bookkeeping/references/scoring-rubric.md` §1 verbatim.
-  * `bookkeeping-specificity.md` — single-shot Specificity scorer
-    (0–3). Output adds a `concrete_evidence[]` array of verbatim
-    extracts from the input that justify the score, capped at 0
-    iff none.
-  * `bookkeeping-relevance.md` — single-shot Relevance scorer (0–3).
-    Inputs include `active_projects[]`, `open_questions[]`,
-    `archived_or_paused_projects[]`. Output captures
-    `connected_projects[]` + (iff score=3) the verbatim
-    `addresses_open_question` text.
-  * `bookkeeping-synthesizer.md` — multi-turn Layer-4 synthesizer
-    (max 8 turns). Inputs: `{topic, entities[≥3], audience}`.
-    Outputs structured markdown sections with `[[type/slug]]`
-    wikilink citations. Self-flags `blog_post_candidate` against
-    a high bar.
-  * **Cross-agent invariant**: the three scorers share output shape
-    (`{score, reasoning, anti_pattern_warnings, …}`) so P8 can fan
-    out the same item to all three in parallel and aggregate the
-    raw score 0..=9. The synthesizer intentionally cannot cite
-    entities it wasn't given (`cited_entities ⊆ input.entities`).
-  * **Fixture coverage**: `crates/arcan/arcan-ergon/tests/agents_fixtures.rs`
-    grew its `REQUIRED_BLESSED_AGENTS` constant from 3 to 7. The
-    existing 6 fixture tests now validate all 7 blessed agents
-    (FsAgentRegistry load, well-formed spec, schema compiles under
-    production validator). No new tests; existing assertions cover
-    the new agents uniformly.
-  * **`agents/README.md`** gained a "Currently shipped (BRO-1012 —
-    bookkeeping)" section documenting purpose, shape, and the
-    aggregator design. Naming convention `bookkeeping-<dimension>`
-    keeps related agents adjacent in directory listings.
+- **Meta-agents** — `agents/nous-promoter.md` and `agents/nous-judge.md`,
+  the two human-PR-authored meta-agents that watch the bookkeeping
+  pipeline. Per architecture spec §7.3, both are explicitly NOT
+  self-modifying in production — they SUGGEST graph actions and
+  prompt edits respectively, but a human PRs every change. (BRO-1011)
+  * `nous-promoter.md` — multi-turn (max 12). Inputs:
+    `{window_hours?, knowledge_graph_summary, open_questions?}`.
+    Reads recent scoring runs from lago via `lago_query`, aggregates
+    via `nous_aggregate`, compares windows via `nous_compare`,
+    decides what to promote / demote / refresh / retire / request
+    synthesis next at the **graph** level. Output is structured
+    actions with `target` + `rationale` + `confidence`. Empty
+    `decisions[]` is a valid output ("no action recommended this
+    window"); padding low-confidence decisions corrupts the signal.
+  * `nous-judge.md` — multi-turn (max 4). Inputs:
+    `{target_scorer, sample_window_hours?, sample_size?, rubric_excerpt}`.
+    Operates at the **scorer** level: reads a sample of one
+    bookkeeping scorer's runs and verdicts the scorer (`calibrated`
+    / `drifting` / `miscalibrated` / `insufficient_signal`).
+    Surfaces drift via cited run_ids. Suggests prompt edits but
+    NEVER applies them — a human PRs the change. The two meta-
+    agents compose: judge → fixes scorer prompts → better scores
+    → promoter sees better signal → cleaner graph.
+  * **Allowed-tools** for both meta-agents is locked down to
+    `[lago_query, nous_aggregate, nous_compare]` — the BRO-1009
+    praxis tools. No `spawn_agent`, no filesystem, no shell. The
+    meta-cognitive layer reads from the journal and aggregates;
+    that's it.
+  * **Fixture coverage**: `REQUIRED_BLESSED_AGENTS` extended to
+    include both new agents; the existing 6 fixture tests in
+    `crates/arcan/arcan-ergon/tests/agents_fixtures.rs` validate
+    them uniformly. After this PR + BRO-1012 (already merged), the
+    constant lists 9 blessed agents.
+  * **`agents/README.md`** gained a "Currently shipped (BRO-1011 —
+    meta-agents)" section explaining the human-PR-authored-only
+    rule and the promoter/judge composition story.
+
+  **Cross-PR dependency**: the agents reference tools (`lago_query`,
+  `nous_aggregate`, `nous_compare`) that BRO-1009 ships in a parallel
+  PR. The .md files validate independently; runtime
+  `spawn_agent("nous-promoter", ...)` calls start succeeding once
+  BRO-1009 is merged. BRO-1011's `nous-judge` references the
+  bookkeeping scorers shipped in BRO-1012 (already merged).
 
 - **First authored agents** at `agents/<name>.md` — the Layer-3 data
   files that prove the substrate end-to-end. (BRO-1010)
