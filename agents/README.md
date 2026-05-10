@@ -129,6 +129,44 @@ directory does not exist, arcan falls back to an empty
 invoke `spawn_agent("general", ...)` and the agent runs with the
 behavior defined here.
 
+## CLI tooling
+
+The `arcan agent` subcommand family (BRO-1008) gives operators a
+read-mostly surface over this directory without spinning up the daemon
+or making any LLM calls. All four commands honor `--agents-dir <DIR>`
+(env `ARCAN_AGENTS_DIR`, default `./agents/`).
+
+| Command | Purpose |
+|---|---|
+| `arcan agent list` | One-line summary per agent (name, model, max_turns, first instructions line). |
+| `arcan agent show <name>` | Pretty-printed full `AgentSpec` — model, schemas (formatted JSON), instructions body. |
+| `arcan agent new <name> [--model M] [--instructions T]` | Scaffold a fresh `<--agents-dir>/<name>.md` from a template. Refuses to overwrite. |
+| `arcan agent test <name> --input <json-or-@file> --dry-run` | Validate input JSON against `<name>`'s `input_schema` using the runtime's own `jsonschema` validator. |
+
+Examples (run from the workspace root, where `agents/` lives):
+
+```bash
+# List every blessed agent the runtime would load.
+arcan agent list
+
+# Inspect goal-pursuer's full spec.
+arcan agent show goal-pursuer
+
+# Scaffold a new bookkeeping scorer.
+arcan agent new bookkeeping.score-novelty
+
+# Validate an input payload against general's input_schema.
+arcan agent test general --input '{"request": "hi"}' --dry-run
+
+# Same, but read the payload from a file.
+arcan agent test goal-pursuer --input @./tmp-goal.json --dry-run
+```
+
+Live-LLM execution (`arcan agent test` without `--dry-run`) is not yet
+supported in this build — it's a fast-follow on top of BRO-1008 once
+the provider-stack wiring is factored out of `arcan serve`'s boot
+path.
+
 ## Future tiers
 
 **Experimental tier** (deferred, per spec §7.3): agents persisted as

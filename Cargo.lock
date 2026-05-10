@@ -394,6 +394,7 @@ dependencies = [
  "fastrand",
  "filetime",
  "futures-util",
+ "jsonschema",
  "lago-aios-eventstore-adapter",
  "lago-core",
  "lago-fs",
