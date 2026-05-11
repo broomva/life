@@ -65,11 +65,14 @@ hyper-util = { version = "0.1", features = ["full"] }
 
 # GraphQL — Lumen M7-W warp_graphql module (Tasks 3-23). The Warp
 # terminal client speaks GraphQL over HTTP + WebSocket; lifegw mounts
-# `/warp/graphql` (queries/mutations) and `/warp/graphql/subscriptions`
-# (subscriptions) atop the existing axum/tower stack. `dataloader`
-# coalesces N+1 fetches against lifed (saga state, session lookups,
-# anima identity, haima wallet) without leaking the underlying RPC
-# pattern into resolvers.
+# `/graphql/v2` (queries/mutations) and `/graphql-ws` (subscriptions
+# via graphql-transport-ws) atop the existing axum/tower stack —
+# matching Warp's wire paths verbatim so a patched warp-oss binary
+# (apps/warp-oss-patch/) drives an arcan-backed task end-to-end via
+# the M7-W.0 override env vars (WARP_SERVER_ROOT_URL +
+# WARP_WS_SERVER_URL). `dataloader` coalesces N+1 fetches against
+# lifed (saga state, session lookups, anima identity, haima wallet)
+# without leaking the underlying RPC pattern into resolvers.
 async-graphql.workspace = true
 async-graphql-axum.workspace = true
 dataloader.workspace = true
