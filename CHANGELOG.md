@@ -3,6 +3,35 @@
 ## Unreleased
 
 ### Added
+- **`lago replay --tree`** — reconstruct the agent-spawn recursion tree
+  for a session, closing acceptance criterion §9.4 of the authored-
+  agents architecture spec. (BRO-1014)
+  * Reads `EventPayload::Custom { event_type: "ergon.stream", … }`
+    events written by `ergon-life-sinks::LagoSink` and reconstructs
+    the recursion hierarchy from `ToolUseStart(spawn_agent)` /
+    `ToolUseEnd` bracketing. `ToolUseInputDelta` chunks accumulate
+    to recover the spawned agent's `name`; `Usage` events accrue
+    token totals per frame; non-spawn tool calls (e.g.
+    `record_answer`) annotate the current frame as
+    `inline_tool_calls`.
+  * Output: indented ASCII tree showing each frame's agent name,
+    depth, event-seq range, token usage, and inline tool calls.
+    Includes a summary footer (total spawns + total tokens).
+  * **CLI:** `lago replay --session <id> [--branch main] [--limit 10000] [--tree]`.
+  * **6 unit tests** in `commands::replay::tests` covering: no
+    spawns (root only), single spawn, two-level recursion
+    (orchestrator → relayer → echo-1 — mirrors the
+    `spawn_dispatch.rs` integration test), malformed args fallback
+    to `<unknown>`, ignoring foreign event types, forward-compat
+    absorption of unrecognised `StreamEvent` variants.
+  * **MVP scope explicitly noted**: cross-tick threading not yet
+    supported; args-parse heuristic falls back to `<unknown>` on
+    malformed JSON; wall-clock duration computation deferred.
+    The cleaner long-term path — a dedicated `Custom {
+    event_type: "ergon.agent_spawned", parent_id: … }` event with
+    real parent/child correlation IDs — is documented in the
+    module header and stays as a clear follow-up.
+
 - **`arcan agent` CLI** — operator tooling for the authored-agent
   substrate. Four read-mostly subcommands over the `--agents-dir`
   directory (`agents/<name>.md` files). (BRO-1008)
