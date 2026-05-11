@@ -1,0 +1,15 @@
+diff --git a/crates/warp_core/src/channel/mod.rs b/crates/warp_core/src/channel/mod.rs
+index b72cc1e..beb9cf3 100644
+--- a/crates/warp_core/src/channel/mod.rs
++++ b/crates/warp_core/src/channel/mod.rs
+@@ -42,8 +42,8 @@ impl Channel {
+     /// (`Dev`, `Local`, `Integration`) continue to honor them for local development and testing.
+     pub fn allows_server_url_overrides(&self) -> bool {
+         match self {
+-            Channel::Dev | Channel::Local | Channel::Integration => true,
+-            Channel::Stable | Channel::Preview | Channel::Oss => false,
++            Channel::Dev | Channel::Local | Channel::Integration | Channel::Oss => true,
++            Channel::Stable | Channel::Preview => false,
+         }
+     }
+ 

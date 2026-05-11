@@ -1,0 +1,2 @@
+# Upstream clone is gitignored; we re-clone on demand and patch.
+upstream/
