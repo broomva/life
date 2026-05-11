@@ -19,6 +19,6 @@ pub mod route;
 pub mod schema_mirror;
 pub mod subscriptions;
 
-// Re-exports gated until Tasks 5 (error.rs) and 10 (adapter.rs) land:
+// Re-export gated until Task 10 (adapter.rs) lands:
 // pub use adapter::WarpSchema;
-// pub use error::WarpGraphqlError;
+pub use error::WarpGraphqlError;
