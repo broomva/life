@@ -91,21 +91,38 @@ Arcan handles the agent loop, LLM provider calls, tool execution, and streaming.
 - ✅ Default policy rules (5 rules, 3 roles, 2 hooks)
 - ✅ CLI commands (session, log, cat, branch, init)
 - ✅ AI SDK v6 streaming (UiPart enum, boundary signals, Vercel format)
+- ✅ Spec C — life-runtime cluster (lifed M5 100%, lifegw M7 100%)
+- ✅ Spec D — Anima Custody (6/6 sub-phases shipped 2026-05-02)
+- ✅ Authored agents architecture (BRO-1005..1012 + Tier A validation, 9 blessed agents at `agents/`)
+- ✅ `lago replay --tree` recursion-tree visualization (BRO-1014)
+- ✅ Bookkeeping P8 calls authored scorer agents in production (BRO-1015)
 
-**Architecture scorecard**:
+**Architecture scorecard** (updated 2026-05-11):
 
 - Agent loop: 9/10 | Persistence: 10/10 | Tool harness: 9/10
-- Memory: 8/10 | Context quality: 9/10 | Self-learning: 2/10 — EGRI substrate wired (autoany-aios + autoany-lago adapters), cross-run inheritance available. No live self-improvement loop yet.
-- Observability: 2/10 | Security: 4/10 | Operational tooling: 8/10
+- Memory: 8/10 | Context quality: 9/10 | Self-learning: 4/10 — authored-agents architecture validated end-to-end via Tier A; nous-promoter + nous-judge meta-agents shipped as data; no live self-improvement loop yet (still human-PR-gated per spec §7.3).
+- Observability: 6/10 — Direct tick path fully wired (event store, nous observer, knowledge middleware); Workflow tick path blind (sinks not wired, see gap below).
+- Security: 7/10 — anima custody + Tier-2 capability tokens + autonomic gating (Direct path) + Vercel JWT verification + Tier-aware tool filtering.
+- Operational tooling: 9/10 — `lago log` / `lago replay --tree` / `arcan agent {list,show,new,test}` / P9 watcher / bookkeeping pipeline.
 
-**Known gaps** (blocks Phase 0 stabilization):
+**Known gaps** (current targets, updated 2026-05-11):
 
-- Branching not exposed (Lago supports it, Arcan defaults to "main")
+**Workflow tick path (3 wiring gaps; ~1 weekend of cleanup):**
+- `ergon-life-sinks` crate has zero consumers — `crates/arcan/arcan-ergon/src/runner.rs:157` uses `BufferSink::new()`. Workflow stream events never reach lago; `lago replay --tree` cannot see them.
+- 3 of 4 ergon auto-hook adapters are Noop (`AutonomicBudgetHook`/`NousScoreHook`/`AnimaAttestHook` get Noop impls in `crates/arcan/arcan-ergon/src/hooks.rs:137-166`; only `PraxisCapabilityHook` is real). Workflow ticks bypass budget/score/attest.
+- `arcan agent test` is `--dry-run` only — no live-LLM invocation. BRO-1015 had to call Anthropic SDK directly from Python.
+
+**Direct tick path is unaffected by all three** — autonomic via `AutonomicPolicyAdapter`, nous via `NousToolObserver`, lago via `EventStorePort` all wired through the standard kernel ports.
+
+**Long-tail gaps (Phase 0 stabilization):**
+- Branching not exposed in arcan API (`arcand/canonical.rs:1265` hardcodes `BranchId::main()`)
 - No OS-level sandbox isolation (soft sandbox only)
 - Network isolation declared but not enforced
-- Mount trait defined but unimplemented
-- No conformance test suite across aiOS/Arcan/Lago
-- aiOS still standalone (unification planned for Phase 7)
+- `Mount` trait defined but unimplemented
+- No conformance test suite across aios/arcan/lago
+- aios still standalone (unification planned for Phase 7)
+- Spec E E-Sub-B through F queued (mlx + vllm + vigil + autonomic + conformance)
+- Lumen Phase α not yet implemented (spec on `lumen-spec-side-branch`)
 
 ## Commands
 
