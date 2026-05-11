@@ -16,13 +16,37 @@
 
 ## Pre-flight Update (2026-05-11)
 
-Pre-flight investigation surfaced one load-bearing finding before Task 1 was dispatched. Summary:
+Two rounds of pre-flight + Task 2 spec-review surfaced findings that affect downstream implementation. Summary:
+
+**Round 1 — endpoint override** (caught by Task 0 pre-flight before any subagent dispatched):
 
 - The `WARP_API_ENDPOINT` env var name used in the original 2026-05-10 plan **does not exist** in Warp's codebase. Correct names are `WARP_SERVER_ROOT_URL` (HTTPS root) and `WARP_WS_SERVER_URL` (WebSocket subscription endpoint).
 - The official OSS binary silently drops these env vars via a release-channel gate at `crates/warp_core/src/channel/mod.rs:46`. Moving `Channel::Oss` from the `false` arm to the `true` arm of `allows_server_url_overrides` restores override behavior. **One-line patch.**
 - New Task 0 added below as the first task. It clones upstream, applies the one-line patch, builds the binary, and verifies override works. Task 0 runs in **parallel with Task 1** (workspace deps) — they touch independent trees.
 - Task 22 (E2E smoke) acceptance gate is updated below to launch `target/release/warp-oss` (the patched binary) instead of stock `warp`.
 - Firebase API key risk is deferred to Phase β (full Lumen fork) and tracked in the spec risk register.
+
+**Round 2 — branch name + Metal Toolchain** (caught by Task 0 + Task 2 implementer reports):
+
+- Upstream's default branch is `master`, not `main`. Plan template + apply-patch.sh updated to autodetect via `symbolic-ref refs/remotes/origin/HEAD`.
+- macOS Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`) is required to build `warp-oss` from source. Documented in `apps/warp-oss-patch/README.md` and the M7-W.0 section header.
+
+**Round 3 — operation names** (caught by Task 2 spec review):
+
+Upstream Warp's GraphQL schema uses a **mixed naming convention** — some Queries use bare nouns (`user`, `freeAvailableModels`, `simpleIntegrations`), others use `get*`-prefixed names (`getRelevantFragments`, `getCloudEnvironments`). The original 2026-05-10 plan assumed uniform `get*` prefix throughout. Plan corrections applied:
+
+| Original plan name | Actual upstream name | Affected task |
+|---|---|---|
+| `getUser` | **`user`** (bare-noun Query) | Task 14 |
+| `getUserSettings` | **DOES NOT EXIST as a Query** — settings nested under `UserResult` returned by `user` Query. Tier-3 stub fallback covers reads in v1 | Task 16 (now only wires `updateUserSettings` Mutation) |
+| `getFreeAvailableModels` | **`freeAvailableModels`** (bare-noun Query) | Task 17 |
+| `getSimpleIntegrations` | `simpleIntegrations` (bare-noun Query) | T2 sweep |
+| `getRequestLimitInfo` | DOES NOT EXIST as Query — nested field on `UserResult`/`OveragesResult` | T2 (drop from list) |
+| `getConversationUsage` | DOES NOT EXIST as Query — `conversationUsage` is a nested field | T2 (drop) |
+| `getAIOveragesForWorkspace` | DOES NOT EXIST as Query — `aiOverages` is a nested field | T2 (drop) |
+| `getAIConversationFormat` | DOES NOT EXIST anywhere | T2 (drop) |
+
+The 4 dropped T2 ops were never accessible as top-level Queries upstream. Their data is exposed via nested fields on response types (e.g., `user { settings { ... }, requestLimitInfo { ... } }`). For Phase α, nested-field reads fall through to the Tier-3 stub fallback (returning the schema's nullable defaults), which the Warp client tolerates. Real field-resolvers can be added in a follow-up if telemetry/billing UX requires populated values.
 
 All other tasks (1–23) are unchanged in scope. The lifegw GraphQL adapter, T1 resolvers, subscription bridge, and arcan adapter all remain as originally specified.
 
@@ -1580,22 +1604,36 @@ fn sdl_mirror_includes_critical_operations() {
     // Tier 1 + Tier 2 operations the resolvers will bind to.
     // If these go missing in upstream, our M7-W.2 plan is invalidated
     // before we start.
+    // Operation names match upstream Warp's actual schema — see
+    // Pre-flight Update + Task 2 spec-review finding (2026-05-11):
+    // upstream uses bare-noun field names (`user`, `freeAvailableModels`,
+    // `simpleIntegrations`) for some Queries and `get*`-prefixed names
+    // for others (`getRelevantFragments`, `getCloudEnvironments`). Don't
+    // assume uniform convention.
     const REQUIRED_OPS: &[&str] = &[
+        // Mutations (prefixed verbs)
         "createAgentTask",
         "updateAgentTask",
         "generateDialogue",
         "generateCommands",
-        "getUser",
+        "generateCodeEmbeddings",
         "createAnonymousUser",
+        "setUserIsOnboarded",
         "mintCustomToken",
         "issueTaskIdentityToken",
-        "getUserSettings",
+        "generateApiKey",
+        "expireApiKey",
         "updateUserSettings",
-        "getFreeAvailableModels",
-        "warpDriveUpdates",
+        // Queries (mixed bare-noun + get-prefixed)
+        "user",                     // upstream: bare; NOT getUser
+        "freeAvailableModels",      // upstream: bare; NOT getFreeAvailableModels
+        "simpleIntegrations",       // upstream: bare; NOT getSimpleIntegrations
+        "codebaseContextConfig",
         "listAIConversations",
-        "getRelevantFragments",
-        "getRequestLimitInfo",
+        "getRelevantFragments",     // upstream: get-prefixed
+        "rerankFragments",
+        // Subscription
+        "warpDriveUpdates",
     ];
 
     for op in REQUIRED_OPS {
@@ -1685,7 +1723,9 @@ To keep this plan tractable, Tasks 14–19 detail the first resolver group (iden
 
 ---
 
-### Task 14: T1 — Identity resolvers (`getUser`, `createAnonymousUser`, `setUserIsOnboarded`)
+### Task 14: T1 — Identity resolvers (`user`, `createAnonymousUser`, `setUserIsOnboarded`)
+
+**NOTE (2026-05-11 plan correction):** upstream Warp's Query field is `user`, NOT `getUser`. The resolver function name in this section says `resolve_get_user` for historical consistency with the original 2026-05-10 plan; the field-resolver binding at `.field_resolver("Query", "user", ...)` is the load-bearing line — match the upstream field name there exactly.
 
 **Files:**
 - Modify: `core/life/crates/life-runtime/lifegw/src/warp_graphql/resolvers/tier1.rs`
@@ -1703,11 +1743,14 @@ use crate::warp_graphql::context::WarpRequestCtx;
 use crate::warp_graphql::error::WarpGraphqlError;
 use async_graphql::dynamic::{FieldFuture, FieldValue, ResolverContext};
 
-/// Resolver: query `getUser`. Returns the authenticated user's profile.
+/// Resolver: query `user`. Returns the authenticated user's profile.
 ///
-/// Schema shape (per upstream): `getUser(id: ID): User`.
-/// Phase α: ignores the `id` arg, always returns the caller's user_id
-/// (per Lumen, multi-tenant lookups are out of scope until Phase β).
+/// Schema shape (per upstream verbatim mirror): `user(requestContext: RequestContext!): UserResult!`
+/// Phase α: ignores the `requestContext` arg's nuances; uses the bearer
+/// JWT's `sub` as the user_id. The `UserResult` return type bundles
+/// profile fields + nested settings + nested requestLimitInfo — those
+/// nested fields fall through to Tier-3 stubs in v1 (real field-resolvers
+/// can be wired in a follow-up when telemetry/billing UX is needed).
 pub fn resolve_get_user(rctx: ResolverContext<'_>) -> FieldFuture {
     FieldFuture::new(async move {
         let ctx: &WarpRequestCtx = rctx
@@ -1803,7 +1846,7 @@ use crate::warp_graphql::resolvers::tier1::{
 
 // Inside WarpSchema::build, after parsing SDL:
 schema_builder
-    .field_resolver("Query", "getUser", resolve_get_user)
+    .field_resolver("Query", "user", resolve_get_user)  // upstream field is `user`, not `getUser`
     .field_resolver("Mutation", "createAnonymousUser", resolve_create_anonymous_user)
     .field_resolver("Mutation", "setUserIsOnboarded", resolve_set_user_is_onboarded)
     // (continued for each T1 op)
@@ -1849,7 +1892,7 @@ async fn get_user_returns_authenticated_user_shape() {
         "trace-test".into(),
     );
 
-    let req = Request::new("query { getUser(id: \"test-user-1\") { id email } }").data(ctx);
+    let req = Request::new("query { user { profile { id email } } }").data(ctx);
     let resp = schema.inner().execute(req).await;
 
     // The test_stub dataloader fails on first RPC; we expect either a
@@ -1870,8 +1913,8 @@ async fn get_user_returns_authenticated_user_shape() {
     } else {
         // If the test infrastructure has a real lifed mock, verify shape.
         let json = resp.data.into_json().unwrap();
-        assert!(json["getUser"]["id"].is_string());
-        assert!(json["getUser"]["email"].is_string() || json["getUser"]["email"].is_null());
+        assert!(json["user"]["id"].is_string());
+        assert!(json["user"]["email"].is_string() || json["user"]["email"].is_null());
     }
 }
 
@@ -1912,7 +1955,7 @@ Expected: all unit + golden tests pass.
 
 ```bash
 git add core/life/crates/life-runtime/lifegw/src/warp_graphql/ core/life/crates/life-runtime/lifegw/tests/warp_graphql_t1_golden.rs
-git commit -m "feat(lifegw): T1 identity resolvers — getUser/createAnonymousUser/setUserIsOnboarded (M7-W.2, BRO-XXXX)"
+git commit -m "feat(lifegw): T1 identity resolvers — user/createAnonymousUser/setUserIsOnboarded (M7-W.2, BRO-XXXX)"
 ```
 
 ---
@@ -2131,46 +2174,19 @@ git commit -m "feat(lifegw): T1 token mint resolvers — OAuth-PKCE → JWT (L6-
 
 ---
 
-### Task 16: T1 — Settings resolvers (`getUserSettings`, `updateUserSettings`)
+### Task 16: T1 — Settings resolver (`updateUserSettings` only)
 
-Follow the same pattern as Task 14:
+**NOTE (2026-05-11 plan correction):** upstream Warp's schema has NO top-level `getUserSettings` Query — settings are nested under the `UserResult` returned by the `user` Query. The original 2026-05-10 plan listed `getUserSettings` as a T1 op; that was incorrect. Phase α drops the standalone settings-read resolver — when the Warp client queries `user { settings { ... } }`, the nested fields fall through to Tier-3 stubs (returning the schema's nullable defaults). A real field-resolver on `UserResult.settings` can be added in a follow-up if Lumen UX needs to persist real settings to lago in v1; that's tracked as an open question.
+
+Only `updateUserSettings` (Mutation) is wired in Task 16.
 
 **Files:** same as Task 14.
 
-- [ ] **Step 1: Implement resolvers**
+- [ ] **Step 1: Implement the resolver**
 
 Append to `tier1.rs`:
 
 ```rust
-pub fn resolve_get_user_settings(rctx: ResolverContext<'_>) -> FieldFuture {
-    FieldFuture::new(async move {
-        let ctx: &WarpRequestCtx = rctx
-            .ctx
-            .data::<WarpRequestCtx>()
-            .map_err(|_| WarpGraphqlError::Internal("missing request ctx".into()))?;
-
-        let mut client = ctx.dataloaders.settings.clone();
-        let resp = client
-            .get_user_settings(life_runtime_proto::lifed::GetUserSettingsRequest {
-                user_id: ctx.user_id().to_string(),
-            })
-            .await
-            .map_err(|e| WarpGraphqlError::Upstream(e.to_string()))?;
-
-        let settings = resp.into_inner();
-        let value = serde_json::json!({
-            "theme":           settings.theme,
-            "fontFamily":      settings.font_family,
-            "fontSize":        settings.font_size,
-            "selectedModel":   settings.selected_model,
-            "agentMode":       settings.agent_mode,
-            "telemetryOptIn":  settings.telemetry_opt_in,
-        });
-
-        Ok(Some(FieldValue::value(value)))
-    })
-}
-
 pub fn resolve_update_user_settings(rctx: ResolverContext<'_>) -> FieldFuture {
     FieldFuture::new(async move {
         let ctx: &WarpRequestCtx = rctx
@@ -2208,25 +2224,29 @@ pub fn resolve_update_user_settings(rctx: ResolverContext<'_>) -> FieldFuture {
 - [ ] **Step 2: Bind + test + commit**
 
 ```rust
-.field_resolver("Query", "getUserSettings", resolve_get_user_settings)
+// Note: there is NO Query "getUserSettings" — that field doesn't exist
+// upstream. The Mutation "updateUserSettings" is the only top-level
+// settings op. Settings-read fall-through is handled by the Tier-3 stub.
 .field_resolver("Mutation", "updateUserSettings", resolve_update_user_settings)
 ```
 
 ```bash
 cargo test -p lifegw warp_graphql
 git add -u
-git commit -m "feat(lifegw): T1 settings resolvers — getUserSettings/updateUserSettings (M7-W.2, BRO-XXXX)"
+git commit -m "feat(lifegw): T1 settings resolver — updateUserSettings Mutation (M7-W.2, BRO-XXXX)"
 ```
 
 ---
 
-### Task 17: T1 — Inference & model resolvers (`getFreeAvailableModels`, `generateDialogue`, `generateCommands`)
+### Task 17: T1 — Inference & model resolvers (`freeAvailableModels`, `generateDialogue`, `generateCommands`)
+
+**NOTE (2026-05-11 plan correction):** upstream Warp's Query field is `freeAvailableModels` (bare-noun), NOT `getFreeAvailableModels`. The resolver function name `resolve_get_free_available_models` is kept for historical consistency, but the `.field_resolver("Query", "freeAvailableModels", ...)` binding is what matters.
 
 `generateDialogue` is the most architecturally significant resolver — it routes through Spec E InferenceBackend via lifed and triggers the agent loop. The signature is large; the implementation pattern is the same as preceding resolvers but with streaming response handling.
 
 **Files:** same.
 
-- [ ] **Step 1: Implement `getFreeAvailableModels`**
+- [ ] **Step 1: Implement `freeAvailableModels`**
 
 ```rust
 pub fn resolve_get_free_available_models(rctx: ResolverContext<'_>) -> FieldFuture {
@@ -2363,7 +2383,7 @@ pub fn resolve_generate_commands(rctx: ResolverContext<'_>) -> FieldFuture {
 - [ ] **Step 4: Bind + test + commit**
 
 ```rust
-.field_resolver("Query",    "getFreeAvailableModels", resolve_get_free_available_models)
+.field_resolver("Query",    "freeAvailableModels", resolve_get_free_available_models)  // upstream field is `freeAvailableModels`
 .field_resolver("Mutation", "generateDialogue",       resolve_generate_dialogue)
 .field_resolver("Mutation", "generateCommands",       resolve_generate_commands)
 ```
