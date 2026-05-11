@@ -63,19 +63,17 @@ bytes = { workspace = true }
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 
-# GraphQL — Lumen M7-W warp_graphql module (Tasks 3-23). The Warp
-# terminal client speaks GraphQL over HTTP + WebSocket; lifegw mounts
-# `/graphql/v2` (queries/mutations) and `/graphql-ws` (subscriptions
-# via graphql-transport-ws) atop the existing axum/tower stack —
-# matching Warp's wire paths verbatim so a patched warp-oss binary
-# (apps/warp-oss-patch/) drives an arcan-backed task end-to-end via
-# the M7-W.0 override env vars (WARP_SERVER_ROOT_URL +
-# WARP_WS_SERVER_URL). `dataloader` coalesces N+1 fetches against
-# lifed (saga state, session lookups, anima identity, haima wallet)
-# without leaking the underlying RPC pattern into resolvers.
+# GraphQL framework for the warp_graphql module (Lumen M7-W).
+# Mounted alongside the existing tonic/axum stack to serve Warp's
+# verbatim GraphQL schema. The `dataloader` feature on async-graphql
+# is enabled at the workspace level for future N+1 coalescing in
+# resolvers (vs. the unmaintained standalone `dataloader` crate which
+# would have pulled async-std). See
+# `docs/superpowers/plans/2026-05-10-lumen-phase-alpha-m7-w.md`
+# for route paths, env vars, and the patched-binary integration point
+# at `apps/warp-oss-patch/`.
 async-graphql.workspace = true
 async-graphql-axum.workspace = true
-dataloader.workspace = true
 
 # WebSocket support — Sub-phase C public-plane Agent.StreamSession bidi
 # pump. tokio-tungstenite 0.26 (workspace pin) drives the upgrade dance
@@ -232,7 +230,8 @@ futures-util = { workspace = true }
 # warp_graphql subscription integration test. Speaks the
 # `graphql-transport-ws` subprotocol that async-graphql's Subscription
 # handler emits, so the test rig can exercise the bidi pump against a
-# live lifegw process.
+# live lifegw process. Task 23 enables `features = ["tungstenite"]`
+# when the e2e_smoke rig wires the real WS round-trip.
 graphql-ws-client = "0.10"
 
 [lints]

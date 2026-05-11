@@ -73,7 +73,7 @@ The implementer must skim these files first:
 
 | Path | Change |
 |---|---|
-| `crates/life-runtime/lifegw/Cargo.toml` | Add deps: `async-graphql = "7"`, `async-graphql-axum = "7"`, `dataloader = "0.18"`, `graphql-ws-client = "0.10"` (dev-dep for E2E only) |
+| `crates/life-runtime/lifegw/Cargo.toml` | Add deps: `async-graphql = "7.2"` (with features `chrono`, `uuid`, `dynamic-schema`, `playground`, `dataloader`), `async-graphql-axum = "7.2"`, `graphql-ws-client = "0.10"` (dev-dep for E2E only). DataLoader batching uses async-graphql's built-in feature — not the standalone `dataloader` crate, which pulled async-std (RUSTSEC-2025-0052) |
 | `crates/life-runtime/lifegw/src/lib.rs` | Add `pub mod warp_graphql;` |
 | `crates/life-runtime/lifegw/src/bootstrap.rs` | Wire `warp_graphql::route::routes()` into the axum Router |
 | `crates/life-runtime/lifegw/src/config.rs` | Add `WarpGraphqlConfig { enabled: bool, max_request_size: usize }` to top-level config |
@@ -297,10 +297,11 @@ Note: do NOT commit `upstream/` — it's gitignored. The binary built there is a
 Open `core/life/Cargo.toml`. Find the `[workspace.dependencies]` table. Add:
 
 ```toml
-async-graphql = { version = "7", default-features = false, features = ["chrono", "uuid"] }
-async-graphql-axum = "7"
-dataloader = "0.18"
+async-graphql = { version = "7.2", default-features = false, features = ["chrono", "uuid", "dynamic-schema", "playground", "dataloader"] }
+async-graphql-axum = "7.2"
 ```
+
+NOTE (2026-05-11 plan correction): the features list MUST include `dynamic-schema` (Task 4 uses `async_graphql::dynamic::Schema`) and `playground` (Task 6 uses `playground_source`). Both are in async-graphql's default feature set but `default-features = false` strips them — easy to miss and produces a compile failure at Task 4. The `dataloader` feature enables async-graphql's lightweight built-in DataLoader (futures-channel + lru); the original plan referenced a standalone `dataloader = "0.18"` crate which pulled the unmaintained async-std runtime (RUSTSEC-2025-0052) and wasn't actually used by Task 8 — we use the framework's native facility instead.
 
 - [ ] **Step 2: Reference workspace deps in lifegw Cargo.toml**
 
@@ -309,7 +310,6 @@ Open `core/life/crates/life-runtime/lifegw/Cargo.toml`. Add to `[dependencies]`:
 ```toml
 async-graphql.workspace = true
 async-graphql-axum.workspace = true
-dataloader.workspace = true
 ```
 
 Add to `[dev-dependencies]`:
@@ -986,11 +986,13 @@ Replace `core/life/crates/life-runtime/lifegw/src/warp_graphql/dataloader.rs` wi
 ```rust
 //! Batched lifed gRPC clients.
 //!
-//! Each lifed service we call from resolvers gets one DataLoader. The
-//! `dataloader` crate coalesces concurrent `.load(key)` calls within a
-//! tick into a single batched RPC (`load_many(keys)`). For services
-//! that don't naturally batch (one-call mutations like `createAgentTask`),
-//! we hold the gRPC client directly without a DataLoader wrapper.
+//! Each lifed service we call from resolvers is accessed through a
+//! tonic gRPC client. For services that benefit from N+1 coalescing
+//! (e.g., a query that needs `getUser` for 50 message authors in one
+//! response), wrap them later in `async_graphql::dataloader::DataLoader`
+//! — the framework's built-in lightweight loader (futures-channel + lru).
+//! v1 holds the raw tonic clients without batching; Task 8 ships only
+//! the holder shape.
 //!
 //! Per L6-D5, `Agent.StreamSession` is invoked via `createAgentTask` →
 //! returned task_id is used to filter the multiplexed `warpDriveUpdates`
