@@ -36,5 +36,6 @@ pub mod observability;
 pub mod proxy;
 pub mod services;
 pub mod shutdown;
+pub mod warp_graphql;
 
 pub use error::{LifegwError, LifegwResult};
