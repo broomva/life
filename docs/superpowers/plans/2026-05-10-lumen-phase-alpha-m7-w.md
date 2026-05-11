@@ -86,6 +86,16 @@ The implementer must skim these files first:
 
 **Outcome of M7-W.0:** A locally-built `target/release/warp-oss` binary that honors `WARP_SERVER_ROOT_URL` + `WARP_WS_SERVER_URL` env vars. This is the client side of the integration; M7-W.1+ is the server side. **They are independent and can run concurrently.**
 
+**System prerequisites (macOS):** Building `warp-oss` from source requires the Xcode Metal Toolchain (Warp's UI compiles GPU shaders via `metal`). If not installed, the build fails at `crates/warpui/build.rs:92`. Install via:
+
+```bash
+xcodebuild -downloadComponent MetalToolchain
+```
+
+This is interactive and ~GB-scale. Skip if you don't need to build the binary locally — Task 23 (manual α-gate verification) can be deferred to an environment that has the toolchain pre-installed, or to CI.
+
+**Build state caveat (2026-05-11 implementer report):** The first Task 0 dispatch committed the patch + script + README + .gitignore artifacts at commit `307cb022`, but the binary build failed on the missing Metal Toolchain. The artifacts are correct (patch verified to apply forward + reverse against current upstream `91b4f09`); only the binary is missing. Retry the build after installing the toolchain, or defer to Task 23.
+
 ---
 
 ### Task 0: Apply OSS-channel gate-bypass patch + build the patched Warp binary
@@ -153,20 +163,27 @@ UPSTREAM_DIR="$SCRIPT_DIR/upstream"
 PATCH_FILE="$SCRIPT_DIR/channel-oss-override.patch"
 UPSTREAM_URL="https://github.com/warpdotdev/warp.git"
 
-# Clone or refresh upstream.
+# Clone or refresh upstream. Autodetect default branch (upstream uses
+# `master`, not `main` — caught by pre-flight 2026-05-11).
 if [ -d "$UPSTREAM_DIR/.git" ]; then
   echo "==> Refreshing upstream clone"
-  git -C "$UPSTREAM_DIR" fetch --depth 1 origin main
+  DEFAULT_BRANCH=$(git -C "$UPSTREAM_DIR" symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
+  git -C "$UPSTREAM_DIR" fetch --depth 1 origin "$DEFAULT_BRANCH"
   git -C "$UPSTREAM_DIR" reset --hard FETCH_HEAD
+  git -C "$UPSTREAM_DIR" checkout -- .  # discard any prior patch
 else
   echo "==> Cloning upstream"
   git clone --depth 1 "$UPSTREAM_URL" "$UPSTREAM_DIR"
 fi
 
-# Apply patch.
+# Apply patch. Skip if already applied (idempotent re-run).
 echo "==> Applying channel-oss-override.patch"
-git -C "$UPSTREAM_DIR" apply --check "$PATCH_FILE"
-git -C "$UPSTREAM_DIR" apply "$PATCH_FILE"
+if git -C "$UPSTREAM_DIR" apply --reverse --check "$PATCH_FILE" 2>/dev/null; then
+  echo "    (already applied — skipping)"
+else
+  git -C "$UPSTREAM_DIR" apply --check "$PATCH_FILE"
+  git -C "$UPSTREAM_DIR" apply "$PATCH_FILE"
+fi
 
 # Build the OSS binary in release mode.
 echo "==> Building warp-oss (release)"
@@ -372,7 +389,7 @@ Expected: line count between 4,000 and 4,200; SDL shape is recognizable.
 Get the upstream commit SHA the schema was fetched from:
 
 ```bash
-gh api repos/warpdotdev/warp/commits/main --jq '.sha' | head -c 12
+gh api repos/warpdotdev/warp/commits/master --jq '.sha' | head -c 12
 ```
 
 Create `core/life/crates/life-runtime/lifegw/src/warp_graphql/schema_mirror/UPSTREAM.md`:
