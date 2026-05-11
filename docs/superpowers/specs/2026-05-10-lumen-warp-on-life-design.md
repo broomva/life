@@ -7,6 +7,47 @@
 **Owner**: lifegw + new `apps/lumen/` (β phase).
 **Linear umbrella**: TBD (created post-spec-approval via MCP Linear, NOT linear CLI per workspace rule).
 
+---
+
+## Pre-flight Update (2026-05-11)
+
+**The "unmodified Warp client" gate of the original Phase α framing was invalidated by pre-flight investigation, but the fix is small.** Documented here so subsequent sections can be read with this correction in mind.
+
+**Finding** (full report in the Linear umbrella): Warp's OSS build silently drops endpoint-override env vars via a release-channel gate at `crates/warp_core/src/channel/mod.rs:46`:
+
+```rust
+pub fn allows_server_url_overrides(&self) -> bool {
+    match self {
+        Channel::Dev | Channel::Local | Channel::Integration => true,
+        Channel::Stable | Channel::Preview | Channel::Oss => false,
+    }
+}
+```
+
+Moving `Channel::Oss` from the `false` arm to the `true` arm restores override behavior. After the patch, the following env vars are honored:
+
+- `WARP_SERVER_ROOT_URL=http://localhost:8443` (HTTPS root for `/graphql/v2`)
+- `WARP_WS_SERVER_URL=ws://localhost:8443/graphql/v2` (WebSocket subscription endpoint)
+
+There is **no `WARP_API_ENDPOINT`** in Warp's codebase — that name was an artifact of design-doc shorthand. References below have been corrected.
+
+**Architectural simplification.** `ChannelState::rtc_http_url()` (`state.rs:236-247`) derives the HTTP scheme from the WS URL by scheme-rewriting. lifegw needs to publish only one host:port; the client speaks both `https://host/graphql/v2` and `wss://host/graphql/v2` against it.
+
+**New risk (deferred to β).** `WarpServerConfig::production()` at `config.rs:46-51` embeds a Firebase API key (`firebase_auth_api_key`). If Lumen routes auth elsewhere (broomva.tech OAuth-PKCE per L6-D6) but leaves this constant intact, the client may attempt Firebase token exchange against `app.warp.dev` for some flows. Mitigation: neutralize in the β fork by swapping `firebase_auth_api_key` to a Lumen-controlled stub or by patching the Firebase call sites to short-circuit. Tracked in the risk register below.
+
+**Phase reframing.** Phase α can no longer be "unmodified Warp + env var override" — it is now "lifegw adapter + minimal patched OSS build." The patch is one line; the work in `crates/life-runtime/lifegw/src/warp_graphql/` is unchanged. Phase β remains the full productized Lumen branded build.
+
+**Sections affected by this update (read with the corrections in mind):**
+- "Phase α / Phase β" bullets in the **Solution** section (Phase α requires a one-line OSS-channel patch, not an unmodified binary)
+- Architecture diagram (env vars are `WARP_SERVER_ROOT_URL` + `WARP_WS_SERVER_URL`, both required)
+- L6-D3 rejected-alternative paragraph mentioning "unmodified Warp" (rejection still stands; the constraint is now that the patched OSS build expects the verbatim wire shape)
+- L6-D5 rejected-alternative paragraph mentioning "unmodified Warp client gate" (same)
+- Phasing tables (Phase α acceptance gate uses `target/release/warp-oss` binary)
+- Risk Register (add Firebase API key embedded constant)
+- Open Questions (add default port — `:8080` Warp dev convention vs `:8443` HTTPS-conventional)
+
+---
+
 ## Problem
 
 Warp open-sourced its client on 2026-04-28 under AGPLv3 (UI framework crates `warpui_core` + `warpui` are MIT). The repository is `github.com/warpdotdev/warp` — 63 Rust workspace crates, 4,134-line GraphQL schema (`crates/warp_graphql_schema/api/schema.graphql`), GPU-rendered terminal on `wgpu`, MCP support, ~56k stars at announcement. OpenAI is the founding sponsor of the open repo.
@@ -176,7 +217,7 @@ This aligns with Broomva's open-source-first stance documented in repository con
 ┌──────────────────────────────────────────────────────────────────┐
 │ Phase α (validate, ≤ 3 weeks)                                    │
 │   Official warpdotdev/warp build, unmodified                     │
-│   $ WARP_API_ENDPOINT=https://lifegw.broomva.tech/graphql warp  │
+│   $ WARP_SERVER_ROOT_URL=https://lifegw.broomva.tech/graphql warp  │
 └────────────────┬─────────────────────────────────────────────────┘
                  │
 ┌────────────────▼─────────────────────────────────────────────────┐
@@ -236,7 +277,7 @@ arcan ──── outbound calls ───→ lifegw GraphQL ───→ Lumen
 |---|---|---|
 | `warp_graphql` adapter (schema mirror + resolvers + auth + dataloader + subscriptions) | `crates/lifegw/src/warp_graphql/` | ~3 KLOC Rust |
 | Conformance battery | `crates/lifegw/tests/warp_conformance.rs` + golden fixtures | ~50 tests + ~30 JSON goldens |
-| arcan Warp-task adapter (createAgentTask → ConsciousnessActor) | `arcan/crates/arcan-core/src/warp_agent.rs` | ~1 KLOC |
+| arcan Warp-task adapter (createAgentTask → ConsciousnessActor) | `crates/arcan/arcan-core/src/warp_agent.rs` | ~1 KLOC |
 | OAuth-PKCE first-launch flow (β only) | `apps/lumen/src/auth.rs` + browser handoff | ~500 LOC |
 | Lumen fork patches (β only) | `apps/lumen/` (defaults, branding, assets) | ~1 KLOC + assets |
 | TS SDK bindings (mirror D-Sub-C wiremock pattern) | `sdks/life-sdk-ts/src/lumen/` | ~400 LOC + 30 tests |
@@ -460,7 +501,7 @@ The bstack 27-skill catalog (P1–P13 primitives + the user-installed skills) be
 
 ## Lumen Fork Scope (β phase)
 
-The fork delta is small because endpoint configuration in Warp is build-time configurable via `ChannelState::server_root_url()` (per schema-discovery findings). The Phase α path uses official Warp with an env var override (`WARP_API_ENDPOINT`); Phase β bakes the default in.
+The fork delta is small because endpoint configuration in Warp is build-time configurable via `ChannelState::server_root_url()` (per schema-discovery findings). The Phase α path uses official Warp with an env var override (`WARP_SERVER_ROOT_URL`); Phase β bakes the default in.
 
 | Patch category | Approximate LOC delta |
 |---|---|
@@ -514,7 +555,8 @@ E2E is the α completion gate — same shape as the M5 e2e_smoke that ships in `
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Warp upstream schema drift (open development = faster changes) | Medium-high | Pin to specific commit; conformance battery catches drift; quarterly rebase cadence with explicit migration ticket |
-| `server_root_url` not env-overridable on official Warp build | Low (verified on day 1) | Confirm before kicking off α. Worst case: skip α, go straight to β fork (saves ~1 week of validation work) |
+| `server_root_url` env-override gated for `Channel::Oss` on official binary | **Confirmed 2026-05-11**: gated. Mitigated by M7-W.0 one-line patch (see `apps/warp-oss-patch/`); Phase α uses the patched OSS binary rather than stock `warp` |
+| Firebase API key embedded in `WarpServerConfig::production()` (`config.rs:46-51`) | Medium for β | Production-build clients may attempt Firebase token exchange against `app.warp.dev` for some flows even when GraphQL endpoint is redirected. Phase β fork must (a) neutralize the constant or (b) patch Firebase call sites to short-circuit. Deferred from α because broomva.tech OAuth-PKCE doesn't go through Firebase; α may still see telemetry/login-side-effect traffic to Firebase — acceptable for validation, not for production |
 | AGPL contagion via lifegw GraphQL bindings | **None** | Lumen client speaks HTTP to lifegw — no linking, no contagion |
 | Spec E backends not production-ready in time for L.3 (code embeddings) | Medium | E-Sub-A InProcess covers v1 baseline; E-Sub-B (MLX) and E-Sub-C (vLLM) mature in parallel; if neither lands by L.3, fall back to E-Sub-A's embedding model with reduced quality (acceptable for v1) |
 | lago graph index slow on large codebases | Medium | Acceptable for v1 (< 100k LOC); HNSW optimization tracked as v1.1 follow-up ticket |
@@ -559,6 +601,10 @@ These are explicitly out of v1 scope but acknowledged for follow-up planning:
 5. **Life-orchestrates-Warp (frontier vision).** v2+ scope. Requires new UX surfaces in arcan ("decide to open a Lumen session") and Lumen ("accept proactive invocations from Life"). Spec to be written when v1 ships and we have feedback on what proactive orchestration should look like.
 
 6. **Native autoupdate channel for Lumen.** L.5 ships a basic release pipeline; full autoupdate (delta updates, signed manifest, rollback) is a follow-up.
+
+7. **Default port — `:8080` (Warp dev convention) or `:8443` (HTTPS-conventional)?** Pre-flight (2026-05-11) found Warp's own local-dev workflow points at `http://localhost:8080`. The plan defaults to `:8443` for HTTPS-conventional reasons. Decide before β whether to align Lumen's default with Warp dev muscle memory.
+
+8. **Firebase API key neutralization strategy (β).** Two viable paths surfaced in pre-flight: (a) swap the embedded `firebase_auth_api_key` constant to a Lumen-controlled stub, or (b) patch Firebase call sites to short-circuit. Choose during β L.1 (fork + branding) sub-phase.
 
 7. **TpmAnima desktop integration UX.** Hardware-backed identity is offered as a graduation in v1 but the UX flow for "enroll your TPM" needs design work. Tracked separately.
 

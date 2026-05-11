@@ -2,15 +2,29 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Land a Warp-compatible GraphQL surface on `lifegw` so an unmodified upstream Warp client, pointed at lifegw via `WARP_API_ENDPOINT`, drives an arcan-backed agent task to completion.
+**Goal:** Land a Warp-compatible GraphQL surface on `lifegw` so a minimally-patched OSS Warp build (one-line `Channel::Oss` gate-bypass), pointed at lifegw via `WARP_SERVER_ROOT_URL` + `WARP_WS_SERVER_URL`, drives an arcan-backed agent task to completion.
 
 **Architecture:** New `warp_graphql` module inside `crates/life-runtime/lifegw/`. Loads Warp's verbatim 4,134-line schema in async-graphql SDL-first mode. Resolvers translate to lifed gRPC. Subscription bridges `warpDriveUpdates` to `lifed.EventService.Subscribe`. New `arcan-core/src/warp_agent.rs` adapts `createAgentTask` invocations to `ConsciousnessActor`.
 
 **Tech Stack:** Rust 2024 (edition = "2024", rust-version = "1.85") · async-graphql 7.x · axum 0.7 · tonic 0.14 · graphql-transport-ws · tokio · existing lifegw JWT/JWKS infrastructure · Spec D AnimaCustody · Spec E InferenceBackend.
 
-**Spec:** `core/life/docs/superpowers/specs/2026-05-10-lumen-warp-on-life-design.md` (committed `686409ab`).
+**Spec:** `core/life/docs/superpowers/specs/2026-05-10-lumen-warp-on-life-design.md` (Pre-flight Update 2026-05-11 included).
 
-**Phase scope:** This plan covers Phase α only (M7-W.1 + M7-W.2 + M7-W.3, ~3 weeks, 18 Linear pts). Phase β (Lumen fork at `apps/lumen/`) gets its own plan written after α ships.
+**Phase scope:** This plan covers Phase α only (M7-W.1 + M7-W.2 + M7-W.3, ~3 weeks, 18 Linear pts), plus a new **Task 0** (Warp OSS one-line patch + binary build) added 2026-05-11 after pre-flight. Phase β (Lumen fork at `apps/lumen/`) gets its own plan written after α ships.
+
+---
+
+## Pre-flight Update (2026-05-11)
+
+Pre-flight investigation surfaced one load-bearing finding before Task 1 was dispatched. Summary:
+
+- The `WARP_API_ENDPOINT` env var name used in the original 2026-05-10 plan **does not exist** in Warp's codebase. Correct names are `WARP_SERVER_ROOT_URL` (HTTPS root) and `WARP_WS_SERVER_URL` (WebSocket subscription endpoint).
+- The official OSS binary silently drops these env vars via a release-channel gate at `crates/warp_core/src/channel/mod.rs:46`. Moving `Channel::Oss` from the `false` arm to the `true` arm of `allows_server_url_overrides` restores override behavior. **One-line patch.**
+- New Task 0 added below as the first task. It clones upstream, applies the one-line patch, builds the binary, and verifies override works. Task 0 runs in **parallel with Task 1** (workspace deps) — they touch independent trees.
+- Task 22 (E2E smoke) acceptance gate is updated below to launch `target/release/warp-oss` (the patched binary) instead of stock `warp`.
+- Firebase API key risk is deferred to Phase β (full Lumen fork) and tracked in the spec risk register.
+
+All other tasks (1–23) are unchanged in scope. The lifegw GraphQL adapter, T1 resolvers, subscription bridge, and arcan adapter all remain as originally specified.
 
 ---
 
@@ -22,7 +36,7 @@ The implementer must skim these files first:
 2. **lifegw existing structure**: `core/life/crates/life-runtime/lifegw/src/lib.rs`, `auth/`, `bootstrap.rs`, `services/` — understand the existing axum router, JWT middleware, and how services register.
 3. **lifegw Cargo.toml**: `core/life/crates/life-runtime/lifegw/Cargo.toml` — feature flags, deps, conventions.
 4. **lifed services**: `core/life/crates/life-runtime/lifed/src/services/` — list available gRPC services. Resolvers will dispatch through these.
-5. **arcan ConsciousnessActor**: `core/life/arcan/crates/arcan-core/src/` — find the existing actor entry point (likely `agent.rs` or `consciousness/`). The new `warp_agent.rs` adapter wraps it.
+5. **arcan ConsciousnessActor**: `core/life/crates/arcan/arcan-core/src/` — find the existing actor entry point (likely `agent.rs` or `consciousness/`). The new `warp_agent.rs` adapter wraps it.
 6. **Workspace Rust conventions**: `core/life/CLAUDE.md` "Shared Conventions" section — Rust 2024 edition specifics (`gen` reserved keyword, `unsafe` env vars, `name.rs` not `mod.rs`), `cargo fmt + clippy + test` workflow.
 7. **Spec C₃ §6.5 close codes**: `core/life/docs/superpowers/specs/2026-04-29-spec-c3-close-codes.md` — close-code vocabulary used by `warpDriveUpdates` subscription on disconnect.
 
@@ -52,8 +66,8 @@ The implementer must skim these files first:
 | `crates/life-runtime/lifegw/tests/warp_graphql_introspection.rs` | Conformance: introspection AST matches schema.graphql byte-for-byte |
 | `crates/life-runtime/lifegw/tests/warp_graphql_t1_golden.rs` | Golden response shapes for each T1 op |
 | `crates/life-runtime/lifegw/tests/warp_graphql_e2e_smoke.rs` | E2E smoke: docker-compose + official Warp client + arcan task to completion |
-| `arcan/crates/arcan-core/src/warp_agent.rs` | Adapter: `createAgentTask` → `ConsciousnessActor` invocation |
-| `arcan/crates/arcan-core/tests/warp_agent.rs` | Tests for the warp_agent adapter |
+| `crates/arcan/arcan-core/src/warp_agent.rs` | Adapter: `createAgentTask` → `ConsciousnessActor` invocation |
+| `crates/arcan/arcan-core/tests/warp_agent.rs` | Tests for the warp_agent adapter |
 
 ### Files modified (existing)
 
@@ -63,8 +77,206 @@ The implementer must skim these files first:
 | `crates/life-runtime/lifegw/src/lib.rs` | Add `pub mod warp_graphql;` |
 | `crates/life-runtime/lifegw/src/bootstrap.rs` | Wire `warp_graphql::route::routes()` into the axum Router |
 | `crates/life-runtime/lifegw/src/config.rs` | Add `WarpGraphqlConfig { enabled: bool, max_request_size: usize }` to top-level config |
-| `arcan/crates/arcan-core/src/lib.rs` | Add `pub mod warp_agent;` |
+| `crates/arcan/arcan-core/src/lib.rs` | Add `pub mod warp_agent;` |
 | `core/life/Cargo.toml` (workspace root) | Add `async-graphql` and friends to `[workspace.dependencies]` |
+
+---
+
+## M7-W.0 — Warp OSS Patch (parallelizable with M7-W.1)
+
+**Outcome of M7-W.0:** A locally-built `target/release/warp-oss` binary that honors `WARP_SERVER_ROOT_URL` + `WARP_WS_SERVER_URL` env vars. This is the client side of the integration; M7-W.1+ is the server side. **They are independent and can run concurrently.**
+
+---
+
+### Task 0: Apply OSS-channel gate-bypass patch + build the patched Warp binary
+
+**Files:**
+- Create: `apps/warp-oss-patch/` (new directory in workspace)
+- Create: `apps/warp-oss-patch/README.md`
+- Create: `apps/warp-oss-patch/apply-patch.sh`
+- Create: `apps/warp-oss-patch/channel-oss-override.patch`
+- Create: `apps/warp-oss-patch/.gitignore` (ignores the `upstream/` clone)
+
+**Why this task exists:** Pre-flight (2026-05-11) found that Warp's OSS build silently drops `WARP_SERVER_ROOT_URL` / `WARP_WS_SERVER_URL` via a release-channel gate at `crates/warp_core/src/channel/mod.rs:46`. A one-line patch (move `Channel::Oss` from the `false` arm to the `true` arm) restores override behavior. This task encapsulates the patch, the build script, and the smoke verification.
+
+**Important constraint:** We do NOT vendor Warp's source into our repo. We clone upstream on demand (gitignored), apply our patch, build. The artifact (`apps/warp-oss-patch/upstream/target/release/warp-oss`) is also gitignored. The only files we commit are the patch, the script, and the README.
+
+- [ ] **Step 1: Create the directory + .gitignore**
+
+```bash
+mkdir -p apps/warp-oss-patch
+cat > apps/warp-oss-patch/.gitignore <<'EOF'
+# Upstream clone is gitignored; we re-clone on demand and patch.
+upstream/
+EOF
+```
+
+- [ ] **Step 2: Write the patch file**
+
+Create `apps/warp-oss-patch/channel-oss-override.patch`:
+
+```patch
+--- a/crates/warp_core/src/channel/mod.rs
++++ b/crates/warp_core/src/channel/mod.rs
+@@ -42,8 +42,9 @@ impl Channel {
+     /// they explicitly opt in via this method.
+     pub fn allows_server_url_overrides(&self) -> bool {
+         match self {
+-            Channel::Dev | Channel::Local | Channel::Integration => true,
+-            Channel::Stable | Channel::Preview | Channel::Oss => false,
++            Channel::Dev | Channel::Local | Channel::Integration | Channel::Oss => true,
++            Channel::Stable | Channel::Preview => false,
+         }
+     }
+```
+
+NOTE: The exact line numbers may shift if upstream rebases. If the patch doesn't apply cleanly, use `git apply --3way` or fall back to manual edit at the same match arm.
+
+- [ ] **Step 3: Write the apply-patch + build script**
+
+Create `apps/warp-oss-patch/apply-patch.sh`:
+
+```bash
+#!/usr/bin/env bash
+# Clone warpdotdev/warp, apply our one-line OSS-channel override patch,
+# and build the binary. Re-running is idempotent: the upstream clone is
+# refreshed and the patch reapplied.
+#
+# Pre-flight finding 2026-05-11: the OSS build silently drops endpoint
+# override env vars via a release-channel gate. This patch removes the
+# gate for Channel::Oss only.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+UPSTREAM_DIR="$SCRIPT_DIR/upstream"
+PATCH_FILE="$SCRIPT_DIR/channel-oss-override.patch"
+UPSTREAM_URL="https://github.com/warpdotdev/warp.git"
+
+# Clone or refresh upstream.
+if [ -d "$UPSTREAM_DIR/.git" ]; then
+  echo "==> Refreshing upstream clone"
+  git -C "$UPSTREAM_DIR" fetch --depth 1 origin main
+  git -C "$UPSTREAM_DIR" reset --hard FETCH_HEAD
+else
+  echo "==> Cloning upstream"
+  git clone --depth 1 "$UPSTREAM_URL" "$UPSTREAM_DIR"
+fi
+
+# Apply patch.
+echo "==> Applying channel-oss-override.patch"
+git -C "$UPSTREAM_DIR" apply --check "$PATCH_FILE"
+git -C "$UPSTREAM_DIR" apply "$PATCH_FILE"
+
+# Build the OSS binary in release mode.
+echo "==> Building warp-oss (release)"
+( cd "$UPSTREAM_DIR" && cargo build --release --bin warp-oss )
+
+BIN="$UPSTREAM_DIR/target/release/warp-oss"
+if [ -x "$BIN" ]; then
+  echo "==> Built: $BIN"
+else
+  echo "ERROR: expected binary not found at $BIN" >&2
+  exit 1
+fi
+```
+
+Make executable:
+
+```bash
+chmod +x apps/warp-oss-patch/apply-patch.sh
+```
+
+- [ ] **Step 4: Write the README**
+
+Create `apps/warp-oss-patch/README.md`:
+
+```markdown
+# warp-oss-patch — One-line override-gate bypass
+
+This directory contains the minimal patch to Warp's open-source binary
+that makes Phase α of Lumen possible. Without it, the OSS build silently
+ignores `WARP_SERVER_ROOT_URL` / `WARP_WS_SERVER_URL` (release-channel
+hardening at `crates/warp_core/src/channel/mod.rs:46`).
+
+## Usage
+
+```bash
+./apply-patch.sh
+```
+
+Clones `warpdotdev/warp` into `upstream/`, applies our one-line patch,
+builds `target/release/warp-oss`. Re-runnable — refreshes the clone and
+reapplies the patch.
+
+## Running the patched binary against lifegw
+
+```bash
+WARP_SERVER_ROOT_URL=http://localhost:8443 \
+WARP_WS_SERVER_URL=ws://localhost:8443/graphql/v2 \
+./upstream/target/release/warp-oss
+```
+
+## The patch
+
+`channel-oss-override.patch` moves `Channel::Oss` from the `false` arm
+to the `true` arm of `Channel::allows_server_url_overrides`. That's it.
+
+After Phase α validates the integration, Phase β replaces this directory
+with a real soft fork at `apps/lumen/` carrying its own branding,
+defaults, and additional patches (Firebase API key neutralization, etc.).
+
+## License
+
+The patched binary inherits Warp's AGPLv3. Our patch is also AGPLv3 for
+consistency.
+```
+
+- [ ] **Step 5: Run the script — clone, patch, build**
+
+```bash
+./apps/warp-oss-patch/apply-patch.sh
+```
+
+Expected: ~15-30 minutes on cold first run (full Warp build is heavy). Result: `apps/warp-oss-patch/upstream/target/release/warp-oss` exists and is executable.
+
+If the build fails on macOS due to missing system dependencies, install via `brew install <missing-pkg>` and re-run. The build script is idempotent — failures partway through don't corrupt state.
+
+- [ ] **Step 6: Verify the patched binary respects override env vars**
+
+Quick verification that the patched binary picks up the env var: start a netcat listener on port 8443 and launch warp-oss; we should see the binary attempt to connect to localhost rather than `app.warp.dev`.
+
+```bash
+# Pane A — listen on 8443
+nc -lk 8443 &
+NC_PID=$!
+
+# Pane B — launch warp-oss with override
+WARP_SERVER_ROOT_URL=http://localhost:8443 \
+WARP_WS_SERVER_URL=ws://localhost:8443/graphql/v2 \
+./apps/warp-oss-patch/upstream/target/release/warp-oss &
+WARP_PID=$!
+
+# Within ~5 seconds, nc should print an inbound HTTP request line
+# (something like "POST /graphql/v2?op=getUser HTTP/1.1") OR a TCP
+# connection attempt log line. If you see app.warp.dev being hit
+# instead, the patch didn't take effect — re-check Step 2 + Step 5.
+
+# Cleanup
+sleep 10
+kill $WARP_PID $NC_PID 2>/dev/null || true
+```
+
+Expected: nc receives a connection from warp-oss. If app.warp.dev is hit instead, the patch is broken — escalate.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/warp-oss-patch/.gitignore apps/warp-oss-patch/README.md apps/warp-oss-patch/apply-patch.sh apps/warp-oss-patch/channel-oss-override.patch
+git commit -m "feat(warp-oss-patch): one-line OSS-channel override-gate bypass (M7-W.0, BRO-XXXX)"
+```
+
+Note: do NOT commit `upstream/` — it's gitignored. The binary built there is a local artifact, not a versioned asset.
 
 ---
 
@@ -2285,7 +2497,7 @@ git commit -m "chore(lifegw): warp_graphql M7-W.2 final pass (BRO-XXXX)"
 
 ## M7-W.3 — Subscription + arcan Adapter + E2E
 
-**Outcome of M7-W.3:** `warpDriveUpdates` subscription multiplexes events from lifed.EventService to the client. arcan ConsciousnessActor wired through `arcan-core/src/warp_agent.rs`. E2E smoke proves an unmodified Warp client drives a task to completion.
+**Outcome of M7-W.3:** `warpDriveUpdates` subscription multiplexes events from lifed.EventService to the client. arcan ConsciousnessActor wired through `arcan-core/src/warp_agent.rs`. E2E smoke proves the patched `warp-oss` client (built in M7-W.0) drives a task to completion.
 
 ---
 
@@ -2417,22 +2629,22 @@ git commit -m "feat(lifegw): warpDriveUpdates subscription bridged to lifed.Even
 The adapter sits between lifed's gRPC `AgentService` (which the resolver calls) and arcan's `ConsciousnessActor`. lifed already has the proto-level `CreateTaskRequest` handler scaffolded (per M5 sub-phase A); the new code is the arcan side that translates a lifed task spawn into a ConsciousnessActor invocation.
 
 **Files:**
-- Create: `core/life/arcan/crates/arcan-core/src/warp_agent.rs`
-- Modify: `core/life/arcan/crates/arcan-core/src/lib.rs`
-- Test: `core/life/arcan/crates/arcan-core/tests/warp_agent.rs`
+- Create: `core/life/crates/arcan/arcan-core/src/warp_agent.rs`
+- Modify: `core/life/crates/arcan/arcan-core/src/lib.rs`
+- Test: `core/life/crates/arcan/arcan-core/tests/warp_agent.rs`
 
 - [ ] **Step 1: Read existing arcan-core/src/agent.rs (or equivalent)**
 
 Locate the existing ConsciousnessActor or agent-loop entry point. The new `warp_agent.rs` will adapt to whatever interface it exposes.
 
 ```bash
-ls core/life/arcan/crates/arcan-core/src/
-grep -n "ConsciousnessActor\|spawn_actor\|agent_loop" core/life/arcan/crates/arcan-core/src/*.rs
+ls core/life/crates/arcan/arcan-core/src/
+grep -n "ConsciousnessActor\|spawn_actor\|agent_loop" core/life/crates/arcan/arcan-core/src/*.rs
 ```
 
 - [ ] **Step 2: Implement the adapter**
 
-Create `core/life/arcan/crates/arcan-core/src/warp_agent.rs`:
+Create `core/life/crates/arcan/arcan-core/src/warp_agent.rs`:
 
 ```rust
 //! Adapter between lifed's CreateTaskRequest and arcan's
@@ -2591,7 +2803,7 @@ mod tests {
 
 - [ ] **Step 3: Wire the module**
 
-Open `core/life/arcan/crates/arcan-core/src/lib.rs`. Add:
+Open `core/life/crates/arcan/arcan-core/src/lib.rs`. Add:
 
 ```rust
 pub mod warp_agent;
@@ -2608,7 +2820,7 @@ Expected: 2 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add core/life/arcan/crates/arcan-core/src/warp_agent.rs core/life/arcan/crates/arcan-core/src/lib.rs core/life/arcan/crates/arcan-core/tests/
+git add core/life/crates/arcan/arcan-core/src/warp_agent.rs core/life/crates/arcan/arcan-core/src/lib.rs core/life/crates/arcan/arcan-core/tests/
 git commit -m "feat(arcan-core): warp_agent adapter — Warp tasks → ConsciousnessActor (L6-D10, M7-W.3, BRO-XXXX)"
 ```
 
@@ -2618,7 +2830,7 @@ NOTE: Wiring `WarpTaskBackend` to the actual arcan ConsciousnessActor implementa
 
 ### Task 22: E2E smoke test
 
-The α completion gate. An unmodified Warp client, configured with `WARP_API_ENDPOINT=http://localhost:8443/graphql/v2`, drives an arcan-backed task to completion against a docker-compose stack containing lifegw + lifed + arcan.
+The α completion gate. The patched `warp-oss` client (built in M7-W.0 Task 0), configured with `WARP_SERVER_ROOT_URL=http://localhost:8443` and `WARP_WS_SERVER_URL=ws://localhost:8443/graphql/v2`, drives an arcan-backed task to completion against a docker-compose stack containing lifegw + lifed + arcan. Note: `WARP_SERVER_ROOT_URL` is the **root** URL — the client appends `/graphql/v2?op=...` for HTTP, and uses `WARP_WS_SERVER_URL` directly for WebSocket subscriptions.
 
 **Files:**
 - Create: `core/life/crates/life-runtime/lifegw/tests/warp_graphql_e2e_smoke.rs`
@@ -2687,7 +2899,7 @@ const WS_ENDPOINT: &str = "ws://127.0.0.1:8443/graphql-ws";
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[tokio::test]
-async fn unmodified_warp_client_drives_task_to_completion() {
+async fn patched_warp_oss_client_drives_task_to_completion() {
     // 1. Start the stack.
     let _stack = TestStack::up().await;
 
@@ -2859,24 +3071,27 @@ cargo test -p lifegw --features e2e-smoke --test warp_graphql_e2e_smoke -- --tes
 
 Expected: passes.
 
-- [ ] **Step 3: Manually verify with an unmodified Warp client**
+- [ ] **Step 3: Manually verify with the patched warp-oss binary**
 
-This is the human-in-the-loop validation step that proves α complete.
+This is the human-in-the-loop validation step that proves α complete. Requires Task 0 (M7-W.0) to be complete so `target/release/warp-oss` exists.
 
 ```bash
 # 1. Bring up the stack:
 docker compose -f core/life/crates/life-runtime/lifegw/tests/fixtures/docker-compose.e2e.yml up
 
-# 2. In a separate shell, launch official Warp pointed at lifegw:
-WARP_API_ENDPOINT=http://localhost:8443/graphql/v2 \
+# 2. In a separate shell, launch the patched warp-oss pointed at lifegw:
+WARP_SERVER_ROOT_URL=http://localhost:8443 \
+WARP_WS_SERVER_URL=ws://localhost:8443/graphql/v2 \
 WARP_AUTH_TOKEN=dev-token-for-test-user-1 \
-warp
+./apps/warp-oss-patch/upstream/target/release/warp-oss
 
-# 3. Type a prompt in the Warp window (e.g. "list files in current directory").
+# 3. Type a prompt in the warp-oss window (e.g. "list files in current directory").
 # 4. Verify a response streams back, sourced from the arcan ConsciousnessActor.
 ```
 
 If this succeeds, **Phase α is complete**.
+
+NOTE: `WARP_SERVER_ROOT_URL` does not include `/graphql/v2` — it is the **root** URL. The client appends `/graphql/v2?op=...` for HTTP requests and uses `WARP_WS_SERVER_URL` directly for WebSocket subscriptions.
 
 - [ ] **Step 4: Final commit**
 
@@ -2895,7 +3110,7 @@ Phase α is complete when **all** of:
 2. `cargo clippy -p lifegw -- -D warnings` is clean.
 3. `cargo test -p arcan-core warp_agent` passes.
 4. `cargo test -p lifegw --features e2e-smoke --test warp_graphql_e2e_smoke` passes against the docker-compose stack.
-5. Manual launch of unmodified `warp` against `WARP_API_ENDPOINT=http://localhost:8443/graphql/v2` reaches a working agent-task completion (Step 3 of Task 23).
+5. Manual launch of patched `./apps/warp-oss-patch/upstream/target/release/warp-oss` against `WARP_SERVER_ROOT_URL=http://localhost:8443` + `WARP_WS_SERVER_URL=ws://localhost:8443/graphql/v2` reaches a working agent-task completion (Step 3 of Task 23). Requires Task 0 (M7-W.0) to have completed successfully.
 
 When all five hold, Phase α has shipped. Phase β (Lumen fork at `apps/lumen/`) gets its own implementation plan written in a separate sub-skill invocation after α stabilizes.
 
@@ -2929,5 +3144,5 @@ When all five hold, Phase α has shipped. Phase β (Lumen fork at `apps/lumen/`)
 - **Spec E** (InferenceBackend): `core/life/docs/superpowers/specs/2026-05-07-spec-e-agent-loop-compute-contract.md`
 - **lifegw**: `core/life/crates/life-runtime/lifegw/` (existing crate, M7 ~80% complete pre-W)
 - **lifed**: `core/life/crates/life-runtime/lifed/` (M5 production-shipped 2026-04-29)
-- **arcan**: `core/life/arcan/crates/arcan-core/` (V1.5 stabilization)
+- **arcan**: `core/life/crates/arcan/arcan-core/` (V1.5 stabilization)
 - **Warp upstream**: `github.com/warpdotdev/warp` — schema at `crates/warp_graphql_schema/api/schema.graphql`
