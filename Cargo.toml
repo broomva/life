@@ -268,6 +268,8 @@ failsafe = { version = "1", default-features = false }
 # ── External dependencies ──
 assert_matches = "1"
 anyhow = "1"
+async-graphql = { version = "7", default-features = false, features = ["chrono", "uuid"] }
+async-graphql-axum = "7"
 async-stream = "0.3"
 async-trait = "0.1"
 arrow = { version = "53", features = ["json"] }
@@ -288,6 +290,7 @@ cryptoki = "0.12"
 # when constructing the post-rotation handle.
 secrecy = "0.10"
 dashmap = "6"
+dataloader = "0.18"
 datafusion = "43"
 dirs = "6"
 ed25519-dalek = { version = "2", features = ["rand_core", "serde"] }

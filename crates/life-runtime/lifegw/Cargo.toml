@@ -63,6 +63,17 @@ bytes = { workspace = true }
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 
+# GraphQL — Lumen M7-W warp_graphql module (Tasks 3-23). The Warp
+# terminal client speaks GraphQL over HTTP + WebSocket; lifegw mounts
+# `/warp/graphql` (queries/mutations) and `/warp/graphql/subscriptions`
+# (subscriptions) atop the existing axum/tower stack. `dataloader`
+# coalesces N+1 fetches against lifed (saga state, session lookups,
+# anima identity, haima wallet) without leaking the underlying RPC
+# pattern into resolvers.
+async-graphql.workspace = true
+async-graphql-axum.workspace = true
+dataloader.workspace = true
+
 # WebSocket support — Sub-phase C public-plane Agent.StreamSession bidi
 # pump. tokio-tungstenite 0.26 (workspace pin) drives the upgrade dance
 # atop a hyper::upgrade::Upgraded stream wrapped in TokioIo. We disable
@@ -214,6 +225,12 @@ wiremock = { workspace = true }
 # feature provides `client_async` which consumes the established
 # stream + builds the WebSocket framing on top.
 futures-util = { workspace = true }
+# Lumen M7-W: GraphQL-over-WebSocket client driver for the
+# warp_graphql subscription integration test. Speaks the
+# `graphql-transport-ws` subprotocol that async-graphql's Subscription
+# handler emits, so the test rig can exercise the bidi pump against a
+# live lifegw process.
+graphql-ws-client = "0.10"
 
 [lints]
 workspace = true
