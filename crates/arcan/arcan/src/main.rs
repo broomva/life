@@ -128,12 +128,7 @@ struct Cli {
     /// When unset, the gRPC server is NOT started — Topology-A users
     /// keep the existing HTTP-only experience. Topology-B operators
     /// set this so lifed's arcan-proxy can dial in. BRO-1016.
-    #[arg(
-        long,
-        global = true,
-        env = "ARCAN_UDS_SOCKET",
-        value_name = "PATH"
-    )]
+    #[arg(long, global = true, env = "ARCAN_UDS_SOCKET", value_name = "PATH")]
     uds_socket: Option<PathBuf>,
 }
 
@@ -368,19 +363,16 @@ async fn serve_substrate_uds(
     if let Some(parent) = socket_path.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            anyhow::anyhow!("create parent dir {}: {e}", parent.display())
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| anyhow::anyhow!("create parent dir {}: {e}", parent.display()))?;
     }
     if socket_path.exists() {
-        std::fs::remove_file(&socket_path).map_err(|e| {
-            anyhow::anyhow!("unlink stale socket {}: {e}", socket_path.display())
-        })?;
+        std::fs::remove_file(&socket_path)
+            .map_err(|e| anyhow::anyhow!("unlink stale socket {}: {e}", socket_path.display()))?;
     }
 
-    let listener = tokio::net::UnixListener::bind(&socket_path).map_err(|e| {
-        anyhow::anyhow!("bind {}: {e}", socket_path.display())
-    })?;
+    let listener = tokio::net::UnixListener::bind(&socket_path)
+        .map_err(|e| anyhow::anyhow!("bind {}: {e}", socket_path.display()))?;
 
     tracing::info!(
         socket = %socket_path.display(),

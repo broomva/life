@@ -222,9 +222,7 @@ impl ArcanProxy {
 /// public-plane `life.v1.AgentEvent` shape that lifed's fan-out
 /// expects. Phase 1 maps three kinds; everything else falls back to
 /// `Token` with the inner text (preserves payload, avoids data loss).
-fn translate_event(
-    evt: arcan_pb::AgentEvent,
-) -> life_runtime_proto::life::v1::AgentEvent {
+fn translate_event(evt: arcan_pb::AgentEvent) -> life_runtime_proto::life::v1::AgentEvent {
     use arcan_pb::AgentEventKind as Sub;
     use life_runtime_proto::life::v1::AgentEventKind as Pub;
     // Phase 1 only emits TOKEN/FINISH/ERROR substrate-side; any other

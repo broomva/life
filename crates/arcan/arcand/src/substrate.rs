@@ -25,8 +25,8 @@ use aios_protocol::{
 };
 use aios_runtime::{KernelRuntime, TickInput, TickKind};
 use arcan_substrate_proto::arcan::v1::{
-    AgentEvent, AgentEventKind, CreateAgentReq, CreateAgentResp, DestroyAgentReq,
-    DestroyAgentResp, DispatchMessageReq, agent_substrate_server::AgentSubstrate,
+    AgentEvent, AgentEventKind, CreateAgentReq, CreateAgentResp, DestroyAgentReq, DestroyAgentResp,
+    DispatchMessageReq, agent_substrate_server::AgentSubstrate,
 };
 use futures_util::Stream;
 use tokio::sync::mpsc;
@@ -177,9 +177,7 @@ impl AgentSubstrate for SubstrateService {
                                     evt.kind(),
                                     AgentEventKind::Finish | AgentEventKind::Error
                                 );
-                                if is_terminal
-                                    && terminal_for_pump.swap(true, Ordering::SeqCst)
-                                {
+                                if is_terminal && terminal_for_pump.swap(true, Ordering::SeqCst) {
                                     // A terminal was already emitted by
                                     // the driver — drop this one and stop.
                                     break;
@@ -276,7 +274,9 @@ impl AgentSubstrate for SubstrateService {
         });
 
         let stream = ReceiverStream::new(rx);
-        Ok(Response::new(Box::pin(stream) as Self::DispatchMessageStream))
+        Ok(Response::new(
+            Box::pin(stream) as Self::DispatchMessageStream
+        ))
     }
 }
 
@@ -306,4 +306,3 @@ fn translate_event(record: &EventRecord) -> Option<AgentEvent> {
         _ => None,
     }
 }
-
