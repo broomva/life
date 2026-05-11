@@ -22,6 +22,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use aios_proto::aios::v1 as aios_v1;
+use arcan_substrate_proto::arcan::v1::{
+    self as arcan_pb, agent_substrate_client::AgentSubstrateClient,
+};
 use async_trait::async_trait;
 use futures::Stream;
 use life_runtime_pool::pool::{Pool, PoolGuard};
@@ -107,25 +111,70 @@ impl ArcanProxy {
         }
     }
 
-    /// Stub: pretend to create an agent and return an opaque agent_id.
-    /// Real impl invokes the arcan AgentService.CreateAgent RPC.
+    /// Create (or attach to) an agent on the substrate. BRO-1016
+    /// wires this to the real `arcan.v1.AgentSubstrate.CreateAgent`
+    /// RPC. The substrate is idempotent on `sid`, so re-issuing the
+    /// call after a saga retry is safe.
     pub async fn create_agent(&self, sid: &str) -> ArcanProxyResult<String> {
         let guard = self.acquire_guard().await?;
-        let mut req = tonic::Request::new(sid.to_string());
+        let mut client = AgentSubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(arcan_pb::CreateAgentReq {
+            sid: Some(aios_v1::SessionId {
+                value: sid.to_owned(),
+            }),
+            label: String::new(),
+        });
         self.attach_token(&mut req);
-        let _ = (req, &self.channel);
-        let out = format!("agent-{sid}");
-        record_success(guard);
-        Ok(out)
+        let result = client
+            .create_agent(req)
+            .await
+            .map_err(ArcanProxyError::from);
+        match result {
+            Ok(resp) => {
+                let agent_id = resp.into_inner().agent_id;
+                record_outcome(guard, true);
+                Ok(agent_id)
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 
+    /// Destroy an agent. BRO-1016 wires this to
+    /// `arcan.v1.AgentSubstrate.DestroyAgent`. Idempotent — sessions
+    /// that don't exist substrate-side return Ok(empty).
     pub async fn destroy_agent(&self, sid: &str) -> ArcanProxyResult<()> {
         let guard = self.acquire_guard().await?;
-        let _ = (sid, &self.channel);
-        record_success(guard);
-        Ok(())
+        let mut client = AgentSubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(arcan_pb::DestroyAgentReq {
+            sid: Some(aios_v1::SessionId {
+                value: sid.to_owned(),
+            }),
+        });
+        self.attach_token(&mut req);
+        let result = client
+            .destroy_agent(req)
+            .await
+            .map_err(ArcanProxyError::from);
+        match result {
+            Ok(_) => {
+                record_outcome(guard, true);
+                Ok(())
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 
+    /// Dispatch a message and stream the substrate's events back as
+    /// `life.v1.AgentEvent`s. BRO-1016 wires this to
+    /// `arcan.v1.AgentSubstrate.DispatchMessage` and translates the
+    /// substrate-plane events into the public-plane shape (Phase 1
+    /// maps TOKEN/FINISH/ERROR; tool kinds remain Phase 2 work).
     pub async fn dispatch_message(
         &self,
         sid: &str,
@@ -138,33 +187,73 @@ impl ArcanProxy {
             >,
         >,
     > {
-        let _ = (sid, content);
-        // Streams hold the guard for the full lifetime; ownership passes
-        // to PoolGuardedStream which records the outcome on Drop.
+        // Streams hold the guard for the full lifetime; ownership
+        // passes to `PoolGuardedStream` which records the outcome on
+        // Drop.
         let guard = self.acquire_guard().await?;
-        let (tx, rx) = tokio::sync::mpsc::channel(8);
-        tokio::spawn(async move {
-            let _ = tx
-                .send(Ok(life_runtime_proto::life::v1::AgentEvent {
-                    record: None,
-                    kind: life_runtime_proto::life::v1::AgentEventKind::Token as i32,
-                }))
-                .await;
-            let _ = tx
-                .send(Ok(life_runtime_proto::life::v1::AgentEvent {
-                    record: None,
-                    kind: life_runtime_proto::life::v1::AgentEventKind::Finish as i32,
-                }))
-                .await;
+        let mut client = AgentSubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(arcan_pb::DispatchMessageReq {
+            sid: Some(aios_v1::SessionId {
+                value: sid.to_owned(),
+            }),
+            content: content.to_owned(),
         });
-        let inner = tokio_stream::wrappers::ReceiverStream::new(rx);
+        self.attach_token(&mut req);
+        let upstream = match client.dispatch_message(req).await {
+            Ok(resp) => resp.into_inner(),
+            Err(s) => {
+                let err = ArcanProxyError::from(s);
+                record_outcome(guard, !err.is_retryable());
+                return Err(err);
+            }
+        };
+
+        // Map arcan.v1.AgentEvent → life.v1.AgentEvent at the wire
+        // boundary. Phase 1 emits the kind mapping; structured
+        // EventRecords stay None until the Phase 2 wire is shipped.
+        use futures::StreamExt;
+        let mapped = upstream.map(|res| res.map(translate_event));
+        let inner = Box::pin(mapped);
         Ok(Box::pin(PoolGuardedStream::new(inner, guard)))
     }
 }
 
-fn record_success(guard: Option<PoolGuard>) {
+/// Translate a substrate-plane `arcan.v1.AgentEvent` into the
+/// public-plane `life.v1.AgentEvent` shape that lifed's fan-out
+/// expects. Phase 1 maps three kinds; everything else falls back to
+/// `Token` with the inner text (preserves payload, avoids data loss).
+fn translate_event(
+    evt: arcan_pb::AgentEvent,
+) -> life_runtime_proto::life::v1::AgentEvent {
+    use arcan_pb::AgentEventKind as Sub;
+    use life_runtime_proto::life::v1::AgentEventKind as Pub;
+    // Phase 1 only emits TOKEN/FINISH/ERROR substrate-side; any other
+    // kind we receive in the future maps to TOKEN so downstream
+    // streams don't drop the payload silently.
+    let kind = match Sub::try_from(evt.kind).unwrap_or(Sub::Unspecified) {
+        Sub::Token => Pub::Token,
+        Sub::Finish => Pub::Finish,
+        Sub::Error => Pub::Error,
+        Sub::Unspecified => Pub::Unspecified,
+    };
+    life_runtime_proto::life::v1::AgentEvent {
+        record: None,
+        kind: kind as i32,
+    }
+}
+
+/// Record a `PoolGuard` outcome based on whether the call succeeded
+/// or whether the error is a non-retryable / permanent failure (the
+/// breaker treats permanent faults as success — they aren't infra
+/// problems — per Spec C₂ §7.2). Mirrors the policy applied by
+/// `Pooled<C>::bracket`.
+fn record_outcome(guard: Option<PoolGuard>, success_or_permanent: bool) {
     if let Some(g) = guard {
-        g.record_success();
+        if success_or_permanent {
+            g.record_success();
+        } else {
+            g.record_failure();
+        }
     }
 }
 
