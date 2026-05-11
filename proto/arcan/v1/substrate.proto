@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package arcan.v1;
+
+import "google/protobuf/timestamp.proto";
+import "aios/v1/identifiers.proto";
+
+// Substrate-plane Agent service. Called by lifed (via arcan-proxy)
+// over UDS. NOT the public-plane shape — that's life.v1.Agent in
+// proto/life/v1/agent.proto, served by lifed.
+//
+// This service exists so lifed's saga driver can route session
+// lifecycle + message dispatch to arcand without going through
+// arcand's HTTP `:3000` server (which is Topology-A only). Spec
+// reference: docs/superpowers/specs/2026-04-25-life-runtime-architecture-spec.md
+// §L1 + the BRO-1016 / topology-b-substrate-stub-gap entity page.
+service AgentSubstrate {
+  // Idempotent on sid. Returns the local agent_id (currently the sid
+  // string itself since arcand maintains 1:1 session-to-agent
+  // mapping; future versions may expose distinct agent identity).
+  rpc CreateAgent(CreateAgentReq) returns (CreateAgentResp);
+
+  // Idempotent. Sessions that don't exist return Ok(empty).
+  rpc DestroyAgent(DestroyAgentReq) returns (DestroyAgentResp);
+
+  // Server-streaming. Drives a Direct tick on the agent's main
+  // branch and emits AgentEvents (TextDelta / ToolCall / etc.)
+  // back to the caller.
+  rpc DispatchMessage(DispatchMessageReq) returns (stream AgentEvent);
+}
+
+message CreateAgentReq {
+  aios.v1.SessionId sid = 1;
+  // Optional human-readable label (e.g. project_id from lifed). Stored
+  // on the manifest. Not used for routing.
+  string label = 2;
+}
+
+message CreateAgentResp {
+  string agent_id = 1;
+  google.protobuf.Timestamp created_at = 2;
+}
+
+message DestroyAgentReq {
+  aios.v1.SessionId sid = 1;
+}
+
+message DestroyAgentResp {}
+
+message DispatchMessageReq {
+  aios.v1.SessionId sid = 1;
+  string content = 2;
+}
+
+// Mirrors life.v1.AgentEvent shape but lives in the substrate-plane
+// package. EventRecord is omitted from Phase 1 (will be lifted in
+// Phase 2 when we wire structured events). Phase 1 emits text +
+// terminal events.
+message AgentEvent {
+  AgentEventKind kind = 1;
+  // Text content for TOKEN events. Empty for FINISH/ERROR.
+  string text = 2;
+  // Error message for ERROR events. Empty otherwise.
+  string error = 3;
+}
+
+enum AgentEventKind {
+  AGENT_EVENT_KIND_UNSPECIFIED = 0;
+  AGENT_EVENT_KIND_TOKEN = 1;
+  AGENT_EVENT_KIND_FINISH = 2;
+  AGENT_EVENT_KIND_ERROR = 3;
+}
