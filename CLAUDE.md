@@ -334,23 +334,36 @@ live-anthropic smoke test (BRO-1013), `lago replay --tree`
 (BRO-1014), bookkeeping pipeline integration (BRO-1015). Architecture
 validated three ways: offline + live + production.
 
-⚠️ **Three wiring gaps — all localized to Workflow tick path:**
+⚠️ **Four wiring gaps — three localized to Workflow tick path; one is bigger:**
 
-1. **`ergon-life-sinks` has zero consumers** —
+1. **`ergon-life-sinks` has zero consumers** (Workflow tick path) —
    `crates/arcan/arcan-ergon/src/runner.rs:157` uses `BufferSink::new()`.
    Workflow stream events never reach lago; `lago replay --tree`
    cannot see them. ~30 LOC fix.
-2. **3 of 4 ergon auto-hook adapters are Noop** —
+2. **3 of 4 ergon auto-hook adapters are Noop** (Workflow tick path) —
    `crates/arcan/arcan-ergon/src/runner.rs:146-150` wires
    `NoopBudgetGate` / `NoopResponseScorer` / `NoopSoulAttester`
    (only `PraxisCapabilityHook` is real). Workflow ticks bypass
    budget/score/attest. ~50 LOC each + real impls.
-3. **`arcan agent test` is `--dry-run` only** — no live-LLM mode for
-   Python consumers. BRO-1008 follow-up.
+3. **`arcan agent test` is `--dry-run` only** (CLI) — no live-LLM mode
+   for Python consumers. BRO-1008 follow-up.
+4. **Topology B's substrate-call wire is stubbed** (production-shipping
+   blocker) — discovered 2026-05-11. The 4 `*-proxy` crates'
+   per-method bodies discard their args and return hardcoded shapes
+   (`arcan_proxy::create_agent` → `format!("agent-{sid}")`;
+   `dispatch_message` emits 2 hardcoded events). The scaffolding above
+   (lifegw + saga + pool + breaker) is real; the substrate call boundary
+   below lifed is not. arcand has no `arcan.v1.AgentService` tonic
+   server. Only Topology A drives real agent work today; Topology B is
+   authenticated/rate-limited scaffolding around a fake substrate.
+   ~1–2 weeks: per-substrate tonic server (~200 LOC) + per-proxy method
+   bodies (~50 LOC × 12 methods). See
+   `research/entities/concept/topology-b-substrate-stub-gap.md`.
 
-**Direct tick path is unaffected by gaps 1 & 2** — autonomic + nous +
-lago all wired through `PolicyGatePort` + `ToolHarnessPort` + turn
-middleware. The gaps are an ergon-Workflow-only blind spot.
+**Direct tick path (Topology A) is unaffected by gaps 1 & 2** —
+autonomic + nous + lago all wired through `PolicyGatePort` +
+`ToolHarnessPort` + turn middleware. Gap 4 affects Topology B only.
+Gap 3 is small / utility.
 
 ### Spec progress
 
