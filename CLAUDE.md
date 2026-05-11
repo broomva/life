@@ -272,6 +272,108 @@ human-authored via PR** and CANNOT self-modify in production. This
 prevents the metacognition deadlock (a meta-agent improving itself
 into a corrupt state).
 
+## Architecture map (2026-05-11 audit)
+
+The workspace has grown to **125 members** across 16 clusters. Two
+deployment topologies and an 8-layer model govern how a user request
+flows through the system. Full inventory lives at
+`docs/architecture/architecture-map-2026-05-11.md` (see also the
+auto-memory entry `project_life_architecture_map_2026_05_11.md`). The
+short version follows.
+
+### Two topologies
+
+| Topology | When | Path |
+|---|---|---|
+| **A — single-binary `arcan serve`** | dev / local / smoke | HTTP `:3000` → `arcand::canonical::run_session` → `KernelRuntime::tick_on_branch` → tick body (Direct OR Workflow) |
+| **B — production multi-tenant** | cloud | HTTPS → `lifegw` (TLS+JWKS+rate-limit+WS) → tonic UDS → `lifed` (saga+pool+breaker) → `*-proxy` → substrate daemons (`arcand`, `lagod`, `haimad`, `soma`) |
+
+### 8-layer model
+
+```
+L0 — Kernel contract       aios-protocol, aios-proto, aios-events, aios-policy
+L1 — Substrate primitives  lago, praxis, anima, autonomic, vigil, nous, haima,
+                           opsis, inference (each its own daemon if applicable)
+L2 — Substrate adapters    arcan-lago, arcan-praxis, arcan-anima, arcan-aios-adapters,
+                           autonomic-lago, haima-lago, nous-lago, anima-lago, opsis-lago
+L3 — Port traits           aios-runtime: ModelProviderPort, ToolHarnessPort,
+                           PolicyGatePort, EventStorePort, ApprovalPort,
+                           WorkflowTickDispatcher
+L3.5 — Tick body           Direct OR ergon::Workflow
+L4 — Tick engine           aios-runtime::KernelRuntime — 8-phase tick
+                           (Perceive → Deliberate → StateEstimated → body
+                            → Commit → Reflect → Sleep|Recover)
+L5 — Session orchestration arcand::ConsciousnessActor
+L6 — Transport / API       lifegw, lifed, arcand HTTP, life-relay,
+                           arcan-console, arcan-prosopon, life-cli
+L7 — User                  browser, CLI, external agents (MCP)
+```
+
+### Wired vs stubbed (current state)
+
+✅ **Direct tick path** — fully wired: autonomic gating via
+`AutonomicPolicyAdapter`, nous scoring via `NousToolObserver`,
+KnowledgeEventMiddleware, lago events via `EventStorePort`. Every
+phase emits durable events. Replayable via `lago log` / `lago replay --tree`.
+
+✅ **Lifegw** (M7 100%) — TLS 1.3, JWKS single-flight, Tier-2 mint,
+rate limiter, WS upgrade + heartbeat, admin plane, cert reloader,
+anima custody routes.
+
+✅ **Lifed** (M5 100%) — Agent/Events/Wallet/Identity services, real
+saga (forward+compensate), routing cache, idempotency, pool +
+circuit breaker (half-open CAS), OTLP exporter, 15 metric series.
+
+✅ **Spec D Anima Custody** (100%) — 6 backends shipped (InProcess /
+Vault / TPM / hardware-wallet / Soma / WebCrypto+Remote), P-256 auth
++ secp256k1 wallet, DID multicodec `0x1200`, rotation/revocation flow.
+
+✅ **Authored agents** — 9 blessed agents at `agents/`, FsAgentRegistry
+loads at boot, spawn_agent dispatch with RecursionContext (BRO-1007b),
+live-anthropic smoke test (BRO-1013), `lago replay --tree`
+(BRO-1014), bookkeeping pipeline integration (BRO-1015). Architecture
+validated three ways: offline + live + production.
+
+⚠️ **Three wiring gaps — all localized to Workflow tick path:**
+
+1. **`ergon-life-sinks` has zero consumers** —
+   `crates/arcan/arcan-ergon/src/runner.rs:157` uses `BufferSink::new()`.
+   Workflow stream events never reach lago; `lago replay --tree`
+   cannot see them. ~30 LOC fix.
+2. **3 of 4 ergon auto-hook adapters are Noop** —
+   `crates/arcan/arcan-ergon/src/runner.rs:146-150` wires
+   `NoopBudgetGate` / `NoopResponseScorer` / `NoopSoulAttester`
+   (only `PraxisCapabilityHook` is real). Workflow ticks bypass
+   budget/score/attest. ~50 LOC each + real impls.
+3. **`arcan agent test` is `--dry-run` only** — no live-LLM mode for
+   Python consumers. BRO-1008 follow-up.
+
+**Direct tick path is unaffected by gaps 1 & 2** — autonomic + nous +
+lago all wired through `PolicyGatePort` + `ToolHarnessPort` + turn
+middleware. The gaps are an ergon-Workflow-only blind spot.
+
+### Spec progress
+
+| Spec | Status | Notes |
+|---|---|---|
+| Spec A — soma kernel daemon | M0/M1 shipped 2026-04-25 | base kernel daemon |
+| Spec B — life-kernel core | shipped | trait surface |
+| Spec C — life-runtime cluster | M0..M7 shipped | lifed + lifegw + 4 proxies + life-runtime-pool |
+| Spec C₁ — soma scope | M0 shipped | renamed from lifed |
+| Spec C₂ — lifed facade | M5 100% | 5 sub-phases A–E |
+| Spec C₃ — lifegw edge | M7 100% | 5 sub-phases A–E |
+| Spec D — anima production custody | 100% (6/6 sub-phases) | shipped 2026-05-02 |
+| Spec E — Agent-Loop Compute Contract | 17% (E-Sub-A only) | B/C/D/E/F queued |
+| Authored-agents architecture (BRO-1006) | 100% | spec validated end-to-end via Tier A 2026-05-11 |
+
+### Branching policy (production)
+
+Lago supports branching (per `lago branch`); arcand currently
+hardcodes `BranchId::main()` at `crates/arcan/arcand/src/canonical.rs:1265`.
+Exposing branch as a route param is a small follow-up that unlocks
+parallel exploration workflows. Listed as "Phase 0 stabilization gap"
+above and in `MEMORY.md`.
+
 ## Shared Conventions
 
 All projects follow these rules (Spaces WASM module uses Rust 2021 edition due to SpacetimeDB requirements):
