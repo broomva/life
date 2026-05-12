@@ -8,7 +8,12 @@ use std::sync::Arc;
 
 use crate::warp_graphql::auth::WarpClaims;
 use crate::warp_graphql::dataloader::LifedDataloaders;
+use crate::warp_graphql::error::WarpGraphqlError;
 
+/// Per-request state carried via async-graphql's `Context::data` into every
+/// resolver. Built once per HTTP request (or once per WS subscription
+/// session). Cheap to clone — `WarpClaims` is `Clone`, `Arc<LifedDataloaders>`
+/// is a refcount bump, `String` is a single heap clone.
 #[derive(Clone)]
 pub struct WarpRequestCtx {
     pub claims: WarpClaims,
@@ -18,6 +23,8 @@ pub struct WarpRequestCtx {
 }
 
 impl WarpRequestCtx {
+    /// Construct a request context. Called from `route.rs` (Task 11) after
+    /// the auth extractor produces `WarpClaims`.
     pub fn new(
         claims: WarpClaims,
         dataloaders: Arc<LifedDataloaders>,
@@ -36,14 +43,11 @@ impl WarpRequestCtx {
     }
 
     /// Returns `Err(Unauthenticated)` if the caller lacks the named scope.
-    pub fn require_scope(
-        &self,
-        scope: &str,
-    ) -> Result<(), crate::warp_graphql::error::WarpGraphqlError> {
+    pub fn require_scope(&self, scope: &str) -> Result<(), WarpGraphqlError> {
         if self.claims.has_scope(scope) {
             Ok(())
         } else {
-            Err(crate::warp_graphql::error::WarpGraphqlError::Unauthenticated)
+            Err(WarpGraphqlError::Unauthenticated)
         }
     }
 }
