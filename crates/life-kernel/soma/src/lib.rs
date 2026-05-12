@@ -12,6 +12,7 @@ pub mod bootstrap;
 pub mod cli;
 pub mod config;
 pub mod error;
+pub mod identity;
 pub mod listener;
 pub mod observability;
 pub mod server;

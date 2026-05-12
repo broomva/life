@@ -71,7 +71,11 @@ sha3 = { workspace = true }
 zeroize = { workspace = true }
 
 anima-core.workspace = true
+# BRO-1019: anima.v1.IdentitySubstrate codegen — wire-only; depends on
+# aios-proto + tonic only.
+anima-substrate-proto.workspace = true
 hex = { workspace = true }
+prost-types = "0.14"
 
 arcan-provider-local.workspace = true
 
