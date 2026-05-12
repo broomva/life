@@ -23,11 +23,13 @@ pub use service::{CustodyKeyStore, CustodyOracleService};
 
 use std::sync::Arc;
 
+use anima_substrate_proto::anima::v1::identity_substrate_server::IdentitySubstrateServer;
 use life_kernel_proto::custody as oracle_pb;
 use tokio::task::JoinHandle;
 
 use crate::config::SomaConfig;
 use crate::error::{SomaError, SomaResult};
+use crate::identity::{IdentityState, IdentitySubstrateService};
 
 /// Spawn the admin custody-oracle UDS.
 ///
@@ -75,13 +77,28 @@ pub async fn run_admin_plane(cfg: &SomaConfig) -> SomaResult<JoinHandle<()>> {
     };
 
     let store = Arc::new(InProcessCustodyKeys::new());
-    let svc = CustodyOracleService::new(Arc::new(policy), Arc::clone(&store));
+    let policy = Arc::new(policy);
+    let custody_svc = CustodyOracleService::new(Arc::clone(&policy), Arc::clone(&store));
+
+    // BRO-1019: identity-data substrate (account/profile/session)
+    // mounted alongside CustodyOracle on the same admin UDS router.
+    // Same auth model (SO_PEERCRED + group `life-runtime`); disjoint
+    // surface (no crypto). The state lives for the daemon lifetime;
+    // persistence + lago event publishing are tracked under follow-up
+    // tickets analogous to haima's F2.
+    let identity_state = Arc::new(IdentityState::new());
+    let identity_svc =
+        IdentitySubstrateService::new(Arc::clone(&identity_state), Arc::clone(&policy));
+
     let acceptor = listener::bind(admin_cfg).await?;
 
     let handle = tokio::spawn(async move {
-        let server = oracle_pb::custody_oracle_server::CustodyOracleServer::new(svc);
+        let custody_server =
+            oracle_pb::custody_oracle_server::CustodyOracleServer::new(custody_svc);
+        let identity_server = IdentitySubstrateServer::new(identity_svc);
         let res = tonic::transport::Server::builder()
-            .add_service(server)
+            .add_service(custody_server)
+            .add_service(identity_server)
             .serve_with_incoming(acceptor)
             .await;
         if let Err(e) = res {
@@ -92,7 +109,8 @@ pub async fn run_admin_plane(cfg: &SomaConfig) -> SomaResult<JoinHandle<()>> {
     tracing::info!(
         target: "soma::admin",
         socket = %admin_cfg.unix_socket.display(),
-        "soma admin custody-oracle UDS bound",
+        services = "custody-oracle + identity-substrate",
+        "soma admin UDS bound",
     );
 
     Ok(handle)

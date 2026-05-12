@@ -11,6 +11,8 @@ repository.workspace = true
 [dependencies]
 aios-protocol.workspace = true
 aios-proto.workspace = true
+# BRO-1019: anima.v1.IdentitySubstrate codegen — wire-only.
+anima-substrate-proto.workspace = true
 life-runtime-pool.workspace = true
 async-trait.workspace = true
 futures.workspace = true
