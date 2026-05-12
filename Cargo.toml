@@ -34,6 +34,7 @@ members = [
     "crates/arcan/arcan-sandbox",
     "crates/arcan/arcan-spaces",
     "crates/arcan/arcan-store",
+    "crates/arcan/arcan-substrate-proto",
     "crates/arcan/arcan-tui",
     "crates/arcan/arcand",
     # Lago — persistence
@@ -253,6 +254,9 @@ life-paths = { path = "crates/life-paths", version = "0.3.0" }
 life-client           = { path = "crates/life-kernel/life-client",        version = "0.3.0" }
 life-kernel-facade    = { path = "crates/life-kernel/life-kernel-facade", version = "0.3.0" }
 # (life-kernel-proto already declared above with the other life-kernel-* crates)
+
+# Arcan substrate wire crate — BRO-1016 (Topology B substrate-stub gap close).
+arcan-substrate-proto = { path = "crates/arcan/arcan-substrate-proto", version = "0.3.0" }
 
 # M5 — lifed facade-aggregator daemon (Spec C₂)
 arcan-proxy        = { path = "crates/life-runtime/arcan-proxy",        version = "0.3.0" }

@@ -3,6 +3,70 @@
 ## Unreleased
 
 ### Added
+- **`arcan.v1.AgentSubstrate` gRPC server** — closes Phase 1 of the
+  Topology B substrate-stub gap (BRO-1016). Until this PR, the
+  `*-proxy` crates' per-method bodies discarded their arguments and
+  returned hardcoded shapes; lifed's saga ran correctly but the
+  substrate-call boundary below it was fake. Phase 1 wires the arcan
+  side end-to-end.
+  * **New proto**: `core/life/proto/arcan/v1/substrate.proto` declares
+    `arcan.v1.AgentSubstrate` service with 3 RPCs (`CreateAgent`,
+    `DestroyAgent`, `DispatchMessage` server-streaming). Imports
+    `aios.v1.SessionId`. Substrate-plane shape (no user_id /
+    project_id / auth fields — those are lifed's concerns one tier up).
+  * **New crate**: `crates/arcan/arcan-substrate-proto/` mirrors the
+    `aios-proto` codegen pattern. Sibling of `life-runtime-proto`.
+    Workspace member. `tonic-prost-build` over the proto + `aios.v1.*`
+    imports.
+  * **arcand gRPC server**: new module
+    `crates/arcan/arcand/src/substrate.rs` (308 LOC) hosts
+    `SubstrateService` implementing the proto. `CreateAgent` maps to
+    `KernelRuntime::create_session_with_id` (idempotent on sid).
+    `DestroyAgent` is a no-op stub for Phase 1 (KernelRuntime has no
+    explicit drop-session API; future ticket). `DispatchMessage`
+    spawns a `tick_on_branch` loop, subscribes to
+    `runtime.subscribe_events()`, translates `EventRecord`s to
+    `arcan.v1.AgentEvent` (TOKEN / FINISH / ERROR), and streams them
+    back via mpsc.
+  * **UDS bind**: new `--uds-socket <PATH>` flag (env
+    `ARCAN_UDS_SOCKET`) in the `arcan serve` subcommand. When set,
+    `arcan` spawns a UDS-bound tonic gRPC server alongside the
+    existing HTTP `:3000` server. Mirrors the
+    `crates/life-kernel/soma/src/listener/unix.rs` pattern (stale
+    socket cleanup, optional mode/group). Topology A users
+    unaffected — the flag is opt-in.
+  * **arcan-proxy real bodies**: replaced the 3 stub methods in
+    `crates/life-runtime/arcan-proxy/src/client.rs` with real tonic
+    calls against the generated `AgentSubstrateClient`. The
+    `let _ = (req, &self.channel)` discards are gone.
+    `dispatch_message` returns a stream that translates
+    `arcan.v1.AgentEvent` → `life.v1.AgentEvent` (the public-plane
+    shape lifed's downstream consumers expect).
+  * **Integration test**:
+    `crates/arcan/arcand/tests/topology_b_e2e_arcan.rs` (253 LOC, 3
+    tests, all green). Spins up arcand on a temp UDS, constructs a
+    real `ArcanProxy` against it, exercises each RPC end-to-end with
+    a mock provider. `create_agent_actually_creates_a_substrate_session`
+    confirms the lifed-side saga step would actually create the
+    KernelRuntime session (not just return a `format!("agent-{sid}")`
+    literal). `dispatch_message_streams_real_substrate_events`
+    confirms the streaming path is real.
+  * **Dep-rule CI**: `scripts/verify_dependencies_lifed.sh` passes —
+    `arcan-substrate-proto` is a wire-only crate (proto + generated
+    code; no substrate runtime deps), so adding it to `arcan-proxy`'s
+    deps doesn't violate proxy-isolation rules.
+
+  **Topology B status**: 1 of 4 substrate gRPC wires now functional
+  (arcan). Siblings BRO-1017 (lago: ship `lago.Append` +
+  `lago.ListNamespaces`, the E3 deferral), BRO-1018 (haima), BRO-1019
+  (anima) remain stubbed and are the next blockers. Each is
+  independently shippable using this PR's pattern.
+
+  **Knowledge graph**:
+  `research/entities/concept/topology-b-substrate-stub-gap.md` will
+  be updated post-merge with "arcan: closed; lago/haima/anima:
+  remaining".
+
 - **`lago replay --tree`** — reconstruct the agent-spawn recursion tree
   for a session, closing acceptance criterion §9.4 of the authored-
   agents architecture spec. (BRO-1014)

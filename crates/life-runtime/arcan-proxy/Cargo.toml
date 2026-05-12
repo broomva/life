@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 aios-protocol.workspace = true
 aios-proto.workspace = true
+arcan-substrate-proto.workspace = true
 life-runtime-proto.workspace = true
 life-runtime-pool.workspace = true
 async-trait.workspace = true

@@ -380,6 +380,7 @@ dependencies = [
  "arcan-provider-vercel",
  "arcan-sandbox",
  "arcan-spaces",
+ "arcan-substrate-proto",
  "arcan-tui",
  "arcand",
  "async-trait",
@@ -427,7 +428,9 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "toml",
+ "tonic 0.14.5",
  "tower-http",
  "tracing",
  "tracing-appender",
@@ -782,6 +785,7 @@ version = "0.3.0"
 dependencies = [
  "aios-proto",
  "aios-protocol",
+ "arcan-substrate-proto",
  "async-trait",
  "bytes",
  "futures",
@@ -852,6 +856,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "arcan-substrate-proto"
+version = "0.3.0"
+dependencies = [
+ "aios-proto",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tonic-prost-build",
+]
+
+[[package]]
 name = "arcan-tui"
 version = "0.3.0"
 dependencies = [
@@ -890,6 +906,7 @@ version = "0.3.0"
 dependencies = [
  "aios-events",
  "aios-policy",
+ "aios-proto",
  "aios-protocol",
  "aios-runtime",
  "aios-sandbox",
@@ -897,24 +914,31 @@ dependencies = [
  "arcan-aios-adapters",
  "arcan-core",
  "arcan-lago",
+ "arcan-proxy",
+ "arcan-substrate-proto",
  "async-trait",
  "autonomic-controller",
  "autonomic-core",
  "axum 0.8.8",
  "chrono",
+ "futures",
  "futures-util",
  "http-body-util",
  "jsonwebtoken",
+ "life-runtime-proto",
  "life-vigil",
  "nous-api",
  "nous-core",
  "praxis-skills",
+ "prost-types 0.14.3",
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tonic 0.14.5",
  "tower 0.5.3",
  "tracing",
  "utoipa",
