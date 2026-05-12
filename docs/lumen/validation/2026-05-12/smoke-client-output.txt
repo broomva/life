@@ -1,0 +1,32 @@
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/broomva/broomva/core/life/.worktrees/lumen-phase-alpha-m7-w/crates/cli/life-cli/Cargo.toml
+workspace: /Users/broomva/broomva/core/life/.worktrees/lumen-phase-alpha-m7-w/Cargo.toml
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.27s
+     Running `.target/debug/examples/lumen_smoke_client`
+[1;36mLumen Phase α — headless smoke client[0m
+  [2mHTTPS endpoint  : https://127.0.0.1:8443/graphql/v2[0m
+  [2mWSS   endpoint  : wss://127.0.0.1:8443/graphql-ws[0m
+  [2mBearer token    : dev-cap-token-for-lumen/test-user-1[0m
+
+[1;36m=== Step 1/5: schema introspection ===[0m
+  [1;32m✓[0m RootQuery / RootMutation / RootSubscription: all present
+  [1;32m✓[0m type count: 621 types registered
+
+[1;36m=== Step 2/5: T1 mutation presence ===[0m
+  [1;32m✓[0m RootMutation field count: 70
+  [1;32m✓[0m all 11 wired T1 ops present: OK
+
+[1;36m=== Step 3/5: createAgentTask dispatch ===[0m
+  [1;32m✓[0m typed error (resolver wired, extensions.code preserved): UNAUTHENTICATED: authentication required
+
+[1;36m=== Step 4/5: SDL argument validation ===[0m
+  [1;32m✓[0m SDL enforces prompt: String!: validator rejected as expected
+
+[1;36m=== Step 5/5: WSS graphql-transport-ws subscription ===[0m
+  [1;32m✓[0m subprotocol negotiated: graphql-transport-ws
+  [1;32m✓[0m connection_ack: received
+  [1;32m✓[0m subscribe sent: id=lumen-smoke-1
+  [1;32m✓[0m first frame: type=next, warpDriveUpdates.__typename = AmbientTaskUpdated
+  [1;32m✓[0m WS teardown: complete frame sent + close requested
+
+[1;32mAll 5 checks passed.[0m Lumen Phase α HTTP + WS surfaces are wire-compatible with what a patched warp-oss client would send.

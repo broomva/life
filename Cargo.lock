@@ -1185,18 +1185,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 
 [[package]]
-name = "async-channel"
-version = "2.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2"
-dependencies = [
- "concurrent-queue",
- "event-listener-strategy",
- "futures-core",
- "pin-project-lite",
-]
-
-[[package]]
 name = "async-graphql"
 version = "7.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3974,10 +3962,7 @@ version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f78e10609fe0e0b3f4157ffab1876319b5b0db102a2c60dc4626306dc46b44ad"
 dependencies = [
- "fastrand",
  "futures-core",
- "futures-io",
- "parking",
  "pin-project-lite",
 ]
 
@@ -4183,23 +4168,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f49c12ba8b21d128a2ce8585955246977fbce4415f680ebf9199b6f9d6d725f"
 dependencies = [
  "async-trait",
-]
-
-[[package]]
-name = "graphql-ws-client"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24f40f46bb92221c76ed086e2aa4b3789f04fa605f68df1addd63bc45de6d7c5"
-dependencies = [
- "async-channel",
- "futures-lite",
- "futures-sink",
- "futures-timer",
- "log",
- "pin-project",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6610,7 +6578,6 @@ dependencies = [
  "futures-util",
  "google-cloud-auth",
  "google-cloud-kms",
- "graphql-ws-client",
  "http 1.4.0",
  "http-body-util",
  "hyper 1.9.0",
@@ -10880,8 +10847,12 @@ dependencies = [
  "futures-util",
  "log",
  "native-tls",
+ "rustls 0.23.37",
+ "rustls-native-certs",
+ "rustls-pki-types",
  "tokio",
  "tokio-native-tls",
+ "tokio-rustls 0.26.4",
  "tungstenite 0.26.2",
 ]
 
@@ -11325,6 +11296,8 @@ dependencies = [
  "log",
  "native-tls",
  "rand 0.9.4",
+ "rustls 0.23.37",
+ "rustls-pki-types",
  "sha1",
  "thiserror 2.0.18",
  "utf-8",

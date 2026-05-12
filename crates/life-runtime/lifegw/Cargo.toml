@@ -222,6 +222,13 @@ hyper-util = { version = "0.1", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rustls-pemfile = "2"
+# examples/lumen_smoke_client.rs uses reqwest against the dev-tls self-signed
+# listener. macOS's default native-tls backend rejects the handshake with
+# `bad protocol version`; opting in to reqwest's `rustls-tls` feature lets
+# us call `.use_rustls_tls()` on the builder and reuse the same ring-backed
+# rustls stack the rest of the example already loads. Workspace reqwest stays
+# on default-tls for the production crate graph (Vault/AWS/GCP JWKS fetch).
+reqwest = { workspace = true, features = ["rustls-tls"] }
 # Sub-phase B integration test mounts a Vercel-style JWKS server at
 # 127.0.0.1:0 to verify the real JWKS path end-to-end.
 wiremock = { workspace = true }
@@ -234,13 +241,22 @@ wiremock = { workspace = true }
 # feature provides `client_async` which consumes the established
 # stream + builds the WebSocket framing on top.
 futures-util = { workspace = true }
-# Lumen M7-W: GraphQL-over-WebSocket client driver for the
-# warp_graphql subscription integration test. Speaks the
-# `graphql-transport-ws` subprotocol that async-graphql's Subscription
-# handler emits, so the test rig can exercise the bidi pump against a
-# live lifegw process. Task 23 enables `features = ["tungstenite"]`
-# when the e2e_smoke rig wires the real WS round-trip.
-graphql-ws-client = "0.10"
+# Lumen M7-W: examples/lumen_smoke_client.rs needs `connect_async_tls_with_config`
+# to dial out over the dev-tls self-signed listener. The lib's main
+# tokio-tungstenite declaration above is `handshake`-only (server-side); cargo
+# unifies features so adding `connect` + `rustls-tls-native-roots` here just
+# adds the client-side codepaths without changing the server's wire shape. The
+# self-signed cert is trusted via a custom `rustls::ClientConfig` injected as
+# `Connector::Rustls(...)` (see `AcceptAnyCert` in the example).
+#
+# We deliberately hand-roll the `graphql-transport-ws` protocol on top of
+# tokio-tungstenite rather than pulling in graphql-ws-client, because the
+# version of tungstenite that graphql-ws-client 0.10 pins (0.23) conflicts
+# with the workspace-pinned tokio-tungstenite 0.26 (tungstenite 0.26). The
+# protocol is ~5 JSON message kinds (connection_init / connection_ack /
+# subscribe / next / complete) so the inline implementation is small enough
+# to maintain alongside the test it serves.
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["handshake", "connect", "rustls-tls-native-roots"] }
 
 [lints]
 workspace = true
