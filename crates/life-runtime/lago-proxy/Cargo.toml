@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 aios-protocol.workspace = true
 aios-proto.workspace = true
+lago-substrate-proto.workspace = true
 life-runtime-proto.workspace = true
 life-runtime-pool.workspace = true
 async-trait.workspace = true
@@ -26,7 +27,7 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 tracing.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-# D2: content-addressed dedup keys for append_event
+# D2 legacy: content-addressed dedup keys (still used by idem_persist path).
 sha2 = "0.10"
 
 [lints]

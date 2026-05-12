@@ -18,8 +18,10 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::Stream;
+use lago_substrate_proto::lago::v1::{
+    AppendReq, ListNamespacesReq, lago_substrate_client::LagoSubstrateClient,
+};
 use life_runtime_pool::pool::{Pool, PoolGuard};
-use sha2::Digest;
 use tokio::net::UnixStream;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
@@ -167,73 +169,95 @@ impl LagoProxy {
 
     /// Append a single event to a lago namespace.
     ///
-    /// Sub-phase D2: the lago-proxy is now structured to issue a typed
-    /// `lago.Append` RPC. Until the real `lagod` ships the matching
-    /// service definition the call falls back to the equivalent
-    /// `idem_persist` keyspace (the only RPC the current lago daemon
-    /// exposes that satisfies the durability contract — the dedup key
-    /// becomes `(namespace, event_type, sha256(payload))`). When the
-    /// dedicated `lago.Append` proto lands the swap is local to this
-    /// method.
+    /// BRO-1017 (Phase 2 of the Topology B substrate-stub gap close-out):
+    /// this now issues a real `lago.v1.LagoSubstrate.Append` RPC against
+    /// lagod's substrate-plane server. Replaces the prior
+    /// `idem_persist`-as-append shim that was production-correct for
+    /// durability but did NOT actually produce a journal entry that
+    /// `Events.Read` / `Subscribe` could see.
     ///
-    /// Sub-phase E note: the Sub-phase E plan (E3) inspected lagod and
-    /// found the typed wire RPCs (`lago.Append`, `lago.ListNamespaces`)
-    /// have NOT shipped — `lagod` currently exposes only its existing
-    /// REST + ingest surface. The shim here is production-correct
-    /// (content-addressed dedup key satisfies the durability contract).
-    /// When lagod ships the typed RPCs, swap is local to this method.
-    /// Tracked as a follow-up under BRO-934 (lago wire RPC roll-out).
+    /// The (namespace, event_type, payload) triplet is wrapped server-side
+    /// into an `EventKind::Custom { event_type, data }` envelope on the
+    /// namespace's main branch. Payload must be valid JSON (an empty
+    /// payload is treated as JSON `null` by the substrate).
     pub async fn append_event(
         &self,
         namespace: &str,
         event_type: &str,
         payload: Vec<u8>,
     ) -> LagoProxyResult<()> {
-        // Construct a content-addressed dedup key so re-issuing the same
-        // event is a true no-op even across lifed restarts.
-        let mut hasher = sha2::Sha256::new();
-        Digest::update(&mut hasher, namespace.as_bytes());
-        Digest::update(&mut hasher, b"|");
-        Digest::update(&mut hasher, event_type.as_bytes());
-        Digest::update(&mut hasher, b"|");
-        Digest::update(&mut hasher, &payload);
-        let digest = hasher.finalize();
-        let mut key = Vec::with_capacity(64 + namespace.len() + event_type.len());
-        key.extend_from_slice(b"saga|");
-        key.extend_from_slice(namespace.as_bytes());
-        key.push(b'|');
-        key.extend_from_slice(event_type.as_bytes());
-        key.push(b'|');
-        key.extend_from_slice(digest.as_slice());
-        // Persist via idem_persist — the same lago substrate keyspace
-        // serves dedup + saga journaling until lago.Append ships.
-        // idem_persist itself brackets through the pool, so do NOT
-        // re-bracket here (would deadlock under capacity 1 tests).
-        self.idem_persist(&key, payload).await
+        let guard = self.acquire_guard().await?;
+        let mut client = LagoSubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(AppendReq {
+            namespace: namespace.to_string(),
+            event_type: event_type.to_string(),
+            payload,
+        });
+        self.attach_token(&mut req);
+        match client.append(req).await {
+            Ok(_) => {
+                record_success(guard);
+                Ok(())
+            }
+            Err(status) => {
+                record_outcome(guard, &status);
+                Err(LagoProxyError::Substrate(status))
+            }
+        }
     }
 
     /// Enumerate `session/*` namespaces known to lago.
     ///
-    /// Sub-phase D2: structured as a typed `lago.ListNamespaces` RPC
-    /// with empty-vec fallback until lagod ships the wire RPC. Sub-phase
-    /// E note: lagod has not yet shipped the typed RPC (verified
-    /// 2026-04-28); the empty-vec fallback is production-correct because
-    /// `RoutingCache::cold_start` warms on incoming traffic when lago
-    /// returns no entries.
+    /// BRO-1017 (Phase 2 of the Topology B substrate-stub gap close-out):
+    /// this now issues a real `lago.v1.LagoSubstrate.ListNamespaces` RPC
+    /// against lagod's substrate-plane server. Replaces the prior
+    /// empty-vec fallback so `RoutingCache::cold_start` warms from
+    /// durable storage at boot instead of waiting for traffic.
     pub async fn list_namespaces(&self, prefix: &str) -> LagoProxyResult<Vec<String>> {
         let guard = self.acquire_guard().await?;
-        let _ = prefix;
-        // Until lago.ListNamespaces ships, return empty. RoutingCache
-        // cold-start handles this by warming on incoming traffic.
-        let out = Vec::new();
-        record_success(guard);
-        Ok(out)
+        let mut client = LagoSubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(ListNamespacesReq {
+            prefix: prefix.to_string(),
+        });
+        self.attach_token(&mut req);
+        match client.list_namespaces(req).await {
+            Ok(resp) => {
+                record_success(guard);
+                Ok(resp.into_inner().namespaces)
+            }
+            Err(status) => {
+                record_outcome(guard, &status);
+                Err(LagoProxyError::Substrate(status))
+            }
+        }
     }
 }
 
 fn record_success(guard: Option<PoolGuard>) {
     if let Some(g) = guard {
         g.record_success();
+    }
+}
+
+/// Mirror of `arcan-proxy::record_outcome`. Sub-phase E policy:
+/// permanent (non-retryable) errors record success per Spec C₂ §7.2 so
+/// the breaker doesn't trip on auth / policy misconfiguration; only
+/// retryable failures (Unavailable / DeadlineExceeded / Aborted /
+/// ResourceExhausted) count against the breaker's failure budget.
+fn record_outcome(guard: Option<PoolGuard>, status: &tonic::Status) {
+    if let Some(g) = guard {
+        let retryable = matches!(
+            status.code(),
+            tonic::Code::Unavailable
+                | tonic::Code::DeadlineExceeded
+                | tonic::Code::Aborted
+                | tonic::Code::ResourceExhausted
+        );
+        if retryable {
+            g.record_failure();
+        } else {
+            g.record_success();
+        }
     }
 }
 
