@@ -284,15 +284,28 @@ fn to_type_ref(ty: &Type) -> TypeRef {
 ///   wrapped via [`async_graphql::dynamic::FieldValue::NULL`]; the
 ///   Warp client renders these gracefully as feature-flag-off
 ///
-/// The resolver does NOT register arguments on the field. Phase α
-/// scope-limits to introspection presence; argument values are
-/// ignored at the stub layer. Task 14 onwards adds the right
-/// argument shape on each tier-1 / tier-2 binding.
+/// In addition to the resolver, this function wires:
+///
+/// * **Field arguments** declared in the SDL (per
+///   `FieldDefinition.arguments`) onto the resulting [`Field`] via
+///   [`InputValue::new`] / [`InputValue::default_value`]. Without
+///   this, async-graphql's query validator REJECTS every Warp T1/T2
+///   client request with "Unknown argument 'X' on field 'Y'", since
+///   every real Warp op takes at least a `requestContext`
+///   argument. The stub does not introspect or enforce argument
+///   values — Task 14+ binds real resolvers that read them.
+///
+/// * **`@deprecated` directive** declared in the SDL (per
+///   `FieldDefinition.directives`) onto the resulting [`Field`] via
+///   [`Field::deprecation`]. Without this, the Warp SDL's 14
+///   declared `@deprecated` fields surface as `isDeprecated: false`
+///   under introspection, which breaks client-side telemetry that
+///   relies on detecting deprecated-op usage.
 fn stub_field(def: &FieldDefinition) -> Field {
     let name = def.name.node.to_string();
     let type_ref = to_type_ref(&def.ty.node);
     let nullable = matches!(type_ref, TypeRef::Named(_) | TypeRef::List(_));
-    Field::new(name, type_ref, move |_| {
+    let mut field = Field::new(name, type_ref, move |_| {
         FieldFuture::new(async move {
             if nullable {
                 Ok(None)
@@ -308,7 +321,48 @@ fn stub_field(def: &FieldDefinition) -> Field {
                 Ok(Some(FieldValue::value(Value::Null)))
             }
         })
-    })
+    });
+
+    // C2: Attach SDL-declared field arguments. Required for
+    // async-graphql's query validator to accept Warp client requests
+    // that pass `requestContext` and other op-specific args.
+    for arg in &def.arguments {
+        let arg_def = &arg.node;
+        let arg_name = arg_def.name.node.to_string();
+        let arg_type_ref = to_type_ref(&arg_def.ty.node);
+        let mut iv = InputValue::new(arg_name, arg_type_ref);
+        if let Some(default) = &arg_def.default_value {
+            // `async_graphql::Value` is a re-export alias for
+            // `async_graphql_value::ConstValue`, so the parser's
+            // `ConstValue` AST is structurally identical to the
+            // runtime `Value` and can be passed through directly.
+            iv = iv.default_value(default.node.clone());
+        }
+        field = field.argument(iv);
+    }
+
+    // C1: Wire the `@deprecated(reason: "...")` directive through to
+    // introspection. The reason argument is optional per the GraphQL
+    // spec — fields with bare `@deprecated` (no reason) still report
+    // `isDeprecated: true` with `deprecationReason: null` after
+    // async-graphql renders the default reason "No longer supported".
+    for directive in &def.directives {
+        if directive.node.name.node.as_str() == "deprecated" {
+            let reason = directive
+                .node
+                .arguments
+                .iter()
+                .find(|(name, _)| name.node.as_str() == "reason")
+                .and_then(|(_, value)| match &value.node {
+                    Value::String(s) => Some(s.clone()),
+                    _ => None,
+                });
+            field = field.deprecation(reason.as_deref());
+            break;
+        }
+    }
+
+    field
 }
 
 /// Build a stub [`InterfaceField`] (no resolver — interfaces only
@@ -431,6 +485,96 @@ mod tests {
                 names
             );
         }
+    }
+
+    /// C2 regression test: stub fields must carry their SDL-declared
+    /// arguments. `mintCustomToken(requestContext: RequestContext!)`
+    /// is a T1 op; without this argument wired, async-graphql's
+    /// validator rejects every real request from the Warp client
+    /// with "Unknown argument 'requestContext' on field
+    /// 'mintCustomToken' of type 'RootMutation'.", making Phase α's
+    /// acceptance gate unreachable.
+    #[tokio::test]
+    async fn schema_field_has_arguments_from_sdl() {
+        let schema = WarpSchema::build().expect("schema builds");
+        let req = async_graphql::Request::new(
+            r#"{
+              __type(name: "RootMutation") {
+                fields {
+                  name
+                  args { name type { kind name ofType { kind name } } }
+                }
+              }
+            }"#,
+        );
+        let resp = schema.inner().execute(req).await;
+        assert!(
+            resp.errors.is_empty(),
+            "introspection errors: {:?}",
+            resp.errors
+        );
+        let json = resp.data.into_json().unwrap();
+        let fields = json["__type"]["fields"].as_array().expect("fields array");
+        let mint = fields
+            .iter()
+            .find(|f| f["name"] == "mintCustomToken")
+            .expect("mintCustomToken present");
+        let args = mint["args"].as_array().expect("args array");
+        let arg_names: Vec<&str> = args.iter().filter_map(|a| a["name"].as_str()).collect();
+        assert!(
+            arg_names.contains(&"requestContext"),
+            "mintCustomToken should expose `requestContext` arg; got: {:?}",
+            arg_names
+        );
+    }
+
+    /// C1 regression test: `@deprecated` directives in the SDL must
+    /// round-trip through introspection. RootMutation deprecates 14
+    /// fields per the verbatim Warp SDL; before the fix, every one
+    /// reported `isDeprecated: false`, breaking client-side
+    /// telemetry that detects deprecated-op usage.
+    #[tokio::test]
+    async fn schema_field_carries_deprecated_directive() {
+        let schema = WarpSchema::build().expect("schema builds");
+        let req = async_graphql::Request::new(
+            r#"{
+              __type(name: "RootMutation") {
+                fields(includeDeprecated: true) {
+                  name
+                  isDeprecated
+                  deprecationReason
+                }
+              }
+            }"#,
+        );
+        let resp = schema.inner().execute(req).await;
+        assert!(
+            resp.errors.is_empty(),
+            "introspection errors: {:?}",
+            resp.errors
+        );
+        let json = resp.data.into_json().unwrap();
+        let fields = json["__type"]["fields"].as_array().expect("fields array");
+        // At least one deprecated field must exist. We don't pin a
+        // specific name because the SDL evolves; we just verify the
+        // walker is propagating @deprecated at all.
+        let any_deprecated = fields.iter().any(|f| f["isDeprecated"] == true);
+        assert!(
+            any_deprecated,
+            "expected at least one RootMutation field to report isDeprecated=true"
+        );
+        // And the first deprecated field's reason should be a
+        // non-null string (async-graphql substitutes "No longer
+        // supported" when the SDL omits an explicit reason).
+        let first_deprecated = fields
+            .iter()
+            .find(|f| f["isDeprecated"] == true)
+            .expect("at least one deprecated field");
+        assert!(
+            first_deprecated["deprecationReason"].as_str().is_some(),
+            "deprecationReason should be a non-null string; got: {:?}",
+            first_deprecated["deprecationReason"]
+        );
     }
 
     /// The `RootSubscription` root must be registered as a
