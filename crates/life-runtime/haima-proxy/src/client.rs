@@ -8,14 +8,25 @@
 //! Sub-phase E: each `*Proxy` owns the `Arc<Pool>` per Spec C₂ §7. The
 //! [`Pooled<C>`] adapter wraps any inner [`HaimaCall`] (real proxy or
 //! mock) and applies pool semaphore + circuit-breaker bracketing.
+//!
+//! BRO-1018 (Phase 3 of the Topology B substrate-stub gap close):
+//! every `HaimaProxy::<rpc>` method below now issues a real
+//! `haima.v1.WalletSubstrate` tonic call instead of returning a
+//! hardcoded shape. The `Pooled<C>` adapter and the `LedgerGuardedStream`
+//! wrapper are unchanged — they bracket whichever inner `HaimaCall`
+//! the caller hands them, so mocks compose identically.
 
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use aios_proto::aios::v1 as aios_v1;
 use async_trait::async_trait;
 use futures::Stream;
+use haima_substrate_proto::haima::v1::{
+    self as haima_pb, wallet_substrate_client::WalletSubstrateClient,
+};
 use life_runtime_pool::pool::{Pool, PoolGuard};
 use tokio::net::UnixStream;
 use tonic::transport::{Channel, Endpoint, Uri};
@@ -102,21 +113,57 @@ impl HaimaProxy {
         }
     }
 
+    /// Bind a wallet to a session. BRO-1018 wires this to the real
+    /// `haima.v1.WalletSubstrate.BindWallet` RPC. The substrate is
+    /// idempotent on `(sid, project_id)`, so re-issuing the call
+    /// after a saga retry is safe.
     pub async fn bind_wallet(&self, sid: &str, project_id: &str) -> HaimaProxyResult<String> {
         let guard = self.acquire_guard().await?;
-        let mut req = tonic::Request::new((sid.to_string(), project_id.to_string()));
+        let mut client = WalletSubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(haima_pb::BindWalletReq {
+            sid: Some(aios_v1::SessionId {
+                value: sid.to_owned(),
+            }),
+            project_id: project_id.to_owned(),
+        });
         self.attach_token(&mut req);
-        let _ = req;
-        let out = format!("wallet-{sid}-{project_id}");
-        record_success(guard);
-        Ok(out)
+        match client.bind_wallet(req).await.map_err(HaimaProxyError::from) {
+            Ok(resp) => {
+                let wallet_id = resp.into_inner().wallet_id;
+                record_outcome(guard, true);
+                Ok(wallet_id)
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 
+    /// Unbind a wallet. BRO-1018 wires this to
+    /// `haima.v1.WalletSubstrate.UnbindWallet`. Idempotent —
+    /// wallets that don't exist substrate-side return Ok(empty).
     pub async fn unbind_wallet(&self, wallet_id: &str) -> HaimaProxyResult<()> {
         let guard = self.acquire_guard().await?;
-        let _ = wallet_id;
-        record_success(guard);
-        Ok(())
+        let mut client = WalletSubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(haima_pb::UnbindWalletReq {
+            wallet_id: wallet_id.to_owned(),
+        });
+        self.attach_token(&mut req);
+        match client
+            .unbind_wallet(req)
+            .await
+            .map_err(HaimaProxyError::from)
+        {
+            Ok(_) => {
+                record_outcome(guard, true);
+                Ok(())
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 
     pub async fn get_balance(
@@ -125,13 +172,26 @@ impl HaimaProxy {
         project_id: &str,
     ) -> HaimaProxyResult<WalletBalance> {
         let guard = self.acquire_guard().await?;
-        let _ = (user_id, project_id);
-        let out = WalletBalance {
-            micros: 1_000_000,
-            currency: "USDC".to_string(),
-        };
-        record_success(guard);
-        Ok(out)
+        let mut client = WalletSubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(haima_pb::GetBalanceReq {
+            user_id: user_id.to_owned(),
+            project_id: project_id.to_owned(),
+        });
+        self.attach_token(&mut req);
+        match client.get_balance(req).await.map_err(HaimaProxyError::from) {
+            Ok(resp) => {
+                let body = resp.into_inner();
+                record_outcome(guard, true);
+                Ok(WalletBalance {
+                    micros: body.micros,
+                    currency: body.currency,
+                })
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 
     pub async fn statement(
@@ -143,11 +203,41 @@ impl HaimaProxy {
         limit: u32,
     ) -> HaimaProxyResult<Pin<Box<dyn Stream<Item = Result<LedgerEntry, tonic::Status>> + Send>>>
     {
-        let _ = (user_id, project_id, since_ms, until_ms, limit);
         let guard = self.acquire_guard().await?;
-        let (tx, rx) = tokio::sync::mpsc::channel(1);
-        drop(tx);
-        let inner = tokio_stream::wrappers::ReceiverStream::new(rx);
+        let mut client = WalletSubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(haima_pb::StatementReq {
+            user_id: user_id.to_owned(),
+            project_id: project_id.to_owned(),
+            since_ms,
+            until_ms,
+            limit,
+        });
+        self.attach_token(&mut req);
+        let upstream = match client.statement(req).await {
+            Ok(resp) => resp.into_inner(),
+            Err(s) => {
+                let err = HaimaProxyError::from(s);
+                record_outcome(guard, !err.is_retryable());
+                return Err(err);
+            }
+        };
+        // Map haima.v1.LedgerEntry → public-plane LedgerEntry at the
+        // wire boundary. The struct shapes are identical except for
+        // the wallet_id field (Phase-3 server-side returns wallet_id
+        // but the public-plane LedgerEntry has no slot for it — lifed's
+        // public-plane Wallet.Statement already drops it via the
+        // service mapping in `services/wallet.rs`).
+        use futures::StreamExt;
+        let mapped = upstream.map(|res| {
+            res.map(|e| LedgerEntry {
+                entry_id: e.entry_id,
+                at_unix_ms: e.at_unix_ms,
+                delta_micros: e.delta_micros,
+                reason: e.reason,
+                sid: e.sid,
+            })
+        });
+        let inner = Box::pin(mapped);
         Ok(Box::pin(LedgerGuardedStream::new(inner, guard)))
     }
 
@@ -160,16 +250,35 @@ impl HaimaProxy {
         reason: &str,
     ) -> HaimaProxyResult<(String, WalletBalance)> {
         let guard = self.acquire_guard().await?;
-        let _ = (user_id, project_id, amount_micros, sid, reason);
-        let out = (
-            "entry-1".to_string(),
-            WalletBalance {
-                micros: 999_000,
-                currency: "USDC".to_string(),
-            },
-        );
-        record_success(guard);
-        Ok(out)
+        let mut client = WalletSubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(haima_pb::DebitReq {
+            user_id: user_id.to_owned(),
+            project_id: project_id.to_owned(),
+            amount_micros,
+            sid: sid.to_owned(),
+            reason: reason.to_owned(),
+        });
+        self.attach_token(&mut req);
+        match client.debit(req).await.map_err(HaimaProxyError::from) {
+            Ok(resp) => {
+                let body = resp.into_inner();
+                let bal = body.new_balance.ok_or_else(|| {
+                    HaimaProxyError::InvalidResponse("debit: missing new_balance".to_string())
+                })?;
+                record_outcome(guard, true);
+                Ok((
+                    body.entry_id,
+                    WalletBalance {
+                        micros: bal.micros,
+                        currency: bal.currency,
+                    },
+                ))
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 
     pub async fn transfer(
@@ -182,33 +291,58 @@ impl HaimaProxy {
         memo: &str,
     ) -> HaimaProxyResult<(String, WalletBalance, WalletBalance)> {
         let guard = self.acquire_guard().await?;
-        let _ = (
-            from_user,
-            from_project,
-            to_user,
-            to_project,
+        let mut client = WalletSubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(haima_pb::TransferReq {
+            from_user: from_user.to_owned(),
+            from_project: from_project.to_owned(),
+            to_user: to_user.to_owned(),
+            to_project: to_project.to_owned(),
             amount_micros,
-            memo,
-        );
-        let out = (
-            "entry-1".to_string(),
-            WalletBalance {
-                micros: 999_000,
-                currency: "USDC".to_string(),
-            },
-            WalletBalance {
-                micros: 100_000,
-                currency: "USDC".to_string(),
-            },
-        );
-        record_success(guard);
-        Ok(out)
+            memo: memo.to_owned(),
+        });
+        self.attach_token(&mut req);
+        match client.transfer(req).await.map_err(HaimaProxyError::from) {
+            Ok(resp) => {
+                let body = resp.into_inner();
+                let from_bal = body.from_balance.ok_or_else(|| {
+                    HaimaProxyError::InvalidResponse("transfer: missing from_balance".to_string())
+                })?;
+                let to_bal = body.to_balance.ok_or_else(|| {
+                    HaimaProxyError::InvalidResponse("transfer: missing to_balance".to_string())
+                })?;
+                record_outcome(guard, true);
+                Ok((
+                    body.entry_id,
+                    WalletBalance {
+                        micros: from_bal.micros,
+                        currency: from_bal.currency,
+                    },
+                    WalletBalance {
+                        micros: to_bal.micros,
+                        currency: to_bal.currency,
+                    },
+                ))
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 }
 
-fn record_success(guard: Option<PoolGuard>) {
+/// Record a `PoolGuard` outcome based on whether the call succeeded
+/// or whether the error is a non-retryable / permanent failure (the
+/// breaker treats permanent faults as success — they aren't infra
+/// problems — per Spec C₂ §7.2). Mirrors the policy applied by
+/// `Pooled<C>::bracket`.
+fn record_outcome(guard: Option<PoolGuard>, success_or_permanent: bool) {
     if let Some(g) = guard {
-        g.record_success();
+        if success_or_permanent {
+            g.record_success();
+        } else {
+            g.record_failure();
+        }
     }
 }
 
@@ -491,5 +625,12 @@ mod tests {
         proxy.attach_token(&mut req);
         let auth = req.metadata().get("authorization").expect("authz set");
         assert_eq!(auth.to_str().unwrap(), "Bearer haima.jws.token");
+    }
+
+    #[tokio::test]
+    async fn record_outcome_no_op_when_guard_absent() {
+        // Compile-only smoke: the helper accepts None and does not panic.
+        record_outcome(None, true);
+        record_outcome(None, false);
     }
 }

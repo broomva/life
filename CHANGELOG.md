@@ -67,6 +67,86 @@
   be updated post-merge with "arcan: closed; lago/haima/anima:
   remaining".
 
+- **`haima.v1.WalletSubstrate` gRPC server** — closes Phase 3 of the
+  Topology B substrate-stub gap (BRO-1018), following the BRO-1016
+  arcan pattern. Until this PR, `haima-proxy`'s six per-method bodies
+  (`bind_wallet`, `unbind_wallet`, `get_balance`, `statement`,
+  `debit`, `transfer`) discarded their arguments and returned
+  hardcoded shapes (`format!("wallet-{sid}-{project_id}")`,
+  999_000 / 100_000 micros, etc.); lifed's saga `BindWallet` step ran
+  correctly but the haima substrate-call boundary below it was fake.
+  Phase 3 wires the haima side end-to-end so per-task billing
+  (`TaskBilled` → `RevenueReceived`) becomes real.
+  * **New proto**: `core/life/proto/haima/v1/substrate.proto` declares
+    `haima.v1.WalletSubstrate` service with 6 RPCs (`BindWallet`,
+    `UnbindWallet`, `GetBalance`, `Statement` server-streaming,
+    `Debit`, `Transfer`). Imports `aios.v1.SessionId`. Substrate-plane
+    shape (no auth tokens — those are lifed's concerns one tier up,
+    attached as the bearer and verified separately).
+  * **New crate**: `crates/haima/haima-substrate-proto/` mirrors the
+    `arcan-substrate-proto` codegen pattern verbatim. Workspace
+    member. `tonic-prost-build` over the proto + `aios.v1.*` imports
+    via `extern_path` so we don't regenerate canonical aios types.
+  * **haimad substrate state + server**: new modules
+    `crates/haima/haimad/src/state.rs` (in-memory wallet + ledger
+    registry, secp256k1-backed via `haima-wallet::evm`, ULID-ordered
+    entries) and `crates/haima/haimad/src/substrate.rs` (gRPC
+    `SubstrateService` adapter). Each RPC is a thin adapter onto a
+    `HaimaState` method. `BindWallet` is idempotent on
+    `(sid, project_id)`; `UnbindWallet` is idempotent (unknown
+    wallets return Ok). `Transfer` is atomic two-leg under a single
+    write lock. The F2 `haima-lago::FinancePublisher` integration is
+    NOT wired in this PR — that's a follow-up; today HaimaState is
+    the source of truth and the F2 publisher remains the durable
+    fan-out path.
+  * **haimad split into lib + bin**: `crates/haima/haimad/src/lib.rs`
+    re-exports `state` + `substrate` so integration tests can pull
+    them; the existing `main.rs` becomes the binary entry. No
+    external consumer of `haimad` as a library exists today, so the
+    shift is purely additive.
+  * **UDS bind**: new `--uds-socket <PATH>` flag (env
+    `HAIMA_UDS_SOCKET`) on `haimad`. When set, the daemon spawns a
+    UDS-bound tonic gRPC server alongside the existing HTTP `:3003`
+    server, sharing a single `Arc<HaimaState>`. Mirrors arcand's
+    BRO-1016 `serve_substrate_uds` helper shape (parent-dir create,
+    stale socket cleanup, best-effort socket removal on shutdown).
+    Topology A users unaffected — the flag is opt-in.
+  * **haima-proxy real bodies**: replaced the 6 stub methods in
+    `crates/life-runtime/haima-proxy/src/client.rs` with real tonic
+    calls against the generated `WalletSubstrateClient`. The
+    `let _ = (...)` argument discards are gone. `statement` streams
+    return `LedgerGuardedStream<S>` wrapping the upstream tonic
+    stream so the pool guard tracks terminal close (success/failure
+    per Spec C₂ §7.2). `record_outcome` replaces the previous
+    bare-success helper so permanent (non-retryable) errors don't
+    trip the breaker on policy/auth misconfiguration.
+  * **Integration test**:
+    `crates/haima/haimad/tests/topology_b_e2e_haima.rs` (3 tests, all
+    green). Spins up haimad's substrate on a temp UDS, constructs a
+    real `HaimaProxy` against it, exercises bind/unbind/transfer/
+    debit/statement/balance end-to-end. `bind_wallet_creates_real_wallet`
+    confirms the saga step would actually create a wallet
+    substrate-side (not just return a `format!()` literal).
+    `transfer_mutates_real_substrate_state` confirms both ledger
+    legs land in the substrate's HaimaState. `proxy_to_server_round_trip`
+    composes the full bind → debit → balance → statement chain.
+  * **Tests**: 16 added (6 state unit + 3 CLI + 4 proxy + 3 e2e). All
+    pass under `cargo test -p haimad -p haima-proxy --all-targets`.
+  * **Dep-rule CI**: `scripts/verify_dependencies_lifed.sh` passes —
+    `haima-substrate-proto` is a wire-only crate (proto + generated
+    code; no haima runtime deps), so adding it to `haima-proxy`'s
+    deps doesn't violate proxy-isolation rules.
+
+  **Topology B status after this PR**: 2 of 4 substrate gRPC wires
+  now functional (arcan via BRO-1016, haima via BRO-1018). Siblings
+  BRO-1017 (lago) and BRO-1019 (anima) remain stubbed. Each is
+  independently shippable using this PR's pattern.
+
+  **Knowledge graph**:
+  `research/entities/concept/topology-b-substrate-stub-gap.md`
+  should be updated post-merge with "arcan + haima: closed;
+  lago/anima: remaining".
+
 - **`lago replay --tree`** — reconstruct the agent-spawn recursion tree
   for a session, closing acceptance criterion §9.4 of the authored-
   agents architecture spec. (BRO-1014)
