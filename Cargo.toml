@@ -96,6 +96,7 @@ members = [
     "crates/anima/anima-core",
     "crates/anima/anima-identity",
     "crates/anima/anima-lago",
+    "crates/anima/anima-substrate-proto",
     # Inference — Agent-Loop Compute Contract (Spec E)
     "crates/inference/inference-core",
     "crates/inference/life-inference",
@@ -264,6 +265,9 @@ haima-substrate-proto = { path = "crates/haima/haima-substrate-proto", version =
 
 # Lago substrate wire crate — BRO-1017 (Topology B substrate-stub gap close, Phase 2).
 lago-substrate-proto = { path = "crates/lago/lago-substrate-proto", version = "0.3.0" }
+
+# Anima substrate wire crate — BRO-1019 (Phase 4 of the Topology B substrate-stub gap close).
+anima-substrate-proto = { path = "crates/anima/anima-substrate-proto", version = "0.3.0" }
 
 # M5 — lifed facade-aggregator daemon (Spec C₂)
 arcan-proxy        = { path = "crates/life-runtime/arcan-proxy",        version = "0.3.0" }

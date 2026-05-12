@@ -1,0 +1,147 @@
+syntax = "proto3";
+
+package anima.v1;
+
+import "google/protobuf/timestamp.proto";
+import "aios/v1/identifiers.proto";
+
+// Substrate-plane Identity service. Called by lifed (via anima-proxy)
+// over UDS. NOT the public-plane shape — that's life.v1.Identity in
+// proto/life/v1/identity.proto, served by lifed's IdentityService.
+//
+// This service exists so lifed's Identity handlers + saga driver can
+// route identity-data operations (accounts, profiles, sessions) to
+// soma without going through soma's `life.admin.kernel.v1.CustodyOracle`
+// admin plane (which is reserved for crypto signing per Spec D
+// D-Sub-E). Identity data and custody crypto are disjoint surfaces;
+// they cohabit the anima module but ride on separate UDS sockets.
+//
+// Phase 4 of the close-out for the Topology B substrate-stub gap audit
+// captured 2026-05-11 (BRO-1019). Sibling of `arcan.v1.AgentSubstrate`
+// (BRO-1016, proto/arcan/v1/substrate.proto), `lago.v1.LagoSubstrate`
+// (BRO-1017), `haima.v1.WalletSubstrate` (BRO-1018).
+//
+// Spec reference: docs/superpowers/specs/2026-04-25-life-runtime-architecture-spec.md
+// §L1 + the topology-b-substrate-stub-gap entity page. Closes the
+// final wiring gap — after BRO-1019 all four `*-proxy` crates have
+// real method bodies talking to real substrate daemon servers.
+//
+// All RPCs are operations against the anima identity substrate scoped
+// by (user_id, sid). The substrate plane stays oblivious to tier-2/3
+// token claims — those are lifed's concern, attached as the bearer
+// one tier up and verified separately.
+service IdentitySubstrate {
+  // Idempotent on sid. Binds a session to a user — lifed's saga step 4
+  // (`RegisterAnimaSession`) drives this on `Agent.CreateSession`. The
+  // substrate keeps a `(sid → SessionDescriptor)` map; re-issuing the
+  // call after a saga retry is a no-op.
+  rpc RegisterSession(RegisterSessionReq) returns (RegisterSessionResp);
+
+  // Idempotent on sid. Marks a session closed (sets `closed_at_ms`).
+  // Sessions that don't exist return Ok(empty) so saga compensation
+  // paths stay clean.
+  rpc MarkSessionClosed(MarkSessionClosedReq) returns (MarkSessionClosedResp);
+
+  // Get the account for a user. Creates a default starting account on
+  // first access so the Phase-4 wire stays useful before persistence
+  // ships — mirrors haima's default-balance materialization pattern
+  // (BRO-1018) and matches the proxy's pre-BRO-1019 stub shape.
+  rpc GetAccount(GetAccountReq) returns (Account);
+
+  // Replace the profile sub-record of an account. Returns the updated
+  // account. Materializes the account on first access.
+  rpc UpdateProfile(UpdateProfileReq) returns (Account);
+
+  // List sessions for a user. Phase-4 returns all matching sessions in
+  // one shot (no pagination); the public-plane caller (lifed's Identity
+  // service) is expected to cap the response if needed. Sessions are
+  // ordered by `opened_at_ms` ascending.
+  rpc ListSessions(ListSessionsReq) returns (ListSessionsResp);
+
+  // Idempotent on sid. Revokes a session (marks closed, sets a
+  // revocation timestamp). Sessions that don't exist return Ok(empty)
+  // — mirror MarkSessionClosed's compensation-friendly shape.
+  rpc RevokeSession(RevokeSessionReq) returns (RevokeSessionResp);
+}
+
+// An account record — the canonical user-scoped identity shape lifed's
+// Identity service projects onto its public surface. Mirrors the
+// `anima_proxy::client::Account` Rust struct verbatim so the wire
+// mapping is a trivial copy.
+message Account {
+  string user_id = 1;
+  string handle = 2;
+  string display_name = 3;
+  string email = 4;
+  string tier = 5;
+  int64 created_at_ms = 6;
+  Profile profile = 7;
+}
+
+// Profile sub-record. Mirrors `anima_proxy::client::Profile`.
+message Profile {
+  string bio = 1;
+  // Content-addressed blob ref. Empty when no avatar is set.
+  bytes avatar_blob_ref = 2;
+  // Free-form key/value preferences. The substrate stores them as-is;
+  // structured fields belong to the public-plane Identity service.
+  map<string, string> preferences = 3;
+}
+
+// A session descriptor — what `ListSessions` returns and what
+// `register_session` materializes substrate-side. Mirrors
+// `anima_proxy::client::SessionDescriptor`.
+message SessionDescriptor {
+  string sid = 1;
+  string project_id = 2;
+  int64 opened_at_ms = 3;
+  // Unix-ms close timestamp, or 0 when the session is still open.
+  int64 closed_at_ms = 4;
+  string label = 5;
+}
+
+message RegisterSessionReq {
+  aios.v1.SessionId sid = 1;
+  string user_id = 2;
+}
+
+message RegisterSessionResp {
+  // Server-side timestamp when the session was first observed (cold
+  // bind) or re-confirmed (idempotent re-bind).
+  google.protobuf.Timestamp opened_at = 1;
+}
+
+message MarkSessionClosedReq {
+  aios.v1.SessionId sid = 1;
+}
+
+message MarkSessionClosedResp {}
+
+message GetAccountReq {
+  string user_id = 1;
+}
+
+message UpdateProfileReq {
+  string user_id = 1;
+  Profile profile = 2;
+}
+
+message ListSessionsReq {
+  string user_id = 1;
+  // When true, include sessions whose `closed_at_ms` is non-zero.
+  // When false, only return open sessions.
+  bool include_closed = 2;
+  // Max sessions to emit. 0 means "no cap" (server may still apply
+  // an internal hard limit to bound memory).
+  uint32 limit = 3;
+}
+
+message ListSessionsResp {
+  repeated SessionDescriptor sessions = 1;
+}
+
+message RevokeSessionReq {
+  aios.v1.SessionId sid = 1;
+}
+
+message RevokeSessionResp {}
