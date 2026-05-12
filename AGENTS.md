@@ -105,23 +105,16 @@ Arcan handles the agent loop, LLM provider calls, tool execution, and streaming.
 - Security: 7/10 — anima custody + Tier-2 capability tokens + autonomic gating (Direct path) + Vercel JWT verification + Tier-aware tool filtering.
 - Operational tooling: 9/10 — `lago log` / `lago replay --tree` / `arcan agent {list,show,new,test}` / P9 watcher / bookkeeping pipeline.
 
-**Known gaps** (current targets, updated 2026-05-11):
+**Known gaps** (current targets, updated 2026-05-12):
 
-**Production wiring gaps (4 total — 3 small + 1 sizeable):**
+**✅ Topology B substrate-call gap — RESOLVED 2026-05-12.** All four `*-proxy` crates (`arcan-proxy`, `lago-proxy`, `haima-proxy`, `anima-proxy`) now have real method bodies talking to real substrate gRPC servers. Shipped via BRO-1016 (arcan, life#1214), BRO-1017 (lago, life#1215), BRO-1018 (haima, life#1216), BRO-1019 (anima identity in soma, life#1217). Topology B is now production-deployable for real agent traffic. KG: `research/entities/concept/topology-b-substrate-stub-gap.md` (status: resolved).
 
-*Workflow tick path (3 small; ~1 weekend total):*
+**Remaining production wiring gaps (3 small; ~1 weekend total — Workflow tick path only):**
 - `ergon-life-sinks` crate has zero consumers — `crates/arcan/arcan-ergon/src/runner.rs:157` uses `BufferSink::new()`. Workflow stream events never reach lago; `lago replay --tree` cannot see them.
 - 3 of 4 ergon auto-hook adapters are Noop (`AutonomicBudgetHook`/`NousScoreHook`/`AnimaAttestHook` get Noop impls in `crates/arcan/arcan-ergon/src/hooks.rs:137-166`; only `PraxisCapabilityHook` is real). Workflow ticks bypass budget/score/attest.
 - `arcan agent test` is `--dry-run` only — no live-LLM invocation. BRO-1015 had to call Anthropic SDK directly from Python.
 
 **Direct tick path (Topology A) is unaffected by all three** — autonomic via `AutonomicPolicyAdapter`, nous via `NousToolObserver`, lago via `EventStorePort` all wired through the standard kernel ports.
-
-*Topology B substrate-call gap (sizeable; ~1–2 weeks; discovered 2026-05-11):*
-- The 4 `*-proxy` crates (`arcan-proxy`, `lago-proxy`, `haima-proxy`, `anima-proxy`) ship **stubbed per-method bodies**. `arcan_proxy::create_agent` returns `format!("agent-{sid}")`; `dispatch_message` discards `sid`+`content` and emits 2 hardcoded `AgentEvent`s. The infrastructure on top of lifed (lifegw + saga + pool + breaker + admin plane) is real; the substrate-call wire below lifed is not.
-- Root cause: arcand exposes only an axum HTTP `:3000` server (Topology A surface). No `arcan.v1.AgentService` tonic server exists for arcan-proxy to call. lago-proxy is partially wired (`IngestService.Ingest`); the others are stubs.
-- **Practical implication**: Topology A is the only path that drives real agent work today. Topology B functions as authenticated/rate-limited/saga-orchestrated scaffolding around a fake substrate.
-- Fix: per-substrate tonic gRPC server (~200 LOC each, on arcand/haimad/anima side) + replace each `*-proxy` method body with a real client call (~50 LOC × 12 methods). gRPC contracts already exist in `life-runtime-proto::life::v1::*`.
-- Knowledge graph: `research/entities/concept/topology-b-substrate-stub-gap.md`.
 
 **Long-tail gaps (Phase 0 stabilization):**
 - Branching not exposed in arcan API (`arcand/canonical.rs:1265` hardcodes `BranchId::main()`)
