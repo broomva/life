@@ -1,0 +1,42 @@
+=== Test A: full schema type count ===
+Total introspected types: 621
+
+=== Test B: RootMutation field summary ===
+Total RootMutation fields: 70
+  T1 ops we dispatch (sample, sorted):
+    createAgentTask
+    createAnonymousUser
+    expireApiKey
+    generateApiKey
+    generateCommands
+    generateDialogue
+    issueTaskIdentityToken
+    mintCustomToken
+    setUserIsOnboarded
+    updateAgentTask
+    updateUserSettings
+
+=== Test C: freeAvailableModels query (real hardcoded resolver) ===
+{
+  "data": {
+    "freeAvailableModels": {
+      "__typename": "FreeAvailableModelsOutput"
+    }
+  }
+}
+
+=== Test D: SDL-level arg validation (prompt: String! required) ===
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Invalid value for argument \"input\", field \"prompt\" of type \"String!\" is required but not provided",
+      "locations": [
+        {
+          "line": 1,
+          "column": 78
+        }
+      ]
+    }
+  ]
+}

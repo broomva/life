@@ -1,0 +1,3 @@
+=== Now attempting to build warp-oss (will likely fail on Metal Toolchain) ===
+Time: Tue May 12 09:25:44 -05 2026
+Metal status: error: error: cannot execute tool 'metal' due to missing Metal Toolchain; use: xcodebuild -downloadComponent MetalToolchain

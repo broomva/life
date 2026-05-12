@@ -1,0 +1,12 @@
+[1;36m[lumen-smoke][0m Smoke 1/3 — schema introspection
+[1;36m[lumen-smoke][0m POST https://127.0.0.1:8443/graphql/v2
+[1;36m[lumen-smoke][0m   ✓ schema introspection returns RootQuery
+[1;36m[lumen-smoke][0m Smoke 2/3 — Tier-1 op presence on RootMutation
+[1;36m[lumen-smoke][0m   ✓ createAgentTask present
+[1;36m[lumen-smoke][0m   ✓ mintCustomToken present
+[1;36m[lumen-smoke][0m   ✓ updateUserSettings present
+[1;36m[lumen-smoke][0m   ✓ generateDialogue present
+[1;36m[lumen-smoke][0m Smoke 3/3 — createAgentTask (real resolver → lifed.Agent.CreateSession via mock fallback)
+[1;36m[lumen-smoke][0m   ✓ resolver dispatched (response shape recognized)
+{"data":null,"errors":[{"message":"authentication required","locations":[{"line":1,"column":71}],"extensions":{"code":"UNAUTHENTICATED"}}]}
+[1;36m[lumen-smoke][0m Curl smoke PASSED — server side is healthy.

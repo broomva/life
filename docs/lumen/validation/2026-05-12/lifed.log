@@ -1,0 +1,5 @@
+[2m2026-05-12T14:23:49.295353Z[0m [33m WARN[0m [2mlifed::bootstrap[0m[2m:[0m one or more substrate UDS sockets missing — booting with MockSubstrates (dev mode, --allow-mock-fallback)
+[2m2026-05-12T14:23:49.295761Z[0m [32m INFO[0m [2mlifed::bootstrap[0m[2m:[0m lifed starting (sub-phase C — mock substrates) [3mpublic_socket[0m[2m=[0m/tmp/lumen-smoke/run/life.sock [3madmin_socket[0m[2m=[0m/tmp/lumen-smoke/run/life-admin.sock
+[2m2026-05-12T14:23:49.295844Z[0m [32m INFO[0m [2mlifed::bootstrap[0m[2m:[0m jwks cache initialised (lazy file-backed) [3mpath[0m[2m=[0m/etc/life/lifegw-jwks.json [3mdev_shortcut[0m[2m=[0mfalse
+[2m2026-05-12T14:23:49.302670Z[0m [33m WARN[0m [2mlifed::listener::public[0m[2m:[0m unix_socket_group honored via systemd SocketGroup directive; in-process chown deferred [3mgroup[0m[2m=[0m"" [3mpath[0m[2m=[0m/tmp/lumen-smoke/run/life.sock
+[2m2026-05-12T14:23:49.302837Z[0m [33m WARN[0m [2mlifed::listener::admin[0m[2m:[0m unix_socket_group honored via systemd SocketGroup directive; in-process chown deferred [3mgroup[0m[2m=[0m"" [3mpath[0m[2m=[0m/tmp/lumen-smoke/run/life-admin.sock
