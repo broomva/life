@@ -560,6 +560,259 @@ pub fn resolve_generate_commands(rctx: ResolverContext<'_>) -> FieldFuture<'_> {
     })
 }
 
+/// Resolver: mutation `createAgentTask`.
+///
+/// Per Lumen spec L6-D5, this is THE entry-point for agent invocation.
+/// The client mutates `createAgentTask(input)` to obtain a `task_id`,
+/// then subscribes to `warpDriveUpdates` filtered to `AmbientTaskUpdated`
+/// events for that `task_id` (Task 20 wires the subscription bridge).
+/// Subsequent `updateAgentTask` calls deliver approval/cancel/feedback
+/// during the agent loop.
+///
+/// # Schema shape
+///
+/// `createAgentTask(input: CreateAgentTaskInput!,
+///   requestContext: RequestContext!): CreateAgentTaskResult!`
+/// where `CreateAgentTaskInput` is:
+/// * `prompt: String!`           — the user's prompt (required)
+/// * `agentConfigSnapshot: String` — optional JSON config blob
+/// * `environmentUid: ID`        — optional environment / workspace id
+/// * `parentRunId: ID`           — optional parent run lineage
+///
+/// and `CreateAgentTaskResult = CreateAgentTaskOutput | UserFacingError`,
+/// `CreateAgentTaskOutput { responseContext, taskId: ID! }`.
+///
+/// # Phase α dispatch
+///
+/// Routes through `lifed.Agent.CreateSession` (the closest-fit lifed
+/// RPC per Spec C₂ §6.3). The proto shape is:
+///
+/// ```proto
+/// message CreateSessionReq {
+///   string user_id = 1;
+///   string project_id = 2;
+///   string label = 3;
+///   aios.v1.SessionId resume_sid = 4;
+///   ChildPolicy inherit_policy = 5;
+/// }
+/// message Session {
+///   aios.v1.SessionId sid = 1;
+///   aios.v1.AgentId agent_id = 2;
+///   string user_id = 3;
+///   string project_id = 4;
+///   google.protobuf.Timestamp created_at = 5;
+/// }
+/// ```
+///
+/// Mappings:
+/// * `user_id` ← `ctx.claims.user_id` (the bearer-validated caller).
+/// * `project_id` ← `input.environmentUid` if present, else a stable
+///   per-user fallback (`"default-{user_id}"`). The Warp schema's
+///   `CreateAgentTaskInput` has no required `project_id`; treating
+///   `environmentUid` as project-scope keeps the routing-cache index
+///   coherent with how the Warp UI groups tasks.
+/// * `label` ← truncated `prompt` (so admin-plane `Saga.Show` /
+///   `Runtime.ListSessions` carries a human-readable handle). The full
+///   prompt is sent via a follow-up `Agent.SendMessage` (Phase β —
+///   see "Prompt delivery" note below).
+/// * `resume_sid` / `inherit_policy` ← left default (this is a fresh
+///   session, not a recursive spawn).
+///
+/// The returned `Session.sid.value` is mapped to GraphQL `taskId`.
+///
+/// # Prompt delivery (Phase β follow-up)
+///
+/// `Agent.CreateSession` allocates the session and runs the 4-step
+/// Spec C₂ §4.2 saga, but does NOT consume the prompt — the prompt is
+/// sent via the separate `Agent.SendMessage` RPC which returns an
+/// `AgentEvent` stream. Phase α intentionally elides the
+/// `SendMessage` call here: the Warp client picks up the prompt by
+/// subscribing to `warpDriveUpdates` (Task 20) which proxies
+/// `Agent.StreamSession`, and the lifed session can be driven by
+/// `updateAgentTask` (`send_user_input`) once that action is wired.
+/// Filing the prompt at creation time is queued as a Phase β refinement
+/// — it requires either a tighter `CreateSessionReq` extension (carry
+/// the prompt inline) or a fire-and-forget `SendMessage` dispatch that
+/// drops the returned stream. Both have non-trivial saga-ordering
+/// concerns (the prompt must persist AFTER `OpenLagoNamespace` lands)
+/// so we defer to a focused ticket.
+///
+/// # Auth contract
+///
+/// Requires `agent:write`. Anonymous callers receive `UNAUTHENTICATED`.
+pub fn resolve_create_agent_task(rctx: ResolverContext<'_>) -> FieldFuture<'_> {
+    FieldFuture::new(async move {
+        let ctx: &WarpRequestCtx = rctx
+            .ctx
+            .data::<WarpRequestCtx>()
+            .map_err(|_| WarpGraphqlError::Internal("missing request ctx".into()).into_graphql())?;
+        ctx.require_scope("agent:write")
+            .map_err(WarpGraphqlError::into_graphql)?;
+
+        // Extract `input` from the resolver context. The SDL declares
+        // `input: CreateAgentTaskInput!` (non-null), so a missing arg
+        // would have been rejected earlier by async-graphql's
+        // validator; this `try_get` is defensive against shape drift.
+        // `async_graphql::Error` is non-`Display`, so format the
+        // underlying message with `{:?}` to keep the typed error code.
+        let input = rctx.args.try_get("input").map_err(|e| {
+            WarpGraphqlError::InvalidInput(format!("missing 'input': {e:?}")).into_graphql()
+        })?;
+        let input_json: serde_json::Value = input.deserialize().map_err(|e| {
+            WarpGraphqlError::InvalidInput(format!("input parse: {e:?}")).into_graphql()
+        })?;
+
+        // `prompt` is non-null in the SDL — surfacing INVALID_INPUT
+        // when the deserialized JSON lacks it preserves the typed
+        // error code contract for clients that bypass the validator.
+        let prompt = input_json["prompt"].as_str().ok_or_else(|| {
+            WarpGraphqlError::InvalidInput("input.prompt is required".into()).into_graphql()
+        })?;
+        // `environmentUid` is optional; map to project_id with a
+        // stable per-user fallback so routing-cache lookups remain
+        // coherent across tasks even when the client doesn't set it.
+        let project_id = input_json["environmentUid"]
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("default-{}", ctx.user_id()));
+
+        // Truncate the prompt to a label-sized substring for the
+        // `Session.label` field (admin-plane display). 64 bytes is the
+        // upper bound used by lifed's existing `Runtime.ListSessions`
+        // formatter; longer prompts are still fully replayable from
+        // the lago journal via the `Events` service.
+        let label = {
+            let max_len = 64;
+            if prompt.len() <= max_len {
+                prompt.to_string()
+            } else {
+                // Truncate at a char boundary (not byte boundary) so
+                // multi-byte UTF-8 sequences don't split mid-codepoint.
+                let mut idx = max_len;
+                while idx > 0 && !prompt.is_char_boundary(idx) {
+                    idx -= 1;
+                }
+                prompt[..idx].to_string()
+            }
+        };
+
+        let req = life_runtime_proto::life::v1::CreateSessionReq {
+            user_id: ctx.user_id().to_string(),
+            project_id,
+            label,
+            // Fresh session — no resume, no inherited policy.
+            resume_sid: None,
+            inherit_policy: None,
+        };
+
+        let mut client = ctx.dataloaders.agent.clone();
+        let resp = client
+            .create_session(req)
+            .await
+            .map_err(|e| WarpGraphqlError::Upstream(e.to_string()))
+            .into_graphql()?;
+
+        let session = resp.into_inner();
+        // `sid.value` is the canonical session identifier — see
+        // `mint_sid` in `lifed/src/services/agent.rs` (BLAKE3 over
+        // (user_id, project_id, time, random) per Spec C₂ §6.3).
+        let task_id = session.sid.map(|s| s.value).ok_or_else(|| {
+            WarpGraphqlError::Upstream("lifed Agent.CreateSession returned no SessionId".into())
+                .into_graphql()
+        })?;
+
+        let value_json = serde_json::json!({
+            "taskId": task_id,
+            // `responseContext` (non-null sibling) falls through to
+            // the auto-stub — same pattern as the other T1 union
+            // success returns (`MintCustomTokenOutput`, etc.).
+        });
+        let value = async_graphql::Value::from_json(value_json)
+            .map_err(|e| WarpGraphqlError::Internal(format!("value encode: {e}")).into_graphql())?;
+        // Union dispatch: `CreateAgentTaskResult = CreateAgentTaskOutput | UserFacingError`.
+        // async-graphql's dynamic-schema requires explicit `.with_type(...)`
+        // for unions; without it the dispatcher cannot pick a variant.
+        Ok(Some(
+            FieldValue::value(value).with_type("CreateAgentTaskOutput"),
+        ))
+    })
+}
+
+/// Resolver: mutation `updateAgentTask`.
+///
+/// Per Lumen spec L6-D5, the action discriminator routes one of:
+/// * `cancel` → `Agent.CancelDispatch` (proto extension required to
+///   target a *session* instead of a *dispatch*; current proto only
+///   cancels individual tool dispatches per Spec C₂ §6.5).
+/// * `approve_tool_call` → `Agent.ApproveDispatch`.
+/// * `send_user_input` → `Agent.SendMessage` (fire-and-forget; the
+///   resulting `AgentEvent` stream is consumed by an existing
+///   `Agent.StreamSession` subscriber — Task 20's bridge — not by
+///   this resolver).
+///
+/// # Schema shape
+///
+/// `updateAgentTask(input: UpdateAgentTaskInput!,
+///   requestContext: RequestContext!) : UpdateAgentTaskResult!`
+/// where `UpdateAgentTaskInput` is:
+/// * `taskId: ID!`               — the session id (required)
+/// * `conversationId: ID`        — optional conversation linkage
+/// * `sessionId: ID`             — optional shared-session linkage
+/// * `statusMessage: AgentTaskStatusMessageInput` — optional progress note
+///
+/// and `UpdateAgentTaskResult = UpdateAgentTaskOutput | UserFacingError`,
+/// `UpdateAgentTaskOutput { responseContext }`.
+///
+/// # Phase α NOT_ENABLED stub
+///
+/// The upstream Warp `UpdateAgentTaskInput` shape does NOT carry an
+/// explicit action discriminator — Warp models updates as nullable
+/// fields where the presence of a field implies the corresponding
+/// action (`statusMessage` ≠ null ⇒ progress update; `conversationId`
+/// ≠ null ⇒ attach conversation; etc.). Mapping this implicit-action
+/// model onto lifed's explicit `Agent.{ApproveDispatch,
+/// CancelDispatch, SendMessage}` RPCs requires a routing matrix that
+/// is non-trivial (and multi-RPC for some combinations).
+///
+/// Phase α surfaces `FEATURE_NOT_ENABLED` for all calls; the explicit
+/// routing-matrix wiring lands in a focused follow-up ticket. The
+/// Warp client tolerates this — its progress-poll UI falls back to
+/// `warpDriveUpdates` (Task 20) for status, and the approve/cancel
+/// UI degrades to "feature disabled".
+///
+/// Promotion to a real resolver requires:
+/// 1. Defining the input-field → RPC routing matrix (likely
+///    `statusMessage.kind` → action variant if the inner type carries
+///    a discriminator; otherwise infer from non-null fields).
+/// 2. Optionally extending the proto with `Agent.CancelSession` (vs
+///    `CancelDispatch`) if "cancel the whole task" is a frequent UX
+///    need.
+/// 3. Replacing this body with the routing dispatcher.
+///
+/// # Auth contract
+///
+/// Requires `agent:write`. Anonymous callers receive `UNAUTHENTICATED`
+/// (the more semantically correct error) rather than
+/// `FEATURE_NOT_ENABLED` — mirrors the pattern in
+/// `resolve_set_user_is_onboarded`.
+pub fn resolve_update_agent_task(rctx: ResolverContext<'_>) -> FieldFuture<'_> {
+    FieldFuture::new(async move {
+        let ctx: &WarpRequestCtx = rctx
+            .ctx
+            .data::<WarpRequestCtx>()
+            .map_err(|_| WarpGraphqlError::Internal("missing request ctx".into()).into_graphql())?;
+        ctx.require_scope("agent:write")
+            .map_err(WarpGraphqlError::into_graphql)?;
+
+        // Explicit return-type annotation so the compiler can resolve
+        // `FieldFuture::new`'s `R: Into<FieldValue<'_>>` generic — an
+        // `Err(...)`-only path leaves `R` unconstrained without it.
+        Err::<Option<FieldValue<'_>>, _>(
+            WarpGraphqlError::NotEnabled("updateAgentTask").into_graphql(),
+        )
+    })
+}
+
 /// Resolver: mutation `updateUserSettings`.
 ///
 /// # Phase α NOT_ENABLED stub
@@ -971,6 +1224,110 @@ mod tests {
         // Anonymous ctx hits scope gate first → UNAUTHENTICATED;
         // callers with `agent:write` hit FEATURE_NOT_ENABLED.
         // Either typed code proves dispatch is wired (NOT auto-stub).
+        assert!(
+            matches!(code, Some("FEATURE_NOT_ENABLED") | Some("UNAUTHENTICATED")),
+            "expected FEATURE_NOT_ENABLED or UNAUTHENTICATED; got code={:?} message={:?}",
+            code,
+            err.message
+        );
+    }
+
+    /// Task 18 — verify `createAgentTask` is registered with the real
+    /// T1 resolver (not the auto-stub) via the special-case in
+    /// adapter.rs. With `agent:write` the resolver actually dispatches
+    /// to `lifed.Agent.CreateSession` over the test-stub gRPC channel
+    /// (unreachable) and surfaces `UPSTREAM_ERROR`. Anonymous callers
+    /// hit `UNAUTHENTICATED` first. With INVALID_INPUT (missing prompt
+    /// in args, but the SDL validator catches that earlier in normal
+    /// flows so it's only reachable when the validator is bypassed).
+    /// Any of the typed codes proves dispatch is wired — the auto-stub
+    /// would return `Ok(None)` and produce an UNTYPED "non-null
+    /// returned null" internal error.
+    #[tokio::test]
+    async fn create_agent_task_is_wired_to_real_resolver() {
+        let schema = WarpSchema::build().expect("schema builds");
+        let ctx = test_ctx_with_scopes(vec!["agent:write"]);
+        // `CreateAgentTaskInput` requires non-null `prompt: String!`.
+        // Selecting `__typename` is enough to prove union dispatch.
+        let mutation = format!(
+            "mutation {{ createAgentTask(\
+                 input: {{ prompt: \"hello agent\" }}, \
+                 requestContext: {}\
+             ) {{ __typename }} }}",
+            REQUEST_CONTEXT_LITERAL,
+        );
+        let req = async_graphql::Request::new(mutation).data(ctx);
+        let resp = schema.inner().execute(req).await;
+
+        // The test_stub gRPC channel is unreachable, so the real
+        // resolver path fails on the first RPC and surfaces
+        // `UPSTREAM_ERROR`. Either typed code (UPSTREAM_ERROR /
+        // UNAUTHENTICATED / INVALID_INPUT) proves the dispatch is
+        // wired (NOT the auto-stub which would produce an UNTYPED
+        // internal error).
+        assert!(
+            !resp.errors.is_empty(),
+            "createAgentTask should produce a typed error against \
+             test_stub gRPC channel; got data: {:?}",
+            resp.data
+        );
+        let err = &resp.errors[0];
+        let extensions_json = serde_json::to_value(&err.extensions).unwrap_or_default();
+        let code = extensions_json.get("code").and_then(|c| c.as_str());
+        assert!(
+            matches!(
+                code,
+                Some("UPSTREAM_ERROR") | Some("UNAUTHENTICATED") | Some("INVALID_INPUT")
+            ),
+            "expected typed error from real resolver; got code={:?} message={:?}",
+            code,
+            err.message
+        );
+        // FEATURE_NOT_ENABLED would mean the dispatch map missed the
+        // (RootMutation, createAgentTask) row — explicitly forbidden.
+        assert_ne!(
+            code,
+            Some("FEATURE_NOT_ENABLED"),
+            "createAgentTask must be wired to a real resolver; got \
+             FEATURE_NOT_ENABLED meaning the dispatch map missed the \
+             row. message={:?}",
+            err.message
+        );
+    }
+
+    /// Task 18 — verify `updateAgentTask` is registered with the real
+    /// T1 resolver (not the auto-stub) AND surfaces the Phase α
+    /// NOT_ENABLED stub. Anonymous callers hit `agent:write` scope
+    /// gate first → `UNAUTHENTICATED`; callers with `agent:write` hit
+    /// `FEATURE_NOT_ENABLED`. Either typed code proves dispatch is
+    /// wired (NOT auto-stub null).
+    #[tokio::test]
+    async fn update_agent_task_is_wired_with_not_enabled() {
+        let schema = WarpSchema::build().expect("schema builds");
+        let ctx = test_ctx_with_scopes(vec!["agent:write"]);
+        // `UpdateAgentTaskInput` requires non-null `taskId: ID!`;
+        // all other fields are optional.
+        let mutation = format!(
+            "mutation {{ updateAgentTask(\
+                 input: {{ taskId: \"t1\" }}, \
+                 requestContext: {}\
+             ) {{ __typename }} }}",
+            REQUEST_CONTEXT_LITERAL,
+        );
+        let req = async_graphql::Request::new(mutation).data(ctx);
+        let resp = schema.inner().execute(req).await;
+
+        assert!(
+            !resp.errors.is_empty(),
+            "updateAgentTask should produce a typed error; got data: {:?}",
+            resp.data
+        );
+        let err = &resp.errors[0];
+        let extensions_json = serde_json::to_value(&err.extensions).unwrap_or_default();
+        let code = extensions_json.get("code").and_then(|c| c.as_str());
+        // With `agent:write` the resolver short-circuits to
+        // FEATURE_NOT_ENABLED. Without the scope, it'd be
+        // UNAUTHENTICATED. Either typed code proves dispatch is wired.
         assert!(
             matches!(code, Some("FEATURE_NOT_ENABLED") | Some("UNAUTHENTICATED")),
             "expected FEATURE_NOT_ENABLED or UNAUTHENTICATED; got code={:?} message={:?}",

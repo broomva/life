@@ -342,6 +342,18 @@ fn real_resolver(parent_type_name: &str, field_name: &str) -> Option<ResolverFn>
         ("RootQuery", "freeAvailableModels") => Some(tier1::resolve_free_available_models),
         ("RootMutation", "generateDialogue") => Some(tier1::resolve_generate_dialogue),
         ("RootMutation", "generateCommands") => Some(tier1::resolve_generate_commands),
+        // Tier-1 agent task resolvers (Task 18, BRO-???).
+        // `createAgentTask` is the keystone of the L6-D5 agent
+        // invocation flow — routes through `lifed.Agent.CreateSession`
+        // to spawn a session and returns its `sid.value` as `taskId`.
+        // `updateAgentTask` is a Phase α NOT_ENABLED stub because the
+        // upstream Warp implicit-action model (presence of nullable
+        // fields ⇒ action kind) does not map 1:1 onto lifed's
+        // explicit `Agent.{ApproveDispatch, CancelDispatch,
+        // SendMessage}` RPCs — the routing-matrix wiring lands in a
+        // focused follow-up ticket.
+        ("RootMutation", "createAgentTask") => Some(tier1::resolve_create_agent_task),
+        ("RootMutation", "updateAgentTask") => Some(tier1::resolve_update_agent_task),
         _ => None,
     }
 }
