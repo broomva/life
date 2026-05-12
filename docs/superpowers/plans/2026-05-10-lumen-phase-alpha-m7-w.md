@@ -1721,6 +1721,32 @@ The pattern is the same for each resolver group:
 
 To keep this plan tractable, Tasks 14–19 detail the first resolver group (identity + auth) fully, then provide patterns for the remaining groups. Each resolver follows the same template; an implementer who completes Task 14 and Task 15 has the muscle memory for the rest.
 
+### Error-propagation pattern (REQUIRED — read before writing any resolver)
+
+**NOTE (2026-05-11 plan correction surfaced by Task 5 review):** async-graphql 7.2.1 has a blanket `impl<T: Display + Send + Sync + 'static> From<T> for Error` that is **active** unless the `custom-error-conversion` feature is enabled (which we do NOT enable workspace-wide because it would break unrelated downstream code that relies on `From<&str>` / `From<String>`).
+
+Consequence: a bare `?` on `Result<_, WarpGraphqlError>` in a resolver silently converts via the blanket impl, which produces `async_graphql::Error { extensions: None }` — **the stable `extensions.code` annotation that `WarpGraphqlError::into_graphql()` exists to surface is silently dropped on the hot path**. The Warp client then sees only `error.message` and cannot route on the typed code.
+
+The fix is the `IntoGraphqlExt` trait in `error.rs` (shipped with Task 5's commit `df715efe` follow-up). All T1+T2 resolvers MUST use `.into_graphql()?` instead of bare `?` when propagating `WarpGraphqlError` values to the client:
+
+```rust
+// ❌ WRONG — silently drops extensions.code via the blanket From impl:
+let resp = client
+    .get_user(req)
+    .await
+    .map_err(|e| WarpGraphqlError::Upstream(e.to_string()))?;
+
+// ✓ RIGHT — preserves extensions.code via the IntoGraphqlExt trait:
+use crate::warp_graphql::error::IntoGraphqlExt;
+let resp = client
+    .get_user(req)
+    .await
+    .map_err(|e| WarpGraphqlError::Upstream(e.to_string()))
+    .into_graphql()?;
+```
+
+Apply the same `.into_graphql()?` ending to every error-propagation site in Tasks 14–22's resolver implementations. The bare-`?` form in the original 2026-05-10 plan code blocks at Tasks 14, 15, 16, 17, 18, 20 was INCORRECT — read those code blocks as templates whose `?` endings must be replaced with `.into_graphql()?`. Spec-compliance + code-quality reviewers will verify this pattern is applied.
+
 ---
 
 ### Task 14: T1 — Identity resolvers (`user`, `createAnonymousUser`, `setUserIsOnboarded`)
