@@ -33,23 +33,31 @@
 //!
 //! ## Pattern for Tasks 14–22 (real resolver registration)
 //!
-//! ```ignore
-//! // INSIDE WarpSchema::build, before stub_resolver is called for
-//! // RootQuery.user, special-case the (parent_type, field_name)
-//! // pair and use the real resolver from resolvers::tier1::user:
+//! Task 14 introduced the dispatch helper [`real_resolver`] — a free
+//! fn that takes a `(parent_type_name, field_name)` pair and returns
+//! `Option<ResolverFn>`. The schema walker inside [`WarpSchema::build`]
+//! consults it once per SDL field, falling through to the auto-stub
+//! when `None`:
 //!
-//! if parent_type_name == "RootQuery" && field_name == "user" {
-//!     // Use the tier-1 resolver implementation instead of stub.
-//!     let real = crate::warp_graphql::resolvers::tier1::user::resolver();
-//!     obj = obj.field(Field::new(field_name, type_ref, real));
+//! ```ignore
+//! let field = if let Some(real) = real_resolver(&parent_type, &fname) {
+//!     // Real T1/T2 resolver registered. Apply SDL-declared
+//!     // metadata (args + @deprecated) so introspection stays
+//!     // consistent across stub + real paths.
+//!     let f = Field::new(fname, type_ref, real);
+//!     apply_field_metadata(f, field_def)
 //! } else {
-//!     obj = obj.field(stub_field(field_name, type_ref));
-//! }
+//!     stub_field(field_def)
+//! };
 //! ```
 //!
-//! The dispatch table lives at the top of [`WarpSchema::build`] —
-//! Task 14 will introduce a `resolver_for(&str, &str) ->
-//! Option<BoxResolverFn>` helper that the loop consults.
+//! Tasks 14–22 each add rows to [`real_resolver`]'s match arms — one
+//! per (parent_type, field_name) pair — and implement the resolver fn
+//! in `resolvers/tier1.rs` or `resolvers/tier2.rs`. The shared
+//! [`apply_field_metadata`] helper guarantees field arguments +
+//! `@deprecated` directives propagate the same way regardless of
+//! whether the field has a real resolver or falls through to the
+//! auto-stub.
 //!
 //! # Skipped AST kinds
 //!
@@ -73,7 +81,7 @@ use async_graphql::{
     Value,
     dynamic::{
         Enum, Field, FieldFuture, FieldValue, InputObject, InputValue, Interface, InterfaceField,
-        Object, Scalar, Schema, SchemaError, Subscription, SubscriptionField,
+        Object, ResolverContext, Scalar, Schema, SchemaError, Subscription, SubscriptionField,
         SubscriptionFieldFuture, TypeRef, Union,
     },
     parser::{
@@ -189,7 +197,25 @@ impl WarpSchema {
                             o = o.implement(iface.node.to_string());
                         }
                         for field in &obj.fields {
-                            o = o.field(stub_field(&field.node));
+                            let field_def = &field.node;
+                            // Special-case (parent_type, field_name)
+                            // pairs registered in the real-resolver
+                            // dispatch table (Tier-1 today, Tier-2 in
+                            // a follow-up). Anything not in the table
+                            // falls through to the auto-stub. Both
+                            // paths share `apply_field_metadata` so
+                            // arguments + `@deprecated` annotations
+                            // are consistent regardless of which
+                            // resolver fires.
+                            let fname = field_def.name.node.to_string();
+                            let field = if let Some(real) = real_resolver(&name, &fname) {
+                                let type_ref = to_type_ref(&field_def.ty.node);
+                                let f = Field::new(fname.clone(), type_ref, real);
+                                apply_field_metadata(f, field_def)
+                            } else {
+                                stub_field(field_def)
+                            };
+                            o = o.field(field);
                         }
                         builder = builder.register(o);
                     }
@@ -274,17 +300,40 @@ fn to_type_ref(ty: &Type) -> TypeRef {
     }
 }
 
-/// Build a stub-resolved [`Field`] from an SDL [`FieldDefinition`].
+/// Bare function-pointer alias for resolvers registered in the real-
+/// resolver dispatch table (Tier-1 today; Tier-2 etc. in follow-ups).
 ///
-/// The resolver returns a type-appropriate safe default:
+/// async-graphql's `Field::new` requires `for<'a> Fn(ResolverContext<'a>)
+/// -> FieldFuture<'a> + Send + Sync + 'static`. A plain `fn` pointer
+/// satisfies this HRTB without `Arc<dyn>` indirection, which keeps the
+/// table cheap and `Copy`-able.
+type ResolverFn = fn(ResolverContext<'_>) -> FieldFuture<'_>;
+
+/// Real-resolver dispatch table — returns `Some(fn)` if a
+/// `(parent_type_name, field_name)` pair has been wired to a real T1/T2
+/// resolver, else `None` so the field falls through to the auto-stub.
 ///
-/// * nullable fields → `Ok(None)` (rendered as `null`)
-/// * non-null lists → empty list
-/// * non-null scalars / objects → `FieldValue::value(Value::Null)`
-///   wrapped via [`async_graphql::dynamic::FieldValue::NULL`]; the
-///   Warp client renders these gracefully as feature-flag-off
+/// This is the single source of truth for real-resolver registration.
+/// Tasks 14–22 each add rows; the schema walker in [`WarpSchema::build`]
+/// consults it once per SDL field.
+fn real_resolver(parent_type_name: &str, field_name: &str) -> Option<ResolverFn> {
+    use crate::warp_graphql::resolvers::tier1;
+    match (parent_type_name, field_name) {
+        // Tier-1 identity (Task 14, BRO-???).
+        ("RootQuery", "user") => Some(tier1::resolve_get_user),
+        ("RootMutation", "createAnonymousUser") => Some(tier1::resolve_create_anonymous_user),
+        ("RootMutation", "setUserIsOnboarded") => Some(tier1::resolve_set_user_is_onboarded),
+        _ => None,
+    }
+}
+
+/// Apply SDL-declared field arguments and `@deprecated` directive to a
+/// [`Field`] in flight. Shared between the auto-stub path
+/// ([`stub_field`]) and the real-resolver override path inside
+/// [`WarpSchema::build`] so that introspection sees the same wire shape
+/// regardless of which resolver fires.
 ///
-/// In addition to the resolver, this function wires:
+/// # Wired metadata
 ///
 /// * **Field arguments** declared in the SDL (per
 ///   `FieldDefinition.arguments`) onto the resulting [`Field`] via
@@ -292,8 +341,7 @@ fn to_type_ref(ty: &Type) -> TypeRef {
 ///   this, async-graphql's query validator REJECTS every Warp T1/T2
 ///   client request with "Unknown argument 'X' on field 'Y'", since
 ///   every real Warp op takes at least a `requestContext`
-///   argument. The stub does not introspect or enforce argument
-///   values — Task 14+ binds real resolvers that read them.
+///   argument.
 ///
 /// * **`@deprecated` directive** declared in the SDL (per
 ///   `FieldDefinition.directives`) onto the resulting [`Field`] via
@@ -301,28 +349,7 @@ fn to_type_ref(ty: &Type) -> TypeRef {
 ///   declared `@deprecated` fields surface as `isDeprecated: false`
 ///   under introspection, which breaks client-side telemetry that
 ///   relies on detecting deprecated-op usage.
-fn stub_field(def: &FieldDefinition) -> Field {
-    let name = def.name.node.to_string();
-    let type_ref = to_type_ref(&def.ty.node);
-    let nullable = matches!(type_ref, TypeRef::Named(_) | TypeRef::List(_));
-    let mut field = Field::new(name, type_ref, move |_| {
-        FieldFuture::new(async move {
-            if nullable {
-                Ok(None)
-            } else {
-                // For non-null fields the stub returns an explicit
-                // null FieldValue. The Warp client treats this as
-                // "feature not provisioned" — same semantics as
-                // tier3_stubs::stub_null. We intentionally do NOT
-                // distinguish list/object/scalar here: introspection
-                // is the only Phase α conformance gate, and the
-                // result-shape match happens when Task 14 special-
-                // cases real resolvers.
-                Ok(Some(FieldValue::value(Value::Null)))
-            }
-        })
-    });
-
+fn apply_field_metadata(mut field: Field, def: &FieldDefinition) -> Field {
     // C2: Attach SDL-declared field arguments. Required for
     // async-graphql's query validator to accept Warp client requests
     // that pass `requestContext` and other op-specific args.
@@ -363,6 +390,44 @@ fn stub_field(def: &FieldDefinition) -> Field {
     }
 
     field
+}
+
+/// Build a stub-resolved [`Field`] from an SDL [`FieldDefinition`].
+///
+/// The resolver returns a type-appropriate safe default:
+///
+/// * nullable fields → `Ok(None)` (rendered as `null`)
+/// * non-null lists → empty list
+/// * non-null scalars / objects → `FieldValue::value(Value::Null)`
+///   wrapped via [`async_graphql::dynamic::FieldValue::NULL`]; the
+///   Warp client renders these gracefully as feature-flag-off
+///
+/// Arguments + `@deprecated` annotations are applied via
+/// [`apply_field_metadata`] so the auto-stub and the real-resolver
+/// override path stay consistent.
+fn stub_field(def: &FieldDefinition) -> Field {
+    let name = def.name.node.to_string();
+    let type_ref = to_type_ref(&def.ty.node);
+    let nullable = matches!(type_ref, TypeRef::Named(_) | TypeRef::List(_));
+    let field = Field::new(name, type_ref, move |_| {
+        FieldFuture::new(async move {
+            if nullable {
+                Ok(None)
+            } else {
+                // For non-null fields the stub returns an explicit
+                // null FieldValue. The Warp client treats this as
+                // "feature not provisioned" — same semantics as
+                // tier3_stubs::stub_null. We intentionally do NOT
+                // distinguish list/object/scalar here: introspection
+                // is the only Phase α conformance gate, and the
+                // result-shape match happens when Task 14 special-
+                // cases real resolvers.
+                Ok(Some(FieldValue::value(Value::Null)))
+            }
+        })
+    });
+
+    apply_field_metadata(field, def)
 }
 
 /// Build a stub [`InterfaceField`] (no resolver — interfaces only
