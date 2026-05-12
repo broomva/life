@@ -10,6 +10,7 @@ pub mod protocol_bridge;
 pub mod queue;
 pub mod runtime;
 pub mod state;
+pub mod warp_agent;
 
 pub use context::{CompactionResult, ContextConfig, compact_messages, estimate_tokens};
 pub use context_compiler::{

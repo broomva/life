@@ -529,6 +529,8 @@ name = "arcan-core"
 version = "0.3.0"
 dependencies = [
  "aios-protocol",
+ "anyhow",
+ "async-trait",
  "chrono",
  "json-patch",
  "schemars 0.8.22",
@@ -536,6 +538,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "wait-timeout",
 ]
