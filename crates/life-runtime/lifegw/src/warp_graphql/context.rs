@@ -25,11 +25,7 @@ pub struct WarpRequestCtx {
 impl WarpRequestCtx {
     /// Construct a request context. Called from `route.rs` (Task 11) after
     /// the auth extractor produces `WarpClaims`.
-    pub fn new(
-        claims: WarpClaims,
-        dataloaders: Arc<LifedDataloaders>,
-        trace_id: String,
-    ) -> Self {
+    pub fn new(claims: WarpClaims, dataloaders: Arc<LifedDataloaders>, trace_id: String) -> Self {
         Self {
             claims,
             dataloaders,
@@ -70,20 +66,25 @@ mod tests {
         }
     }
 
-    #[test]
-    fn user_id_returns_sub() {
+    // `ctx_with_scopes` constructs a `LifedDataloaders::test_stub()` which
+    // uses `Channel::from_static(...).connect_lazy()`. That call registers
+    // a `TokioTimer` and therefore needs an active runtime — so every
+    // test here is `#[tokio::test]` (post Task 8: real tonic clients
+    // replaced the empty stub).
+    #[tokio::test]
+    async fn user_id_returns_sub() {
         let ctx = ctx_with_scopes(vec!["agent:read"]);
         assert_eq!(ctx.user_id(), "u1");
     }
 
-    #[test]
-    fn require_scope_passes_when_present() {
+    #[tokio::test]
+    async fn require_scope_passes_when_present() {
         let ctx = ctx_with_scopes(vec!["agent:read", "agent:write"]);
         assert!(ctx.require_scope("agent:read").is_ok());
     }
 
-    #[test]
-    fn require_scope_fails_when_absent() {
+    #[tokio::test]
+    async fn require_scope_fails_when_absent() {
         let ctx = ctx_with_scopes(vec!["agent:read"]);
         assert!(ctx.require_scope("agent:write").is_err());
     }

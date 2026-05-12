@@ -130,8 +130,7 @@ mod tests {
         // `extensions.code` set — proving that resolver-style `.into_graphql()?`
         // does NOT silently lose the stable code (which is what bare `?`
         // would do via async-graphql's blanket Display-based impl).
-        let result: Result<u32, WarpGraphqlError> =
-            Err(WarpGraphqlError::Unauthenticated);
+        let result: Result<u32, WarpGraphqlError> = Err(WarpGraphqlError::Unauthenticated);
         let converted: async_graphql::Result<u32> = result.into_graphql();
         let err = converted.expect_err("Err preserved");
         let json = serde_json::to_value(&err).expect("error serializes");
