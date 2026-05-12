@@ -16,17 +16,17 @@ use std::sync::Arc;
 
 use async_graphql_axum::{GraphQLProtocol, GraphQLRequest, GraphQLResponse, GraphQLWebSocket};
 use axum::{
+    Router,
     extract::{Query, State, WebSocketUpgrade},
     http::HeaderMap,
     response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
 };
 
 use crate::auth::JwksCache;
 use crate::warp_graphql::{
     adapter::WarpSchema,
-    auth::{extract_bearer, verify_to_claims, WarpClaims},
+    auth::{WarpClaims, extract_bearer, verify_to_claims},
     context::WarpRequestCtx,
     dataloader::LifedDataloaders,
 };
@@ -117,12 +117,12 @@ async fn ws_handler(
             // Tier-1 caps; warp_graphql sits behind Tier-User auth so
             // the failure mode is different.
             let claims = match extract_bearer(&headers) {
-                Some(token) => match verify_to_claims(&jwks, token, "lumen", &expected_issuer)
-                    .await
-                {
-                    Ok(c) => c,
-                    Err(_) => return,
-                },
+                Some(token) => {
+                    match verify_to_claims(&jwks, token, "lumen", &expected_issuer).await {
+                        Ok(c) => c,
+                        Err(_) => return,
+                    }
+                }
                 None => return,
             };
 

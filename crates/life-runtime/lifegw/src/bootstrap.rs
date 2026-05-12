@@ -506,13 +506,12 @@ pub async fn serve_with_listener_and_signer(
     // `apps/warp-oss-patch/`) drives an arcan-backed agent task
     // end-to-end. Spec C₂ + C₃ ground truth at
     // `docs/superpowers/specs/2026-05-10-lumen-warp-on-life-design.md`.
-    let warp_schema = crate::warp_graphql::adapter::WarpSchema::build()
-        .map_err(|e| crate::error::LifegwError::Config(format!(
-            "warp_graphql schema build failed: {e}"
-        )))?;
-    let warp_dataloaders = Arc::new(
-        crate::warp_graphql::dataloader::LifedDataloaders::new(upstream_channel.clone()),
-    );
+    let warp_schema = crate::warp_graphql::adapter::WarpSchema::build().map_err(|e| {
+        crate::error::LifegwError::Config(format!("warp_graphql schema build failed: {e}"))
+    })?;
+    let warp_dataloaders = Arc::new(crate::warp_graphql::dataloader::LifedDataloaders::new(
+        upstream_channel.clone(),
+    ));
     let warp_state = crate::warp_graphql::route::WarpRouteState {
         schema: warp_schema,
         jwks: Arc::clone(&jwks),
