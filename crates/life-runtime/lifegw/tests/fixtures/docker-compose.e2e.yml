@@ -1,0 +1,68 @@
+# Lumen Phase α E2E stack — wired in Task 22.
+#
+# Actually buildable + runnable after the operator installs:
+#   - macOS Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`)
+#     — required by the patched warp-oss client when driven against this
+#     stack from a Mac. The compose stack itself runs Linux containers
+#     and doesn't need Metal; the *client side* does.
+#   - Builds the patched warp-oss via `apps/warp-oss-patch/apply-patch.sh`
+#     (Phase α path; will be consumed by tests that exercise the patched
+#     binary end-to-end against this stack).
+#
+# Current Dockerfile inventory (deploy/railway/):
+#   - lifegw-stack/Dockerfile — multi-process: lifed + lifegw + caddy.
+#     Designed for Railway's single-port shape. Co-locates lifegw + lifed
+#     in one container so the UDS-only contract between them holds.
+#   - Dockerfile.arcan — arcan substrate daemon.
+#   - Dockerfile.lagod / haimad / autonomicd / nousd / opsisd — substrate
+#     daemons that arcan depends on at runtime.
+#
+# Phase α follow-up: split the lifegw-stack image into separate
+# `Dockerfile.lifegw` + `Dockerfile.lifed` so this compose file can wire
+# them independently (matching production-deployment topology B). For now
+# this compose file uses the combined image and exposes both ports via a
+# single container. An operator who wants the split topology should
+# follow the v0.2 path: `docker compose -f docker-compose.e2e.yml up`
+# with the combined image; full-fan-out wiring is a Phase β refinement.
+services:
+  # Combined lifegw + lifed (co-located via UDS — see
+  # `deploy/railway/lifegw-stack/Dockerfile` rationale §"Why this shape").
+  # In Phase α this is the gate-pass image because it's the only built
+  # image we have that wires lifegw + lifed correctly with TLS.
+  lifegw-stack:
+    image: lifegw-stack:dev
+    build:
+      # Workspace root: from `crates/life-runtime/lifegw/tests/fixtures/`
+      # up four levels lands at the workspace root, where Cargo.toml +
+      # deploy/ live.
+      context: ../../../../..
+      dockerfile: deploy/railway/lifegw-stack/Dockerfile
+    environment:
+      # Caddy fronts on $PORT in cleartext (Railway-edge style); lifegw
+      # itself runs HTTPS on 127.0.0.1:8443 with a self-signed cert.
+      # See the entrypoint script for the boot sequence.
+      - PORT=8080
+      - LIFED_ALLOW_MOCK_FALLBACK=true
+      - RUST_LOG=info,lifegw=info,lifed=info
+      - RUST_BACKTRACE=1
+    ports:
+      # Caddy is the publicly-bound port (matches Railway behaviour).
+      # Tests should hit http://127.0.0.1:8080 — Caddy proxies into
+      # https://127.0.0.1:8443 inside the container.
+      - "8080:8080"
+  # arcan substrate — not yet wired into the compose stack because the
+  # lifegw-stack image runs lifed with `LIFED_ALLOW_MOCK_FALLBACK=true`
+  # so substrate calls are intercepted by mocks. Phase β follow-up will
+  # wire real arcan + lagod + haimad + animad containers and drop the
+  # mock fallback so the E2E really exercises the full agent loop.
+  # arcan:
+  #   image: arcan:dev
+  #   build:
+  #     context: ../../../../..
+  #     dockerfile: deploy/railway/Dockerfile.arcan
+  #   environment:
+  #     - ARCAN_BIND_UDS=/run/life/arcan.sock
+  #   volumes:
+  #     - life-uds:/run/life
+# volumes:
+#   life-uds:

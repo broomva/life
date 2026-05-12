@@ -34,6 +34,14 @@ kms-gcp = ["dep:google-cloud-kms", "dep:google-cloud-auth", "dep:sha2"]
 # OFF in production. Enabled in CI / unit tests via the
 # integration_proxy_passthrough.rs rig.
 dev-mode = []
+# Lumen Phase α M7-W Task 22 — End-to-end smoke harness. Gated so
+# `cargo test -p lifegw` doesn't try to spin up docker-compose by
+# default. Run via:
+#   cargo test -p lifegw --features e2e-smoke \
+#       --test warp_graphql_e2e_smoke -- --test-threads=1
+# Operator pre-reqs (macOS Metal Toolchain, patched warp-oss binary,
+# Docker images) documented in tests/warp_graphql_e2e_smoke.rs.
+e2e-smoke = []
 
 [dependencies]
 # wire / ABI — Spec C₃ §11.3: the only proto crate lifegw depends on.
