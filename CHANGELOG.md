@@ -3,6 +3,83 @@
 ## Unreleased
 
 ### Added
+- **`lago.v1.LagoSubstrate` gRPC server** — closes Phase 2 of the
+  Topology B substrate-stub gap (BRO-1017). Mirrors the BRO-1016
+  pattern on the lago substrate. Closes the E3 deferral named in
+  `crates/life-runtime/CLAUDE.md` §"Sub-phase E handoff state —
+  pool push-down + observability hardening" (the
+  `idem_persist`-as-append + empty-vec-list-namespaces shims).
+  * **New proto**: `core/life/proto/lago/v1/substrate.proto` declares
+    `lago.v1.LagoSubstrate` service with 2 RPCs (`Append`,
+    `ListNamespaces`). Substrate-plane shape — `Append` takes the
+    `(namespace, event_type, payload)` triplet the proxy already
+    exposes; `ListNamespaces` takes a single prefix filter. Imports
+    `aios.v1` types via `extern_path`. Sibling of (NOT extension of)
+    the existing `lago.v1.IngestService` — that stays as-is for
+    arcand's bidi-streaming session-bound event journal.
+  * **New crate**: `crates/lago/lago-substrate-proto/` mirrors the
+    `arcan-substrate-proto` codegen pattern byte-for-byte (modulo
+    proto file path). Wire-only crate (no runtime deps).
+  * **lagod gRPC server**: new module
+    `crates/lago/lagod/src/substrate.rs` (~165 LOC) hosts
+    `SubstrateService` implementing the proto. `Append` wraps the
+    (namespace, event_type, payload) triplet into an
+    `EventKind::Custom { event_type, data }` envelope on the
+    namespace's main branch and journals it via the existing
+    `RedbJournal::append` API (no Journal trait extension needed —
+    `Append` is a pure adapter over the existing API). Empty payload
+    becomes JSON `null`. `ListNamespaces` enumerates BOTH
+    `put_session`-registered sessions AND event-only namespaces
+    (full scan of `Journal::read(EventQuery::default())`) — needed
+    because lifed's saga path produces namespaces like
+    `system/lifed/saga/<id>` that exist only in the event journal,
+    not the sessions table. Server-side mount in `lagod::run`
+    alongside `IngestServiceServer` on the same gRPC port — single
+    client connection multiplexes both services.
+  * **lago-proxy real bodies**: replaced the 2 stub methods in
+    `crates/life-runtime/lago-proxy/src/client.rs` (`append_event`,
+    `list_namespaces`) with real tonic calls against the generated
+    `LagoSubstrateClient`. The `sha2`-based content-addressed dedup
+    key + `idem_persist` fallback for `append_event` is gone — the
+    substrate is now genuinely append-only at this boundary (the
+    re-dispatch dedup invariant moves up to lifed's saga driver,
+    which is where it belongs). `list_namespaces`' empty-vec
+    fallback is gone — `RoutingCache::cold_start` now warms from
+    durable storage at boot instead of waiting for traffic.
+  * **`record_outcome` helper**: lago-proxy now mirrors arcan-proxy's
+    `record_outcome` policy — permanent (non-retryable) errors record
+    SUCCESS per Spec C₂ §7.2 so the breaker doesn't trip on auth /
+    policy misconfiguration; only retryable failures (Unavailable /
+    DeadlineExceeded / Aborted / ResourceExhausted) count against the
+    breaker's failure budget.
+  * **Integration test**:
+    `crates/lago/lagod/tests/topology_b_e2e_lago.rs` (3 tests, all
+    green). Spins up lagod's `SubstrateService` on a temp UDS, dials
+    via a real `LagoProxy`, exercises both methods end-to-end against
+    a real `RedbJournal`. `append_actually_writes_to_journal`
+    confirms `LagoProxy::append_event` produces a real journal entry
+    (not the placeholder `idem_persist`-as-append shim that the
+    previous proxy used). `list_namespaces_returns_real_namespaces`
+    confirms real namespace enumeration including both
+    `put_session`-registered sessions and event-only namespaces.
+    `proxy_to_server_round_trip` exercises 5 sequential appends +
+    `list_namespaces` + empty-payload edge case in a single test.
+  * **Dep-rule CI**: `scripts/verify_dependencies_lifed.sh` passes —
+    `lago-substrate-proto` is a wire-only crate (proto + generated
+    code; no `lago-core` / `lago-journal` / `lago-ingest` / `lagod`
+    runtime deps), so adding it to `lago-proxy`'s deps doesn't
+    violate proxy-isolation rules.
+
+  **Topology B status**: 2 of 4 substrate gRPC wires now functional
+  (arcan + lago). Siblings BRO-1018 (haima) and BRO-1019 (anima)
+  remain stubbed and are the next blockers. Each is independently
+  shippable using this PR's pattern.
+
+  **Knowledge graph**:
+  `research/entities/concept/topology-b-substrate-stub-gap.md` will
+  be updated post-merge with "arcan + lago: closed; haima + anima:
+  remaining".
+
 - **`arcan.v1.AgentSubstrate` gRPC server** — closes Phase 1 of the
   Topology B substrate-stub gap (BRO-1016). Until this PR, the
   `*-proxy` crates' per-method bodies discarded their arguments and
