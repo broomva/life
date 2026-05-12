@@ -99,6 +99,12 @@ dev_signer_enabled = true
 tier1_issuer = "https://broomva.tech"
 tier2_issuer = "lifegw"
 publish_jwks_path = "$WORKDIR/run/lifegw-jwks.json"
+
+[admin_plane]
+unix_socket = "$WORKDIR/run/lifegw-admin.sock"
+# Empty group string -> permissive mode (any caller can open admin
+# UDS). Acceptable for local dev only; production sets
+# unix_socket_group = "life-admin".
 EOF
 }
 
@@ -150,11 +156,17 @@ cmd_up() {
         tail -20 "$WORKDIR/lifed.log" >&2
         die "Abort. (Check $WORKDIR/lifed.log for the real error.)"
     fi
+    # The UDS file appearing means the listener is bound, but lifed's
+    # tonic accept loop may not be ready for the HTTP/2 SETTINGS frame
+    # yet. Give it a moment so lifegw's eager UDS dial in
+    # `connect_uds` doesn't race the server-side handshake. ~500ms is
+    # plenty empirically; we use 2s as defensive headroom.
+    sleep 2
 
     log "Starting lifegw (dev-mode, dev-signer enabled) → $WORKDIR/lifegw.log"
     (cd "$REPO_ROOT" && \
         LIFEGW_CONFIG="$WORKDIR/lifegw.toml" \
-        nohup cargo run --quiet -p lifegw --features dev-mode -- \
+        nohup cargo run --quiet -p lifegw --features dev-mode -- daemon \
             > "$WORKDIR/lifegw.log" 2>&1 &
         echo $! > "$WORKDIR/lifegw.pid")
     log "  lifegw PID = $(cat "$WORKDIR/lifegw.pid")"
@@ -237,7 +249,11 @@ cmd_status() {
 
 cmd_smoke_curl() {
     local endpoint="https://$LIFEGW_HTTPS_ADDR/graphql/v2"
-    local token="dev-token-for-test-user-1"
+    # Tier-2 capability-token dev shortcut: format is
+    # `dev-cap-token-for-{aud}/{user_id}` or just
+    # `dev-cap-token-for-{user_id}` (defaults to allowed_audiences[0]).
+    # Lumen's audience is "lumen" per route.rs's verify_to_claims call.
+    local token="dev-cap-token-for-lumen/test-user-1"
 
     log "Smoke 1/3 — schema introspection"
     log "POST $endpoint"
@@ -271,12 +287,24 @@ cmd_smoke_curl() {
     done
 
     log "Smoke 3/3 — createAgentTask (real resolver → lifed.Agent.CreateSession via mock fallback)"
+    # Real schema: input is CreateAgentTaskInput, requires
+    # clientContext + osContext per RequestContext. Output union has
+    # `taskId: ID!` and `responseContext: ResponseContext!`.
     resp=$(curl --insecure --silent --show-error --max-time 10 \
         -X POST "$endpoint" \
         -H "Authorization: Bearer $token" \
         -H "Content-Type: application/json" \
-        --data-raw '{"query":"mutation { createAgentTask(input: { prompt: \"echo hello\", environmentUid: \"ws-test\" }) { __typename ... on CreateAgentTaskOutput { id status } } }"}')
-    if echo "$resp" | grep -qE '"__typename":"CreateAgentTaskOutput"|"__typename":"UserFacingError"|"code":"UPSTREAM_ERROR"|"code":"UNAUTHENTICATED"'; then
+        --data-raw '{
+            "query":"mutation Smoke($input: CreateAgentTaskInput!, $rc: RequestContext!) { createAgentTask(input: $input, requestContext: $rc) { __typename ... on CreateAgentTaskOutput { taskId } } }",
+            "variables": {
+                "input": { "prompt": "echo hello", "environmentUid": "ws-test" },
+                "rc": {
+                    "clientContext": { "version": "lumen-smoke" },
+                    "osContext":     { "name": "darwin", "category": "darwin", "version": "0.0" }
+                }
+            }
+        }')
+    if echo "$resp" | grep -qE '"__typename":"CreateAgentTaskOutput"|"__typename":"UserFacingError"|"code":"UPSTREAM_ERROR"|"code":"UNAUTHENTICATED"|"code":"INVALID_INPUT"'; then
         log "  ✓ resolver dispatched (response shape recognized)"
         echo "$resp" | head -3
     else
