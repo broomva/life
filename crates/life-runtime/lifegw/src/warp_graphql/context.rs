@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use crate::auth::tier_user::TierUserMinter;
 use crate::warp_graphql::auth::WarpClaims;
 use crate::warp_graphql::dataloader::LifedDataloaders;
 use crate::warp_graphql::error::WarpGraphqlError;
@@ -13,23 +14,43 @@ use crate::warp_graphql::error::WarpGraphqlError;
 /// Per-request state carried via async-graphql's `Context::data` into every
 /// resolver. Built once per HTTP request (or once per WS subscription
 /// session). Cheap to clone — `WarpClaims` is `Clone`, `Arc<LifedDataloaders>`
-/// is a refcount bump, `String` is a single heap clone.
+/// and `Arc<TierUserMinter>` are refcount bumps, `String` is a single heap
+/// clone.
 #[derive(Clone)]
 pub struct WarpRequestCtx {
     pub claims: WarpClaims,
     pub dataloaders: Arc<LifedDataloaders>,
     /// Trace span id for cross-service correlation in vigil.
     pub trace_id: String,
+    /// Tier-User minter shared with `/anima/custody/*` (Spec D D-Sub-C).
+    ///
+    /// Task 15 (M7-W) uses this to mint short-lived ES256 capability JWS
+    /// for the four T1 token resolvers (`mintCustomToken`,
+    /// `issueTaskIdentityToken`, `generateApiKey`, `expireApiKey`).
+    /// Phase α skips the spec's broomva.tech OAuth-PKCE round-trip and
+    /// mints caps directly from the bearer-validated user_id already
+    /// present in [`WarpClaims`]. The full OAuth flow is β-only.
+    ///
+    /// Bootstrap populates this with the same `Arc<TierUserMinter>` the
+    /// `/anima/custody/*` routes use — single shared signing key (Spec D
+    /// L4-D6) so verifiers see a uniform JWKS across the gateway.
+    pub minter: Arc<TierUserMinter>,
 }
 
 impl WarpRequestCtx {
     /// Construct a request context. Called from `route.rs` (Task 11) after
     /// the auth extractor produces `WarpClaims`.
-    pub fn new(claims: WarpClaims, dataloaders: Arc<LifedDataloaders>, trace_id: String) -> Self {
+    pub fn new(
+        claims: WarpClaims,
+        dataloaders: Arc<LifedDataloaders>,
+        trace_id: String,
+        minter: Arc<TierUserMinter>,
+    ) -> Self {
         Self {
             claims,
             dataloaders,
             trace_id,
+            minter,
         }
     }
 
@@ -51,6 +72,20 @@ impl WarpRequestCtx {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::kms::{KmsSigner, StaticKeystore};
+    use crate::auth::tier_user::DEFAULT_TIER_USER_TTL;
+
+    /// Build a `TierUserMinter` over an ephemeral `StaticKeystore` for
+    /// tests. Mirrors `tier_user::tests::dev_minter` so resolver tests
+    /// can construct a request ctx without booting the full lifegw
+    /// bootstrap pipeline.
+    pub(crate) fn test_minter() -> Arc<TierUserMinter> {
+        let signer = Arc::new(StaticKeystore::generate_dev().expect("dev keystore"));
+        Arc::new(TierUserMinter::with_defaults(
+            signer as Arc<dyn KmsSigner>,
+            DEFAULT_TIER_USER_TTL,
+        ))
+    }
 
     fn ctx_with_scopes(scopes: Vec<&str>) -> WarpRequestCtx {
         WarpRequestCtx {
@@ -63,6 +98,7 @@ mod tests {
             },
             dataloaders: Arc::new(LifedDataloaders::test_stub()),
             trace_id: "trace-1".into(),
+            minter: test_minter(),
         }
     }
 

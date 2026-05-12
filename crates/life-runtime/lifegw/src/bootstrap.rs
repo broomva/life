@@ -520,6 +520,11 @@ pub async fn serve_with_listener_and_signer(
         // the issuer is the same `cfg.auth.tier2_issuer` lifegw uses
         // for its own minted caps — typically "lifegw".
         expected_issuer: cfg.auth.tier2_issuer.clone(),
+        // Task 15 (M7-W): share the same `Arc<TierUserMinter>` the
+        // anima_state above already holds. Single signer, single
+        // published JWKS — every Tier-User cap (regardless of origin
+        // route) verifies against the same active kid.
+        minter: Arc::clone(&tier_user_minter),
     };
     let warp_graphql_router = crate::warp_graphql::route::routes(warp_state);
 

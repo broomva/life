@@ -24,6 +24,7 @@ use axum::{
 };
 
 use crate::auth::JwksCache;
+use crate::auth::tier_user::TierUserMinter;
 use crate::warp_graphql::{
     adapter::WarpSchema,
     auth::{WarpClaims, extract_bearer, verify_to_claims},
@@ -35,7 +36,7 @@ use crate::warp_graphql::{
 ///
 /// Built once at lifegw startup by `bootstrap::serve_with_listener_*`
 /// and threaded through every handler via axum's `State` extractor.
-/// All four fields are cheap to clone (Arc + Channel pools).
+/// All five fields are cheap to clone (Arc + Channel pools).
 #[derive(Clone)]
 pub struct WarpRouteState {
     pub schema: WarpSchema,
@@ -47,6 +48,14 @@ pub struct WarpRouteState {
     /// differ. (Lumen caps are minted via the Tier-2 mint path, so the
     /// issuer matches `tier2_issuer`, not `tier1_issuer`.)
     pub expected_issuer: String,
+    /// Tier-User minter shared with `/anima/custody/*` (Spec D D-Sub-C).
+    ///
+    /// Task 15 (M7-W) uses this to mint short-lived ES256 caps for the
+    /// four T1 token resolvers (`mintCustomToken`,
+    /// `issueTaskIdentityToken`, `generateApiKey`, `expireApiKey`).
+    /// Same signer the Tier-2 minter wraps — single published JWKS
+    /// covers verification for every gateway-minted cap.
+    pub minter: Arc<TierUserMinter>,
 }
 
 /// Router segment for the warp_graphql endpoints. Mount into the lifegw
@@ -86,7 +95,12 @@ async fn post_handler(
         .unwrap_or("trace-anon")
         .to_string();
 
-    let ctx = WarpRequestCtx::new(claims, state.dataloaders.clone(), trace_id);
+    let ctx = WarpRequestCtx::new(
+        claims,
+        state.dataloaders.clone(),
+        trace_id,
+        state.minter.clone(),
+    );
     req = req.data(ctx);
 
     Ok(state.schema.inner().execute(req).await.into())
@@ -107,6 +121,7 @@ async fn ws_handler(
     let dataloaders = state.dataloaders.clone();
     let jwks = state.jwks.clone();
     let expected_issuer = state.expected_issuer.clone();
+    let minter = state.minter.clone();
 
     ws.protocols(["graphql-transport-ws", "graphql-ws"])
         .on_upgrade(move |socket| async move {
@@ -126,7 +141,7 @@ async fn ws_handler(
                 None => return,
             };
 
-            let ctx = WarpRequestCtx::new(claims, dataloaders, "trace-ws".into());
+            let ctx = WarpRequestCtx::new(claims, dataloaders, "trace-ws".into(), minter);
 
             let mut data = async_graphql::Data::default();
             data.insert(ctx);

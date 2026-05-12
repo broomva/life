@@ -323,6 +323,13 @@ fn real_resolver(parent_type_name: &str, field_name: &str) -> Option<ResolverFn>
         ("RootQuery", "user") => Some(tier1::resolve_get_user),
         ("RootMutation", "createAnonymousUser") => Some(tier1::resolve_create_anonymous_user),
         ("RootMutation", "setUserIsOnboarded") => Some(tier1::resolve_set_user_is_onboarded),
+        // Tier-1 token mint (Task 15, BRO-???).
+        ("RootMutation", "mintCustomToken") => Some(tier1::resolve_mint_custom_token),
+        ("RootMutation", "issueTaskIdentityToken") => {
+            Some(tier1::resolve_issue_task_identity_token)
+        }
+        ("RootMutation", "generateApiKey") => Some(tier1::resolve_generate_api_key),
+        ("RootMutation", "expireApiKey") => Some(tier1::resolve_expire_api_key),
         _ => None,
     }
 }
