@@ -42,8 +42,10 @@ pub struct WarpRouteState {
     pub jwks: Arc<JwksCache>,
     pub dataloaders: Arc<LifedDataloaders>,
     /// Issuer the JWKS verifier expects on inbound Tier-User caps.
-    /// Per Spec C₃ §5 this is typically "lifegw". Read from
-    /// `cfg.auth.tier1_issuer` at bootstrap so dev/staging/prod can differ.
+    /// Per Spec C₃ §5.4 this is typically "lifegw". Read from
+    /// `cfg.auth.tier2_issuer` at bootstrap so dev/staging/prod can
+    /// differ. (Lumen caps are minted via the Tier-2 mint path, so the
+    /// issuer matches `tier2_issuer`, not `tier1_issuer`.)
     pub expected_issuer: String,
 }
 
