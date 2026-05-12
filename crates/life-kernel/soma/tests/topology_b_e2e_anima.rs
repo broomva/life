@@ -282,10 +282,7 @@ async fn proxy_to_server_round_trip() {
 
     // bob has only c, not alice's sessions — proves user_id filtering
     // works on the substrate side.
-    let bob_sessions = proxy
-        .list_sessions("bob", true, 0)
-        .await
-        .expect("list bob");
+    let bob_sessions = proxy.list_sessions("bob", true, 0).await.expect("list bob");
     assert_eq!(bob_sessions.len(), 1);
     assert_eq!(bob_sessions[0].sid, "sid-rt-c");
 

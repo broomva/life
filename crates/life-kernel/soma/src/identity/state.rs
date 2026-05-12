@@ -128,12 +128,7 @@ impl IdentityState {
     /// for a different `user_id` the substrate keeps the first binding
     /// and ignores the conflicting one — lifed treats sid as a per-user
     /// primary key, and changing it post-bind would imply a bug.
-    pub fn register_session(
-        &self,
-        sid: &str,
-        user_id: &str,
-        project_id: &str,
-    ) -> DateTime<Utc> {
+    pub fn register_session(&self, sid: &str, user_id: &str, project_id: &str) -> DateTime<Utc> {
         // Fast path: already registered.
         {
             let guard = self.inner.read().expect("poisoned");
@@ -378,7 +373,10 @@ mod tests {
         assert_eq!(updated.user_id, "bob");
         assert_eq!(updated.profile.bio, "test bio");
         assert_eq!(updated.profile.avatar_blob_ref, vec![1, 2, 3]);
-        assert_eq!(updated.profile.preferences.get("theme"), Some(&"dark".to_string()));
+        assert_eq!(
+            updated.profile.preferences.get("theme"),
+            Some(&"dark".to_string())
+        );
 
         // A subsequent get_or_create returns the updated profile.
         let probe = st.get_or_create_account("bob");

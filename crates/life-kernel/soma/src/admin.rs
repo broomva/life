@@ -87,12 +87,14 @@ pub async fn run_admin_plane(cfg: &SomaConfig) -> SomaResult<JoinHandle<()>> {
     // persistence + lago event publishing are tracked under follow-up
     // tickets analogous to haima's F2.
     let identity_state = Arc::new(IdentityState::new());
-    let identity_svc = IdentitySubstrateService::new(Arc::clone(&identity_state), Arc::clone(&policy));
+    let identity_svc =
+        IdentitySubstrateService::new(Arc::clone(&identity_state), Arc::clone(&policy));
 
     let acceptor = listener::bind(admin_cfg).await?;
 
     let handle = tokio::spawn(async move {
-        let custody_server = oracle_pb::custody_oracle_server::CustodyOracleServer::new(custody_svc);
+        let custody_server =
+            oracle_pb::custody_oracle_server::CustodyOracleServer::new(custody_svc);
         let identity_server = IdentitySubstrateServer::new(identity_svc);
         let res = tonic::transport::Server::builder()
             .add_service(custody_server)

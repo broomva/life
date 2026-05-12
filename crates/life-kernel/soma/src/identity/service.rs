@@ -167,7 +167,9 @@ impl IdentitySubstrate for IdentitySubstrateService {
         let profile = inner
             .profile
             .ok_or_else(|| Status::invalid_argument("missing profile"))?;
-        let acc = self.state.update_profile(&inner.user_id, profile_from_proto(profile));
+        let acc = self
+            .state
+            .update_profile(&inner.user_id, profile_from_proto(profile));
         Ok(Response::new(account_to_proto(acc)))
     }
 
@@ -361,9 +363,7 @@ mod tests {
         for (sid, user) in [("a", "alice"), ("b", "alice"), ("c", "bob")] {
             let req = make_request(
                 anima_pb::RegisterSessionReq {
-                    sid: Some(aios_v1::SessionId {
-                        value: sid.into(),
-                    }),
+                    sid: Some(aios_v1::SessionId { value: sid.into() }),
                     user_id: user.into(),
                 },
                 dev_cred(),
