@@ -293,7 +293,6 @@ fn stub_field(def: &FieldDefinition) -> Field {
     let type_ref = to_type_ref(&def.ty.node);
     let nullable = matches!(type_ref, TypeRef::Named(_) | TypeRef::List(_));
     Field::new(name, type_ref, move |_| {
-        let nullable = nullable;
         FieldFuture::new(async move {
             if nullable {
                 Ok(None)
