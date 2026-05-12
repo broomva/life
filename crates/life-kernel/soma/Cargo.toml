@@ -89,6 +89,10 @@ tokio-vsock = { version = "0.5", default-features = false }
 # tempfile is in [dependencies] for production use (Bootstrap._lago_tempdir);
 # no extra dev-only tempfile needed.
 # (lifectl's old dev-dep tempfile entry collapses into this comment.)
+# BRO-1019: e2e integration test driving the IdentitySubstrate wire
+# through anima-proxy. Dev-only — production soma doesn't depend on
+# anima-proxy (proxy is lifed-side).
+anima-proxy = { workspace = true }
 
 [lints]
 workspace = true
