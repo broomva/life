@@ -4215,6 +4215,7 @@ dependencies = [
  "aios-protocol",
  "async-trait",
  "futures",
+ "haima-substrate-proto",
  "hyper-util",
  "life-runtime-pool",
  "prost 0.14.3",
@@ -4225,6 +4226,18 @@ dependencies = [
  "tonic-prost",
  "tower 0.5.3",
  "tracing",
+]
+
+[[package]]
+name = "haima-substrate-proto"
+version = "0.3.0"
+dependencies = [
+ "aios-proto",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tonic-prost-build",
 ]
 
 [[package]]
@@ -4275,25 +4288,38 @@ dependencies = [
 name = "haimad"
 version = "0.3.0"
 dependencies = [
+ "aios-proto",
  "aios-protocol",
  "anyhow",
+ "async-trait",
  "axum 0.8.8",
+ "chrono",
  "clap",
+ "futures",
  "haima-api",
  "haima-core",
  "haima-lago",
  "haima-outcome",
+ "haima-proxy",
+ "haima-substrate-proto",
  "haima-wallet",
  "haima-x402",
  "life-paths",
  "life-vigil",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
  "serde",
  "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "toml",
+ "tonic 0.14.5",
  "tracing",
  "tracing-subscriber",
+ "ulid",
 ]
 
 [[package]]

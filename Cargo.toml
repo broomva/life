@@ -77,6 +77,7 @@ members = [
     "crates/haima/haima-insurance",
     "crates/haima/haima-lago",
     "crates/haima/haima-outcome",
+    "crates/haima/haima-substrate-proto",
     "crates/haima/haima-wallet",
     "crates/haima/haima-x402",
     "crates/haima/haimad",
@@ -257,6 +258,8 @@ life-kernel-facade    = { path = "crates/life-kernel/life-kernel-facade", versio
 
 # Arcan substrate wire crate — BRO-1016 (Topology B substrate-stub gap close).
 arcan-substrate-proto = { path = "crates/arcan/arcan-substrate-proto", version = "0.3.0" }
+# Haima substrate wire crate — BRO-1018 (Phase 3 of the Topology B substrate-stub gap close).
+haima-substrate-proto = { path = "crates/haima/haima-substrate-proto", version = "0.3.0" }
 
 # M5 — lifed facade-aggregator daemon (Spec C₂)
 arcan-proxy        = { path = "crates/life-runtime/arcan-proxy",        version = "0.3.0" }
