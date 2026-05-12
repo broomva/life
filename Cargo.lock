@@ -5389,6 +5389,7 @@ dependencies = [
  "async-trait",
  "futures",
  "hyper-util",
+ "lago-substrate-proto",
  "life-runtime-pool",
  "life-runtime-proto",
  "prost 0.14.3",
@@ -5419,9 +5420,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "lago-substrate-proto"
+version = "0.3.0"
+dependencies = [
+ "aios-proto",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tonic-prost-build",
+]
+
+[[package]]
 name = "lagod"
 version = "0.3.0"
 dependencies = [
+ "aios-protocol",
  "axum 0.8.8",
  "clap",
  "lago-api",
@@ -5431,13 +5445,19 @@ dependencies = [
  "lago-ingest",
  "lago-journal",
  "lago-policy",
+ "lago-proxy",
  "lago-store",
+ "lago-substrate-proto",
  "life-paths",
  "life-vigil",
  "metrics",
  "metrics-exporter-prometheus",
+ "prost-types 0.14.3",
  "serde",
+ "serde_json",
+ "tempfile",
  "tokio",
+ "tokio-stream",
  "toml",
  "tonic 0.14.5",
  "tracing",
