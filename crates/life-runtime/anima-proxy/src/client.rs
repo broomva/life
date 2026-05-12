@@ -8,11 +8,23 @@
 //! Sub-phase E: each `*Proxy` owns the `Arc<Pool>` per Spec C₂ §7. The
 //! [`Pooled<C>`] adapter wraps any inner [`AnimaCall`] (real proxy or
 //! mock) and applies pool semaphore + circuit-breaker bracketing.
+//!
+//! BRO-1019 (Phase 4 of the Topology B substrate-stub gap close):
+//! every `AnimaProxy::<rpc>` method below now issues a real
+//! `anima.v1.IdentitySubstrate` tonic call against soma's admin UDS
+//! (which mounts both `CustodyOracle` and `IdentitySubstrate` per
+//! Spec D D-Sub-E + BRO-1019). The `Pooled<C>` adapter is unchanged
+//! — it brackets whichever inner `AnimaCall` the caller hands it, so
+//! mocks compose identically.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use aios_proto::aios::v1 as aios_v1;
+use anima_substrate_proto::anima::v1::{
+    self as anima_pb, identity_substrate_client::IdentitySubstrateClient,
+};
 use async_trait::async_trait;
 use life_runtime_pool::pool::{Pool, PoolGuard};
 use serde::{Deserialize, Serialize};
@@ -113,48 +125,122 @@ impl AnimaProxy {
         }
     }
 
+    /// Register a session substrate-side. BRO-1019 wires this to the
+    /// real `anima.v1.IdentitySubstrate.RegisterSession` RPC. Idempotent
+    /// on sid — re-issuing after a saga retry is safe.
     pub async fn register_session(&self, sid: &str, user_id: &str) -> AnimaProxyResult<()> {
         let guard = self.acquire_guard().await?;
-        let mut req = tonic::Request::new((sid.to_string(), user_id.to_string()));
+        let mut client = IdentitySubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(anima_pb::RegisterSessionReq {
+            sid: Some(aios_v1::SessionId {
+                value: sid.to_owned(),
+            }),
+            user_id: user_id.to_owned(),
+        });
         self.attach_token(&mut req);
-        let _ = req;
-        record_success(guard);
-        Ok(())
+        match client
+            .register_session(req)
+            .await
+            .map_err(AnimaProxyError::from)
+        {
+            Ok(_) => {
+                record_outcome(guard, true);
+                Ok(())
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 
+    /// Mark a session closed. BRO-1019 wires this to
+    /// `anima.v1.IdentitySubstrate.MarkSessionClosed`. Idempotent —
+    /// unknown sids return Ok.
     pub async fn mark_session_closed(&self, sid: &str) -> AnimaProxyResult<()> {
         let guard = self.acquire_guard().await?;
-        let _ = sid;
-        record_success(guard);
-        Ok(())
+        let mut client = IdentitySubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(anima_pb::MarkSessionClosedReq {
+            sid: Some(aios_v1::SessionId {
+                value: sid.to_owned(),
+            }),
+        });
+        self.attach_token(&mut req);
+        match client
+            .mark_session_closed(req)
+            .await
+            .map_err(AnimaProxyError::from)
+        {
+            Ok(_) => {
+                record_outcome(guard, true);
+                Ok(())
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 
+    /// Fetch (or materialize) the account for a user. BRO-1019 wires
+    /// this to `anima.v1.IdentitySubstrate.GetAccount`. The substrate
+    /// creates a default account on first access (mirror of the
+    /// proxy's pre-BRO-1019 fallback shape).
     pub async fn get_account(&self, user_id: &str) -> AnimaProxyResult<Account> {
         let guard = self.acquire_guard().await?;
-        let out = Account {
-            user_id: user_id.to_string(),
-            handle: format!("@{user_id}"),
-            display_name: user_id.to_string(),
-            email: format!("{user_id}@example.com"),
-            tier: "free".to_string(),
-            created_at_ms: chrono::Utc::now().timestamp_millis(),
-            profile: Profile::default(),
-        };
-        record_success(guard);
-        Ok(out)
+        let mut client = IdentitySubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(anima_pb::GetAccountReq {
+            user_id: user_id.to_owned(),
+        });
+        self.attach_token(&mut req);
+        match client.get_account(req).await.map_err(AnimaProxyError::from) {
+            Ok(resp) => {
+                let body = resp.into_inner();
+                record_outcome(guard, true);
+                Ok(account_from_proto(body))
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 
+    /// Replace the profile sub-record. BRO-1019 wires this to
+    /// `anima.v1.IdentitySubstrate.UpdateProfile`. Returns the updated
+    /// account.
     pub async fn update_profile(
         &self,
         user_id: &str,
         profile: Profile,
     ) -> AnimaProxyResult<Account> {
-        // get_account brackets internally — do not double-bracket.
-        let mut a = self.get_account(user_id).await?;
-        a.profile = profile;
-        Ok(a)
+        let guard = self.acquire_guard().await?;
+        let mut client = IdentitySubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(anima_pb::UpdateProfileReq {
+            user_id: user_id.to_owned(),
+            profile: Some(profile_to_proto(profile)),
+        });
+        self.attach_token(&mut req);
+        match client
+            .update_profile(req)
+            .await
+            .map_err(AnimaProxyError::from)
+        {
+            Ok(resp) => {
+                let body = resp.into_inner();
+                record_outcome(guard, true);
+                Ok(account_from_proto(body))
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 
+    /// List sessions for a user. BRO-1019 wires this to
+    /// `anima.v1.IdentitySubstrate.ListSessions`. Phase 4 returns all
+    /// matching sessions in one shot (no pagination — see proto comment).
     pub async fn list_sessions(
         &self,
         user_id: &str,
@@ -162,23 +248,109 @@ impl AnimaProxy {
         limit: u32,
     ) -> AnimaProxyResult<Vec<SessionDescriptor>> {
         let guard = self.acquire_guard().await?;
-        let _ = (user_id, include_closed, limit);
-        let out = vec![];
-        record_success(guard);
-        Ok(out)
+        let mut client = IdentitySubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(anima_pb::ListSessionsReq {
+            user_id: user_id.to_owned(),
+            include_closed,
+            limit,
+        });
+        self.attach_token(&mut req);
+        match client
+            .list_sessions(req)
+            .await
+            .map_err(AnimaProxyError::from)
+        {
+            Ok(resp) => {
+                let body = resp.into_inner();
+                record_outcome(guard, true);
+                Ok(body.sessions.into_iter().map(session_from_proto).collect())
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 
+    /// Revoke a session. BRO-1019 wires this to
+    /// `anima.v1.IdentitySubstrate.RevokeSession`. Idempotent.
     pub async fn revoke_session(&self, sid: &str) -> AnimaProxyResult<()> {
         let guard = self.acquire_guard().await?;
-        let _ = sid;
-        record_success(guard);
-        Ok(())
+        let mut client = IdentitySubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(anima_pb::RevokeSessionReq {
+            sid: Some(aios_v1::SessionId {
+                value: sid.to_owned(),
+            }),
+        });
+        self.attach_token(&mut req);
+        match client
+            .revoke_session(req)
+            .await
+            .map_err(AnimaProxyError::from)
+        {
+            Ok(_) => {
+                record_outcome(guard, true);
+                Ok(())
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
     }
 }
 
-fn record_success(guard: Option<PoolGuard>) {
+/// Record a `PoolGuard` outcome based on whether the call succeeded
+/// or whether the error is a non-retryable / permanent failure (the
+/// breaker treats permanent faults as success — they aren't infra
+/// problems — per Spec C₂ §7.2). Mirrors the policy applied by
+/// `Pooled<C>::bracket` and `haima-proxy`'s `record_outcome` helper
+/// (BRO-1018).
+fn record_outcome(guard: Option<PoolGuard>, success_or_permanent: bool) {
     if let Some(g) = guard {
-        g.record_success();
+        if success_or_permanent {
+            g.record_success();
+        } else {
+            g.record_failure();
+        }
+    }
+}
+
+fn account_from_proto(p: anima_pb::Account) -> Account {
+    Account {
+        user_id: p.user_id,
+        handle: p.handle,
+        display_name: p.display_name,
+        email: p.email,
+        tier: p.tier,
+        created_at_ms: p.created_at_ms,
+        profile: p.profile.map(profile_from_proto).unwrap_or_default(),
+    }
+}
+
+fn profile_from_proto(p: anima_pb::Profile) -> Profile {
+    Profile {
+        bio: p.bio,
+        avatar_blob_ref: p.avatar_blob_ref,
+        preferences: p.preferences,
+    }
+}
+
+fn profile_to_proto(p: Profile) -> anima_pb::Profile {
+    anima_pb::Profile {
+        bio: p.bio,
+        avatar_blob_ref: p.avatar_blob_ref,
+        preferences: p.preferences,
+    }
+}
+
+fn session_from_proto(s: anima_pb::SessionDescriptor) -> SessionDescriptor {
+    SessionDescriptor {
+        sid: s.sid,
+        project_id: s.project_id,
+        opened_at_ms: s.opened_at_ms,
+        closed_at_ms: s.closed_at_ms,
+        label: s.label,
     }
 }
 
@@ -276,9 +448,6 @@ impl<C: AnimaCall> AnimaCall for Pooled<C> {
         self.bracket(self.inner.get_account(user_id)).await
     }
     async fn update_profile(&self, user_id: &str, profile: Profile) -> AnimaProxyResult<Account> {
-        // update_profile in the proxy delegates to get_account which
-        // already brackets; in the adapter path the inner trait method
-        // is the single bracket point.
         self.bracket(self.inner.update_profile(user_id, profile))
             .await
     }
@@ -317,5 +486,12 @@ mod tests {
         proxy.attach_token(&mut req);
         let auth = req.metadata().get("authorization").expect("authz set");
         assert_eq!(auth.to_str().unwrap(), "Bearer anima.jws.token");
+    }
+
+    #[tokio::test]
+    async fn record_outcome_no_op_when_guard_absent() {
+        // Compile-only smoke: the helper accepts None and does not panic.
+        record_outcome(None, true);
+        record_outcome(None, false);
     }
 }
