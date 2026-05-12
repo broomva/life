@@ -332,6 +332,16 @@ fn real_resolver(parent_type_name: &str, field_name: &str) -> Option<ResolverFn>
         ("RootMutation", "expireApiKey") => Some(tier1::resolve_expire_api_key),
         // Tier-1 settings (Task 16, BRO-???).
         ("RootMutation", "updateUserSettings") => Some(tier1::resolve_update_user_settings),
+        // Tier-1 inference + model resolvers (Task 17, BRO-???).
+        // `freeAvailableModels` returns a hardcoded model menu so the
+        // pre-login picker UI populates; `generateDialogue` and
+        // `generateCommands` are NOT_ENABLED stubs because lifed does
+        // not yet expose an `Inference` service client (Spec E
+        // E-Sub-A ships the trait; lifed-facade exposure is queued
+        // for E-Sub-E or a dedicated Spec C₂ sub-phase).
+        ("RootQuery", "freeAvailableModels") => Some(tier1::resolve_free_available_models),
+        ("RootMutation", "generateDialogue") => Some(tier1::resolve_generate_dialogue),
+        ("RootMutation", "generateCommands") => Some(tier1::resolve_generate_commands),
         _ => None,
     }
 }

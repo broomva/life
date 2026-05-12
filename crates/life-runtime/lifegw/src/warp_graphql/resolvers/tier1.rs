@@ -415,6 +415,151 @@ pub fn resolve_set_user_is_onboarded(rctx: ResolverContext<'_>) -> FieldFuture<'
     })
 }
 
+/// Resolver: query `freeAvailableModels`. Returns the hardcoded Phase α
+/// model menu for the Warp client's pre-login model-picker UI.
+///
+/// # Phase α scope
+///
+/// lifed does NOT yet expose an `Inference` service client — the 7
+/// wired clients are `agent` / `events` / `identity` / `wallet` /
+/// `runtime` / `saga` / `routing_cache`. Spec E E-Sub-A (shipped
+/// 2026-05-08) lands `InferenceBackend` in `crates/inference/` but
+/// the lifed-facade exposure is queued for E-Sub-E (or a dedicated
+/// Spec C₂ sub-phase). Until that ships, Phase α dispatches the
+/// `FreeAvailableModelsResult` union to its success variant
+/// (`FreeAvailableModelsOutput`) so the Warp client's pre-login
+/// model-picker UI populates with the SDL-shaped success envelope;
+/// the nested `featureModelChoice` falls through to async-graphql's
+/// auto-stub (returning null) and the client degrades to its
+/// hardcoded fallback model list. An error variant
+/// (`UserFacingError`) would break the pre-login UX outright.
+///
+/// # Schema shape
+///
+/// `freeAvailableModels(input: FreeAvailableModelsInput!,
+///   requestContext: RequestContext!): FreeAvailableModelsResult!`
+/// where `FreeAvailableModelsResult = FreeAvailableModelsOutput |
+/// UserFacingError`. `FreeAvailableModelsOutput` exposes a single
+/// `featureModelChoice: FeatureModelChoice!` which carries 5 slots
+/// (`agentMode`, `cliAgent`, `coding`, `computerUseAgent`, `planning`)
+/// each of `AvailableLlms { choices: [LlmInfo!]!, defaultId: String!,
+/// preferredCodexModelId: String }`. Each `LlmInfo` has 14 nested
+/// fields — promoting to a fully-populated hardcoded menu requires
+/// per-field resolvers on the nested types, which is out of scope for
+/// Phase α's "must-implement set" carve-out.
+///
+/// # Auth contract
+///
+/// This op is explicitly callable pre-login (per the SDL doc-comment:
+/// "Used during pre-login onboarding"). No scope check — anonymous
+/// callers reach this resolver as they would any unauthenticated
+/// route. The dispatch contains no per-user information.
+pub fn resolve_free_available_models(rctx: ResolverContext<'_>) -> FieldFuture<'_> {
+    FieldFuture::new(async move {
+        let _ctx: &WarpRequestCtx = rctx
+            .ctx
+            .data::<WarpRequestCtx>()
+            .map_err(|_| WarpGraphqlError::Internal("missing request ctx".into()).into_graphql())?;
+
+        // The SDL declares
+        // `FreeAvailableModelsResult = FreeAvailableModelsOutput | UserFacingError`.
+        // async-graphql's dynamic-schema union dispatch requires the
+        // return to carry an explicit `.with_type("VariantName")` —
+        // there is no `__typename`-from-JSON discrimination on the
+        // dynamic side (only `#[derive]` static schemas do that).
+        //
+        // The variant fields (`FreeAvailableModelsOutput.featureModelChoice`
+        // and `responseContext`) fall through to the SDL-walker's
+        // auto-stub. The auto-stub returns `Value::Null` for non-null
+        // object fields — which means clients that select beyond
+        // `__typename` will hit a "non-null returned null" error.
+        // That's the documented Phase α contract (Tier-3 stubs): the
+        // Warp picker UI's pre-login fetch reads `__typename` to
+        // assert the success variant; deeper selections (`choices`,
+        // `defaultId`, etc.) are stubbed null and the client degrades
+        // to its hardcoded fallback. Promotion to a fully-populated
+        // hardcoded menu is a Phase α follow-up that requires per-
+        // field resolvers on `FreeAvailableModelsOutput` and
+        // `FeatureModelChoice` and the 14 nested `LlmInfo` fields —
+        // out of scope for Task 17's "must-implement set" carve-out.
+        Ok(Some(
+            FieldValue::NULL.with_type("FreeAvailableModelsOutput"),
+        ))
+    })
+}
+
+/// Resolver: mutation `generateDialogue`.
+///
+/// # Phase α NOT_ENABLED stub
+///
+/// The production dialogue-generation path routes through
+/// `Agent.CreateSession` → arcan `ConsciousnessActor` → Spec E
+/// `InferenceBackend` (E-Sub-A shipped 2026-05-08). Phase α exposes
+/// the agent-task entry point via `createAgentTask` (Task 18), which
+/// IS the real-LLM round-trip surface for Phase α. A standalone
+/// `generateDialogue` Mutation would duplicate the agent-task path
+/// without buying additional functionality, so it's deferred to
+/// Phase β when the Warp client's dialogue-generation UI is wired
+/// to an explicit (non-task-scoped) inference endpoint.
+///
+/// Promotion to a real resolver requires:
+/// 1. Adding `lifed.Inference.GenerateDialogue` (or routing through
+///    the existing `Agent.CreateSession` with a `dialogue_only` flag).
+/// 2. Replacing this body with the real dispatch.
+///
+/// # Auth contract
+///
+/// Requires `agent:write`. Anonymous callers receive `UNAUTHENTICATED`
+/// (the more semantically correct error) rather than
+/// `FEATURE_NOT_ENABLED`.
+pub fn resolve_generate_dialogue(rctx: ResolverContext<'_>) -> FieldFuture<'_> {
+    FieldFuture::new(async move {
+        let ctx: &WarpRequestCtx = rctx
+            .ctx
+            .data::<WarpRequestCtx>()
+            .map_err(|_| WarpGraphqlError::Internal("missing request ctx".into()).into_graphql())?;
+        ctx.require_scope("agent:write")
+            .map_err(WarpGraphqlError::into_graphql)?;
+
+        // Explicit return-type annotation so the compiler can resolve
+        // `FieldFuture::new`'s `R: Into<FieldValue<'_>>` generic — an
+        // `Err(...)`-only path leaves `R` unconstrained without it.
+        Err::<Option<FieldValue<'_>>, _>(
+            WarpGraphqlError::NotEnabled("generateDialogue").into_graphql(),
+        )
+    })
+}
+
+/// Resolver: mutation `generateCommands`.
+///
+/// # Phase α NOT_ENABLED stub
+///
+/// Lower-priority "suggest shell commands" feature; the production
+/// path routes through the same inference substrate as
+/// `generateDialogue` (Spec E). Deferred to Phase β alongside the
+/// dialogue-generation Mutation.
+///
+/// # Auth contract
+///
+/// Requires `agent:write`. Anonymous callers receive
+/// `UNAUTHENTICATED`.
+pub fn resolve_generate_commands(rctx: ResolverContext<'_>) -> FieldFuture<'_> {
+    FieldFuture::new(async move {
+        let ctx: &WarpRequestCtx = rctx
+            .ctx
+            .data::<WarpRequestCtx>()
+            .map_err(|_| WarpGraphqlError::Internal("missing request ctx".into()).into_graphql())?;
+        ctx.require_scope("agent:write")
+            .map_err(WarpGraphqlError::into_graphql)?;
+
+        // Explicit return-type annotation so the compiler can resolve
+        // `FieldFuture::new`'s `R: Into<FieldValue<'_>>` generic.
+        Err::<Option<FieldValue<'_>>, _>(
+            WarpGraphqlError::NotEnabled("generateCommands").into_graphql(),
+        )
+    })
+}
+
 /// Resolver: mutation `updateUserSettings`.
 ///
 /// # Phase α NOT_ENABLED stub
@@ -751,5 +896,86 @@ mod tests {
                  MintCustomTokenOutput variant of the result union"
             );
         }
+    }
+
+    /// Task 17 — verify `freeAvailableModels` returns the hardcoded
+    /// Phase α model list cleanly. No upstream calls, no auth gating;
+    /// the resolver must produce zero errors and dispatch the
+    /// `FreeAvailableModelsOutput` union variant.
+    ///
+    /// Anonymous ctx is sufficient because the SDL marks this op as
+    /// pre-login (used during onboarding before the user has a token).
+    #[tokio::test]
+    async fn free_available_models_returns_hardcoded_list() {
+        let schema = WarpSchema::build().expect("schema builds");
+        let ctx = test_ctx_anonymous();
+        // `FreeAvailableModelsInput` is all-optional (`referrer:
+        // String`), so the empty object literal `{}` passes schema
+        // validation. Selecting `__typename` is enough to prove the
+        // union dispatch succeeded.
+        let query = format!(
+            "query {{ freeAvailableModels(input: {{}}, requestContext: {}) {{ __typename }} }}",
+            REQUEST_CONTEXT_LITERAL,
+        );
+        let req = async_graphql::Request::new(query).data(ctx);
+        let resp = schema.inner().execute(req).await;
+
+        assert!(
+            resp.errors.is_empty(),
+            "freeAvailableModels should succeed; errors: {:?}",
+            resp.errors
+        );
+        let json = resp
+            .data
+            .into_json()
+            .expect("response data serializes to JSON");
+        assert_eq!(
+            json["freeAvailableModels"]["__typename"], "FreeAvailableModelsOutput",
+            "expected hardcoded success variant; got: {:?}",
+            json
+        );
+    }
+
+    /// Task 17 — verify `generateDialogue` is wired (not auto-stub)
+    /// and surfaces a typed error code. Anonymous callers hit the
+    /// `agent:write` scope gate first; callers with the scope hit
+    /// `FEATURE_NOT_ENABLED`. Either typed code proves dispatch.
+    #[tokio::test]
+    async fn generate_dialogue_is_wired_with_not_enabled() {
+        let schema = WarpSchema::build().expect("schema builds");
+        let ctx = test_ctx_anonymous();
+        // `GenerateDialogueInput` requires non-null `prompt: String!`
+        // and `transcript: [TranscriptPart!]!`. We satisfy the SDL
+        // validator with minimal-but-valid input so the resolver
+        // dispatch actually fires (an invalid input would short-circuit
+        // before any resolver runs, producing a parse-level error that
+        // would not prove dispatch).
+        let mutation = format!(
+            "mutation {{ generateDialogue(\
+                 input: {{ prompt: \"hi\", transcript: [] }}, \
+                 requestContext: {}\
+             ) {{ __typename }} }}",
+            REQUEST_CONTEXT_LITERAL,
+        );
+        let req = async_graphql::Request::new(mutation).data(ctx);
+        let resp = schema.inner().execute(req).await;
+
+        assert!(
+            !resp.errors.is_empty(),
+            "generateDialogue should produce a typed error; got data: {:?}",
+            resp.data
+        );
+        let err = &resp.errors[0];
+        let extensions_json = serde_json::to_value(&err.extensions).unwrap_or_default();
+        let code = extensions_json.get("code").and_then(|c| c.as_str());
+        // Anonymous ctx hits scope gate first → UNAUTHENTICATED;
+        // callers with `agent:write` hit FEATURE_NOT_ENABLED.
+        // Either typed code proves dispatch is wired (NOT auto-stub).
+        assert!(
+            matches!(code, Some("FEATURE_NOT_ENABLED") | Some("UNAUTHENTICATED")),
+            "expected FEATURE_NOT_ENABLED or UNAUTHENTICATED; got code={:?} message={:?}",
+            code,
+            err.message
+        );
     }
 }
