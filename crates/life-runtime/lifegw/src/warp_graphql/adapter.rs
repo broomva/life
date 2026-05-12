@@ -330,6 +330,8 @@ fn real_resolver(parent_type_name: &str, field_name: &str) -> Option<ResolverFn>
         }
         ("RootMutation", "generateApiKey") => Some(tier1::resolve_generate_api_key),
         ("RootMutation", "expireApiKey") => Some(tier1::resolve_expire_api_key),
+        // Tier-1 settings (Task 16, BRO-???).
+        ("RootMutation", "updateUserSettings") => Some(tier1::resolve_update_user_settings),
         _ => None,
     }
 }

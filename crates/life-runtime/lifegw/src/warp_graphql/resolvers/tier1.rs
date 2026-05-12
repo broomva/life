@@ -415,6 +415,60 @@ pub fn resolve_set_user_is_onboarded(rctx: ResolverContext<'_>) -> FieldFuture<'
     })
 }
 
+/// Resolver: mutation `updateUserSettings`.
+///
+/// # Phase α NOT_ENABLED stub
+///
+/// Per Pre-flight Update Round 3, upstream Warp's schema has NO
+/// top-level `getUserSettings` Query — settings are nested under the
+/// `UserResult` returned by the `user` Query. Phase α drops the
+/// standalone settings-read resolver; nested settings reads fall
+/// through to Tier-3 stubs (returning null defaults). Only the
+/// `updateUserSettings` Mutation is wired here.
+///
+/// `lifed.Identity` does not currently expose a settings RPC — `Me`,
+/// `UpdateProfile`, `ListSessions`, `RevokeSession` are the only 4
+/// RPCs (see `core/life/proto/life/v1/identity.proto`). The settings
+/// persistence path lands in Phase β: either a new `life.v1.Settings`
+/// service or a lago-event-sourced projection via the existing
+/// `Events.Append` path (when `lagod` ships the wire RPC — currently
+/// tracked under BRO-934's "lago wire RPC roll-out" follow-up).
+///
+/// This resolver is wired through the adapter override map (so the
+/// special-case binding path is exercised) but surfaces
+/// `FEATURE_NOT_ENABLED`. The Warp client gracefully handles this —
+/// settings changes are stored client-side until the server-side path
+/// is wired.
+///
+/// Schema shape (per upstream verbatim mirror):
+/// `updateUserSettings(input: UpdateUserSettingsInput!,
+///   requestContext: RequestContext!) : UpdateUserSettingsResult!`
+///
+/// # Auth contract
+///
+/// Requires `agent:write`. Anonymous callers receive `UNAUTHENTICATED`
+/// (the more semantically correct error) rather than
+/// `FEATURE_NOT_ENABLED` when they try to call an op they cannot
+/// reach in the first place — mirrors `setUserIsOnboarded` above.
+pub fn resolve_update_user_settings(rctx: ResolverContext<'_>) -> FieldFuture<'_> {
+    FieldFuture::new(async move {
+        let ctx: &WarpRequestCtx = rctx
+            .ctx
+            .data::<WarpRequestCtx>()
+            .map_err(|_| WarpGraphqlError::Internal("missing request ctx".into()).into_graphql())?;
+
+        ctx.require_scope("agent:write")
+            .map_err(WarpGraphqlError::into_graphql)?;
+
+        // Explicit return-type annotation so the compiler can resolve
+        // `FieldFuture::new`'s `R: Into<FieldValue<'_>>` generic — an
+        // `Err(...)`-only path leaves `R` unconstrained without it.
+        Err::<Option<FieldValue<'_>>, _>(
+            WarpGraphqlError::NotEnabled("updateUserSettings").into_graphql(),
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -592,6 +646,48 @@ mod tests {
             code,
             Some("FEATURE_NOT_ENABLED"),
             "agent:write caller should hit FEATURE_NOT_ENABLED; got code={:?} message={:?}",
+            code,
+            err.message
+        );
+    }
+
+    /// Task 16 — verify `updateUserSettings` is registered with the real T1
+    /// resolver (not the auto-stub) via the special-case in adapter.rs.
+    ///
+    /// The dispatch is proven by the typed extension code. Anonymous callers
+    /// hit `UNAUTHENTICATED` first (the `agent:write` scope gate runs before
+    /// the NOT_ENABLED short-circuit); callers with `agent:write` hit
+    /// `FEATURE_NOT_ENABLED`. Either typed code proves the dispatch map
+    /// fired — the auto-stub would return `Ok(None)` and produce an UNTYPED
+    /// "non-null returned null" internal error.
+    #[tokio::test]
+    async fn update_user_settings_is_wired_to_real_resolver() {
+        let schema = WarpSchema::build().expect("schema builds");
+        let ctx = test_ctx_anonymous();
+        // `UpdateUserSettingsInput` is an all-optional input; an empty
+        // object literal `{}` passes schema validation.
+        let mutation = format!(
+            "mutation {{ updateUserSettings(input: {{}}, requestContext: {}) \
+              {{ __typename }} }}",
+            REQUEST_CONTEXT_LITERAL,
+        );
+        let req = async_graphql::Request::new(mutation).data(ctx);
+        let resp = schema.inner().execute(req).await;
+
+        assert!(
+            !resp.errors.is_empty(),
+            "updateUserSettings should produce a typed error; got data: {:?}",
+            resp.data
+        );
+        let err = &resp.errors[0];
+        let extensions_json = serde_json::to_value(&err.extensions).unwrap_or_default();
+        let code = extensions_json.get("code").and_then(|c| c.as_str());
+        // Anonymous ctx hits the scope gate first; with `agent:write` it
+        // would short-circuit to FEATURE_NOT_ENABLED. Either typed code
+        // proves the dispatch map is wired (NOT auto-stub null).
+        assert!(
+            matches!(code, Some("FEATURE_NOT_ENABLED") | Some("UNAUTHENTICATED")),
+            "expected FEATURE_NOT_ENABLED or UNAUTHENTICATED; got code={:?} message={:?}",
             code,
             err.message
         );
