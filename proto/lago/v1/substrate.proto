@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package lago.v1;
+
+import "google/protobuf/timestamp.proto";
+import "aios/v1/identifiers.proto";
+
+// Substrate-plane Lago service. Called by lifed (via lago-proxy) over
+// UDS. NOT the same as `lago.v1.IngestService` (the existing
+// bidi-streaming ingest path) which stays as-is for arcand's
+// session-bound event journal. This service exposes the small slice of
+// lago RPCs lifed's saga driver + routing cache need (event append +
+// namespace enumeration) at the substrate boundary.
+//
+// Phase 2 of the close-out for the Topology B substrate-stub gap audit
+// captured 2026-05-11 (BRO-1017). Sibling of `arcan.v1.AgentSubstrate`
+// (BRO-1016, proto/arcan/v1/substrate.proto). Sibling tickets in the
+// same audit: BRO-1018 (haima), BRO-1019 (anima).
+//
+// Spec reference: docs/superpowers/specs/2026-04-25-life-runtime-architecture-spec.md
+// §L1 + the topology-b-substrate-stub-gap entity page. Closes the lago
+// E3 deferral named in crates/life-runtime/CLAUDE.md §"Sub-phase E
+// handoff state — pool push-down + observability hardening".
+service LagoSubstrate {
+  // Append a single opaque event payload to a namespace. lifed currently
+  // uses two namespace shapes (`session/<sid>` for kernel-bound events,
+  // `system/lifed/saga/<saga_id>` for saga journaling). The substrate
+  // does not enforce a shape — it treats the namespace string as the
+  // SessionId for the underlying journal.
+  //
+  // The (namespace, event_type, payload) triplet is wrapped as a
+  // `EventKind::Custom { event_type, data }` under the hood. Payload
+  // must be a JSON value when non-empty; an empty payload is stored as
+  // JSON `null`. Returns the assigned monotonic sequence number within
+  // the namespace's branch.
+  rpc Append(AppendReq) returns (AppendResp);
+
+  // Enumerate namespaces whose ID starts with `prefix`. lifed's
+  // `RoutingCache::cold_start` calls this with `"session/"` on boot to
+  // warm the cache from durable storage. Pagination is intentionally
+  // omitted in Phase 2 — the server returns all matches in one shot;
+  // the lifed-side caller's hard cap (LRU_HARD_CAP) bounds growth.
+  // Pagination is a future ticket.
+  rpc ListNamespaces(ListNamespacesReq) returns (ListNamespacesResp);
+}
+
+message AppendReq {
+  // The namespace under which to append. Used as the underlying
+  // session_id for the lago journal.
+  string namespace = 1;
+  // A free-form event-type label (e.g. `"saga.started"`, `"agent.tick"`).
+  // Stored in the resulting envelope's `EventKind::Custom.event_type`.
+  string event_type = 2;
+  // JSON-encoded payload bytes. May be empty (treated as `null`).
+  // The substrate parses it as `serde_json::Value` and stores it under
+  // `EventKind::Custom.data`.
+  bytes payload = 3;
+}
+
+message AppendResp {
+  // The monotonic sequence number assigned to this event within the
+  // namespace's main branch.
+  uint64 seq = 1;
+  // Server-side wall-clock timestamp for the assignment.
+  google.protobuf.Timestamp committed_at = 2;
+}
+
+message ListNamespacesReq {
+  // Prefix filter — only namespaces whose ID starts with this string are
+  // returned. Empty prefix returns everything visible to the caller.
+  string prefix = 1;
+}
+
+message ListNamespacesResp {
+  // The matching namespace identifiers (each one is a SessionId string
+  // under the hood). Order is unspecified.
+  repeated string namespaces = 1;
+}

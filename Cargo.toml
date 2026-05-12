@@ -53,6 +53,7 @@ members = [
     "crates/lago/lago-lance",
     "crates/lago/lago-policy",
     "crates/lago/lago-store",
+    "crates/lago/lago-substrate-proto",
     "crates/lago/lagod",
     # Autonomic — homeostasis
     "crates/autonomic/autonomic-api-schema",
@@ -257,6 +258,9 @@ life-kernel-facade    = { path = "crates/life-kernel/life-kernel-facade", versio
 
 # Arcan substrate wire crate — BRO-1016 (Topology B substrate-stub gap close).
 arcan-substrate-proto = { path = "crates/arcan/arcan-substrate-proto", version = "0.3.0" }
+
+# Lago substrate wire crate — BRO-1017 (Topology B substrate-stub gap close, Phase 2).
+lago-substrate-proto = { path = "crates/lago/lago-substrate-proto", version = "0.3.0" }
 
 # M5 — lifed facade-aggregator daemon (Spec C₂)
 arcan-proxy        = { path = "crates/life-runtime/arcan-proxy",        version = "0.3.0" }
