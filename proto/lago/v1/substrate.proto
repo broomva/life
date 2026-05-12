@@ -3,7 +3,6 @@ syntax = "proto3";
 package lago.v1;
 
 import "google/protobuf/timestamp.proto";
-import "aios/v1/identifiers.proto";
 
 // Substrate-plane Lago service. Called by lifed (via lago-proxy) over
 // UDS. NOT the same as `lago.v1.IngestService` (the existing
