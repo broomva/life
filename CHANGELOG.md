@@ -3,6 +3,103 @@
 ## Unreleased
 
 ### Added
+- **`anima.v1.IdentitySubstrate` gRPC server** — closes Phase 4 of the
+  Topology B substrate-stub gap (BRO-1019), the FINAL piece of the
+  4-phase audit. After this PR, all 4 `*-proxy` crates have real method
+  bodies talking to real substrate daemon servers. Until BRO-1019,
+  `anima-proxy`'s six per-method bodies (`register_session`,
+  `mark_session_closed`, `get_account`, `update_profile`, `list_sessions`,
+  `revoke_session`) discarded their arguments and returned hardcoded
+  shapes (synthetic `@{user_id}` accounts, empty vecs); lifed's saga step 4
+  `RegisterAnimaSession` ran correctly but the anima substrate-call
+  boundary below it was fake. Phase 4 wires the anima side end-to-end
+  so lifed.Identity service's `GetAccount` / `UpdateProfile` /
+  `ListSessions` / `RevokeSession` handlers route through real wire to
+  real soma-side state.
+  * **New proto**: `core/life/proto/anima/v1/substrate.proto` declares
+    `anima.v1.IdentitySubstrate` service with 6 RPCs. Substrate-plane
+    shape (no auth tokens — those are lifed's concerns one tier up).
+    Imports `aios.v1.SessionId`. Mirrors the proxy's pre-BRO-1019
+    `Account` / `Profile` / `SessionDescriptor` Rust shapes verbatim
+    so the wire mapping is a trivial copy.
+  * **New crate**: `crates/anima/anima-substrate-proto/` mirrors the
+    `arcan-substrate-proto` / `lago-substrate-proto` /
+    `haima-substrate-proto` codegen pattern verbatim. Workspace
+    member. `tonic-prost-build` over the proto + `aios.v1.*` imports
+    via `extern_path`.
+  * **Architectural decision (locked)**: anima identity substrate lives
+    INSIDE soma, NOT a new `animad` daemon. Reasons: (1) soma is already
+    the kernel daemon hosting anima-related work (Spec D Anima Custody —
+    `CustodyOracle` over UDS); (2) `CustodyOracle` (crypto/signing) and
+    `IdentitySubstrate` (identity-data: accounts, profiles, sessions)
+    are disjoint surfaces — no overlap, but they cohabit the anima
+    module; (3) avoids spinning up another daemon + systemd unit +
+    dep graph; (4) soma's `admin/service.rs` pattern shows how to add
+    a tonic service to soma's UDS router.
+  * **soma substrate state + service**: new modules
+    `crates/life-kernel/soma/src/identity/state.rs` (in-memory account
+    + session registry, `std::sync::RwLock` over `HashMap`s) and
+    `crates/life-kernel/soma/src/identity/service.rs` (gRPC
+    `IdentitySubstrateService` adapter). Each RPC is a thin adapter
+    onto an `IdentityState` method. `RegisterSession` /
+    `MarkSessionClosed` / `RevokeSession` are idempotent on sid;
+    `GetAccount` materializes a default account on first access
+    (mirror of the proxy's pre-BRO-1019 stub shape so lifed's
+    Identity-handler tests keep passing). The `anima-lago` event
+    publishing path is NOT wired in this PR — that's a follow-up
+    (sibling of haima's F2); today `IdentityState` is the in-memory
+    source of truth.
+  * **Mount on soma admin UDS**: `IdentitySubstrateServer` mounted
+    alongside `CustodyOracleServer` on the same admin plane router in
+    `crates/life-kernel/soma/src/admin.rs::run_admin_plane`. Both
+    services use the SAME SO_PEERCRED + `life-runtime` group auth
+    model (Spec D D-Sub-E). The acceptor (`admin::listener::bind`)
+    yields `AdminConn`s carrying `PeerCred` via tonic's `Connected`
+    trait; both services pull cred via `req.extensions().get::<AdminConnInfo>()`
+    and run policy checks before delegating to their respective state.
+  * **anima-proxy real bodies**: replaced the 6 stub methods in
+    `crates/life-runtime/anima-proxy/src/client.rs` with real tonic
+    calls against the generated `IdentitySubstrateClient`. Pool-guard /
+    retry-class / token-attach machinery preserved (mirror of
+    BRO-1018's haima-proxy pattern). Added `record_outcome` helper
+    with the same Spec C₂ §7.2 breaker policy: permanent (non-retryable)
+    errors count as success; only retryable failures count against
+    the breaker's failure budget. `Account` / `Profile` /
+    `SessionDescriptor` Rust struct shapes unchanged — lifed's Identity
+    handlers compile against the same vocabulary.
+  * **Integration test**:
+    `crates/life-kernel/soma/tests/topology_b_e2e_anima.rs` (3 tests,
+    all green). Spins up `IdentitySubstrateServer` on a tempdir UDS
+    bound through the real `admin::listener::bind` so per-connection
+    `AdminConn` → `AdminConnInfo` extension wiring matches production.
+    `register_session_creates_real_session_record` confirms
+    `AnimaProxy::register_session` actually causes `IdentityState`'s
+    session_count to gain the session.
+    `update_profile_returns_real_updated_account` confirms profile
+    mutation transports end-to-end.
+    `proxy_to_server_round_trip` composes register → list → revoke
+    → re-list against shared in-memory state.
+  * **Dep-rule CI**: `scripts/verify_dependencies_lifed.sh` passes —
+    `anima-substrate-proto` is a wire-only crate (proto + generated
+    code; no anima-identity / anima-core runtime deps), so adding it
+    to `anima-proxy`'s deps doesn't violate proxy-isolation rules.
+    soma's existing dep rules pass (`scripts/verify_dependencies_soma.sh`
+    rule sets 1+2+3 clean; rule set 4 failures are pre-existing on
+    main, unrelated to BRO-1019, affect `*-api-schema` crates).
+
+  **Topology B status**: 4 of 4 substrate gRPC wires now functional
+  (arcan via BRO-1016, lago via BRO-1017, haima via BRO-1018, anima via
+  BRO-1019). The substrate-stub gap is CLOSED entirely. Topology B can
+  now be deployed in production and actually drive user-facing traffic
+  end-to-end. lifed.Agent.CreateSession's saga step 4
+  (`RegisterAnimaSession`) actually creates a session in soma's anima
+  identity storage; lifed.Identity service's CRUD handlers route through
+  real wire to real soma-side state.
+
+  **Knowledge graph**:
+  `research/entities/concept/topology-b-substrate-stub-gap.md` updated
+  to "gap closed (4/4)".
+
 - **`lago.v1.LagoSubstrate` gRPC server** — closes Phase 2 of the
   Topology B substrate-stub gap (BRO-1017). Mirrors the BRO-1016
   pattern on the lago substrate. Closes the E3 deferral named in
