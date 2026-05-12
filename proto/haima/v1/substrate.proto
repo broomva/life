@@ -1,0 +1,142 @@
+syntax = "proto3";
+
+package haima.v1;
+
+import "google/protobuf/timestamp.proto";
+import "aios/v1/identifiers.proto";
+
+// Substrate-plane Wallet service. Called by lifed (via haima-proxy)
+// over UDS. NOT the public-plane shape — that's life.v1.Wallet in
+// proto/life/v1/wallet.proto, served by lifed's WalletService.
+//
+// This service exists so lifed's saga driver + Wallet handlers can
+// route wallet operations to haimad without going through haimad's
+// HTTP `:3003` server (which carries x402/facilitator routes for the
+// public-plane). Spec reference:
+// docs/superpowers/specs/2026-04-25-life-runtime-architecture-spec.md
+// §L1 + the BRO-1016 / topology-b-substrate-stub-gap entity page.
+//
+// All RPCs are operations against the haima wallet substrate scoped
+// by (user_id, project_id, sid) — the substrate plane stays oblivious
+// to tier-2/3 token claims (those are lifed's concern, attached as
+// the bearer one tier up and verified separately).
+service WalletSubstrate {
+  // Idempotent on (sid, project_id). Binds a wallet to the session;
+  // creates the wallet entry on first call. Returns the wallet_id —
+  // currently a deterministic `wallet-{sid}-{project_id}` shape
+  // mirroring the Phase-1 sid→agent 1:1 invariant in arcan.
+  rpc BindWallet(BindWalletReq) returns (BindWalletResp);
+
+  // Idempotent. Unbind a wallet from its session (saga compensation
+  // path). Wallets that don't exist return Ok(empty).
+  rpc UnbindWallet(UnbindWalletReq) returns (UnbindWalletResp);
+
+  // Get the current balance for a (user_id, project_id) wallet.
+  // Returns a default 1 USDC balance for newly-bound wallets so the
+  // Phase-3 wire stays useful before haima's on-chain balance sync
+  // ships.
+  rpc GetBalance(GetBalanceReq) returns (Balance);
+
+  // Server-streaming. Returns ledger entries for a (user_id,
+  // project_id) wallet within the requested time window. Streaming
+  // matches the public-plane Wallet.Statement shape (Spec C₂ §6.2).
+  rpc Statement(StatementReq) returns (stream LedgerEntry);
+
+  // Idempotent debit (drives an off-chain ledger entry). lifed
+  // already idempotents the Debit RPC at the public-plane boundary
+  // via the `idempotency-key` envelope; the substrate is a simple
+  // ledger sink (no double-debit protection — that's lifed's job).
+  rpc Debit(DebitReq) returns (DebitReceipt);
+
+  // Transfer micros from one (user_id, project_id) wallet to
+  // another. Returns the entry_id plus updated balances on both
+  // ends. Idempotency lives at the public plane (lifed Wallet.Transfer
+  // was made idempotent in M5 Sub-phase D follow-up #3); the
+  // substrate accepts every Transfer as a fresh ledger event.
+  rpc Transfer(TransferReq) returns (TransferReceipt);
+}
+
+message BindWalletReq {
+  aios.v1.SessionId sid = 1;
+  string project_id = 2;
+}
+
+message BindWalletResp {
+  string wallet_id = 1;
+  // Address of the EVM wallet bound to the session (the deterministic
+  // local secp256k1 backend produces a fresh keypair on first bind).
+  string address = 2;
+  google.protobuf.Timestamp bound_at = 3;
+}
+
+message UnbindWalletReq {
+  string wallet_id = 1;
+}
+
+message UnbindWalletResp {}
+
+message GetBalanceReq {
+  string user_id = 1;
+  string project_id = 2;
+}
+
+message Balance {
+  // Balance in micro-credits (1 USDC = 1_000_000 μc).
+  uint64 micros = 1;
+  // Currency ticker — "USDC" today; future versions may expose
+  // multi-currency balances.
+  string currency = 2;
+  google.protobuf.Timestamp as_of = 3;
+}
+
+message StatementReq {
+  string user_id = 1;
+  string project_id = 2;
+  // Inclusive lower bound for entry timestamps in Unix ms.
+  int64 since_ms = 3;
+  // Exclusive upper bound for entry timestamps in Unix ms.
+  int64 until_ms = 4;
+  // Max entries to emit. 0 means "no cap" (server may still apply
+  // an internal hard limit to bound memory).
+  uint32 limit = 5;
+}
+
+message LedgerEntry {
+  string entry_id = 1;
+  // Entry timestamp in Unix ms.
+  int64 at_unix_ms = 2;
+  // Signed delta in micro-credits (positive = credit, negative =
+  // debit). Matches the proxy-side LedgerEntry shape verbatim so
+  // wire mapping is a trivial copy.
+  int64 delta_micros = 3;
+  string reason = 4;
+  string sid = 5;
+}
+
+message DebitReq {
+  string user_id = 1;
+  string project_id = 2;
+  uint64 amount_micros = 3;
+  string sid = 4;
+  string reason = 5;
+}
+
+message DebitReceipt {
+  string entry_id = 1;
+  Balance new_balance = 2;
+}
+
+message TransferReq {
+  string from_user = 1;
+  string from_project = 2;
+  string to_user = 3;
+  string to_project = 4;
+  uint64 amount_micros = 5;
+  string memo = 6;
+}
+
+message TransferReceipt {
+  string entry_id = 1;
+  Balance from_balance = 2;
+  Balance to_balance = 3;
+}
