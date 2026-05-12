@@ -183,12 +183,27 @@ impl WarpSchema {
                         // these on registration and rejects a plain
                         // Object whose name matches the declared
                         // subscription root.
+                        //
+                        // Task 20: the single `warpDriveUpdates`
+                        // field carries a real resolver from
+                        // [`crate::warp_graphql::subscriptions::warp_drive_updates`].
+                        // Any sibling field (currently none upstream)
+                        // falls through to the auto-stub for
+                        // defensive coverage. async-graphql's dynamic
+                        // schema does not let us mutate fields
+                        // post-`register`, so this is the install
+                        // point.
                         let mut sub = Subscription::new(&name);
                         for field in &obj.fields {
                             let f = &field.node;
                             let fname = f.name.node.to_string();
                             let type_ref = to_type_ref(&f.ty.node);
-                            sub = sub.field(stub_subscription_field(&fname, type_ref));
+                            let sub_field = if fname == "warpDriveUpdates" {
+                                crate::warp_graphql::subscriptions::warp_drive_updates::field()
+                            } else {
+                                stub_subscription_field(&fname, type_ref)
+                            };
+                            sub = sub.field(sub_field);
                         }
                         builder = builder.register(sub);
                     } else {
