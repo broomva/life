@@ -499,14 +499,41 @@ pub async fn serve_with_listener_and_signer(
     };
     let agent_http_router = crate::services::agent_http::router(agent_http_state);
 
+    // Lumen M7-W (May 2026): Warp-compatible GraphQL surface.
+    // `/graphql/v2` (POST, queries+mutations) and `/graphql-ws` (WS,
+    // single `warpDriveUpdates` subscription) match upstream Warp's
+    // wire paths verbatim so a patched warp-oss binary (built via
+    // `apps/warp-oss-patch/`) drives an arcan-backed agent task
+    // end-to-end. Spec C₂ + C₃ ground truth at
+    // `docs/superpowers/specs/2026-05-10-lumen-warp-on-life-design.md`.
+    let warp_schema = crate::warp_graphql::adapter::WarpSchema::build()
+        .map_err(|e| crate::error::LifegwError::Config(format!(
+            "warp_graphql schema build failed: {e}"
+        )))?;
+    let warp_dataloaders = Arc::new(
+        crate::warp_graphql::dataloader::LifedDataloaders::new(upstream_channel.clone()),
+    );
+    let warp_state = crate::warp_graphql::route::WarpRouteState {
+        schema: warp_schema,
+        jwks: Arc::clone(&jwks),
+        dataloaders: warp_dataloaders,
+        // Lumen caps are minted via the Tier-2 mint path (Spec C₃ §5);
+        // the issuer is the same `cfg.auth.tier2_issuer` lifegw uses
+        // for its own minted caps — typically "lifegw".
+        expected_issuer: cfg.auth.tier2_issuer.clone(),
+    };
+    let warp_graphql_router = crate::warp_graphql::route::routes(warp_state);
+
     // Compose: top-level axum router that nests `/anima/custody/*`,
-    // merges the `/v1/agent/create_session` route, and falls back to
-    // the tonic-stack adapter for everything else (including
+    // merges the `/v1/agent/create_session` route, merges the
+    // warp_graphql `/graphql/v2` + `/graphql-ws` routes, and falls
+    // back to the tonic-stack adapter for everything else (including
     // `/v1/agent/stream` which the WS layer handles inside the tonic
     // stack).
     let app: axum::Router<()> = axum::Router::new()
         .nest("/anima/custody", anima_router)
         .merge(agent_http_router)
+        .merge(warp_graphql_router)
         .fallback_service(tonic_stack_adapted);
 
     // Convert the axum router's response body to tonic::body::Body so
