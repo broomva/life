@@ -217,7 +217,5 @@ async fn ws_subscribe(_url: &str, _token: &str) -> Result<WsSubscription, anyhow
     // the first time against a live stack. The
     // `graphql_ws_client::ClientBuilder` + `tokio_tungstenite::connect_async`
     // pattern is the entry point.
-    todo!(
-        "implement WS connection + connection_init bearer auth + subscribe to warpDriveUpdates"
-    )
+    todo!("implement WS connection + connection_init bearer auth + subscribe to warpDriveUpdates")
 }
