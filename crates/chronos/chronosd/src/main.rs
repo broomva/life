@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
-use clap::Parser;
 use chronosd::{DaemonConfig, run};
+use clap::Parser;
 
 /// CLI surface for `chronosd`. See `chronosd --help` for the rendered version.
 #[derive(Debug, Parser)]
@@ -28,7 +28,11 @@ struct Cli {
     data_dir: PathBuf,
 
     /// File name (within `--data-dir`) for the redb journal.
-    #[arg(long, default_value = "journal.redb", env = "CHRONOSD_JOURNAL_FILENAME")]
+    #[arg(
+        long,
+        default_value = "journal.redb",
+        env = "CHRONOSD_JOURNAL_FILENAME"
+    )]
     journal_filename: String,
 
     /// Mpsc buffer capacity for the [`chronos_core::WakeRouter`]. Larger values absorb

@@ -110,7 +110,11 @@ mod tests {
             Box::new(WebhookTriggerStub),
         ];
         for mut s in stubs {
-            assert!(s.next_wake().await.is_none(), "stub {} returned Some", s.name());
+            assert!(
+                s.next_wake().await.is_none(),
+                "stub {} returned Some",
+                s.name()
+            );
         }
     }
 }

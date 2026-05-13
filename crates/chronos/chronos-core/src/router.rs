@@ -47,10 +47,7 @@ impl WakeRouter {
             info!(trigger = name, "trigger started");
             while let Some(event) = trigger.next_wake().await {
                 if tx.send(event).await.is_err() {
-                    warn!(
-                        trigger = name,
-                        "router closed; trigger forwarder exiting"
-                    );
+                    warn!(trigger = name, "router closed; trigger forwarder exiting");
                     break;
                 }
             }

@@ -164,7 +164,10 @@ mod tests {
             .with_target_session(SessionId::from_string("sess-42"));
         assert_eq!(e.source, WakeSource::Http);
         assert_eq!(e.payload["intent"], "rebuild_index");
-        assert_eq!(e.target_session.as_ref().map(|s| s.as_str()), Some("sess-42"));
+        assert_eq!(
+            e.target_session.as_ref().map(|s| s.as_str()),
+            Some("sess-42")
+        );
     }
 
     #[test]

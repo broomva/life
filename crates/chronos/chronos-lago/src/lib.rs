@@ -106,8 +106,7 @@ mod tests {
     use super::*;
 
     fn open_journal(dir: &Path) -> Arc<dyn Journal> {
-        Arc::new(RedbJournal::open(dir.join("test.redb")).expect("open redb"))
-            as Arc<dyn Journal>
+        Arc::new(RedbJournal::open(dir.join("test.redb")).expect("open redb")) as Arc<dyn Journal>
     }
 
     #[tokio::test]
@@ -125,7 +124,9 @@ mod tests {
             .expect("append");
         assert!(seq > 0, "journal should assign a positive sequence");
 
-        let query = EventQuery::new().session(session.clone()).branch(branch.clone());
+        let query = EventQuery::new()
+            .session(session.clone())
+            .branch(branch.clone());
         let stored = journal.read(query).await.expect("read");
         assert_eq!(stored.len(), 1, "exactly one wake should be persisted");
 
