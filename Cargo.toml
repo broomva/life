@@ -62,6 +62,11 @@ members = [
     "crates/autonomic/autonomic-core",
     "crates/autonomic/autonomic-lago",
     "crates/autonomic/autonomicd",
+    # Chronos — temporality (M0 scaffold; see docs/superpowers/plans/2026-05-13-chronos-temporal-primitive.md)
+    "crates/chronos/chronos-core",
+    "crates/chronos/chronos-triggers",
+    "crates/chronos/chronos-lago",
+    "crates/chronos/chronosd",
     # Praxis — tool execution
     "crates/praxis/praxis-core",
     "crates/praxis/praxis-mcp-bridge",
@@ -196,6 +201,10 @@ autonomic-api = { path = "crates/autonomic/autonomic-api", version = "0.3.0" }
 autonomic-controller = { path = "crates/autonomic/autonomic-controller", version = "0.3.0" }
 autonomic-core = { path = "crates/autonomic/autonomic-core", version = "0.3.0" }
 autonomic-lago = { path = "crates/autonomic/autonomic-lago", version = "0.3.0" }
+# Chronos — temporality
+chronos-core = { path = "crates/chronos/chronos-core", version = "0.3.0" }
+chronos-triggers = { path = "crates/chronos/chronos-triggers", version = "0.3.0" }
+chronos-lago = { path = "crates/chronos/chronos-lago", version = "0.3.0" }
 haima-api = { path = "crates/haima/haima-api", version = "0.3.0" }
 haima-core = { path = "crates/haima/haima-core", version = "0.3.0" }
 haima-insurance = { path = "crates/haima/haima-insurance", version = "0.3.0" }
