@@ -6073,6 +6073,8 @@ dependencies = [
 name = "life-cli"
 version = "0.3.1"
 dependencies = [
+ "anima-core",
+ "anima-identity",
  "anyhow",
  "async-trait",
  "chrono",

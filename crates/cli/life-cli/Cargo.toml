@@ -48,6 +48,12 @@ life-relay-core = { path = "../../relay/life-relay-core", version = "0.3.0" }
 # Shared path resolution + credential cascade
 life-paths = { path = "../../life-paths", version = "0.3.0" }
 
+# Identity bootstrap (Spec D InProcess custody — life init creates an Anima identity
+# the same way `zero init` creates a wallet, but goes through the AnimaCustody trait
+# so production deployments can swap to Vault/TPM/WebCrypto/Soma/HardwareWallet).
+anima-identity = { path = "../../anima/anima-identity" }
+anima-core = { path = "../../anima/anima-core" }
+
 [dev-dependencies]
 tempfile = "3"
 
