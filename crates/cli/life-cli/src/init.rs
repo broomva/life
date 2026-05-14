@@ -252,18 +252,37 @@ fn update_gitignore(root: &Path) -> Result<()> {
 
 /// Write the raw 32-byte master seed to `.life/identity/seed.local.bin` with
 /// `0o600` permissions on Unix (best-effort on other platforms).
+///
+/// On Unix the file is created with mode `0o600` atomically via
+/// `OpenOptions::mode` — there is no window during which the seed exists on
+/// disk with a more permissive mode. This is stricter than the previous
+/// `write + chmod` sequence which left a brief world-readable transient
+/// (CodeRabbit review on #1242).
 fn write_seed(identity_dir: &Path, seed_bytes: &[u8; 32]) -> Result<()> {
     let path = identity_dir.join("seed.local.bin");
-    std::fs::write(&path, seed_bytes)
-        .with_context(|| format!("failed to write {}", path.display()))?;
 
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&path)?.permissions();
-        perms.set_mode(0o600);
-        std::fs::set_permissions(&path, perms)
-            .with_context(|| format!("failed to chmod 0o600 {}", path.display()))?;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .with_context(|| format!("failed to open {} for write", path.display()))?;
+        f.write_all(seed_bytes)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        // Best-effort fsync — not critical for correctness but cheap insurance
+        // against a power loss between write and journal-bootstrap.
+        let _ = f.sync_all();
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(&path, seed_bytes)
+            .with_context(|| format!("failed to write {}", path.display()))?;
     }
 
     Ok(())
@@ -334,7 +353,27 @@ pub fn bootstrap_anima_identity(life_dir: &Path) -> Result<(IdentitySummary, boo
     std::fs::create_dir_all(&identity_dir).context("failed to create .life/identity/")?;
 
     // ── Reload existing identity if present (idempotency) ────────────────
+    //
+    // For InProcess custody the seed file is the source of truth for signing.
+    // soul.json without a readable seed.local.bin is a corrupted half-state —
+    // signing operations would fail at runtime with a confusing error. Detect
+    // it here and surface a clear message instead of silently reporting
+    // "already configured" (CodeRabbit review on #1242).
+    //
+    // Non-InProcess custody (vault/tpm/webcrypto/hardware/soma) doesn't keep
+    // the seed on disk — the soul.json is sufficient state to reload from.
     if let Some(doc) = read_soul_document(&identity_dir)? {
+        if doc.custody.kind == "in_process" && read_seed(&identity_dir)?.is_none() {
+            return Err(anyhow::anyhow!(
+                ".life/identity/soul.json claims in_process custody but \
+                 seed.local.bin is missing or malformed — the identity is unusable. \
+                 Restore the seed from backup, or remove .life/identity/soul.json \
+                 and re-run `life init` to regenerate (you will lose the current \
+                 DID {} and wallet {}).",
+                doc.did,
+                doc.wallet.address,
+            ));
+        }
         return Ok((
             IdentitySummary {
                 did: doc.did,
@@ -678,5 +717,95 @@ mod tests {
         let rb = run_in(b.path()).unwrap();
         assert_ne!(ra.identity.did, rb.identity.did);
         assert_ne!(ra.identity.wallet_address, rb.identity.wallet_address);
+    }
+
+    /// CodeRabbit review (#1242): atomic mode-on-open prevents a brief window
+    /// where the seed exists with permissive mode. Verify the seed file is
+    /// `0o600` immediately after `write_seed` returns, with no intermediate
+    /// chmod step required.
+    #[cfg(unix)]
+    #[test]
+    fn write_seed_is_atomically_chmod_600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let identity_dir = tmp.path().join("identity");
+        std::fs::create_dir_all(&identity_dir).unwrap();
+
+        let seed = [7u8; 32];
+        write_seed(&identity_dir, &seed).unwrap();
+
+        let seed_path = identity_dir.join("seed.local.bin");
+        let mode = std::fs::metadata(&seed_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "seed.local.bin must be chmod 0o600 immediately after write_seed; got {:o}",
+            mode
+        );
+
+        let read_back = std::fs::read(&seed_path).unwrap();
+        assert_eq!(read_back, seed.to_vec(), "seed bytes round-trip exactly");
+    }
+
+    /// CodeRabbit review (#1242): if soul.json exists but seed.local.bin is
+    /// missing, the InProcess identity is unusable — signing would fail at
+    /// runtime. `bootstrap_anima_identity` must reject this state with a
+    /// clear error rather than silently reporting "already configured."
+    #[test]
+    fn rejects_inprocess_soul_with_missing_seed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let first = run_in(tmp.path()).unwrap();
+        assert!(first.identity_created);
+
+        // Delete the seed but keep soul.json — the corrupted half-state
+        // CodeRabbit's review flagged.
+        let seed_path = tmp.path().join(".life/identity/seed.local.bin");
+        std::fs::remove_file(&seed_path).unwrap();
+        assert!(!seed_path.exists());
+
+        // Second init must error out cleanly with a recoverable message.
+        let result = run_in(tmp.path());
+        assert!(
+            result.is_err(),
+            "expected error when soul.json present but seed.local.bin missing; got {:?}",
+            result
+        );
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(
+            err.contains("seed.local.bin is missing"),
+            "error message should name the missing file; got: {err}"
+        );
+        // Error must surface the existing DID + wallet so user can decide
+        // whether to restore from backup vs regenerate.
+        assert!(
+            err.contains(&first.identity.did),
+            "error message should include the existing DID for recovery context"
+        );
+    }
+
+    /// Soul-json-but-truncated-seed must also fail cleanly. `read_seed`
+    /// already returns `Err` for wrong-length seeds; verify
+    /// `bootstrap_anima_identity` surfaces that as an actionable error
+    /// rather than panicking or treating it as "configured".
+    #[test]
+    fn rejects_inprocess_soul_with_truncated_seed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        run_in(tmp.path()).unwrap();
+
+        // Truncate the seed to 16 bytes — read_seed will detect wrong length.
+        let seed_path = tmp.path().join(".life/identity/seed.local.bin");
+        std::fs::write(&seed_path, [0u8; 16]).unwrap();
+
+        let result = run_in(tmp.path());
+        assert!(
+            result.is_err(),
+            "expected error on truncated seed; got {:?}",
+            result
+        );
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(
+            err.contains("wrong length"),
+            "error should describe the length problem; got: {err}"
+        );
     }
 }
