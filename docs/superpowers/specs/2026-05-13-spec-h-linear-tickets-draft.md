@@ -1,6 +1,27 @@
 # Spec H — Linear Tickets Draft
 
-> **STATE: PENDING MCP RE-AUTH.** Linear MCP token expired on 2026-05-13 while filing; ticket bodies are ready below for direct paste once re-authorized. When filed, replace this header with a SUPERSEDED block listing the mapping (see Spec E draft for the format).
+> **STATE: SUPERSEDED 2026-05-13 — TICKETS FILED.** All 16 tickets filed under [BRO-1111](https://linear.app/broomva/issue/BRO-1111) umbrella on the **Life** project. Mapping below for traceability:
+>
+> | Section in this draft | Filed as | Status | Estimate |
+> |---|---|---|---|
+> | Umbrella | [BRO-1111](https://linear.app/broomva/issue/BRO-1111) | Backlog | 0 |
+> | H-Sub-A (links PR #1242) | [BRO-1112](https://linear.app/broomva/issue/BRO-1112) | **Done** | 2 |
+> | H-Sub-B | [BRO-1113](https://linear.app/broomva/issue/BRO-1113) | Backlog | 2 |
+> | H-Sub-C | [BRO-1117](https://linear.app/broomva/issue/BRO-1117) | Backlog | 1 |
+> | H-Sub-D | [BRO-1118](https://linear.app/broomva/issue/BRO-1118) | Backlog | 3 |
+> | H-Sub-E | [BRO-1119](https://linear.app/broomva/issue/BRO-1119) | Backlog | 5 |
+> | H-Sub-F | [BRO-1120](https://linear.app/broomva/issue/BRO-1120) | Backlog | 2 |
+> | H-Sub-G | [BRO-1122](https://linear.app/broomva/issue/BRO-1122) | Backlog | 1 |
+> | H-Sub-H | [BRO-1125](https://linear.app/broomva/issue/BRO-1125) | Backlog | 8 |
+> | H-Sub-I | [BRO-1124](https://linear.app/broomva/issue/BRO-1124) | Backlog | 3 |
+> | H-Sub-J | [BRO-1114](https://linear.app/broomva/issue/BRO-1114) | Backlog | 3 |
+> | H-Sub-K | [BRO-1126](https://linear.app/broomva/issue/BRO-1126) | Backlog | 5 |
+> | H-Sub-L | [BRO-1115](https://linear.app/broomva/issue/BRO-1115) | Backlog | 1 |
+> | H-Sub-M | [BRO-1121](https://linear.app/broomva/issue/BRO-1121) | Backlog | 2 |
+> | H-Sub-N | [BRO-1116](https://linear.app/broomva/issue/BRO-1116) | Backlog | 2 |
+> | H-Sub-O | [BRO-1123](https://linear.app/broomva/issue/BRO-1123) | Backlog | 5 |
+>
+> **Total estimate:** 45 points (matches the spec doc). All `blockedBy` edges + parent relations wired during filing. Linear is now the canonical source for ticket bodies; this draft is retained below for historical reference.
 
 All tickets target the **Life** project on the **broomva** team.
 
