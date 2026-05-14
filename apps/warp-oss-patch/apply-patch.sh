@@ -11,7 +11,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UPSTREAM_DIR="$SCRIPT_DIR/upstream"
-PATCH_FILE="$SCRIPT_DIR/channel-oss-override.patch"
+PATCH_FILES=(
+  "$SCRIPT_DIR/channel-oss-override.patch"
+  # Lumen α: makes Metal-shader compilation conditional on the absence of
+  # `experimental-wgpu-renderer`. Default build is byte-identical to upstream;
+  # the patch only takes effect when the wgpu feature is selected. Required
+  # so agents on machines without a working Metal Toolchain install can still
+  # produce a runnable binary (via `--features warpui/experimental-wgpu-renderer`).
+  "$SCRIPT_DIR/skip-metal-when-wgpu.patch"
+)
 UPSTREAM_URL="https://github.com/warpdotdev/warp.git"
 
 # Clone or refresh upstream.
@@ -27,18 +35,31 @@ else
   git clone --depth 1 "$UPSTREAM_URL" "$UPSTREAM_DIR"
 fi
 
-# Apply patch. Skip if already applied (idempotent).
-echo "==> Applying channel-oss-override.patch"
-if git -C "$UPSTREAM_DIR" apply --reverse --check "$PATCH_FILE" 2>/dev/null; then
-  echo "==> Patch already applied; skipping"
-else
-  git -C "$UPSTREAM_DIR" apply --check "$PATCH_FILE"
-  git -C "$UPSTREAM_DIR" apply "$PATCH_FILE"
-fi
+# Apply each patch idempotently. `--reverse --check` succeeds when the
+# patch is already in the tree; in that case skip. Otherwise validate +
+# apply forward. Patches are applied in order; one failure aborts.
+for PATCH_FILE in "${PATCH_FILES[@]}"; do
+  patch_name=$(basename "$PATCH_FILE")
+  echo "==> Applying $patch_name"
+  if git -C "$UPSTREAM_DIR" apply --reverse --check "$PATCH_FILE" 2>/dev/null; then
+    echo "    (already applied, skipping)"
+  else
+    git -C "$UPSTREAM_DIR" apply --check "$PATCH_FILE"
+    git -C "$UPSTREAM_DIR" apply "$PATCH_FILE"
+  fi
+done
 
-# Build the OSS binary in release mode.
+# Build the OSS binary in release mode. By default uses Metal; pass
+# WARP_OSS_USE_WGPU=1 to opt into the wgpu renderer (Metal-bypass) for
+# machines where the Metal Toolchain is unavailable.
 echo "==> Building warp-oss (release)"
-( cd "$UPSTREAM_DIR" && cargo build --release --bin warp-oss )
+if [ "${WARP_OSS_USE_WGPU:-0}" = "1" ]; then
+  echo "    (using experimental-wgpu-renderer — Metal-bypass)"
+  ( cd "$UPSTREAM_DIR" && cargo build --release --bin warp-oss \
+    --features warpui/experimental-wgpu-renderer )
+else
+  ( cd "$UPSTREAM_DIR" && cargo build --release --bin warp-oss )
+fi
 
 BIN="$UPSTREAM_DIR/target/release/warp-oss"
 if [ -x "$BIN" ]; then

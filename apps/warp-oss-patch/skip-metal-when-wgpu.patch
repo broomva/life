@@ -1,0 +1,37 @@
+diff --git a/crates/warpui/build.rs b/crates/warpui/build.rs
+index 0000000..1111111 100644
+--- a/crates/warpui/build.rs
++++ b/crates/warpui/build.rs
+@@ -19,10 +19,28 @@ fn main() {
+         native: { not(target_family = "wasm") },
+     }
+
+-    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+-        bindgen_shader_types();
+-        compile_metal_shaders();
+-        compile_objc_lib();
++    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
++        bindgen_shader_types();
++        // Lumen Phase α (broomva): gate Metal-shader compilation behind the
++        // absence of `experimental-wgpu-renderer`. Apple's MobileAsset CDN
++        // intermittently refuses to serve the Metal Toolchain
++        // (`com.apple.MobileAsset.MetalToolchain`) on freshly-released Xcode
++        // builds; on those machines `xcrun metal` is unavailable and
++        // `compile_metal_shaders()` aborts the build before the binary can be
++        // produced. Upstream already exposes an `experimental-wgpu-renderer`
++        // feature on warpui that swaps the Metal renderer for a wgpu one;
++        // this gate just tells the build script to skip the .metal → .air →
++        // .metallib compilation when the user opts into the wgpu path. The
++        // default build (no feature flag) is byte-for-byte identical to
++        // upstream — Metal stays the default; wgpu is the opt-in escape
++        // hatch for agents that need a working binary without a Metal
++        // Toolchain install.
++        let wgpu_renderer =
++            env::var("CARGO_FEATURE_EXPERIMENTAL_WGPU_RENDERER").is_ok();
++        if !wgpu_renderer {
++            compile_metal_shaders();
++        }
++        compile_objc_lib();
+     }
+ }
+
