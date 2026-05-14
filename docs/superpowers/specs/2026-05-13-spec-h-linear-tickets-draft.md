@@ -1,4 +1,4 @@
-# Spec F — Linear Tickets Draft
+# Spec H — Linear Tickets Draft
 
 > **STATE: PENDING MCP RE-AUTH.** Linear MCP token expired on 2026-05-13 while filing; ticket bodies are ready below for direct paste once re-authorized. When filed, replace this header with a SUPERSEDED block listing the mapping (see Spec E draft for the format).
 
@@ -6,11 +6,11 @@ All tickets target the **Life** project on the **broomva** team.
 
 ## Umbrella
 
-**Title:** Spec F — Life Onboarding & Capability UX
+**Title:** Spec H — Life Onboarding & Capability UX
 
 **Body:**
 ```
-Spec: core/life/docs/superpowers/specs/2026-05-13-spec-f-onboarding-capability-ux.md
+Spec: core/life/docs/superpowers/specs/2026-05-13-spec-h-onboarding-capability-ux.md
 
 Closes the developer-facing UX gap surfaced by the 2026-05-13 zero.xyz
 architectural deep-dive (~/Documents/Zero_xyz_Architecture_Research_20260513).
@@ -18,15 +18,15 @@ Life's substrate (Anima Spec D shipped, Haima x402 client, Lago journal)
 is ahead of named competitors; the first-run UX is behind.
 
 Four phases:
-- F.A Bootstrap (F-Sub-A..D, ~8 pts) — life init → identity + journal + status + welcome
-- F.B Custody (F-Sub-E..G, ~8 pts) — --custody flag + EncryptedSeed + auto-detection
-- F.C Capability (F-Sub-H..K, ~19 pts) — capability-registry + ReviewLedger + PaidCapability + Spaces gossip
-- F.D Operator UX (F-Sub-L..O, ~10 pts) — upgrade check + attest/policy/trust + skill install + lineage wallets
+- H.A Bootstrap (H-Sub-A..D, ~8 pts) — life init → identity + journal + status + welcome
+- H.B Custody (H-Sub-E..G, ~8 pts) — --custody flag + EncryptedSeed + auto-detection
+- H.C Capability (H-Sub-H..K, ~19 pts) — capability-registry + ReviewLedger + PaidCapability + Spaces gossip
+- H.D Operator UX (H-Sub-L..O, ~10 pts) — upgrade check + attest/policy/trust + skill install + lineage wallets
 
 Total: ~45 points across 15 sub-phases.
 Critical path: A → B → C → J → H → I (E in parallel for production).
 
-F-Sub-A SHIPPED in #1242 (anima identity + derived wallet on life init).
+H-Sub-A SHIPPED in #1242 (anima identity + derived wallet on life init).
 ```
 
 **Labels:** `spec`, `onboarding`, `capability`, `phase-1`
@@ -36,13 +36,13 @@ F-Sub-A SHIPPED in #1242 (anima identity + derived wallet on life init).
 
 ---
 
-## F-Sub-A — Anima identity bootstrap on `life init` ✅ DONE
+## H-Sub-A — Anima identity bootstrap on `life init` ✅ DONE
 
-**Title:** Spec F F-Sub-A — Anima identity bootstrap on `life init`
+**Title:** Spec H H-Sub-A — Anima identity bootstrap on `life init`
 
 **Body:**
 ```
-Spec ref: §F-Sub-A
+Spec ref: §H-Sub-A
 Shipped in: #1242
 
 Extended `life init` to generate an InProcessAnima identity, derive the
@@ -62,14 +62,14 @@ EVM address on Base (eip155:8453), Blake3 soul hash, full AgentSoul JSON.
 
 ---
 
-## F-Sub-B — Lago journal init at `.life/journal/`
+## H-Sub-B — Lago journal init at `.life/journal/`
 
-**Title:** Spec F F-Sub-B — Lago journal init at `.life/journal/` + soul-genesis event
+**Title:** Spec H H-Sub-B — Lago journal init at `.life/journal/` + soul-genesis event
 
 **Body:**
 ```
-Spec ref: §F-Sub-B
-Depends on: F-Sub-A
+Spec ref: §H-Sub-B
+Depends on: H-Sub-A
 
 Open project-local Lago journal at .life/journal/events.redb after
 identity bootstrap. Append AnimaEventKind::SoulGenesis as first event.
@@ -91,18 +91,18 @@ Acceptance:
 **Labels:** `spec-f`, `sub-b`, `bootstrap`, `lago`
 **Priority:** High
 **Estimate:** 2
-**Blocked by:** F-Sub-A
+**Blocked by:** H-Sub-A
 
 ---
 
-## F-Sub-C — `life status` shows identity, wallet, journal state
+## H-Sub-C — `life status` shows identity, wallet, journal state
 
-**Title:** Spec F F-Sub-C — `life status` (local mode) surfaces identity + wallet + journal
+**Title:** Spec H H-Sub-C — `life status` (local mode) surfaces identity + wallet + journal
 
 **Body:**
 ```
-Spec ref: §F-Sub-C
-Depends on: F-Sub-A, F-Sub-B
+Spec ref: §H-Sub-C
+Depends on: H-Sub-A, H-Sub-B
 
 Extend life status to support a no-args local mode. Reads
 .life/identity/soul.json and .life/journal/events.redb; optionally
@@ -124,18 +124,18 @@ Acceptance:
 **Labels:** `spec-f`, `sub-c`, `bootstrap`, `cli`
 **Priority:** High
 **Estimate:** 1
-**Blocked by:** F-Sub-A, F-Sub-B
+**Blocked by:** H-Sub-A, H-Sub-B
 
 ---
 
-## F-Sub-D — `life init --claim-welcome` via a Haima merchant
+## H-Sub-D — `life init --claim-welcome` via a Haima merchant
 
-**Title:** Spec F F-Sub-D — `life init --claim-welcome` welcome credit flow
+**Title:** Spec H H-Sub-D — `life init --claim-welcome` welcome credit flow
 
 **Body:**
 ```
-Spec ref: §F-Sub-D
-Depends on: F-Sub-A, F-Sub-B
+Spec ref: §H-Sub-D
+Depends on: H-Sub-A, H-Sub-B
 
 Optional flag (default false) that signs a welcome-claim message with the
 new wallet, POSTs to a Haima merchant at merchants.broomva.tech/welcome/claim,
@@ -161,18 +161,18 @@ Acceptance:
 **Labels:** `spec-f`, `sub-d`, `bootstrap`, `haima`, `growth`
 **Priority:** Medium
 **Estimate:** 3 (+ 2 for server-side merchant)
-**Blocked by:** F-Sub-A, F-Sub-B
+**Blocked by:** H-Sub-A, H-Sub-B
 
 ---
 
-## F-Sub-E — `--custody=` flag on `life init`
+## H-Sub-E — `--custody=` flag on `life init`
 
-**Title:** Spec F F-Sub-E — `--custody=in_process|vault|tpm|webcrypto|hardware|soma` flag
+**Title:** Spec H H-Sub-E — `--custody=in_process|vault|tpm|webcrypto|hardware|soma` flag
 
 **Body:**
 ```
-Spec ref: §F-Sub-E
-Depends on: F-Sub-A; Spec D D-Sub-B..F (all shipped)
+Spec ref: §H-Sub-E
+Depends on: H-Sub-A; Spec D D-Sub-B..F (all shipped)
 
 Add --custody flag dispatching to the right AnimaCustody constructor.
 Each backend gated by a Cargo feature on life-cli (kms-vault, kms-tpm,
@@ -196,18 +196,18 @@ Acceptance:
 **Labels:** `spec-f`, `sub-e`, `custody`, `production`
 **Priority:** High
 **Estimate:** 5
-**Blocked by:** F-Sub-A
+**Blocked by:** H-Sub-A
 
 ---
 
-## F-Sub-F — `EncryptedSeed` at rest + keychain passphrase
+## H-Sub-F — `EncryptedSeed` at rest + keychain passphrase
 
-**Title:** Spec F F-Sub-F — Encrypt seed.local.bin via EncryptedSeed + keychain passphrase
+**Title:** Spec H H-Sub-F — Encrypt seed.local.bin via EncryptedSeed + keychain passphrase
 
 **Body:**
 ```
-Spec ref: §F-Sub-F
-Depends on: F-Sub-A
+Spec ref: §H-Sub-F
+Depends on: H-Sub-A
 
 For InProcess deploys, replace raw 32-byte seed with anima_identity::EncryptedSeed
 (ChaCha20-Poly1305) keyed by a per-install passphrase stored via
@@ -232,18 +232,18 @@ Acceptance:
 **Labels:** `spec-f`, `sub-f`, `custody`, `security`
 **Priority:** High
 **Estimate:** 2
-**Blocked by:** F-Sub-A
+**Blocked by:** H-Sub-A
 
 ---
 
-## F-Sub-G — Runtime context auto-detection for default custody
+## H-Sub-G — Runtime context auto-detection for default custody
 
-**Title:** Spec F F-Sub-G — Auto-detect runtime context to pick default custody backend
+**Title:** Spec H H-Sub-G — Auto-detect runtime context to pick default custody backend
 
 **Body:**
 ```
-Spec ref: §F-Sub-G
-Depends on: F-Sub-E (for the secret-store path)
+Spec ref: §H-Sub-G
+Depends on: H-Sub-E (for the secret-store path)
 
 When --custody not passed, pick default based on runtime:
 - chatOS browser → WebCrypto
@@ -271,24 +271,24 @@ Acceptance:
 **Labels:** `spec-f`, `sub-g`, `custody`, `ux`
 **Priority:** Medium
 **Estimate:** 1
-**Blocked by:** F-Sub-E
+**Blocked by:** H-Sub-E
 
 ---
 
-## F-Sub-H — `capability-registry` crate
+## H-Sub-H — `capability-registry` crate
 
-**Title:** Spec F F-Sub-H — New `capability-registry` crate (Lago-projection + BM25 search)
+**Title:** Spec H H-Sub-H — New `capability-registry` crate (Lago-projection + BM25 search)
 
 **Body:**
 ```
-Spec ref: §F-Sub-H
-Depends on: F-Sub-B, F-Sub-J
+Spec ref: §H-Sub-H
+Depends on: H-Sub-B, H-Sub-J
 
 New crates/capability-registry/ (sibling of lago). Maintains Lago
 projection of capability.advertised / capability.reviewed / capability.deprecated
 events. Exposes Registry::search(query, opts) -> Vec<CapabilityListing>
 over BM25 index built from the projection. Reads local project Lago by
-default; federates via Spaces (F-Sub-K) optionally.
+default; federates via Spaces (H-Sub-K) optionally.
 
 Deliverables:
 - crates/capability-registry/Cargo.toml + src/{lib,projection,search}.rs
@@ -310,18 +310,18 @@ LARGEST SINGLE SUB-PHASE.
 **Labels:** `spec-f`, `sub-h`, `capability`, `new-crate`
 **Priority:** High
 **Estimate:** 8
-**Blocked by:** F-Sub-B, F-Sub-J
+**Blocked by:** H-Sub-B, H-Sub-J
 
 ---
 
-## F-Sub-I — `ReviewLedger` port + `capability.reviewed` events
+## H-Sub-I — `ReviewLedger` port + `capability.reviewed` events
 
-**Title:** Spec F F-Sub-I — `ReviewLedger` port + capability.reviewed events on Lago
+**Title:** Spec H H-Sub-I — `ReviewLedger` port + capability.reviewed events on Lago
 
 **Body:**
 ```
-Spec ref: §F-Sub-I
-Depends on: F-Sub-B
+Spec ref: §H-Sub-I
+Depends on: H-Sub-B
 
 New trait ReviewLedger in aios-protocol::review. Default impl writes
 capability.reviewed { payment_id, accuracy, value, reliability, content }
@@ -346,18 +346,18 @@ Acceptance:
 **Labels:** `spec-f`, `sub-i`, `capability`, `reputation`
 **Priority:** High
 **Estimate:** 3
-**Blocked by:** F-Sub-B
+**Blocked by:** H-Sub-B
 
 ---
 
-## F-Sub-J — `PaidCapability` trait in `aios-protocol`
+## H-Sub-J — `PaidCapability` trait in `aios-protocol`
 
-**Title:** Spec F F-Sub-J — `PaidCapability` trait — sibling of `Tool`, payment plumbing transparent
+**Title:** Spec H H-Sub-J — `PaidCapability` trait — sibling of `Tool`, payment plumbing transparent
 
 **Body:**
 ```
-Spec ref: §F-Sub-J
-Depends on: none (independent of F-Sub-H)
+Spec ref: §H-Sub-J
+Depends on: none (independent of H-Sub-H)
 
 Define typed Rust trait for paid HTTP capabilities alongside existing Tool
 trait. Implement adapter from haima-x402 so bazaar-discovered/advertised
@@ -387,18 +387,18 @@ Acceptance:
 
 ---
 
-## F-Sub-K — Spaces gossip channel for capabilities
+## H-Sub-K — Spaces gossip channel for capabilities
 
-**Title:** Spec F F-Sub-K — Spaces `#capabilities` channel + bridge to capability-registry
+**Title:** Spec H H-Sub-K — Spaces `#capabilities` channel + bridge to capability-registry
 
 **Body:**
 ```
-Spec ref: §F-Sub-K
-Depends on: F-Sub-H, F-Sub-J
+Spec ref: §H-Sub-K
+Depends on: H-Sub-H, H-Sub-J
 
 Opt-in Spaces channel where agents publish capability.advertised events.
 Subscribers fold into local registry projection. Implements decentralized
-discovery per L6-F4.
+discovery per L6-H4.
 
 Deliverables:
 - Spaces module table: CapabilityAdvertisement (signed Lago event payload)
@@ -419,17 +419,17 @@ Acceptance:
 **Labels:** `spec-f`, `sub-k`, `capability`, `spaces`, `distributed`
 **Priority:** Medium
 **Estimate:** 5
-**Blocked by:** F-Sub-H, F-Sub-J
+**Blocked by:** H-Sub-H, H-Sub-J
 
 ---
 
-## F-Sub-L — `life upgrade check`
+## H-Sub-L — `life upgrade check`
 
-**Title:** Spec F F-Sub-L — `life upgrade check` (daily silent version check)
+**Title:** Spec H H-Sub-L — `life upgrade check` (daily silent version check)
 
 **Body:**
 ```
-Spec ref: §F-Sub-L
+Spec ref: §H-Sub-L
 Depends on: none
 
 Mirror Zero's update_check.json pattern: daily check against
@@ -457,14 +457,14 @@ Acceptance:
 
 ---
 
-## F-Sub-M — `life identity attest` + `life policy show` + `life trust show`
+## H-Sub-M — `life identity attest` + `life policy show` + `life trust show`
 
-**Title:** Spec F F-Sub-M — Identity surface CLI commands (attest / policy / trust)
+**Title:** Spec H H-Sub-M — Identity surface CLI commands (attest / policy / trust)
 
 **Body:**
 ```
-Spec ref: §F-Sub-M
-Depends on: F-Sub-A
+Spec ref: §H-Sub-M
+Depends on: H-Sub-A
 
 Three short CLI commands exposing identity + trust + policy surface
 to users and to other agents reading the soul as data.
@@ -491,23 +491,23 @@ Acceptance:
 **Labels:** `spec-f`, `sub-m`, `identity`, `cli`
 **Priority:** Medium
 **Estimate:** 2
-**Blocked by:** F-Sub-A
+**Blocked by:** H-Sub-A
 
 ---
 
-## F-Sub-N — Agent skill installation (opt-in)
+## H-Sub-N — Agent skill installation (opt-in)
 
-**Title:** Spec F F-Sub-N — `life init --install-skills` agent skill installation (opt-in)
+**Title:** Spec H H-Sub-N — `life init --install-skills` agent skill installation (opt-in)
 
 **Body:**
 ```
-Spec ref: §F-Sub-N
+Spec ref: §H-Sub-N
 Depends on: none
 
 On explicit life init --install-skills or life setup prompt, write a
 "life" skill (SKILL.md frontmatter) to relevant agent runtime dirs so
 Claude Code, Cursor, Codex, Windsurf pick up life command surface
-without manual config. Implements L6-F8 (opt-in only).
+without manual config. Implements L6-H8 (opt-in only).
 
 Deliverables:
 - crates/cli/life-cli/skills/life.md — canonical skill content
@@ -531,14 +531,14 @@ Acceptance:
 
 ---
 
-## F-Sub-O — Multi-agent wallet hierarchy via Anima lineage
+## H-Sub-O — Multi-agent wallet hierarchy via Anima lineage
 
-**Title:** Spec F F-Sub-O — Multi-agent wallet hierarchy via Anima lineage + parent spend caps
+**Title:** Spec H H-Sub-O — Multi-agent wallet hierarchy via Anima lineage + parent spend caps
 
 **Body:**
 ```
-Spec ref: §F-Sub-O
-Depends on: F-Sub-A, F-Sub-F
+Spec ref: §H-Sub-O
+Depends on: H-Sub-A, H-Sub-F
 
 When agent spawns child agent (already supported via SoulBuilder::
 lineage_entry), child receives own DID + wallet AND parent-side spend cap.
@@ -566,7 +566,7 @@ Acceptance:
 **Labels:** `spec-f`, `sub-o`, `multi-agent`, `lineage`
 **Priority:** Medium
 **Estimate:** 5
-**Blocked by:** F-Sub-A, F-Sub-F
+**Blocked by:** H-Sub-A, H-Sub-F
 
 ---
 
@@ -575,18 +575,18 @@ Acceptance:
 Once Linear re-auth lands, file in this order so blocked-by edges resolve cleanly on first save:
 
 1. Umbrella (must exist first; subsequent tickets parent to it)
-2. F-Sub-A (mark Done immediately, link #1242)
-3. F-Sub-B, F-Sub-J, F-Sub-L, F-Sub-N (no blocked-by dependencies)
-4. F-Sub-C (blocks on A + B), F-Sub-D (A + B), F-Sub-E (A), F-Sub-F (A), F-Sub-M (A)
-5. F-Sub-G (E), F-Sub-O (A + F)
-6. F-Sub-I (B), F-Sub-H (B + J)
-7. F-Sub-K (H + J)
+2. H-Sub-A (mark Done immediately, link #1242)
+3. H-Sub-B, H-Sub-J, H-Sub-L, H-Sub-N (no blocked-by dependencies)
+4. H-Sub-C (blocks on A + B), H-Sub-D (A + B), H-Sub-E (A), H-Sub-F (A), H-Sub-M (A)
+5. H-Sub-G (E), H-Sub-O (A + F)
+6. H-Sub-I (B), H-Sub-H (B + J)
+7. H-Sub-K (H + J)
 
 Total: 1 umbrella + 15 children = 16 tickets.
 
 ## Cross-References
 
-- Spec doc: `core/life/docs/superpowers/specs/2026-05-13-spec-f-onboarding-capability-ux.md`
-- F-Sub-A implementation: [#1242](https://github.com/broomva/life/pull/1242)
+- Spec doc: `core/life/docs/superpowers/specs/2026-05-13-spec-h-onboarding-capability-ux.md`
+- H-Sub-A implementation: [#1242](https://github.com/broomva/life/pull/1242)
 - Spec doc PR: [#1243](https://github.com/broomva/life/pull/1243)
 - Source motivation: `~/Documents/Zero_xyz_Architecture_Research_20260513/research_report_20260513_zero_xyz_architecture.md`
