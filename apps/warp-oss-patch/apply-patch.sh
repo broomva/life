@@ -61,10 +61,24 @@ else
   ( cd "$UPSTREAM_DIR" && cargo build --release --bin warp-oss )
 fi
 
-BIN="$UPSTREAM_DIR/target/release/warp-oss"
-if [ -x "$BIN" ]; then
+# Resolve the binary path. The host workspace (life worktree) sets
+# `target-dir = ".target"` in `.cargo/config.toml`, which cargo inherits
+# when run from any subdirectory — so the actual binary may land in the
+# shared `.target/release/` rather than the per-subworkspace path.
+# Check both; report whichever exists.
+WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+BIN_CANDIDATES=(
+  "$WORKSPACE_ROOT/.target/release/warp-oss"
+  "$UPSTREAM_DIR/target/release/warp-oss"
+)
+BIN=""
+for c in "${BIN_CANDIDATES[@]}"; do
+  if [ -x "$c" ]; then BIN="$c"; break; fi
+done
+if [ -n "$BIN" ]; then
   echo "==> Built: $BIN"
 else
-  echo "ERROR: expected binary not found at $BIN" >&2
+  echo "ERROR: expected binary not found in any of:" >&2
+  printf '  - %s\n' "${BIN_CANDIDATES[@]}" >&2
   exit 1
 fi

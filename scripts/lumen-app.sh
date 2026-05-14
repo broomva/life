@@ -61,13 +61,33 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WARP_OSS_DIR="$REPO_ROOT/apps/warp-oss-patch/upstream"
-WARP_OSS_BIN="$WARP_OSS_DIR/target/release/warp-oss"
+# The worktree's .cargo/config.toml redirects `target-dir` to `.target/` at
+# the workspace root, so the produced binary lives there — not under the
+# warp-oss-patch subdir. Resolve both candidates and pick whichever exists.
+_warp_oss_bin_candidates=(
+  "$REPO_ROOT/.target/release/warp-oss"
+  "$WARP_OSS_DIR/target/release/warp-oss"
+)
+WARP_OSS_BIN=""
+for _c in "${_warp_oss_bin_candidates[@]}"; do
+  if [ -x "$_c" ]; then WARP_OSS_BIN="$_c"; break; fi
+done
+# Default to the shared-target path for build-time messaging when neither
+# exists yet.
+WARP_OSS_BIN="${WARP_OSS_BIN:-${_warp_oss_bin_candidates[0]}}"
 WORKDIR="/tmp/lumen-app"
 LIFEGW_LOG="/tmp/lumen-smoke/lifegw.log"
 LIFED_LOG="/tmp/lumen-smoke/lifed.log"
 APP_LOG="$WORKDIR/warp-oss.log"
 APP_PIDFILE="$WORKDIR/warp-oss.pid"
 PROC_NAME="warp-oss"
+# Minimal .app wrapper around the bare binary. Running the bare Mach-O
+# directly leaves macOS treating the process as a background app (no
+# NSApplication activation, no AppleEvent responses, no main window).
+# Wrapping the binary in a .app bundle with an Info.plist (CFBundleExecutable,
+# CFBundlePackageType=APPL, LSBackgroundOnly=false, NSPrincipalClass=NSApplication)
+# gives the OS the metadata it needs to wire the GUI lifecycle correctly.
+APP_BUNDLE="$WORKDIR/WarpOss.app"
 
 # Default Life endpoint contract (matches scripts/lumen-smoke.sh).
 WARP_SERVER_ROOT_URL="${WARP_SERVER_ROOT_URL:-https://127.0.0.1:8443}"
@@ -151,13 +171,60 @@ cmd_pid() {
   pgrep -x "$PROC_NAME" 2>/dev/null | head -1 || true
 }
 
-cmd_launch() {
-  ensure_workdir
+ensure_app_bundle() {
+  # Idempotently produce a minimal .app wrapper around $WARP_OSS_BIN so
+  # macOS treats it as a foreground GUI app. Cheap to recreate every
+  # launch; skips work if everything is already wired.
   if [ ! -x "$WARP_OSS_BIN" ]; then
     err "Binary not built: $WARP_OSS_BIN"
     err "Run: $0 build  (or $0 build --wgpu if Metal Toolchain unavailable)"
     return 1
   fi
+  mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
+  # Replace the symlink unconditionally so a rebuilt binary is always reflected.
+  ln -sf "$WARP_OSS_BIN" "$APP_BUNDLE/Contents/MacOS/warp-oss"
+  if [ ! -f "$APP_BUNDLE/Contents/Info.plist" ]; then
+    cat > "$APP_BUNDLE/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>WarpOss</string>
+  <key>CFBundleExecutable</key>
+  <string>warp-oss</string>
+  <key>CFBundleIdentifier</key>
+  <string>dev.warp.WarpOss</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>WarpOss</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.0.0</string>
+  <key>CFBundleVersion</key>
+  <string>0</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>10.14</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>LSBackgroundOnly</key>
+  <false/>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+</dict>
+</plist>
+PLIST
+  fi
+}
+
+cmd_launch() {
+  ensure_workdir
+  ensure_app_bundle || return 1
+
   local existing
   existing=$(cmd_pid)
   if [ -n "$existing" ]; then
@@ -165,21 +232,50 @@ cmd_launch() {
     return 1
   fi
 
-  info "Launching warp-oss"
+  info "Launching WarpOss.app"
   dim "  WARP_SERVER_ROOT_URL = $WARP_SERVER_ROOT_URL"
   dim "  WARP_WS_SERVER_URL   = $WARP_WS_SERVER_URL"
   dim "  WARP_AUTH_TOKEN      = $WARP_AUTH_TOKEN"
+  dim "  app bundle           = $APP_BUNDLE"
   dim "  log file             = $APP_LOG"
 
+  # Launch via `open` so macOS LaunchServices wires the .app bundle's
+  # Info.plist into NSApplication. `open -a PATH` activates the bundle;
+  # `--stdout`/`--stderr` route the binary's fds to our log file. We
+  # pass `-W` no because we want the call to return after launch (the
+  # app keeps running in its own process).
+  #
+  # We pass env vars through `--env`; LaunchServices doesn't inherit
+  # the calling shell's environment, so the bare `--env KEY=VALUE`
+  # form is the only reliable way to thread the Life endpoints in.
   WARP_SERVER_ROOT_URL="$WARP_SERVER_ROOT_URL" \
   WARP_WS_SERVER_URL="$WARP_WS_SERVER_URL" \
   WARP_AUTH_TOKEN="$WARP_AUTH_TOKEN" \
   RUST_LOG="${RUST_LOG:-warp_oss=debug,info}" \
-  "$WARP_OSS_BIN" >"$APP_LOG" 2>&1 &
-  local pid=$!
+  open --new --background \
+    --stdout "$APP_LOG" --stderr "$APP_LOG" \
+    --env WARP_SERVER_ROOT_URL="$WARP_SERVER_ROOT_URL" \
+    --env WARP_WS_SERVER_URL="$WARP_WS_SERVER_URL" \
+    --env WARP_AUTH_TOKEN="$WARP_AUTH_TOKEN" \
+    --env RUST_LOG="${RUST_LOG:-warp_oss=debug,info}" \
+    "$APP_BUNDLE"
+
+  # Wait up to ~5s for the process to register with launchd + acquire
+  # a PID under our bundle ID. Polling on pgrep is the cheapest path.
+  local pid="" tries=0
+  while [ -z "$pid" ] && [ "$tries" -lt 50 ]; do
+    pid=$(pgrep -x warp-oss 2>/dev/null | head -1 || true)
+    tries=$((tries + 1))
+    sleep 0.1
+  done
+  if [ -z "$pid" ]; then
+    err "warp-oss did not register a PID within 5 s — see $APP_LOG"
+    tail -30 "$APP_LOG" >&2 || true
+    return 1
+  fi
   echo "$pid" > "$APP_PIDFILE"
 
-  # Give it ~3 s to either crash or successfully create an NSApp window.
+  # Give it ~3 s to fully initialise NSApplication.
   sleep 3
   if ! kill -0 "$pid" 2>/dev/null; then
     err "warp-oss exited within 3 s — see $APP_LOG"
