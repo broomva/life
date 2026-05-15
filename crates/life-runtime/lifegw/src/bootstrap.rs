@@ -28,6 +28,7 @@ use tonic::service::Routes;
 use tonic_web::GrpcWebLayer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower_http::trace::TraceLayer;
 
 use life_runtime_proto::life::v1 as pb;
 
@@ -534,11 +535,22 @@ pub async fn serve_with_listener_and_signer(
     // back to the tonic-stack adapter for everything else (including
     // `/v1/agent/stream` which the WS layer handles inside the tonic
     // stack).
+    // Lumen Phase α (broomva): wrap the top-level router with
+    // tower-http's TraceLayer so every decoded HTTP request (post-TLS,
+    // post-routing) lands as a structured tracing span. Without this,
+    // lifegw was opaque at the per-request level — a Layer 2-GUI run
+    // with Lumen reaching out for `FreeAvailableModels` produced
+    // exactly zero log lines on the server side, leaving us unable to
+    // empirically distinguish "the call succeeded silently" from "the
+    // call was cached / skipped / failed at a lower layer". TraceLayer
+    // emits a span per request with method + path + status + latency at
+    // DEBUG, plus higher-level events at INFO when configured.
     let app: axum::Router<()> = axum::Router::new()
         .nest("/anima/custody", anima_router)
         .merge(agent_http_router)
         .merge(warp_graphql_router)
-        .fallback_service(tonic_stack_adapted);
+        .fallback_service(tonic_stack_adapted)
+        .layer(TraceLayer::new_for_http());
 
     // Convert the axum router's response body to tonic::body::Body so
     // the existing `serve_connections` body-type contract holds.

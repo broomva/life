@@ -56,7 +56,31 @@ and are addressable with two small, well-scoped patches.
 | `09-post-ca-trust-launch.png` | First launch after the CA was trusted — Lumen window placed at top-right |
 | `10-lumen-live-terminal.png` | **menu bar reads "Lumen"** — macOS LaunchServices treats it as a distinct app — interior shows a live zsh prompt loading from `~/.zsh_history`, conda `(base)` env active |
 | `lumen-post-ca-trust.log` | 190-line log: ChannelState dump → SQLite WAL recovered (220 frames from the prior run, in the isolated `dev.broomva.Lumen` subdir) → window open → `Received Bootstrapped hook` → `Shell is bootstrapped with session_id …` — **zero TLS errors over the entire run** (vs 4 in `lumen-after-rename.log` from the same earlier launch sequence) |
-| `lifegw-post-ca-trust.log` | lifegw log — currently bootstrap-only because the unauthenticated post-onboarding state doesn't trigger an HTTPS fetch immediately. Triggering the model picker or agent panel would surface real GraphQL traffic; that's a Lumen UI-driving exercise, not a TLS one |
+| `lifegw-post-ca-trust.log` | lifegw log at INFO — bootstrap-only. Pre-TraceLayer; can't distinguish "request succeeded silently" from "no request attempted". This ambiguity is what motivated Patch E. |
+
+### Post-TraceLayer state (request observability)
+
+| File | What it captures |
+|---|---|
+| `lifegw-with-tracelayer.log` | After wrapping the top-level axum router with `tower_http::trace::TraceLayer::new_for_http()`, every decoded HTTP request lands as a `tower_http::trace::on_request` + `on_response` pair with `method`, `uri`, `version`, `latency_ms`, `status`. Smoke client run produces exactly the 5 `POST /graphql/v2` + 1 `GET /graphql-ws` (`status=101` upgrade) entries we expect — empirical confirmation lifegw is now visible at the request level. |
+
+The first hard empirical finding from this observability:
+
+```
+21:56:45.105 DEBUG lifegw::bootstrap: tls handshake failed error=tls handshake eof
+21:56:52.366 DEBUG lifegw::bootstrap: tls handshake failed error=tls handshake eof
+```
+
+Both events are **from the running Lumen PID** (kept alive across the lifegw restart) — Lumen retries TLS automatically after the gateway comes back up, and both attempts fail with `tls handshake eof` (the peer closed the connection mid-handshake). No corresponding `request{...}` spans appear, confirming the failure is below the HTTP layer.
+
+This is a **separate gate** from the CA-trust one we closed at `54375190`. Curl + smoke client both succeed against the same lifegw with the same cert; only Lumen's TLS client closes the handshake early. Open questions:
+
+- Lumen's reqwest TLS may negotiate a protocol version (TLS 1.2 vs 1.3) that lifegw's rustls listener rejects
+- ALPN advertising mismatch (HTTP/2 vs HTTP/1.1)
+- Cipher suite intersection empty
+- Lumen's TLS client might be using the embedded Mozilla root store rather than the macOS keychain we trusted the CA in
+
+Investigation deferred to a follow-up session — TraceLayer makes the ground truth visible, which is the prerequisite for any further work.
 
 ## What the GUI run empirically proved
 
