@@ -51,13 +51,24 @@ pub async fn bind(cfg_tls: &TlsConfig, cfg_listen: &ListenConfig) -> LifegwResul
 }
 
 /// Build a rustls `TlsAcceptor` from PEM-encoded cert + key files.
+///
+/// Lumen Phase α (broomva): advertises `h2` and `http/1.1` via ALPN so
+/// strict HTTP/2-preferring clients (warp-oss/Lumen's `http_client::Client`
+/// sets `http2_keep_alive_*` unconditionally, which makes hyper's TLS
+/// client send ALPN offering h2; without server-side ALPN advertising
+/// the handshake closes EOF before any decoded HTTP reaches the router).
+/// The protocol selection still happens via `hyper_util::server::conn::
+/// auto::Builder` downstream — this only fixes the negotiation surface.
+/// Browsers, smoke client, and curl don't strictly require this (they
+/// fall back gracefully on missing ALPN) but Lumen empirically does.
 pub fn build_acceptor(cert_path: &Path, key_path: &Path) -> LifegwResult<TlsAcceptor> {
     let certs = load_certs(cert_path)?;
     let key = load_private_key(key_path)?;
-    let server_config = rustls::ServerConfig::builder()
+    let mut server_config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .map_err(|e| LifegwError::Tls(format!("server config: {e}")))?;
+    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Ok(TlsAcceptor::from(Arc::new(server_config)))
 }
 

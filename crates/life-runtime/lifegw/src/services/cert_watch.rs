@@ -200,10 +200,15 @@ impl CertReloader {
 fn build_server_config(cert_path: &Path, key_path: &Path) -> LifegwResult<rustls::ServerConfig> {
     let certs = load_certs(cert_path)?;
     let key = load_private_key(key_path)?;
-    let cfg = rustls::ServerConfig::builder()
+    let mut cfg = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .map_err(|e| LifegwError::Tls(format!("server config: {e}")))?;
+    // Lumen Phase α: must match `listener::build_acceptor`'s ALPN list
+    // exactly so cert rotations don't drop the h2 advertisement (which
+    // would re-break Lumen mid-flight). See the comment on
+    // `build_acceptor` for the full failure-mode explanation.
+    cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Ok(cfg)
 }
 
