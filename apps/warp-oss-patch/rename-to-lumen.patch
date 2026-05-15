@@ -1,0 +1,58 @@
+diff --git a/app/src/bin/oss.rs b/app/src/bin/oss.rs
+index dfe5454..35af65c 100644
+--- a/app/src/bin/oss.rs
++++ b/app/src/bin/oss.rs
+@@ -9,12 +9,23 @@ use warp_core::{
+ };
+ 
+ // Simple wrapper around warp::run() for Warp OSS builds.
++//
++// Lumen Phase α (broomva): the AppId is renamed from
++// ("dev", "warp", "WarpOss") to ("dev", "broomva", "Lumen") so the OSS
++// build's `project_path()` becomes `dev.broomva.Lumen`. This is what
++// determines the Application Support subdir under the team-level Group
++// Container (`~/Library/Group Containers/2BBY89MBSN.dev.warp/Library/
++// Application Support/{project_path}/`). Renaming guarantees the OSS
++// build's SQLite, keychain entries, and secure-storage live in a
++// completely separate subdir from the stable / preview / dev Warp
++// builds — so running Lumen alongside Warp.app no longer deadlocks
++// on shared DB / Keychain locks.
+ fn main() -> Result<()> {
+     let mut state = ChannelState::new(
+         Channel::Oss,
+         ChannelConfig {
+-            app_id: AppId::new("dev", "warp", "WarpOss"),
+-            logfile_name: "warp-oss.log".into(),
++            app_id: AppId::new("dev", "broomva", "Lumen"),
++            logfile_name: "lumen.log".into(),
+             server_config: WarpServerConfig::production(),
+             oz_config: OzConfig::production(),
+             telemetry_config: None,
+@@ -41,15 +52,15 @@ embed_plist::embed_info_plist_bytes!(r#"
+     <key>CFBundleDevelopmentRegion</key>
+     <string>English</string>
+     <key>CFBundleDisplayName</key>
+-    <string>WarpOss</string>
++    <string>Lumen</string>
+     <key>CFBundleExecutable</key>
+     <string>warp-oss</string>
+     <key>CFBundleIdentifier</key>
+-    <string>dev.warp.WarpOss</string>
++    <string>dev.broomva.Lumen</string>
+     <key>CFBundleInfoDictionaryVersion</key>
+     <string>6.0</string>
+     <key>CFBundleName</key>
+-    <string>WarpOss</string>
++    <string>Lumen</string>
+     <key>CFBundlePackageType</key>
+     <string>APPL</string>
+     <key>CFBundleShortVersionString</key>
+@@ -61,7 +72,7 @@ embed_plist::embed_info_plist_bytes!(r#"
+     <key>UIDesignRequiresCompatibility</key>
+     <true/>
+     <key>CFBundleURLTypes</key>
+-    <array><dict><key>CFBundleURLName</key><string>Custom App</string><key>CFBundleURLSchemes</key><array><string>warposs</string></array></dict></array>
++    <array><dict><key>CFBundleURLName</key><string>Custom App</string><key>CFBundleURLSchemes</key><array><string>lumen</string></array></dict></array>
+     <key>NSHumanReadableCopyright</key>
+     <string>© 2026, Denver Technologies, Inc</string>
+     </dict>

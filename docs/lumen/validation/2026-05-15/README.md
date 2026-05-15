@@ -6,30 +6,47 @@
 
 ## TL;DR
 
-For the first time, an agent has empirically observed the patched
-warp-oss GUI talking to (almost) lifegw. Three of the four
-remaining Layer 2-GUI gates are now closed:
+In a single session, an agent took warp-oss from "wire-protocol smoke
+only" to "**the OSS build is now a distinct macOS app named Lumen
+that gets all the way to the post-customize onboarding step without
+the OAuth dead-end**". Two new patches landed; five of the six
+Layer 2-GUI gates are now closed:
 
 | Gate | Status |
 |---|---|
 | Binary launches with full NSApplication lifecycle | ✅ |
 | Channel-override patch honored (`WARP_SERVER_ROOT_URL` flows through) | ✅ |
 | GUI window renders, onboarding flow is interactive | ✅ |
-| HTTPS connection from warp-oss to lifegw succeeds | ❌ **TLS trust gate** |
-| Sign-in step completes against a local IdP | ❌ **OAuth gate (browser flow)** |
+| **Onboarding sign-in step skipped on Channel::Oss** | ✅ (`skip-oss-login.patch`) |
+| **Lumen runs side-by-side with stable Warp without collision** | ✅ (`rename-to-lumen.patch`) |
+| HTTPS connection from Lumen to lifegw succeeds | ❌ **TLS trust gate** (only one left) |
 
 The two remaining gates are real **product** gaps (not tooling gaps)
 and are addressable with two small, well-scoped patches.
 
 ## Evidence files
 
+### Pre-patch state (before Patch B + Patch C)
+
 | File | What it captures |
 |---|---|
 | `01-warp-oss-launched.png` | "Customize your Warp" — onboarding slide 3 (Tools panel + tab styling) |
-| `02-onboarding-mid-flow.png` | "Sign in on your browser to continue" — the sign-in gate |
-| `03-onboarding-current.png` | Same screen ~2 s later (user did not advance — confirming gate) |
-| `lifegw-during-gui.log` | lifegw log slice (NOTE: bootstrap-only — no incoming HTTPS requests) |
-| `warp-oss-during-gui.log` | full warp-oss log including the 6 TLS-cert failures and 15 onboarding click events |
+| `02-onboarding-mid-flow.png` | "Sign in on your browser to continue" — the OAuth dead-end |
+| `03-onboarding-current.png` | Same screen ~2 s later (user did not advance — confirming the gate) |
+| `lifegw-during-gui.log` | bootstrap-only — no incoming HTTPS requests |
+| `warp-oss-during-gui.log` | 6 TLS-cert failures + 15 onboarding click events |
+
+### Post-patch state (Patch B + Patch C applied + binary rebuilt)
+
+| File | What it captures |
+|---|---|
+| `04-patched-binary-launched.png` | First launch after `skip-oss-login.patch` — window present but hidden behind other apps |
+| `05-activated.png` | After `tell System Events to set frontmost` — window still didn't surface (Group Container deadlock blocker found) |
+| `06-after-rename.png` | First launch after `rename-to-lumen.patch` — macOS prompt visible: "warp-oss would like to access data from other apps" |
+| `07-post-allow-dialog.png` | Operator clicked "Don't Allow" → app fell back to local `~/Library/Application Support/dev.broomva.Lumen/` → window painted |
+| `08-lumen-onboarding-tab-config.png` | **"Create your first tab config"** — proves the sign-in slide is now skipped on Channel::Oss |
+| `lumen-after-rename.log` | 107-line log: SQLite open, ChannelState dump showing `AppId { qualifier: "dev", organization: "broomva", application_name: "Lumen" }`, window open, GPU acquired |
+| `lifegw-during-lumen-run.log` | lifegw log during the Lumen run — TLS errors confirm gate is still the only blocker |
 
 ## What the GUI run empirically proved
 

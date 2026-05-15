@@ -28,6 +28,21 @@ PATCH_FILES=(
   # a single AND-clause on `requires_login`; all other channels behave
   # identically to upstream.
   "$SCRIPT_DIR/skip-oss-login.patch"
+  # Lumen α: rename the OSS build's AppId from ("dev", "warp", "WarpOss")
+  # to ("dev", "broomva", "Lumen") so the SQLite / keychain / secure-
+  # storage subdir under the team-level Group Container is fully
+  # disjoint from stable / preview / dev Warp builds. Without this, an
+  # already-running Warp.app holds locks on the shared
+  # `2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.WarpOss/`
+  # subpath and our binary deadlocks at init (silent log after
+  # "Unable to read user from secure storage"). Discovered when the
+  # rebuild-then-relaunch flow stopped advancing past that line while
+  # `/Applications/Warp.app/Contents/MacOS/stable` was still running.
+  # Also retitles the embedded Info.plist (bundle ID, display/CF name,
+  # URL scheme) so macOS LaunchServices treats Lumen as a distinct app.
+  # Binary file name stays `warp-oss` to avoid touching the Cargo bin
+  # target rename surface.
+  "$SCRIPT_DIR/rename-to-lumen.patch"
 )
 UPSTREAM_URL="https://github.com/warpdotdev/warp.git"
 

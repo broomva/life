@@ -87,7 +87,15 @@ PROC_NAME="warp-oss"
 # Wrapping the binary in a .app bundle with an Info.plist (CFBundleExecutable,
 # CFBundlePackageType=APPL, LSBackgroundOnly=false, NSPrincipalClass=NSApplication)
 # gives the OS the metadata it needs to wire the GUI lifecycle correctly.
-APP_BUNDLE="$WORKDIR/WarpOss.app"
+#
+# Lumen Phase α (broomva): the bundle is named `Lumen.app` and uses
+# `dev.broomva.Lumen` as its identifier so LaunchServices treats the OSS
+# build as a distinct macOS app from the user's installed Warp.app
+# (stable). This matches the AppId rename baked into the binary by
+# `rename-to-lumen.patch` (which controls the Application Support
+# subdir under the team-level Group Container, isolating SQLite +
+# keychain + secure storage).
+APP_BUNDLE="$WORKDIR/Lumen.app"
 
 # Default Life endpoint contract (matches scripts/lumen-smoke.sh).
 WARP_SERVER_ROOT_URL="${WARP_SERVER_ROOT_URL:-https://127.0.0.1:8443}"
@@ -192,15 +200,15 @@ ensure_app_bundle() {
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>WarpOss</string>
+  <string>Lumen</string>
   <key>CFBundleExecutable</key>
   <string>warp-oss</string>
   <key>CFBundleIdentifier</key>
-  <string>dev.warp.WarpOss</string>
+  <string>dev.broomva.Lumen</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>WarpOss</string>
+  <string>Lumen</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -232,7 +240,7 @@ cmd_launch() {
     return 1
   fi
 
-  info "Launching WarpOss.app"
+  info "Launching Lumen.app"
   dim "  WARP_SERVER_ROOT_URL = $WARP_SERVER_ROOT_URL"
   dim "  WARP_WS_SERVER_URL   = $WARP_WS_SERVER_URL"
   dim "  WARP_AUTH_TOKEN      = $WARP_AUTH_TOKEN"

@@ -1,0 +1,107 @@
+2026-05-15T19:44:47Z [INFO] Initial open file descriptor limit is 256, with a hard limit of 9223372036854775807
+2026-05-15T19:44:47Z [INFO] Increased open file descriptor limit to 2560
+2026-05-15T19:44:47Z [INFO] Spawning terminal server process...
+2026-05-15T19:44:47Z [INFO] Running terminal server...
+2026-05-15T19:44:47Z [INFO] application will finish launching
+2026-05-15T19:44:47Z [INFO] Migrating public settings from native store to settings.toml
+2026-05-15T19:44:47Z [INFO] Settings file migration complete — migrated 0 settings, 0 failed
+2026-05-15T19:44:47Z [INFO] Unable to read user from secure storage: SecureStorageError(NotFound)
+2026-05-15T20:09:32Z [INFO] Connecting to SQLite database
+2026-05-15T20:09:32Z [WARN] SQLite error 284 (Automatic indexing used - database might benefit from additional indexes): automatic index on object_permissions(subject_type)
+2026-05-15T20:09:32Z [INFO] Starting warp with channel state ChannelState { channel: Oss, additional_features: {}, config: ChannelConfig { app_id: AppId { qualifier: "dev", organization: "broomva", application_name: "Lumen" }, logfile_name: "lumen.log", server_config: WarpServerConfig { server_root_url: "https://127.0.0.1:8443", rtc_server_url: "wss://127.0.0.1:8443/graphql-ws", session_sharing_server_url: Some("wss://sessions.app.warp.dev"), firebase_auth_api_key: "AIza<redacted-warp-client-key>" }, oz_config: OzConfig { oz_root_url: "https://oz.warp.dev", workload_audience_url: None }, telemetry_config: None, autoupdate_config: None, crash_reporting_config: None, mcp_static_config: None } } and version None
+2026-05-15T20:09:32Z [INFO] Computing available system fonts
+2026-05-15T20:09:32Z [INFO] Initializing app services
+2026-05-15T20:09:32Z [INFO] Converting 0 legacy MCP servers into templatable MCP servers
+2026-05-15T20:09:32Z [INFO] Initialized execution profile model with state: Unsynced
+2026-05-15T20:09:32Z [INFO] dispatching global action for root_view:open_from_restored
+2026-05-15T20:09:32Z [INFO] Opening window with id 0
+2026-05-15T20:09:32Z [INFO] Using discrete GPU for rendering new window.
+2026-05-15T20:09:32Z [ERROR] failed to verify TLS certificate: invalid peer certificate: Other(OtherError("“localhost” certificate is not trusted: -67843"))
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [WARN] Failed to fetch free-tier LLMs from server: error sending request: error sending request for url (https://127.0.0.1:8443/graphql/v2?op=FreeAvailableModels): client error (Connect): invalid peer certificate: Other(OtherError("“localhost” certificate is not trusted: -67843"))
+2026-05-15T20:09:33Z [INFO] application can reach internet
+2026-05-15T20:09:33Z [INFO] received NSApplicationDidChangeScreenParametersNotification
+2026-05-15T20:09:33Z [INFO] dispatching global action for root_view:move_quake_mode_window_from_screen_change
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:33Z [INFO] window resized
+2026-05-15T20:09:33Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:38Z [INFO] application did become active
+2026-05-15T20:09:38Z [ERROR] failed to verify TLS certificate: invalid peer certificate: Other(OtherError("“localhost” certificate is not trusted: -67843"))
+2026-05-15T20:09:38Z [WARN] Failed to fetch free-tier LLMs from server: error sending request: error sending request for url (https://127.0.0.1:8443/graphql/v2?op=FreeAvailableModels): client error (Connect): invalid peer certificate: Other(OtherError("“localhost” certificate is not trusted: -67843"))
+2026-05-15T20:09:38Z [INFO] active window changed: Some(WindowId(0))
+2026-05-15T20:09:38Z [INFO] dispatching global action for root_view:update_quake_mode_state
+2026-05-15T20:09:38Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:38Z [INFO] window resized
+2026-05-15T20:09:38Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:38Z [INFO] dispatching typed action: onboarding::slides::intro_slide::IntroSlideAction::GetStartedClicked
+2026-05-15T20:09:39Z [INFO] dispatching typed action: onboarding::slides::intention_slide::IntentionSlideAction::NextClicked
+2026-05-15T20:09:40Z [INFO] dispatching typed action: onboarding::slides::customize_slide::CustomizeSlideAction::NextClicked
+2026-05-15T20:09:41Z [INFO] dispatching typed action: onboarding::slides::agent_slide::AgentSlideAction::NextClicked
+2026-05-15T20:09:41Z [INFO] dispatching typed action: onboarding::slides::third_party_slide::ThirdPartySlideAction::NextClicked
+2026-05-15T20:09:42Z [INFO] dispatching typed action: onboarding::slides::theme_picker_slide::ThemePickerSlideAction::NextClicked
+2026-05-15T20:09:42Z [INFO] Updated local unsynced default execution profile (no personal drive yet): ClientProfileId(0)
+2026-05-15T20:09:42Z [INFO] Updated local unsynced default execution profile (no personal drive yet): ClientProfileId(0)
+2026-05-15T20:09:42Z [INFO] Updated local unsynced default execution profile (no personal drive yet): ClientProfileId(0)
+2026-05-15T20:09:42Z [INFO] Updated local unsynced default execution profile (no personal drive yet): ClientProfileId(0)
+2026-05-15T20:09:42Z [INFO] Creating terminal model with 0 restored blocks
+2026-05-15T20:09:42Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T20:09:42Z [WARN] Action HandleFocusChange was dispatched, but no view handled it
+2026-05-15T20:09:42Z [WARN] Generator for GitDiffStats: could not prepare execution context
+2026-05-15T20:09:42Z [WARN] Generator for KubernetesContext: could not prepare execution context
+2026-05-15T20:09:42Z [WARN] Generator for GithubPullRequest: could not prepare execution context
+2026-05-15T20:09:42Z [WARN] Tried to update block filter query without active_filter_editor_block_index set
+2026-05-15T20:09:42Z [INFO] Starting shell /bin/zsh
+2026-05-15T20:09:42Z [INFO] Successfully spawned tty with pid: 94470
+2026-05-15T20:09:42Z [INFO] Successfully spawned child zsh process with pid 94470
+2026-05-15T20:09:42Z [WARN] Tried to render share modal without a model
+2026-05-15T20:09:42Z [WARN] SuggestedAgentModeWorkflowModal has not been initialized
+2026-05-15T20:09:42Z [WARN] No alert dialog was set for the native modal
+2026-05-15T20:09:42Z [INFO] Received InitShell hook
+2026-05-15T20:09:42Z [INFO] Received CommandFinished hook
+2026-05-15T20:09:42Z [INFO] Tried to exit the alternate screen, but it was already inactive
+2026-05-15T20:09:42Z [INFO] Block finished with new state DoneWithNoExecution
+2026-05-15T20:09:42Z [INFO] Incrementing stage from WarpInput to ScriptExecution
+2026-05-15T20:09:42Z [INFO] Received Precmd hook
+2026-05-15T20:09:43Z [WARN] Unable to create cloud preferences due to unset personal drive
+2026-05-15T20:09:43Z [INFO] notifying view observers and updating windows for timer id 130
+2026-05-15T20:09:43Z [INFO] notifying view observers and updating windows for timer id 131
+2026-05-15T20:09:44Z [INFO] Received Bootstrapped hook
+2026-05-15T20:09:44Z [INFO] Configured typeahead mode as ShellReported
+2026-05-15T20:09:44Z [INFO] creating a local executor!
+2026-05-15T20:09:44Z [INFO] Parsed shell version string: Some([Number(5), Number(9)])
+2026-05-15T20:09:44Z [INFO] Shell is bootstrapped with session_id SessionId(177887578228721)
+2026-05-15T20:09:44Z [INFO] Loading history from file /Users/broomva/.zsh_history for shell zsh
+2026-05-15T20:09:44Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T20:09:44Z [INFO] Received CommandFinished hook
+2026-05-15T20:09:44Z [INFO] Tried to exit the alternate screen, but it was already inactive
+2026-05-15T20:09:44Z [INFO] Block finished with new state DoneWithNoExecution
+2026-05-15T20:09:44Z [INFO] Incrementing stage from Bootstrapped to PostBootstrapPrecmd
+2026-05-15T20:09:44Z [WARN] Generator for GitDiffStats: could not prepare execution context
+2026-05-15T20:09:44Z [WARN] Generator for KubernetesContext: could not prepare execution context
+2026-05-15T20:09:44Z [WARN] Generator for GithubPullRequest: could not prepare execution context
+2026-05-15T20:09:44Z [INFO] Received Precmd hook
+2026-05-15T20:09:44Z [INFO] Received InputBuffer hook
+2026-05-15T20:09:44Z [WARN] Unable to create cloud preferences due to unset personal drive
