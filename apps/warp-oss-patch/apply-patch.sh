@@ -19,6 +19,15 @@ PATCH_FILES=(
   # so agents on machines without a working Metal Toolchain install can still
   # produce a runnable binary (via `--features warpui/experimental-wgpu-renderer`).
   "$SCRIPT_DIR/skip-metal-when-wgpu.patch"
+  # Lumen α: skip the post-customize browser-sign-in slide when running on
+  # Channel::Oss. Without this, onboarding dead-ends at "Sign in on your
+  # browser to continue" because warp-oss expects to delegate auth to
+  # `app.warp.dev`'s Firebase OAuth flow — which our local lifegw can't
+  # speak. Empirically discovered during the 2026-05-15 agent-driven GUI
+  # run (see `docs/lumen/validation/2026-05-15/README.md`). The change is
+  # a single AND-clause on `requires_login`; all other channels behave
+  # identically to upstream.
+  "$SCRIPT_DIR/skip-oss-login.patch"
 )
 UPSTREAM_URL="https://github.com/warpdotdev/warp.git"
 

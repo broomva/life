@@ -1,0 +1,34 @@
+diff --git a/app/src/root_view.rs b/app/src/root_view.rs
+index d8840d6..2eafb66 100644
+--- a/app/src/root_view.rs
++++ b/app/src/root_view.rs
+@@ -76,7 +76,7 @@ use crate::{
+     server::server_api::ServerApi,
+     workspace::{view::OnboardingTutorial, PaneViewLocator, Workspace, WorkspaceRegistry},
+ };
+-use crate::{features::FeatureFlag, ChannelState};
++use crate::{channel::Channel, features::FeatureFlag, ChannelState};
+ use crate::{send_telemetry_from_app_ctx, GlobalResourceHandles, GlobalResourceHandlesProvider};
+ use anyhow::Result;
+ use cfg_if::cfg_if;
+@@ -2186,9 +2186,19 @@ impl RootView {
+                 let ai_enabled = selected_settings.is_ai_enabled();
+                 let warp_drive_enabled = selected_settings.is_warp_drive_enabled();
+                 // With old onboarding, we ask user to log in before onboarding, so don't do it after onboarding completes.
++                //
++                // Lumen Phase α (broomva): the Channel::Oss build is wired to a
++                // local lifegw — not to `app.warp.dev`'s OAuth flow. The
++                // post-customize browser-sign-in step would dead-end here
++                // because (a) the auth URL points at our gateway, (b) lifegw
++                // doesn't speak Warp's Firebase auth handshake, (c) even if
++                // it did, warp-oss strictly verifies TLS so the dev cert is
++                // rejected. Skipping the gate on OSS only leaves all other
++                // channels (Stable/Preview/Dev/Local/Integration) unchanged.
+                 let requires_login = !is_logged_in
+                     && (ai_enabled || warp_drive_enabled)
+-                    && FeatureFlag::OpenWarpNewSettingsModes.is_enabled();
++                    && FeatureFlag::OpenWarpNewSettingsModes.is_enabled()
++                    && ChannelState::channel() != Channel::Oss;
+ 
+                 if requires_login {
+                     let tutorial = OnboardingTutorial::from(selected_settings.clone());
