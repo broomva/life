@@ -47,15 +47,28 @@ warn() { printf '\033[1;33m[lumen-smoke]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[lumen-smoke]\033[0m %s\n' "$*" >&2; exit 1; }
 
 ensure_dev_tls() {
+    # If the dedicated bootstrap script exists, defer to it — it produces a
+    # proper local CA + SAN-bearing leaf that strict TLS clients (Lumen,
+    # browsers, curl without -k) trust once the CA is in the system
+    # keychain. See `docs/lumen/dev-tls-setup.md` for the one-time sudo step.
+    # Falls back to an inline self-signed cert if the bootstrap script is
+    # absent (e.g., a partial checkout); that fallback is sufficient only
+    # for the `danger_accept_invalid_certs(true)` smoke client.
+    local bootstrap="$REPO_ROOT/scripts/dev-tls-bootstrap.sh"
     if [[ ! -f "$DEV_TLS_DIR/cert.pem" || ! -f "$DEV_TLS_DIR/key.pem" ]]; then
-        log "Generating self-signed dev-tls cert at $DEV_TLS_DIR"
-        mkdir -p "$DEV_TLS_DIR"
-        openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
-            -keyout "$DEV_TLS_DIR/key.pem" \
-            -out   "$DEV_TLS_DIR/cert.pem" \
-            -subj "/CN=localhost" \
-            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
-            >/dev/null 2>&1
+        if [[ -x "$bootstrap" ]]; then
+            log "Running dev-tls-bootstrap.sh to produce CA + SAN leaf"
+            "$bootstrap" >/dev/null
+        else
+            log "Generating self-signed dev-tls cert at $DEV_TLS_DIR (fallback)"
+            mkdir -p "$DEV_TLS_DIR"
+            openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
+                -keyout "$DEV_TLS_DIR/key.pem" \
+                -out   "$DEV_TLS_DIR/cert.pem" \
+                -subj "/CN=localhost" \
+                -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+                >/dev/null 2>&1
+        fi
     fi
 }
 
