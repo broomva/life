@@ -1,0 +1,195 @@
+2026-05-15T21:03:33Z [INFO] Initial open file descriptor limit is 256, with a hard limit of 9223372036854775807
+2026-05-15T21:03:33Z [INFO] Increased open file descriptor limit to 2560
+2026-05-15T21:03:33Z [INFO] Spawning terminal server process...
+2026-05-15T21:03:33Z [INFO] Running terminal server...
+2026-05-15T21:03:33Z [INFO] application will finish launching
+2026-05-15T21:03:33Z [INFO] Unable to read user from secure storage: SecureStorageError(NotFound)
+2026-05-15T21:04:13Z [INFO] Migrated SQLite database into application container
+2026-05-15T21:04:13Z [INFO] Migrated SQLite WAL into application container
+2026-05-15T21:04:13Z [INFO] Migrated SQLite shared memory file into application container
+2026-05-15T21:04:13Z [WARN] SQLite error 283 (A WAL mode database file was recovered): recovered 220 frames from WAL file /Users/broomva/Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.broomva.Lumen/warp.sqlite-wal
+2026-05-15T21:04:13Z [INFO] Connecting to SQLite database
+2026-05-15T21:04:13Z [INFO] Starting warp with channel state ChannelState { channel: Oss, additional_features: {}, config: ChannelConfig { app_id: AppId { qualifier: "dev", organization: "broomva", application_name: "Lumen" }, logfile_name: "lumen.log", server_config: WarpServerConfig { server_root_url: "https://127.0.0.1:8443", rtc_server_url: "wss://127.0.0.1:8443/graphql-ws", session_sharing_server_url: Some("wss://sessions.app.warp.dev"), firebase_auth_api_key: "AIza<redacted-warp-client-key>" }, oz_config: OzConfig { oz_root_url: "https://oz.warp.dev", workload_audience_url: None }, telemetry_config: None, autoupdate_config: None, crash_reporting_config: None, mcp_static_config: None } } and version None
+2026-05-15T21:04:13Z [INFO] Computing available system fonts
+2026-05-15T21:04:13Z [INFO] Initializing app services
+2026-05-15T21:04:13Z [INFO] Converting 0 legacy MCP servers into templatable MCP servers
+2026-05-15T21:04:13Z [INFO] Initialized execution profile model with state: Unsynced
+2026-05-15T21:04:14Z [INFO] Migrated codebase index snapshots into secure application container
+2026-05-15T21:04:14Z [INFO] dispatching global action for root_view:open_from_restored
+2026-05-15T21:04:14Z [INFO] Opening window with id 0
+2026-05-15T21:04:14Z [INFO] Using discrete GPU for rendering new window.
+2026-05-15T21:04:14Z [INFO] Computing available system fonts
+2026-05-15T21:04:14Z [INFO] Creating terminal model with 0 restored blocks
+2026-05-15T21:04:14Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:04:14Z [WARN] Action HandleFocusChange was dispatched, but no view handled it
+2026-05-15T21:04:14Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:04:14Z [WARN] Action HandleFocusChange was dispatched, but no view handled it
+2026-05-15T21:04:14Z [WARN] Tried to update block filter query without active_filter_editor_block_index set
+2026-05-15T21:04:14Z [INFO] Starting shell /bin/zsh
+2026-05-15T21:04:14Z [INFO] Successfully spawned tty with pid: 28276
+2026-05-15T21:04:14Z [INFO] Successfully spawned child zsh process with pid 28276
+2026-05-15T21:04:14Z [INFO] application can reach internet
+2026-05-15T21:04:14Z [WARN] Tried to render share modal without a model
+2026-05-15T21:04:14Z [WARN] No alert dialog was set for the native modal
+2026-05-15T21:04:14Z [WARN] SuggestedAgentModeWorkflowModal has not been initialized
+2026-05-15T21:04:14Z [INFO] Received InitShell hook
+2026-05-15T21:04:14Z [INFO] Received CommandFinished hook
+2026-05-15T21:04:14Z [INFO] Tried to exit the alternate screen, but it was already inactive
+2026-05-15T21:04:14Z [INFO] Block finished with new state DoneWithNoExecution
+2026-05-15T21:04:14Z [INFO] Incrementing stage from WarpInput to ScriptExecution
+2026-05-15T21:04:14Z [INFO] Received Precmd hook
+2026-05-15T21:04:14Z [INFO] received NSApplicationDidChangeScreenParametersNotification
+2026-05-15T21:04:14Z [INFO] dispatching global action for root_view:move_quake_mode_window_from_screen_change
+2026-05-15T21:04:14Z [INFO] window resized
+2026-05-15T21:04:14Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:14Z [INFO] window resized
+2026-05-15T21:04:14Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:14Z [INFO] window resized
+2026-05-15T21:04:14Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:14Z [INFO] window resized
+2026-05-15T21:04:14Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:14Z [INFO] window resized
+2026-05-15T21:04:14Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:14Z [INFO] window resized
+2026-05-15T21:04:14Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:14Z [INFO] window resized
+2026-05-15T21:04:14Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:14Z [INFO] window resized
+2026-05-15T21:04:14Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:14Z [INFO] window resized
+2026-05-15T21:04:14Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:14Z [INFO] window resized
+2026-05-15T21:04:14Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:14Z [INFO] window resized
+2026-05-15T21:04:14Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:14Z [INFO] window resized
+2026-05-15T21:04:14Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:14Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:04:14Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:14Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:16Z [INFO] Received Bootstrapped hook
+2026-05-15T21:04:16Z [INFO] Configured typeahead mode as ShellReported
+2026-05-15T21:04:16Z [INFO] creating a local executor!
+2026-05-15T21:04:16Z [INFO] Parsed shell version string: Some([Number(5), Number(9)])
+2026-05-15T21:04:16Z [INFO] Shell is bootstrapped with session_id SessionId(177887905432714)
+2026-05-15T21:04:16Z [INFO] Loading history from file /Users/broomva/.zsh_history for shell zsh
+2026-05-15T21:04:16Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:16Z [INFO] Received CommandFinished hook
+2026-05-15T21:04:16Z [INFO] Tried to exit the alternate screen, but it was already inactive
+2026-05-15T21:04:16Z [INFO] Block finished with new state DoneWithNoExecution
+2026-05-15T21:04:16Z [INFO] Incrementing stage from Bootstrapped to PostBootstrapPrecmd
+2026-05-15T21:04:16Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:04:16Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:16Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:16Z [WARN] Generator for GitDiffStats: could not prepare execution context
+2026-05-15T21:04:16Z [WARN] Generator for KubernetesContext: could not prepare execution context
+2026-05-15T21:04:16Z [WARN] Generator for GithubPullRequest: could not prepare execution context
+2026-05-15T21:04:16Z [INFO] Received Precmd hook
+2026-05-15T21:04:16Z [INFO] Received InputBuffer hook
+2026-05-15T21:04:17Z [INFO] application did become active
+2026-05-15T21:04:17Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::ResizeMove(Vector2F(F32x2([829.5586, 599.3906])))
+2026-05-15T21:04:17Z [INFO] active window changed: Some(WindowId(0))
+2026-05-15T21:04:17Z [INFO] dispatching global action for root_view:update_quake_mode_state
+2026-05-15T21:04:17Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:17Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::ResizeMove(Vector2F(F32x2([829.5586, 599.3906])))
+2026-05-15T21:04:17Z [INFO] window resized
+2026-05-15T21:04:17Z [INFO] dispatching global action for workspace:save_app
+2026-05-15T21:04:17Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:17Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::ResizeMove(Vector2F(F32x2([829.5586, 599.3906])))
+2026-05-15T21:04:17Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::ResizeMove(Vector2F(F32x2([829.5586, 599.3906])))
+2026-05-15T21:04:17Z [INFO] notifying view observers and updating windows for timer id 0
+2026-05-15T21:04:17Z [INFO] notifying view observers and updating windows for timer id 1
+2026-05-15T21:04:21Z [INFO] dispatching typed action: warp::workspace::action::WorkspaceAction::ToggleUserMenu
+2026-05-15T21:04:21Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:22Z [INFO] notifying view observers and updating windows for timer id 2
+2026-05-15T21:04:22Z [INFO] dispatching typed action: warp::menu::MenuAction::Close(false)
+2026-05-15T21:04:24Z [INFO] notifying view observers and updating windows for timer id 3
+2026-05-15T21:04:25Z [INFO] dispatching typed action: warp::workspace::action::WorkspaceAction::ToggleLeftPanel
+2026-05-15T21:04:27Z [INFO] dispatching typed action: warp::workspace::action::WorkspaceAction::ToggleLeftPanel
+2026-05-15T21:04:27Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:04:31Z [INFO] notifying view observers and updating windows for timer id 8
+2026-05-15T21:04:43Z [INFO] dispatching typed action: warp::editor::view::EditorAction::Select(Begin { position: DisplayPointAndClampDirection { point: DisplayPoint(Point { row: 0, column: 0 }), clamp_direction: Down }, add: false })
+2026-05-15T21:04:43Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearParentSelections
+2026-05-15T21:04:43Z [INFO] dispatching typed action: warp::editor::view::EditorAction::Focus
+2026-05-15T21:04:43Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:04:43Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:04:43Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:43Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:43Z [INFO] dispatching typed action: warp::editor::view::EditorAction::Select(End)
+2026-05-15T21:04:44Z [INFO] dispatching typed action: warp::editor::view::EditorAction::UserInsert(UserInput { .. })
+2026-05-15T21:04:44Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:44Z [INFO] dispatching typed action: warp::editor::view::EditorAction::UserInsert(UserInput { .. })
+2026-05-15T21:04:44Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:45Z [INFO] dispatching typed action: warp::editor::view::EditorAction::Enter
+2026-05-15T21:04:45Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:04:45Z [WARN] Received 'end_in_band_command_output' while not expecting to read in-band command output.
+2026-05-15T21:04:45Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:45Z [INFO] Received Preexec hook
+2026-05-15T21:04:45Z [INFO] Received CommandFinished hook
+2026-05-15T21:04:45Z [INFO] Tried to exit the alternate screen, but it was already inactive
+2026-05-15T21:04:45Z [INFO] Block finished with new state DoneWithExecution
+2026-05-15T21:04:45Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:04:45Z [INFO] dispatching typed action: warp::terminal::view::action::TerminalAction::ClearMarkedText
+2026-05-15T21:04:45Z [INFO] dispatching typed action: warp::terminal::view::action::TerminalAction::ClearMarkedText
+2026-05-15T21:04:45Z [INFO] Received Precmd hook
+2026-05-15T21:04:45Z [WARN] failed to get git_branches_for_command_corrections
+2026-05-15T21:04:46Z [INFO] Received InputBuffer hook
+2026-05-15T21:04:46Z [WARN] Unable to create cloud preferences due to unset personal drive
+2026-05-15T21:04:49Z [INFO] dispatching typed action: warp::editor::view::EditorAction::UserInsert(UserInput { .. })
+2026-05-15T21:04:49Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:49Z [INFO] dispatching typed action: warp::editor::view::EditorAction::UserInsert(UserInput { .. })
+2026-05-15T21:04:49Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:49Z [INFO] dispatching typed action: warp::editor::view::EditorAction::UserInsert(UserInput { .. })
+2026-05-15T21:04:49Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:49Z [INFO] dispatching typed action: warp::editor::view::EditorAction::UserInsert(UserInput { .. })
+2026-05-15T21:04:49Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:49Z [INFO] dispatching typed action: warp::editor::view::EditorAction::UserInsert(UserInput { .. })
+2026-05-15T21:04:49Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:49Z [INFO] dispatching typed action: warp::editor::view::EditorAction::UserInsert(UserInput { .. })
+2026-05-15T21:04:49Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:50Z [INFO] dispatching typed action: warp::editor::view::EditorAction::Backspace
+2026-05-15T21:04:50Z [INFO] dispatching typed action: warp::editor::view::EditorAction::Backspace
+2026-05-15T21:04:50Z [INFO] dispatching typed action: warp::editor::view::EditorAction::UserInsert(UserInput { .. })
+2026-05-15T21:04:50Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:50Z [INFO] dispatching typed action: warp::editor::view::EditorAction::UserInsert(UserInput { .. })
+2026-05-15T21:04:50Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:51Z [INFO] dispatching typed action: warp::editor::view::EditorAction::Backspace
+2026-05-15T21:04:51Z [INFO] dispatching typed action: warp::editor::view::EditorAction::Backspace
+2026-05-15T21:04:51Z [INFO] dispatching typed action: warp::editor::view::EditorAction::UserInsert(UserInput { .. })
+2026-05-15T21:04:51Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:52Z [INFO] dispatching typed action: warp::editor::view::EditorAction::UserInsert(UserInput { .. })
+2026-05-15T21:04:52Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:53Z [INFO] dispatching typed action: warp::editor::view::EditorAction::Backspace
+2026-05-15T21:04:53Z [INFO] dispatching typed action: warp::editor::view::EditorAction::Enter
+2026-05-15T21:04:53Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:04:53Z [WARN] Received 'end_in_band_command_output' while not expecting to read in-band command output.
+2026-05-15T21:04:53Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:04:53Z [INFO] Received Preexec hook
+2026-05-15T21:04:59Z [INFO] dispatching typed action: warp::terminal::view::action::TerminalAction::CtrlC
+2026-05-15T21:04:59Z [INFO] Received CommandFinished hook
+2026-05-15T21:04:59Z [INFO] Tried to exit the alternate screen, but it was already inactive
+2026-05-15T21:04:59Z [INFO] Block finished with new state DoneWithExecution
+2026-05-15T21:04:59Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:04:59Z [INFO] dispatching typed action: warp::terminal::view::action::TerminalAction::ClearMarkedText
+2026-05-15T21:04:59Z [INFO] dispatching typed action: warp::terminal::view::action::TerminalAction::ClearMarkedText
+2026-05-15T21:04:59Z [INFO] Received Precmd hook
+2026-05-15T21:04:59Z [WARN] failed to get git_branches_for_command_corrections
+2026-05-15T21:04:59Z [INFO] Received InputBuffer hook
+2026-05-15T21:05:00Z [INFO] dispatching typed action: warp::editor::view::EditorAction::Enter
+2026-05-15T21:05:00Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:05:00Z [WARN] Received 'end_in_band_command_output' while not expecting to read in-band command output.
+2026-05-15T21:05:00Z [INFO] dispatching typed action: warp::editor::view::EditorAction::ClearMarkedText
+2026-05-15T21:05:00Z [INFO] Received CommandFinished hook
+2026-05-15T21:05:00Z [INFO] Tried to exit the alternate screen, but it was already inactive
+2026-05-15T21:05:00Z [INFO] Block finished with new state DoneWithNoExecution
+2026-05-15T21:05:00Z [INFO] dispatching typed action: warp::pane_group::PaneGroupAction::HandleFocusChange
+2026-05-15T21:05:00Z [INFO] dispatching typed action: warp::terminal::view::action::TerminalAction::ClearMarkedText
+2026-05-15T21:05:00Z [INFO] dispatching typed action: warp::terminal::view::action::TerminalAction::ClearMarkedText
+2026-05-15T21:05:00Z [INFO] Received Precmd hook
+2026-05-15T21:05:00Z [WARN] failed to get git_branches_for_command_corrections
+2026-05-15T21:05:00Z [INFO] Received InputBuffer hook
+2026-05-15T21:05:28Z [INFO] notifying view observers and updating windows for timer id 22
+2026-05-15T21:05:28Z [INFO] dispatching global action for root_view:update_quake_mode_state
+2026-05-15T21:05:28Z [INFO] active window changed: None
+2026-05-15T21:05:28Z [INFO] dispatching global action for root_view:update_quake_mode_state
+2026-05-15T21:05:28Z [INFO] dispatching global action for workspace:save_app

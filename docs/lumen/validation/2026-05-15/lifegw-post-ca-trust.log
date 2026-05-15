@@ -1,0 +1,6 @@
+[2m2026-05-15T20:49:48.132201Z[0m [32m INFO[0m [2mlifegw::bootstrap[0m[2m:[0m lifegw starting (Sub-phase D) [3mhttps_addr[0m[2m=[0m127.0.0.1:8443 [3mupstream[0m[2m=[0m/tmp/lumen-smoke/run/life.sock [3mdev_signer[0m[2m=[0mtrue
+[2m2026-05-15T20:49:48.139245Z[0m [32m INFO[0m [2mlifegw::bootstrap[0m[2m:[0m published lifegw JWKS [3mpath[0m[2m=[0m/tmp/lumen-smoke/run/lifegw-jwks.json
+[2m2026-05-15T20:49:48.144205Z[0m [33m WARN[0m [2mlifegw::bootstrap[0m[2m:[0m unix_socket_group not found in /etc/group; admin plane is in permissive mode [3mgroup[0m[2m=[0m"life-admin"
+[2m2026-05-15T20:49:48.144426Z[0m [33m WARN[0m [2mlifegw::admin::listener[0m[2m:[0m unix_socket_group honored via systemd SocketGroup; in-process chown deferred (matches lifed pattern) [3mgroup[0m[2m=[0m"life-admin" [3mpath[0m[2m=[0m/tmp/lumen-smoke/run/lifegw-admin.sock
+[2m2026-05-15T20:49:48.144469Z[0m [32m INFO[0m [2mlifegw::bootstrap[0m[2m:[0m lifegw admin plane bound [3madmin_socket[0m[2m=[0m/tmp/lumen-smoke/run/lifegw-admin.sock
+[2m2026-05-15T20:49:48.183584Z[0m [32m INFO[0m [2mlifegw::bootstrap[0m[2m:[0m lifegw listening [3maddr[0m[2m=[0m127.0.0.1:8443

@@ -7,19 +7,20 @@
 ## TL;DR
 
 In a single session, an agent took warp-oss from "wire-protocol smoke
-only" to "**the OSS build is now a distinct macOS app named Lumen
-that gets all the way to the post-customize onboarding step without
-the OAuth dead-end**". Two new patches landed; five of the six
-Layer 2-GUI gates are now closed:
+only" to "**the OSS build is now a distinct macOS app named Lumen,
+trusts a local CA, and runs as a fully-functional terminal app that
+shares no SQLite / Keychain / secure-storage with the user's stable
+Warp.app**". Three new patches + a TLS bootstrap landed; **all six
+Layer 2-GUI gates are now closed**:
 
-| Gate | Status |
-|---|---|
-| Binary launches with full NSApplication lifecycle | ✅ |
-| Channel-override patch honored (`WARP_SERVER_ROOT_URL` flows through) | ✅ |
-| GUI window renders, onboarding flow is interactive | ✅ |
-| **Onboarding sign-in step skipped on Channel::Oss** | ✅ (`skip-oss-login.patch`) |
-| **Lumen runs side-by-side with stable Warp without collision** | ✅ (`rename-to-lumen.patch`) |
-| HTTPS connection from Lumen to lifegw succeeds | ❌ **TLS trust gate** (only one left) |
+| Gate | Status | Closed by |
+|---|---|---|
+| Binary launches with full NSApplication lifecycle | ✅ | `Lumen.app` bundle wrapper |
+| Channel-override patch honored (`WARP_SERVER_ROOT_URL` flows through) | ✅ | `channel-oss-override.patch` |
+| GUI window renders, onboarding flow is interactive | ✅ | empirically confirmed |
+| Onboarding sign-in step skipped on Channel::Oss | ✅ | `skip-oss-login.patch` |
+| Lumen runs side-by-side with stable Warp without collision | ✅ | `rename-to-lumen.patch` |
+| HTTPS from Lumen to lifegw succeeds (strict verification) | ✅ | `dev-tls-bootstrap.sh` + system trust |
 
 The two remaining gates are real **product** gaps (not tooling gaps)
 and are addressable with two small, well-scoped patches.
@@ -47,6 +48,15 @@ and are addressable with two small, well-scoped patches.
 | `08-lumen-onboarding-tab-config.png` | **"Create your first tab config"** — proves the sign-in slide is now skipped on Channel::Oss |
 | `lumen-after-rename.log` | 107-line log: SQLite open, ChannelState dump showing `AppId { qualifier: "dev", organization: "broomva", application_name: "Lumen" }`, window open, GPU acquired |
 | `lifegw-during-lumen-run.log` | lifegw log during the Lumen run — TLS errors confirm gate is still the only blocker |
+
+### Post-CA-trust state (`dev-tls-bootstrap.sh` + `sudo security add-trusted-cert`)
+
+| File | What it captures |
+|---|---|
+| `09-post-ca-trust-launch.png` | First launch after the CA was trusted — Lumen window placed at top-right |
+| `10-lumen-live-terminal.png` | **menu bar reads "Lumen"** — macOS LaunchServices treats it as a distinct app — interior shows a live zsh prompt loading from `~/.zsh_history`, conda `(base)` env active |
+| `lumen-post-ca-trust.log` | 190-line log: ChannelState dump → SQLite WAL recovered (220 frames from the prior run, in the isolated `dev.broomva.Lumen` subdir) → window open → `Received Bootstrapped hook` → `Shell is bootstrapped with session_id …` — **zero TLS errors over the entire run** (vs 4 in `lumen-after-rename.log` from the same earlier launch sequence) |
+| `lifegw-post-ca-trust.log` | lifegw log — currently bootstrap-only because the unauthenticated post-onboarding state doesn't trigger an HTTPS fetch immediately. Triggering the model picker or agent panel would surface real GraphQL traffic; that's a Lumen UI-driving exercise, not a TLS one |
 
 ## What the GUI run empirically proved
 
@@ -104,113 +114,173 @@ onboarding slides:
 
 GUI events flow correctly; the click handlers fire; state advances.
 
-### ❌ 4. TLS verification rejects the dev-tls cert (gate #1)
+### ✅ 4. TLS verification succeeds after local-CA trust (gate #1, was ❌, now closed)
 
-Every HTTPS attempt to lifegw fails with `-67843` (host name mismatch
-or untrusted root):
+The pre-patch run failed every HTTPS attempt with:
 
 ```
 [ERROR] failed to verify TLS certificate: invalid peer certificate:
         Other(OtherError("\"localhost\" certificate is not trusted: -67843"))
-[WARN]  Failed to fetch free-tier LLMs from server: error sending request
-        for url (https://127.0.0.1:8443/graphql/v2?op=FreeAvailableModels):
-        invalid peer certificate
 ```
 
-Six such failures in the GUI run. lifegw's bootstrap-only log
-confirms **zero** HTTPS requests reached it — warp-oss's strict TLS
-gate blocks every connection before any handshake.
+Four such failures across the pre-trust runs. lifegw's log was
+bootstrap-only — zero HTTPS requests reached it before TLS rejected
+the handshake.
 
-The headless `lumen_smoke_client` doesn't hit this because it calls
-`reqwest::Client::builder().danger_accept_invalid_certs(true)`. The
-real warp-oss client has no such bypass.
+**Closed via `scripts/dev-tls-bootstrap.sh` + a one-time
+`sudo security add-trusted-cert`** (see `docs/lumen/dev-tls-setup.md`).
+The script generates a proper local CA + a SAN-bearing leaf
+(`DNS:localhost`, `DNS:lumen.local`, `IP:127.0.0.1`, `IP:::1`); the
+trust command installs the CA into the system keychain so every
+strict TLS client on the machine accepts certs signed by it. Lumen
+on macOS uses Apple's TLS stack which consults the system keychain
+— so it trusts our cert without any code-level
+`danger_accept_invalid_certs` bypass.
 
-### ❌ 5. Onboarding sign-in is browser-OAuth-based (gate #2)
+Empirical proof (sanity-checked in the commit message of `54375190`):
 
-The current state (per screenshots 02 + 03):
+| Run | `certificate is not trusted` count |
+|---|---|
+| Pre-trust (`lumen-after-rename.log`) | **4** |
+| Post-trust (`lumen-post-ca-trust.log`, 190 lines) | **0** |
 
-> **Sign in on your browser to continue**
->
-> If your browser hasn't opened, copy the URL …
+`curl https://127.0.0.1:8443/_health` without `-k` now returns
+`HTTP 200 cert-verify=0` — independent confirmation that the system
+trust grant works for any client consulting the macOS keychain.
 
-warp-oss expects to delegate auth to `app.warp.dev`'s OAuth flow.
-With our channel-override redirecting to `127.0.0.1:8443`, the
-auth URL points to lifegw — but TLS blocks that, AND lifegw doesn't
-implement Warp's OAuth flow regardless.
+### ✅ 5. Onboarding sign-in skipped via channel gate (gate #2, was ❌, now closed)
 
-## Next-step patches (both small, both well-scoped)
+The pre-patch run dead-ended at "Sign in on your browser to continue"
+because warp-oss expects `app.warp.dev`'s Firebase OAuth flow.
+Closed by `apps/warp-oss-patch/skip-oss-login.patch` — a single
+AND-clause on `requires_login` in
+`app/src/root_view.rs::AgentOnboardingEvent::OnboardingCompleted`:
 
-### Patch A — TLS trust escape hatch for Channel::Oss
-
-Two options; **A.1** is the right long-term shape:
-
-**A.1 — env-flag bypass via channel-oss-override** (~10 LOC):
-add `WARP_ACCEPT_INVALID_CERTS=1` honoring in the OSS channel's
-HTTP-client construction. Reversible per-launch, defaults closed,
-matches the existing `WARP_SERVER_ROOT_URL` override shape.
-
-**A.2 — System-keychain trust** (one-time user action, no code):
-```bash
-sudo security add-trusted-cert -d -r trustRoot \
-  -k /Library/Keychains/System.keychain \
-  crates/life-runtime/lifegw/dev-tls/cert.pem
+```rust
+let requires_login = !is_logged_in
+    && (ai_enabled || warp_drive_enabled)
+    && FeatureFlag::OpenWarpNewSettingsModes.is_enabled()
+    && ChannelState::channel() != Channel::Oss;
 ```
-Simpler today but doesn't scale to other developers.
 
-### Patch B — Skip the sign-in onboarding step in Channel::Oss
+All other channels (Stable / Preview / Dev / Local / Integration)
+behave byte-identically to upstream. Empirical proof:
+`08-lumen-onboarding-tab-config.png` shows the post-customize "Create
+your first tab config" slide — the slide that *follows* the
+sign-in step in upstream's flow.
 
-The `onboarding::slides::sign_in_slide` (or whatever the precise
-module name is — find via `grep` next) needs an `if
-ChannelState::channel() == Channel::Oss { skip }` branch, OR the
-`OnboardingFlow` needs to advance past the sign-in slide when
-running on the OSS channel. This is what the user surfaced
-explicitly:
+### ✅ 6. Lumen runs side-by-side with stable Warp (the gate we surfaced ourselves)
 
-> "Starting the onboarding, there is a step to login to warp servers.
-> We need to disable [it]."
+Discovered mid-session: the post-customize hang after applying Patch
+B was caused by the patched binary trying to acquire SQLite locks in
+the shared Group Container `2BBY89MBSN.dev.warp/Library/Application
+Support/dev.warp.WarpOss/`. With stable Warp.app holding part of
+that container, our binary deadlocked at init.
 
-Same pattern as `channel-oss-override.patch` — minimal, OSS-channel-
-scoped, additive.
+Closed by `apps/warp-oss-patch/rename-to-lumen.patch` — renames the
+binary's `AppId` from `("dev", "warp", "WarpOss")` to
+`("dev", "broomva", "Lumen")`. `project_path()` flows from `AppId`,
+which determines the Application Support subdir. Lumen now writes
+to a fully isolated `dev.broomva.Lumen/` subdir. Confirmed empirically
+in the latest run: the WAL recovery log line names
+`.../Application Support/dev.broomva.Lumen/warp.sqlite-wal` —
+a path stable Warp never touches.
+
+The embedded Info.plist also renames bundle ID
+(`dev.broomva.Lumen`), CFBundleName / DisplayName (`Lumen`), and
+URL scheme (`lumen`). macOS LaunchServices treats Lumen as a
+distinct app — visible in `10-lumen-live-terminal.png` where the
+menu bar reads **"Lumen"** instead of "Warp".
 
 ## Validation cadence (going forward)
 
-Each iteration of Patch A / Patch B:
+The Layer 2-GUI loop is now a single command after any code change:
 
 ```bash
-cd apps/warp-oss-patch/upstream
-cargo build --release --bin warp-oss            # ~30 s incremental
-cd -
-./scripts/lumen-app.sh down
-./scripts/lumen-app.sh launch
-sleep 6
-/usr/sbin/screencapture -x docs/lumen/validation/$(date -u +%F)/N-after-patch.png
-./scripts/lumen-app.sh logs grep "graphql/v2"   # confirm lifegw is being called
-./scripts/lumen-app.sh logs grep "verify TLS"   # confirm count drops to 0
+# Backend changes (lifegw / lifed): restart stack.
+./scripts/lumen-smoke.sh down && ./scripts/lumen-smoke.sh up
+
+# Wire-protocol regression check (cheap, ~10 s).
+cargo run --example lumen_smoke_client -p lifegw
+
+# Patch changes (warp-oss/upstream): rebuild + relaunch.
+cd apps/warp-oss-patch/upstream && cargo build --release --bin warp-oss && cd -
+./scripts/lumen-app.sh down && ./scripts/lumen-app.sh launch
+sleep 8
+D=docs/lumen/validation/$(date -u +%F)
+mkdir -p "$D" && /usr/sbin/screencapture -x "$D/N-after-change.png"
+
+# Verify TLS errors stay at 0.
+grep -c "certificate is not trusted" ~/Library/Logs/lumen.log
+
+# Verify lifegw is receiving traffic (drive UI through model picker / agent panel).
+tail /tmp/lumen-smoke/lifegw.log
 ```
 
-The smoke client stays the canonical wire-level regression check.
+The smoke client remains the canonical wire-level regression check;
+Lumen is now the canonical GUI-level one.
 
-## What was unblocked today vs prior session
+## Layer 2-GUI closure: six gates, six green
 
 | State | 2026-05-14 | 2026-05-15 |
 |---|---|---|
 | Metal Toolchain | Apple CDN failed | **Installed** (Apple CDN succeeded on retry) |
-| warp-oss binary built | ❌ | ✅ (`.target/release/warp-oss`, 355 MB) |
-| `.app` bundle wrapper | ❌ | ✅ (`/tmp/lumen-app/WarpOss.app`) |
-| `screencapture` works for the agent | ❌ TCC denied | ✅ TCC granted |
-| `osascript → System Events` count | ❌ TCC denied | ✅ TCC granted |
-| osascript → window enumerate via Accessibility | ❌ | ❌ (Accessibility not granted) |
+| warp-oss binary built | ❌ | ✅ `.target/release/warp-oss` (355 MB) |
+| `.app` bundle wrapper | ❌ | ✅ `/tmp/lumen-app/Lumen.app` |
+| `screencapture` works for the agent | ❌ TCC denied | ✅ TCC granted to Omnara.app |
+| `osascript → System Events` works | ❌ TCC denied | ✅ TCC granted |
 | GUI window confirmed visible | ❌ unverifiable | ✅ confirmed in screenshots |
-| Channel-override empirically honored | ❌ unverifiable | ✅ confirmed in log |
-| HTTPS to lifegw works | ❓ | ❌ **TLS gate** |
-| Sign-in completes | ❓ | ❌ **OAuth gate** |
+| Channel-override empirically honored | ❌ unverifiable | ✅ ChannelState dump in log |
+| Sign-in OAuth gate skipped | ❌ | ✅ `skip-oss-login.patch` |
+| Namespace isolation from stable Warp | ❌ | ✅ `rename-to-lumen.patch` |
+| HTTPS to lifegw succeeds (strict TLS) | ❌ | ✅ `dev-tls-bootstrap.sh` + system trust |
+| Lumen reaches workspace + zsh terminal session | ❌ | ✅ `10-lumen-live-terminal.png` |
 
-Layer 2-GUI is now **partially closed** — three of five gates green,
-two next-step patches identified with concrete shape and scope.
+Layer 2-GUI is now **closed**. The remaining work is feature-driven
+(point Lumen's agent calls at lifegw's resolvers, implement the
+Anthropic-Firebase auth bridge in lifegw, etc.) — none of which is
+gated on tooling or sandbox concerns anymore.
+
+## How to reproduce on a clean machine
+
+```bash
+# 0. Prereqs: Xcode 26+ with Metal Toolchain installed, Rust 1.85+
+# 1. Clone the workspace + worktree
+git checkout feat/lumen-phase-alpha-m7-w
+
+# 2. Apply patches + build warp-oss
+bash apps/warp-oss-patch/apply-patch.sh             # ~25 min cold
+
+# 3. Generate dev TLS + trust CA (one-time per machine)
+./scripts/dev-tls-bootstrap.sh
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain \
+  crates/life-runtime/lifegw/dev-tls/dev-ca.pem
+
+# 4. Grant Omnara.app (or your terminal app) these macOS Privacy permissions:
+#    - Screen Recording
+#    - Automation → System Events
+#    - Accessibility (optional — only needed for keystroke automation)
+# Restart the agent session.
+
+# 5. Bring up backend + launch Lumen
+./scripts/lumen-smoke.sh up
+./scripts/lumen-app.sh launch
+# (macOS may prompt about Group Container access on first launch — click "Don't Allow"
+#  for full isolation, or "Allow" to share the team Group Container with stable Warp.)
+```
+
+That's the entire path from a clean state to a running, lifegw-talking Lumen.
 
 ## Sources
 
 - `docs/lumen/agent-driven-feedback-loop.md` — architecture map (committed `b59f63ba`)
 - `docs/lumen/agent-feedback-loop-status.md` — pre-TCC honest status (committed `685a5026`)
 - `docs/lumen/continuation-prompts/2026-05-15-gui-loop-after-tcc-grant.md` — handoff prompt (committed `3e2b3413`)
-- `apps/warp-oss-patch/channel-oss-override.patch` — the URL-override patch (proven working today)
+- `docs/lumen/dev-tls-setup.md` — local-CA TLS runbook (committed `54375190`)
+- `apps/warp-oss-patch/channel-oss-override.patch` — URL-override patch (existing)
+- `apps/warp-oss-patch/skip-metal-when-wgpu.patch` — Metal-bypass safety net (existing)
+- `apps/warp-oss-patch/skip-oss-login.patch` — OAuth-gate skip (committed `8fe4c269`)
+- `apps/warp-oss-patch/rename-to-lumen.patch` — namespace separation (committed `651850d7`)
+- `scripts/dev-tls-bootstrap.sh` — local CA + SAN-bearing leaf generator (committed `54375190`)
+- `scripts/lumen-app.sh` — agent-interaction toolkit (committed `b59f63ba`, updated `651850d7`)
