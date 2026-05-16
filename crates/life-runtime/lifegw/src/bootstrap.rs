@@ -529,10 +529,23 @@ pub async fn serve_with_listener_and_signer(
     };
     let warp_graphql_router = crate::warp_graphql::route::routes(warp_state);
 
+    // Lumen Phase α₁: credential bootstrap. POST /life/v1/auth/bootstrap
+    // mints a Tier-User cap so `scripts/lumen-app.sh` can hand it to
+    // the warp-oss binary via `WARP_USER_SECRET`, bypassing Firebase /
+    // OAuth-via-browser entirely. Shares the same `TierUserMinter` /
+    // signer / JWKS as the rest of lifegw — verifiers don't need to
+    // know about Phase α₁ specifically. Wire shape + security posture
+    // documented in `services/auth_bootstrap.rs`.
+    let auth_bootstrap_state = crate::services::auth_bootstrap::AuthBootstrapState {
+        minter: Arc::clone(&tier_user_minter),
+    };
+    let auth_bootstrap_router = crate::services::auth_bootstrap::router(auth_bootstrap_state);
+
     // Compose: top-level axum router that nests `/anima/custody/*`,
     // merges the `/v1/agent/create_session` route, merges the
-    // warp_graphql `/graphql/v2` + `/graphql-ws` routes, and falls
-    // back to the tonic-stack adapter for everything else (including
+    // warp_graphql `/graphql/v2` + `/graphql-ws` routes, merges the
+    // Phase α₁ `/life/v1/auth/bootstrap` route, and falls back to the
+    // tonic-stack adapter for everything else (including
     // `/v1/agent/stream` which the WS layer handles inside the tonic
     // stack).
     // Lumen Phase α (broomva): wrap the top-level router with
@@ -549,6 +562,7 @@ pub async fn serve_with_listener_and_signer(
         .nest("/anima/custody", anima_router)
         .merge(agent_http_router)
         .merge(warp_graphql_router)
+        .merge(auth_bootstrap_router)
         .fallback_service(tonic_stack_adapted)
         .layer(TraceLayer::new_for_http());
 

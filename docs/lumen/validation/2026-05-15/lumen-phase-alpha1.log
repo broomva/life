@@ -1,0 +1,6 @@
+2026-05-16T04:50:59Z [INFO] Initial open file descriptor limit is 256, with a hard limit of 9223372036854775807
+2026-05-16T04:50:59Z [INFO] Increased open file descriptor limit to 2560
+2026-05-16T04:50:59Z [INFO] Spawning terminal server process...
+2026-05-16T04:50:59Z [INFO] Running terminal server...
+2026-05-16T04:50:59Z [INFO] application will finish launching
+2026-05-16T04:50:59Z [INFO] Unable to read user from secure storage: SecureStorageError(NotFound)

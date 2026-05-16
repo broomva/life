@@ -229,6 +229,52 @@ PLIST
   fi
 }
 
+# Phase α₁ — bootstrap a Lumen Tier-User cap from lifegw and stash it
+# so the launcher can inject it via `WARP_USER_SECRET`. Lumen's upstream
+# `app/src/auth/auth_state.rs:133-138` reads that env var at startup and
+# wraps it as `Credentials::ApiKey` (or `Bearer` depending on prefix),
+# attaching it as `Authorization: Bearer <token>` on every HTTPS call.
+# This is what removes the Firebase / OAuth-via-browser leg of the
+# auth flow — there is no longer a `/login/remote` browser handoff.
+#
+# Returns the token on stdout, or non-zero on failure. The caller is
+# expected to capture stdout into a variable.
+#
+# Architecture context: `docs/lumen/architecture/2026-05-15-life-native-wiring.md`
+# §"Phase α₁ in detail". Endpoint contract:
+# `crates/life-runtime/lifegw/src/services/auth_bootstrap.rs`.
+lumen_bootstrap_token() {
+  local user_id="${1:-lumen-local}"
+  local endpoint="${WARP_SERVER_ROOT_URL%/}/life/v1/auth/bootstrap"
+  # `--cacert dev-tls/dev-ca.pem` is the cleanest: we pin the local CA
+  # we generated via `scripts/dev-tls-bootstrap.sh` rather than relying
+  # on `-k` (which would also work since the user trusted the CA in
+  # the system keychain, but pinning makes the script self-contained
+  # for callers running outside the macOS keychain context).
+  local ca_pem="$REPO_ROOT/crates/life-runtime/lifegw/dev-tls/dev-ca.pem"
+  local cacert_flag=""
+  if [ -f "$ca_pem" ]; then
+    cacert_flag="--cacert $ca_pem"
+  else
+    cacert_flag="-k"
+  fi
+  local response
+  response=$(curl -sS $cacert_flag -X POST "$endpoint" \
+    -H "Content-Type: application/json" \
+    -d "{\"user_id\":\"$user_id\",\"client_label\":\"Lumen GUI\"}" 2>&1) || {
+    err "bootstrap call to $endpoint failed: $response"
+    return 1
+  }
+  local token
+  token=$(printf '%s' "$response" \
+    | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("access_token",""))' 2>/dev/null)
+  if [ -z "$token" ]; then
+    err "bootstrap response missing access_token; raw: $response"
+    return 1
+  fi
+  printf '%s' "$token"
+}
+
 cmd_launch() {
   ensure_workdir
   ensure_app_bundle || return 1
@@ -240,10 +286,24 @@ cmd_launch() {
     return 1
   fi
 
+  # Phase α₁: mint a Tier-User cap from lifegw and stash it. If the
+  # mint fails, fall back to the legacy dev-cap-token shortcut (this
+  # keeps the launcher useful for testing the wire even when lifegw
+  # is down). The dev-cap-token shortcut path was the only auth
+  # plumbing available pre-Phase α₁.
+  local user_secret
+  if user_secret=$(lumen_bootstrap_token "lumen-local" 2>/dev/null) && [ -n "$user_secret" ]; then
+    ok "minted Tier-User cap from lifegw (${#user_secret} chars)"
+  else
+    warn "lifegw bootstrap mint failed; falling back to dev-cap-token shortcut"
+    user_secret="$WARP_AUTH_TOKEN"
+  fi
+
   info "Launching Lumen.app"
   dim "  WARP_SERVER_ROOT_URL = $WARP_SERVER_ROOT_URL"
   dim "  WARP_WS_SERVER_URL   = $WARP_WS_SERVER_URL"
-  dim "  WARP_AUTH_TOKEN      = $WARP_AUTH_TOKEN"
+  dim "  WARP_AUTH_TOKEN      = $WARP_AUTH_TOKEN  (legacy shortcut)"
+  dim "  WARP_USER_SECRET     = ${user_secret:0:40}...  (Phase α₁ Tier-User cap)"
   dim "  app bundle           = $APP_BUNDLE"
   dim "  log file             = $APP_LOG"
 
@@ -256,15 +316,22 @@ cmd_launch() {
   # We pass env vars through `--env`; LaunchServices doesn't inherit
   # the calling shell's environment, so the bare `--env KEY=VALUE`
   # form is the only reliable way to thread the Life endpoints in.
+  #
+  # `WARP_USER_SECRET` is the Phase α₁ Tier-User cap we minted above —
+  # Lumen reads it at `app/src/auth/auth_state.rs:133-138` and wraps as
+  # `Credentials::Bearer`, attaching it to every HTTPS/WS call. This is
+  # what bypasses Firebase + the OAuth-via-browser flow entirely.
   WARP_SERVER_ROOT_URL="$WARP_SERVER_ROOT_URL" \
   WARP_WS_SERVER_URL="$WARP_WS_SERVER_URL" \
   WARP_AUTH_TOKEN="$WARP_AUTH_TOKEN" \
+  WARP_USER_SECRET="$user_secret" \
   RUST_LOG="${RUST_LOG:-warp_oss=debug,info}" \
   open --new --background \
     --stdout "$APP_LOG" --stderr "$APP_LOG" \
     --env WARP_SERVER_ROOT_URL="$WARP_SERVER_ROOT_URL" \
     --env WARP_WS_SERVER_URL="$WARP_WS_SERVER_URL" \
     --env WARP_AUTH_TOKEN="$WARP_AUTH_TOKEN" \
+    --env WARP_USER_SECRET="$user_secret" \
     --env RUST_LOG="${RUST_LOG:-warp_oss=debug,info}" \
     "$APP_BUNDLE"
 
