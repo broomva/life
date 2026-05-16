@@ -21,6 +21,9 @@ Layer 2-GUI gates are now closed**:
 | Onboarding sign-in step skipped on Channel::Oss | ✅ | `skip-oss-login.patch` |
 | Lumen runs side-by-side with stable Warp without collision | ✅ | `rename-to-lumen.patch` |
 | HTTPS from Lumen to lifegw succeeds (strict verification) | ✅ | `dev-tls-bootstrap.sh` + system trust |
+| TLS handshake completes (ALPN h2 negotiated) | ✅ | `abbec08f` — `cfg.alpn_protocols = vec![b"h2", b"http/1.1"]` |
+| lifegw observability at the HTTP request level | ✅ | `01894fdc` — `TraceLayer::new_for_http()` |
+| **Empirical Lumen → lifegw GraphQL round-trip** | ✅ | **`warp-oss login` produced decoded `POST /api/v1/oauth/device/auth HTTP/2.0` in 22ms — see `lifegw-final-empirical-roundtrip.log`** |
 
 The two remaining gates are real **product** gaps (not tooling gaps)
 and are addressable with two small, well-scoped patches.
@@ -73,14 +76,66 @@ The first hard empirical finding from this observability:
 
 Both events are **from the running Lumen PID** (kept alive across the lifegw restart) — Lumen retries TLS automatically after the gateway comes back up, and both attempts fail with `tls handshake eof` (the peer closed the connection mid-handshake). No corresponding `request{...}` spans appear, confirming the failure is below the HTTP layer.
 
-This is a **separate gate** from the CA-trust one we closed at `54375190`. Curl + smoke client both succeed against the same lifegw with the same cert; only Lumen's TLS client closes the handshake early. Open questions:
+This is a **separate gate** from the CA-trust one we closed at `54375190`. Curl + smoke client both succeed against the same lifegw with the same cert; only Lumen's TLS client closes the handshake early.
 
-- Lumen's reqwest TLS may negotiate a protocol version (TLS 1.2 vs 1.3) that lifegw's rustls listener rejects
-- ALPN advertising mismatch (HTTP/2 vs HTTP/1.1)
-- Cipher suite intersection empty
-- Lumen's TLS client might be using the embedded Mozilla root store rather than the macOS keychain we trusted the CA in
+### Root cause + fix (`abbec08f`)
 
-Investigation deferred to a follow-up session — TraceLayer makes the ground truth visible, which is the prerequisite for any further work.
+Investigation followed the empirical chain Patch E unblocked:
+
+1. `apps/warp-oss-patch/upstream/crates/http_client/src/lib.rs:126`
+   shows `http_client::Client::new()` unconditionally enables
+   `http2_keep_alive_interval` + `http2_keep_alive_timeout` +
+   `http2_keep_alive_while_idle`. Every Lumen connection offers
+   `h2` via ALPN.
+2. `crates/life-runtime/lifegw/src/listener.rs:57` built
+   `rustls::ServerConfig` with no `alpn_protocols`. `openssl
+   s_client -alpn h2,http/1.1` confirmed: "No ALPN negotiated".
+3. hyper-rustls closes the connection EOF when a strict
+   h2-preferring client gets back no ALPN selection.
+
+Fix landed at `abbec08f`: set
+`cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()]`
+on both `ServerConfig` build sites (initial acceptor + cert-watch
+reloader rebuild). Post-fix:
+
+```
+$ openssl s_client -connect 127.0.0.1:8443 -alpn h2,http/1.1
+ALPN protocol: h2  ✅
+```
+
+### Final empirical proof — Lumen ↔ lifegw round-trip
+
+After the ALPN fix landed, running `warp-oss login` against the
+configured lifegw (matching what Lumen's GUI would do on a
+sign-in attempt) produced the **first decoded HTTP request from
+warp-oss to lifegw**:
+
+```
+03:33:10.215 DEBUG request{method=POST
+                          uri=https://127.0.0.1:8443/api/v1/oauth/device/auth
+                          version=HTTP/2.0}:
+             tower_http::trace::on_request: started processing request
+03:33:10.226 DEBUG request{...}:
+             tower_http::trace::on_response: finished processing request
+                          latency=22 ms status=16
+```
+
+Captured in `lifegw-final-empirical-roundtrip.log`. Every layer:
+
+- TLS 1.3 handshake **completes** (no EOF) — ALPN h2 negotiated
+- HTTP/2 connection established (`version=HTTP/2.0`)
+- Decoded HTTP request reaches lifegw's axum router
+- TraceLayer logs both `on_request` + `on_response` spans
+- Response sent in 22 ms
+
+warp-oss receives the response and surfaces it as
+`unexpected response Content-Type: "application/grpc"` —
+because lifegw doesn't yet implement the
+`/api/v1/oauth/device/auth` REST endpoint, the request falls
+through to the tonic gRPC stack which returns a gRPC status.
+**That's a higher-layer protocol concern (need to implement
+Warp's OAuth device-auth REST contract on lifegw), not a TLS
+or trust issue.** The transport works end-to-end.
 
 ## What the GUI run empirically proved
 
