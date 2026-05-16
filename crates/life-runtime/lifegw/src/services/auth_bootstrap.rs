@@ -50,11 +50,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::tier_user::TierUserMinter;
 
-/// State for the bootstrap route — wraps the shared `TierUserMinter`
-/// the rest of lifegw already uses for Tier-User cap minting.
+/// State for the bootstrap route. Carries:
+///
+/// - `minter`: a `TierUserMinter` configured with audience `"lumen"`
+///   so the minted JWS passes `warp_graphql`'s verifier in production
+///   (where `JwksSource::Url(...)` points at an external JWKS that
+///   includes the active kid).
+/// - `dev_signer_enabled`: when `true`, the bootstrap endpoint emits
+///   a `dev-cap-token-for-lumen/{user_id}` **dev-shortcut** token
+///   instead of a real JWS. This is the correct path for local
+///   dev because the warp_graphql route's outer JwksCache is built
+///   with `JwksSource::Url(cfg.jwks_url)` (Vercel-style), which
+///   does NOT include our fresh in-process dev signer's kid. The
+///   verifier's dev-shortcut path (gated to `dev_signer_enabled`)
+///   accepts the magic prefix without a JWKS lookup. See
+///   `verify_capability_token` in `auth/jwks.rs:626`.
 #[derive(Clone)]
 pub struct AuthBootstrapState {
     pub minter: Arc<TierUserMinter>,
+    pub dev_signer_enabled: bool,
 }
 
 /// Default scopes minted for a Lumen client. Narrow enough that a
@@ -116,29 +130,58 @@ async fn bootstrap_handler(
 ) -> Result<Json<BootstrapResponse>, AuthBootstrapError> {
     // Reject empty user_id early — the JWS spec allows empty `sub`
     // but every downstream consumer treats it as a malformed claim.
-    if req.user_id.trim().is_empty() {
+    let user_id = req.user_id.trim();
+    if user_id.is_empty() {
         return Err(AuthBootstrapError::InvalidUserId);
     }
 
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    if state.dev_signer_enabled {
+        // Dev-shortcut path: emit `dev-cap-token-for-lumen/{user_id}`.
+        // The warp_graphql verifier's `verify_capability_token` accepts
+        // this prefix when `dev_signer_enabled` is true, bypassing the
+        // JWKS lookup that would otherwise fail (the outer JwksCache
+        // uses `JwksSource::Url(cfg.jwks_url)` which doesn't contain
+        // our in-process dev signer's kid). The TTL is effectively
+        // unbounded server-side because there's no JWT-style `exp`
+        // field on a dev-shortcut token; we surface the same 15-min
+        // window the production path would use so launcher scripts
+        // can treat both paths uniformly.
+        let token = format!("dev-cap-token-for-lumen/{user_id}");
+        let exp = now + (15 * 60);
+        let expires_in = 15 * 60u64;
+        return Ok(Json(BootstrapResponse {
+            access_token: token,
+            token_type: "Bearer".to_string(),
+            user_id: user_id.to_string(),
+            expires_in,
+            expires_at: exp,
+        }));
+    }
+
+    // Production path: mint a real Tier-User JWS with audience
+    // `"lumen"`. The signer's kid MUST be present in the warp_graphql
+    // route's JwksCache (typically via `JwksSource::Url` pointing at a
+    // production JWKS that publishes the same key material lifegw's
+    // signer holds).
     let scopes: Vec<String> = LUMEN_DEFAULT_SCOPES
         .iter()
         .map(|s| (*s).to_string())
         .collect();
     let (token, exp) = state
         .minter
-        .mint(&req.user_id, scopes)
+        .mint(user_id, scopes)
         .map_err(|e| AuthBootstrapError::Mint(e.to_string()))?;
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
     let expires_in = (exp - now).max(0) as u64;
 
     Ok(Json(BootstrapResponse {
         access_token: token,
         token_type: "Bearer".to_string(),
-        user_id: req.user_id,
+        user_id: user_id.to_string(),
         expires_in,
         expires_at: exp,
     }))
@@ -192,15 +235,28 @@ mod tests {
     use http_body_util::BodyExt as _;
     use tower::ServiceExt as _;
 
-    fn test_state() -> AuthBootstrapState {
+    fn test_state_prod() -> AuthBootstrapState {
         let signer = Arc::new(StaticKeystore::generate_dev().expect("dev keystore"));
         let minter = Arc::new(TierUserMinter::with_defaults(signer, DEFAULT_TIER_USER_TTL));
-        AuthBootstrapState { minter }
+        AuthBootstrapState {
+            minter,
+            dev_signer_enabled: false,
+        }
+    }
+
+    fn test_state_dev() -> AuthBootstrapState {
+        let mut s = test_state_prod();
+        s.dev_signer_enabled = true;
+        s
+    }
+
+    fn test_state() -> AuthBootstrapState {
+        test_state_prod()
     }
 
     #[tokio::test]
-    async fn happy_path_returns_signed_token_with_lumen_scopes() {
-        let app = router(test_state());
+    async fn happy_path_prod_returns_signed_jws() {
+        let app = router(test_state_prod());
         let body = serde_json::json!({"user_id": "lumen-local"}).to_string();
         let resp = app
             .oneshot(
@@ -221,6 +277,33 @@ mod tests {
         assert!(parsed.access_token.contains('.'), "token must be a JWS");
         assert!(parsed.expires_in > 0);
         assert!(parsed.expires_at > 0);
+    }
+
+    #[tokio::test]
+    async fn happy_path_dev_returns_shortcut_token() {
+        let app = router(test_state_dev());
+        let body = serde_json::json!({"user_id": "lumen-local"}).to_string();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/life/v1/auth/bootstrap")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let parsed: BootstrapResponse = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed.token_type, "Bearer");
+        assert_eq!(parsed.user_id, "lumen-local");
+        assert_eq!(
+            parsed.access_token, "dev-cap-token-for-lumen/lumen-local",
+            "dev mode must emit the verify_capability_token shortcut shape"
+        );
+        assert_eq!(parsed.expires_in, 15 * 60);
     }
 
     #[tokio::test]

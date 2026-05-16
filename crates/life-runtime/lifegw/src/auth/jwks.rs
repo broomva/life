@@ -654,14 +654,33 @@ impl JwksCache {
                     "dev cap audience {aud} not in allowed list"
                 )));
             }
-            return Ok(VerifiedCapClaims {
-                aud: aud.to_string(),
-                sub: user_id.to_string(),
-                scope: vec![
+            // Synthesized scopes vary by audience. The original
+            // dev-shortcut shipped with anima.user.* scopes hardcoded
+            // (Spec D D-Sub-C, intended for `/anima/custody/*`); when
+            // Lumen Phase α₁ landed, Lumen-audience tokens need to
+            // also satisfy `warp_graphql` resolver-level scope checks
+            // (`agent:read`, `agent:dispatch`, `events:read`). Routing
+            // the synthesized scope set by audience keeps both surfaces
+            // working from the same dev-shortcut format without changing
+            // either resolver's `require_scope` calls.
+            let scope = match aud {
+                "lumen" => vec![
+                    "agent:read".to_string(),
+                    "agent:write".to_string(),
+                    "agent:dispatch".to_string(),
+                    "events:read".to_string(),
+                    "lumen:client".to_string(),
+                ],
+                _ => vec![
                     "anima.user.sign_auth".to_string(),
                     "anima.user.sign_wallet".to_string(),
                     "anima.user.get_pubkey".to_string(),
                 ],
+            };
+            return Ok(VerifiedCapClaims {
+                aud: aud.to_string(),
+                sub: user_id.to_string(),
+                scope,
             });
         }
 

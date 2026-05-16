@@ -532,12 +532,26 @@ pub async fn serve_with_listener_and_signer(
     // Lumen Phase α₁: credential bootstrap. POST /life/v1/auth/bootstrap
     // mints a Tier-User cap so `scripts/lumen-app.sh` can hand it to
     // the warp-oss binary via `WARP_USER_SECRET`, bypassing Firebase /
-    // OAuth-via-browser entirely. Shares the same `TierUserMinter` /
-    // signer / JWKS as the rest of lifegw — verifiers don't need to
-    // know about Phase α₁ specifically. Wire shape + security posture
-    // documented in `services/auth_bootstrap.rs`.
+    // OAuth-via-browser entirely.
+    //
+    // Audience MUST be `"lumen"` so the minted JWS passes the
+    // warp_graphql route's `verify_to_claims(jwks, token, "lumen",
+    // expected_issuer)` check. The shared `tier_user_minter` above
+    // is anima-audience (`anima.user-cap`) and would 401 at the
+    // graphql route. We construct a dedicated `lumen_minter` here
+    // using the SAME signer (shared `Arc<dyn KmsSigner>`) so the
+    // published JWKS already covers it — verifiers don't need
+    // bootstrap-specific config. TTL matches the anima default
+    // (15 min); future refresh-loop work can extend it.
+    let lumen_minter = Arc::new(crate::auth::tier_user::TierUserMinter::new(
+        Arc::clone(tier_user_minter.signer()),
+        cfg.auth.tier2_issuer.clone(),
+        "lumen".to_string(),
+        crate::auth::tier_user::DEFAULT_TIER_USER_TTL,
+    ));
     let auth_bootstrap_state = crate::services::auth_bootstrap::AuthBootstrapState {
-        minter: Arc::clone(&tier_user_minter),
+        minter: lumen_minter,
+        dev_signer_enabled: cfg.auth.dev_signer_enabled,
     };
     let auth_bootstrap_router = crate::services::auth_bootstrap::router(auth_bootstrap_state);
 
