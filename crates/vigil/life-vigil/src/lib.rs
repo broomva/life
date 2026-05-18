@@ -29,12 +29,14 @@ pub mod metrics;
 pub mod pricing;
 pub mod semconv;
 pub mod spans;
+pub mod tokens;
 
 pub use config::{LogFormat, OtlpProtocol, VigConfig};
 pub use envelope::{CircuitState, CostSource, LlmRequestEnvelope, LlmResponseEconomics};
 pub use jsonl::{JsonlWriter, LlmCallRecord};
 pub use metrics::GenAiMetrics;
 pub use pricing::{ModelPricing, PRICING_SNAPSHOT, estimate_cost, lookup_pricing};
+pub use tokens::estimate_tokens;
 
 use std::sync::OnceLock;
 
