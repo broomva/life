@@ -89,11 +89,57 @@ The model picker (`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`) calls `GET /v1
 
 **Rejected alternative**: return only Anthropic's seven IDs. That loses Spec E composability — the whole point of Life as silicon-fanout is that any backend reaches Claude Code via the same protocol surface.
 
-### L10-D7 — `count_tokens` runs at the edge, no upstream RPC
+### L10-D7 — `count_tokens` reuses Life's existing token + pricing infrastructure (no new tokenizer crate)
 
-`POST /v1/messages/count_tokens` returns an estimate from `tiktoken`-equivalent (Rust: `tiktoken-rs`) without an upstream call. Claude Code uses it for compact-window budgeting. Round-tripping to lifed adds latency for what is fundamentally a tokenizer probe.
+**Decision amended 2026-05-18 in response to Q8 review.** The original draft proposed adding `tiktoken-rs` as a new dependency. That is rejected — the workspace already has the surfaces needed:
 
-**Rejected alternative**: dispatch as a `lifed.Agent.CountTokens` RPC. That RPC doesn't exist and would require a new proto, a new lifed handler, and a new ArcanCall trait method for ~0 user-visible benefit. Edge-resolve.
+| What we need | Where it already lives |
+|---|---|
+| Token-count estimator | `crates/arcan/arcan-core/src/context_compiler.rs:85` — `estimate_tokens(text: &str) -> usize` (currently `fn`-private; pub-expose in J-Sub-F) |
+| Per-model pricing snapshot | `crates/vigil/life-vigil/src/pricing.rs` — `PRICING_SNAPSHOT` with Claude 4 family, GPT-4o, OpenRouter variants, USD/M-tokens |
+| Canonical Usage type | `crates/aios/aios-protocol/src/event.rs:803` — `TokenUsage { prompt_tokens, completion_tokens, total_tokens }` |
+| GenAI semconv attrs | `crates/vigil/life-vigil/src/semconv.rs` + `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` already emitted from `crates/arcan/arcan-aios-adapters/src/provider.rs:626` |
+| Billing wire | `crates/aios/aios-protocol/src/billing.rs:11` — `UsageRecord` (haima-consumed) |
+
+`POST /v1/messages/count_tokens` flow:
+
+```rust
+async fn count_tokens_handler(
+    State(state): State<AnthropicMessagesState>,
+    Json(req): Json<TokenCountRequest>,
+) -> impl IntoResponse {
+    let text = canonicalize_messages(&req.messages);
+    // Reuse the workspace's existing estimator — no new dep.
+    let input_tokens = arcan_core::context_compiler::estimate_tokens(&text);
+
+    // Vigil span for cost surfacing — gives haima budget signal without
+    // changing the response wire shape.
+    let span = tracing::info_span!(
+        "life.anthropic.count_tokens",
+        gen_ai.system = "life",
+        gen_ai.usage.input_tokens = input_tokens,
+        gen_ai.request.model = %req.model,
+        life.anima.did = %did,
+    );
+    let pricing = life_vigil::pricing::lookup_model(&req.model);
+    if let Some(p) = pricing {
+        let est_micros = (input_tokens as f64 * p.input_per_million / 1_000_000.0 * 1_000_000.0) as u64;
+        span.record("life.estimated_cost_usd_micros", &est_micros);
+    }
+
+    // Response wire shape: exactly what Anthropic returns — Claude Code compat.
+    Json(TokenCountResponse { input_tokens })
+}
+```
+
+Optional extension: emit `X-Life-Cost-Estimate-Usd-Micros: <n>` response header so haima-aware clients can see the cost surface without parsing the trace.
+
+**Rejected alternatives**:
+- New `tiktoken-rs` dependency. Adds a transitive Python-tokenizer port for what `arcan-core::context_compiler::estimate_tokens` already covers at ~4-chars/token resolution (acceptable for Claude Code's ±5% compact-window budgeting tolerance).
+- New `lifed.Agent.CountTokens` RPC. Round-trip latency for a tokenizer probe that can be edge-resolved.
+- A separate `lifegw-anthropic-codec/src/tokens.rs` module. Duplicates `arcan-core::context_compiler`'s estimator. The codec crate stays free of token-counting concerns; tokens are a Vigil/Haima surface, not a wire-codec surface.
+
+If higher accuracy is needed in Phase 2+: file a separate ticket to swap `estimate_tokens` for per-backend tokenizer calls (Spec E backends each know their model's encoding; this becomes a `BackendCapabilities::count_tokens` extension, not Spec J scope).
 
 ### L10-D8 — `CLAUDE_CODE_AUTO_COMPACT_WINDOW=190000` is the documented client quirk; we trust the client
 
@@ -656,16 +702,20 @@ When implementation lands, the following surfaces produce evidence:
   - `api/model_router.py` (tier-to-backend resolution)
   - `messaging/session.py` (tree-queued session model — *not* ported in Phase 1; reference for Phase 3+ Discord/Telegram ingress)
 
-## Open questions (for user review before Phase 1 dispatch)
+## Open questions — resolved 2026-05-18 user review
 
-1. **Spec letter**: J. F=auth-tier-1, G=external-trigger-ingress, H=onboarding (PR #1243), I=Khora-agent-environment (worktree in flight). Confirm Spec J is the right letter, or assign different.
-2. **arcan-proxy::AnthropicArcan**: uncommitted on local main. Action: file precursor PR to commit, or fold into J-Sub-B?
-3. **Praxis-side tools (J-Sub-I)**: defer to Phase 2 as outlined, or worth including in Phase 1?
-4. **Codec crate naming**: `lifegw-anthropic-codec` — alternatives: `life-anthropic-protocol`, `lifegw-protocol-anthropic`, `claude-code-protocol`. Naming locks the publishing-to-crates.io decision (L10-D4).
-5. **life-claude launcher (J-Sub-J)**: ship in Phase 1 (so onboarding demo works end-to-end) or defer to Phase 2?
-6. **Anthropic-version header policy**: hard-reject unknown versions (L10-D5) or warn-and-passthrough?
-7. **Replay-on-disconnect default**: Life-replay (current draft) or Anthropic-no-replay (matches real API behavior)?
-8. **`tiktoken-rs` accuracy vs per-backend probe**: tolerate ±5% estimation error in Phase 1, or invest in per-backend CountTokens RPC from the start?
+| # | Question | Resolution |
+|---|---|---|
+| 1 | Spec letter | **J confirmed.** F/G/H/I taken (subscription-auth / external-trigger-ingress / onboarding-PR-1243 / Khora-substrate-worktree). |
+| 2 | arcan-proxy::AnthropicArcan precursor | **Fold into J-Sub-B.** No separate precursor PR. J-Sub-B's first commit lands `crates/life-runtime/arcan-proxy/src/anthropic.rs` from the local working tree; subsequent commits add the `/v1/messages` route that uses it. Plan amended accordingly. |
+| 3 | Praxis-side tools | **Phase 2.** Phase 1 supports only Claude-Code-host tools (BYOT — bring-your-own-tool). Mode-detection (empty client tools + populated lifed tools → inline Praxis execution) deferred to J-Sub-I. |
+| 4 | Codec crate naming | **`lifegw-anthropic-codec`.** Matches workspace `life-runtime-*` pattern; clearly internal; doesn't claim to be a vendor-neutral protocol crate. Crates.io publication only after Phase 2 stabilises (re-evaluated then). |
+| 5 | `life-claude` launcher | **Phase 2.** Phase 1 ships with raw `claude` + env vars; documented in Phase 1 README. `apps/life-claude` analog of `fcc-claude` files in Phase 2 alongside J-Sub-J. |
+| 6 | `anthropic-version` policy | **Hard reject unknown.** Per L10-D5. Loud failure mode preferred over silent regression on protocol drift. |
+| 7 | Replay-on-disconnect default | **Life-replay.** Lago-backed replay from `from_sequence` is strict superset of Anthropic's no-replay semantics; Claude Code never expects replay so receiving it doesn't break. Opt-out header (`X-Life-Replay: never`) is a Phase 2 nice-to-have if any client breaks. |
+| 8 | Token counting | **Reuse existing Life infra; NO `tiktoken-rs` dep.** Per L10-D7 amendment. `arcan-core::context_compiler::estimate_tokens` + `life-vigil::pricing::PRICING_SNAPSHOT` + `aios-protocol::TokenUsage` + `gen_ai.usage.*` semconv all already exist. `count_tokens` route becomes a thin Vigil-span emitter over the existing estimator. Tokens are a Vigil/Haima surface, not a codec surface. |
+
+All eight resolved; Phase 1 sub-tickets unblocked from spec side.
 
 ## Phase 0 deliverables (this artifact)
 

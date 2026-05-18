@@ -10,14 +10,13 @@
 
 Phase 0 (spec + this plan + entity + PR) **complete on user sign-off**. Implementation sub-tickets file when the user approves the spec. This document is the **dispatch handoff** — when the user nods, the steps below execute without further negotiation.
 
-## Critical pre-condition (do this first, separately)
+## arcan-proxy::AnthropicArcan landing (folded into J-Sub-B per Q2 resolution)
 
-`crates/life-runtime/arcan-proxy/src/anthropic.rs` is uncommitted on the local working tree of main. It implements `AnthropicArcan` as an `ArcanCall` — the upstream Anthropic adapter Spec J Phase 1 relies on.
+`crates/life-runtime/arcan-proxy/src/anthropic.rs` is uncommitted on the local working tree of main. Per user review, **the precursor is folded into J-Sub-B** rather than a separate PR. J-Sub-B's first commit lands the AnthropicArcan adapter; subsequent commits add the `/v1/messages` route that consumes it. Single PR, single review cycle.
 
-**Action**: file a small precursor PR ("commit existing AnthropicArcan adapter") on a separate worktree off main. Body:
-> Cleanup commit. This adapter has been used in local development for ~weeks; landing on main so Spec J Phase 1 (BRO-1140) has a stable upstream call surface.
-
-This is **not** a Spec J sub-ticket — it's a precursor that unblocks J-Sub-B. ~15 minutes of work + PR cycle.
+Risks of folding (mitigated):
+- Larger PR diff — managed via clear commit boundaries (`feat(arcan-proxy): land AnthropicArcan ArcanCall adapter` → `feat(lifegw): add /v1/messages route consuming AnthropicArcan`).
+- Reviewer must validate both surfaces — acceptable because the route directly exercises the adapter via integration tests.
 
 ## Sub-tickets (file at dispatch time)
 
@@ -31,7 +30,7 @@ Each sub-ticket gets one worktree at `core/life/.worktrees/feat-bro-XXX-<slug>` 
 
 **Deliverables**:
 - New crate at `crates/life-runtime/lifegw-anthropic-codec/`
-- `Cargo.toml` with `serde`, `serde_json`, `tokio`, `futures`, `bytes`, `sha2`, `hex`, `tiktoken-rs`, `thiserror`, `tracing`, `life-runtime-proto` (NO substrate deps; see Spec J §[CI lane])
+- `Cargo.toml` with `serde`, `serde_json`, `tokio`, `futures`, `bytes`, `sha2`, `hex`, `thiserror`, `tracing`, `life-runtime-proto` (NO `tiktoken-rs` per Q8 resolution / L10-D7; NO substrate deps per Spec J §[CI lane])
 - `src/lib.rs` exports: `Encoder`, `BlockPolicyState`, `EmittedTracker`, `AnthropicSseEvent`, `AnthropicMessagesRequest`, `synthesize_sid`
 - `src/encoder.rs` — `pb::AgentEvent` → `AnthropicSseEvent` translation (state machine driven by `BlockPolicyState`)
 - `src/block_policy.rs` — port of `core/anthropic/native_sse_block_policy.py` (up-stream block re-mapping)
@@ -39,11 +38,12 @@ Each sub-ticket gets one worktree at `core/life/.worktrees/feat-bro-XXX-<slug>` 
 - `src/tools.rs` — tool_use block construction
 - `src/state.rs` — `EmittedTracker` for replay de-dup
 - `src/sid.rs` — `synthesize_sid` per Spec J L10-D2
-- `src/tokens.rs` — `count_tokens` via `tiktoken-rs`
 - `src/errors.rs` — Anthropic error event format
 - `src/contracts.rs` — wire-shape assertion helpers (test-only)
 - 25+ unit tests under `tests/`
 - `scripts/verify_dependencies_lifegw_anthropic_codec.sh` per Spec J §12
+
+**Explicitly NOT in this crate**: `tokens.rs` / token counting. Per Q8 / L10-D7, token counting reuses `arcan-core::context_compiler::estimate_tokens` (currently `fn`-private — pub-expose in J-Sub-F) and `life-vigil::pricing::PRICING_SNAPSHOT`. The codec crate stays free of cost/token concerns; tokens are a Vigil/Haima surface.
 
 **Reference**: `Alishahryar1/free-claude-code` files listed in Spec J §11 — port each one as a Rust module with the same behavior.
 
@@ -57,12 +57,14 @@ git worktree add -b feat/bro-XXXA-lifegw-anthropic-codec-scaffold \
 
 **Subagent brief**: see Spec J §[Rust port surface] for file-by-file mapping; port each Python module with TDD (failing test → impl → green). Reference free-claude-code's `tests/core/anthropic/test_native_sse_block_policy.py` for block-policy test cases — port them 1:1.
 
-### J-Sub-B — lifegw `/v1/messages` route + Tier-1↔Tier-2 wiring
+### J-Sub-B — lifegw `/v1/messages` route + Tier-1↔Tier-2 wiring + arcan-proxy AnthropicArcan commit
 
-**Estimate**: 5 working days
+**Estimate**: 5 working days (slightly larger after folding precursor, ~6 days realistic)
 **Owner**: subagent on worktree `feat-bro-XXXB-lifegw-v1-messages-route`
-**Blocked by**: J-Sub-A + precursor (arcan-proxy AnthropicArcan committed)
+**Blocked by**: J-Sub-A only (precursor folded in per Q2 resolution)
 **Blocks**: J-Sub-D, J-Sub-E, J-Sub-F
+
+**First commit (folded precursor)**: `feat(arcan-proxy): land AnthropicArcan ArcanCall adapter` — moves `crates/life-runtime/arcan-proxy/src/anthropic.rs` from working tree to committed history, with its module-level docs + the existing test (`parses_text_delta_and_finish`).
 
 **Deliverables**:
 - `crates/life-runtime/lifegw/src/services/anthropic_messages.rs` (new) — sibling of `agent_http.rs`, `anima_custody.rs`, `ws.rs`
@@ -144,9 +146,15 @@ git worktree add -b feat/bro-XXXA-lifegw-anthropic-codec-scaffold \
 **Deliverables**:
 - `GET /v1/models` handler in `services/anthropic_messages.rs`
 - Static model list (Phase 1) per Spec J §[Model picker]; placeholder for Spec E backend discovery integration in Phase 2
-- `POST /v1/messages/count_tokens` handler using `lifegw_anthropic_codec::tokens::count_tokens`
+- `POST /v1/messages/count_tokens` handler that:
+  - Calls `arcan_core::context_compiler::estimate_tokens` (currently `fn`-private at line 85 — small precursor commit in this sub-PR pub-exposes it)
+  - Emits `life.anthropic.count_tokens` Vigil span with `gen_ai.usage.input_tokens` + `life.estimated_cost_usd_micros` (from `life_vigil::pricing::lookup_model`)
+  - Optionally adds `X-Life-Cost-Estimate-Usd-Micros: <n>` response header
+  - Returns Anthropic-compat `{"input_tokens": <usize>}` body
 - Probe endpoints (`HEAD`, `OPTIONS`) for both
-- 6+ tests: `models_endpoint`, `models_with_no_thinking_variants`, `count_tokens_simple`, `count_tokens_multi_turn`, `count_tokens_with_tools`, `count_tokens_within_5pct_of_anthropic`
+- 6+ tests: `models_endpoint`, `models_with_no_thinking_variants`, `count_tokens_simple`, `count_tokens_multi_turn`, `count_tokens_with_tools`, `count_tokens_vigil_span_emitted`
+
+**Precursor inside this sub-PR**: `pub use context_compiler::estimate_tokens` (or `pub fn`) in `arcan-core`. Tiny API surface change; gated by existing arcan-core tests. Document the export in arcan-core/CLAUDE.md.
 
 **Acceptance**: Claude Code's `/model` picker shows the gateway-discovered list; `/v1/messages/count_tokens` returns plausible counts (±5% of anthropic.com reference).
 
@@ -176,20 +184,22 @@ git worktree add -b feat/bro-XXXA-lifegw-anthropic-codec-scaffold \
 ## Dispatch sequence (when user nods)
 
 ```
-Day 0:  Precursor PR (commit arcan-proxy::AnthropicArcan)
 Day 1:  Dispatch J-Sub-A (codec scaffold)        — subagent A worktree
         Dispatch J-Sub-C inside J-Sub-A's worktree (sid module is the codec's sid.rs)
 Day 6:  J-Sub-A merged → unblock J-Sub-B
 Day 7:  Dispatch J-Sub-B (lifegw route)          — subagent B worktree
-Day 12: J-Sub-B merged → unblock J-Sub-D, J-Sub-E, J-Sub-F
-Day 13: PARALLEL dispatch:
+        First commit in this PR: land arcan-proxy::AnthropicArcan (folded precursor per Q2)
+Day 13: J-Sub-B merged → unblock J-Sub-D, J-Sub-E, J-Sub-F
+Day 14: PARALLEL dispatch:
         - J-Sub-D (tool-use bridge)              — subagent D worktree
         - J-Sub-E (vigil + haima)                — subagent E worktree
-        - J-Sub-F (models + count_tokens)        — subagent F worktree
-Day 17: All three merged → unblock J-Sub-G
-Day 18: J-Sub-G smoke
-Day 19: Phase 1 done, BRO-1140 closes
+        - J-Sub-F (models + count_tokens via existing estimator) — subagent F worktree
+Day 18: All three merged → unblock J-Sub-G
+Day 19: J-Sub-G smoke
+Day 20: Phase 1 done, BRO-1140 closes
 ```
+
+Critical path now ~17-20 working days (was ~16 — folding precursor adds ~1 day to J-Sub-B for the AnthropicArcan commit + tests). Trade-off accepted per Q2 resolution.
 
 ## Risks during execution
 
