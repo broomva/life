@@ -1,0 +1,48 @@
+[package]
+name = "lifegw-anthropic-codec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Anthropic Messages SSE codec for lifegw — translates pb::AgentEvent streams into Anthropic Messages SSE responses, validates inbound requests, and synthesizes stateless sids from anima DID + canonical first user message. Edge-only, substrate-free (Spec J L10-D1)."
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Spec J L10-D1: this crate is **edge-only** and **substrate-free**.
+# It MAY depend on: serde / serde_json / tokio / futures / bytes / sha2 /
+# hex / thiserror / tracing / life-runtime-proto.
+# It MUST NOT depend on: arcand, lago-*, haima-*, anima-*, arcan-core,
+# arcan-harness, arcan-aios-adapters, inference-core. Enforced by
+# scripts/verify_dependencies_lifegw_anthropic_codec.sh.
+#
+# Per Spec J L10-D7 the codec is also free of token-counting concerns:
+# tokens are a Vigil/Haima surface, not a wire-codec surface.
+
+[dependencies]
+# wire / ABI — the only proto crate this codec depends on
+life-runtime-proto = { workspace = true }
+
+# canonical serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# byte-level + async — used for SSE chunk shapes + stream adapters
+bytes = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+
+# crypto + hex — used for synthesize_sid (Spec J L10-D2)
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# error machinery
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+life-runtime-proto = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true

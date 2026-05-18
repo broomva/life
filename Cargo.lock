@@ -6619,6 +6619,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "lifegw-anthropic-codec"
+version = "0.3.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "hex",
+ "life-runtime-proto",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "line-clipping"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
