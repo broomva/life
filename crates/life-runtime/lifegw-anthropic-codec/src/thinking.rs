@@ -9,14 +9,16 @@
 //! currently open, and at what block index".
 
 /// State of an in-flight thinking content block, if any.
+///
+/// The encoder doesn't store the thinking-block signature here — when
+/// upstream emits a `signature_delta`, the encoder routes it straight
+/// to the SSE stream as a `BlockDelta::SignatureDelta`. The state we
+/// need to carry across events is only "is a thinking block open, and
+/// at what downstream index"; signatures stream through.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ThinkingState {
     open: bool,
     block_index: u32,
-    /// Optional `signature` carried alongside the thinking trace.
-    /// Tracked so the encoder can attach it to the closing
-    /// `content_block_stop` when upstream chooses signed thinking.
-    pub signature: Option<u32>,
 }
 
 impl ThinkingState {
