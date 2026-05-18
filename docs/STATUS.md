@@ -1552,6 +1552,26 @@ All 5 pass green. Joined with the existing
 `anthropic_messages_integration.rs` tests, the lifegw test surface
 now covers Phase 1 end-to-end at the in-process level.
 
+**Three test paths for Phase 1:**
+
+- **Path 1 — in-process E2E** (`cargo test -p lifegw --test
+  spec_j_e2e_smoke`): the 5 scenarios above. Automated regression gate.
+- **Path 2 — Railway staging deploy**
+  (`docs/conformance/2026-05-18-claude-code-smoke-runbook.md`): live
+  Claude Code session against a Railway-hosted lifegw+lifed stack.
+  Produces the Phase 1 conformance evidence (Loom + Vigil traces + lago
+  replay + haima ledger).
+- **Path 3 — local interactive smoke** (`cargo run -p lifegw --example
+  local_smoke`, BRO-1165): boots the real lifegw router against an
+  in-process mock lifed UDS on a kernel-picked `127.0.0.1` port. Prints
+  the URL + dev bearer and serves until SIGINT. Same code paths as
+  production (codec, auth, rate-limit, Vigil) — only the substrate is
+  mocked. Used for iterating on the Anthropic Messages route, validating
+  Vigil span emission, and verifying the wire over a real TCP socket
+  without burning a Railway slot. See
+  `crates/life-runtime/lifegw/examples/README.md` for the full curl
+  recipes.
+
 **Operator runbook + deploy script (this PR's other deliverables):**
 
 - `docs/conformance/2026-05-18-claude-code-smoke-runbook.md` — seven
