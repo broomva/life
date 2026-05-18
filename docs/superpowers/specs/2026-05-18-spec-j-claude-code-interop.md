@@ -1,7 +1,7 @@
 # Spec J — Claude Code Interoperability (Anthropic Messages ↔ lifegw)
 
 **Date**: 2026-05-18
-**Status**: Phase 1 (5/6) shipped 2026-05-18; E2E smoke prep landed for operator execution (BRO-1146). J-Sub-A..F merged on `main`; in-process E2E scaffold + operator runbook + deploy script ride this PR. Runbook + script target the `lifegw-stack` Dockerfile (Option A, Topology A, mock-substrate fallback); they edit the baked `lifegw.toml` in place because lifegw reads TOML only.
+**Status**: **Phase 1 (6/6) SHIPPED 2026-05-18.** J-Sub-A..G all merged on `main`. Three test paths available: (1) `cargo test -p lifegw --test spec_j_e2e_smoke` in-process E2E, (2) `cargo run -p lifegw --example local_smoke` interactive local TCP, (3) Railway staging deploy via `scripts/deploy_lifegw_staging.sh` + operator runbook at `docs/conformance/2026-05-18-claude-code-smoke-runbook.md`. Live operator smoke session (BRO-1146 follow-up) remains as human-only step to close Phase 1 conformance evidence. Phase 2 candidates documented under `## Phase 2 backlog` in the ticket [BRO-1140](https://linear.app/broomva/issue/BRO-1140).
 **Sibling of**: Spec C₃ (lifegw edge gateway) — same wire-shape-at-the-edge pattern, applied to Anthropic Messages instead of native lifed gRPC/WS.
 **Owner**: `crates/life-runtime/lifegw/` + new `crates/life-runtime/lifegw-anthropic-codec/`
 **Linear umbrella**: [BRO-1140](https://linear.app/broomva/issue/BRO-1140/spec-j-claude-code-interoperability-anthropic-messages-lifegw)
