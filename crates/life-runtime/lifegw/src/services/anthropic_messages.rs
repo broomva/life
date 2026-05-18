@@ -48,8 +48,17 @@
 //!   with an Anthropic-shape error body. Body-level forward compatibility
 //!   stays the codec's choice (see codec's `request.rs` strictness policy).
 //! - **L10-D6**: model-name resolution (Anthropic vs life-routed) is
-//!   J-Sub-F's surface. This route passes `model` through to lifed
-//!   verbatim.
+//!   J-Sub-F's surface. The `model` field on the inbound Anthropic body
+//!   is **NOT** forwarded to lifed — `CreateSessionReq` and
+//!   `SendMessageReq` have no `model` field. The route captures
+//!   `req.model` only for the codec encoder, where it becomes
+//!   `gen_ai.response.model` plus the `model` field on the `message_start`
+//!   envelope. Backend selection (Anthropic upstream vs life-routed
+//!   substrate) is derived from agent identity inside lifed; the wire
+//!   model name only roundtrips through SSE framing today. J-Sub-F is
+//!   where actual model-based routing lands; until then the comment in
+//!   the PR body table that said "passes through to lifed" was wrong
+//!   and is corrected here.
 //! - **L10-D7**: no token counting. Token semantics are Vigil/Haima
 //!   surfaces (J-Sub-F).
 //!
@@ -78,7 +87,7 @@ use std::time::Duration;
 use axum::{
     Router,
     body::Body,
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::post,
@@ -89,6 +98,7 @@ use lifegw_anthropic_codec::{
     AnthropicError, AnthropicErrorKind, AnthropicMessagesRequest, AnthropicSseEvent,
     AnthropicVersion, CodecError, Encoder, synthesize_sid,
 };
+use tokio_util::sync::CancellationToken;
 use tonic::transport::Channel;
 use uuid::Uuid;
 
@@ -96,6 +106,7 @@ use life_runtime_proto::life::v1::{self as pb, agent_client::AgentClient};
 
 use crate::auth::jwks::JwksCache;
 use crate::auth::tier2::Tier2Minter;
+use crate::services::rate_limit::TokenBucketLimiter;
 
 /// Wall-clock cap on a single `/v1/messages` response stream.
 ///
@@ -130,6 +141,12 @@ const MAX_VERSION_HEADER_LEN: usize = 64;
 /// extractor defaults — we surface oversize bodies as a 413 with an
 /// Anthropic-shape error rather than letting axum reject them with the
 /// default text body.
+///
+/// Fix-round 1 — I-4: this constant is enforced at the *router* level
+/// via [`DefaultBodyLimit::max`] so axum rejects oversize bodies during
+/// the body read (streaming-time) rather than after the full payload
+/// has been buffered into a `Bytes` extractor. The post-extract size
+/// check has been removed as redundant.
 const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 
 // ─── Router state ───────────────────────────────────────────────────────
@@ -143,6 +160,15 @@ pub struct AnthropicMessagesState {
     pub minter: Arc<Tier2Minter>,
     /// Pre-dialed lifed UDS channel. Cheap to clone (internally `Arc`'d).
     pub upstream: Channel,
+    /// Fix-round 1 — C-1: per-user + per-IP token-bucket limiter
+    /// shared with `AuthLayer`. The handler consults the same limiter
+    /// the tonic stack uses post–Tier-1-verify and pre–Tier-2-mint, so
+    /// `/v1/messages` traffic is gated by the same budget. Until the
+    /// limiter exists every Anthropic-shaped POST holds a streaming
+    /// slot for up to `HARD_STREAM_TIMEOUT` (600 s) without back-pressure
+    /// — strictly worse than the `agent_http` precedent (10 s unary).
+    /// Tests opt out by leaving this `None`.
+    pub rate_limiter: Option<TokenBucketLimiter>,
 }
 
 /// Mount the route.
@@ -157,6 +183,11 @@ pub fn router(state: AnthropicMessagesState) -> Router {
             "/v1/messages",
             post(messages_handler).options(probe).head(probe),
         )
+        // I-4 (fix-round 1): cap body size at the router boundary so
+        // axum rejects oversized payloads during the read rather than
+        // after the entire body has been buffered into `Bytes`. axum's
+        // default ceiling is 2 MiB; we override to MAX_BODY_BYTES.
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
 }
 
@@ -238,14 +269,43 @@ async fn messages_handler(
         }
     };
 
-    // 3. Enforce body size.
-    if body.len() > MAX_BODY_BYTES {
-        return anthropic_http_error(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            AnthropicErrorKind::InvalidRequestError,
-            format!("request body exceeds {MAX_BODY_BYTES} bytes"),
-        );
+    // C-1 (fix-round 1): rate-limit check AFTER Tier-1 verify (so we
+    // have a real `user_id` to key the bucket on) and BEFORE Tier-2
+    // mint + the upstream saga (so over-budget traffic doesn't pay
+    // the JWS-mint CPU cost or hold a streaming slot). The limiter is
+    // the same handle `AuthLayer` uses for the tonic stack, so a user
+    // who exhausts their bucket across `/v1/agent/*` will also hit the
+    // limit on `/v1/messages` (single shared budget per user).
+    //
+    // Per the prompt's hard rule, rate-limit failures map to HTTP 429
+    // + Anthropic-shape `rate_limit_error` body (the body shape lifed
+    // would otherwise produce via `ResourceExhausted` → 429 mapping
+    // for an upstream-side rejection).
+    if let Some(limiter) = state.rate_limiter.as_ref() {
+        let peer_ip = peer_ip_from_request(&headers)
+            .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+        let decision = limiter.check(&tier1.user_id, peer_ip);
+        if decision.is_reject() {
+            tracing::debug!(
+                user = %tier1.user_id,
+                ip = %peer_ip,
+                reason = decision.reason(),
+                "rate limit rejected /v1/messages request"
+            );
+            return anthropic_http_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                AnthropicErrorKind::RateLimitError,
+                decision.reason().to_string(),
+            );
+        }
+        // Suppress unused-decision warning when reason is informational only.
+        let _ = decision;
     }
+
+    // 3. Body size is enforced at the router level via
+    //    `DefaultBodyLimit::max(MAX_BODY_BYTES)` — axum rejects
+    //    oversized requests with a 413 during the body read before
+    //    this handler is even called. See `router(...)` below.
 
     // 4. Parse the request body via the codec (forward-compatible — see
     //    codec's `request.rs` strictness policy).
@@ -308,8 +368,24 @@ async fn messages_handler(
         return err;
     }
 
+    // I-5 (fix-round 1): a `CancellationToken` ties the SendMessage
+    // upstream drain task to the SSE response body lifecycle. The
+    // body-stream holds the matching `DropGuard`; when axum drops the
+    // body (client disconnect, hyper teardown, error), the guard fires
+    // `cancel()` and the drain stops cleanly instead of burning a
+    // connection-pool slot for up to HARD_STREAM_TIMEOUT.
+    let cancel = CancellationToken::new();
+
     let last_user_content = extract_last_user_content(&req);
-    if let Err(err) = send_message(&mut agent_client, &tier2, &sid, &last_user_content).await {
+    if let Err(err) = send_message(
+        &mut agent_client,
+        &tier2,
+        &sid,
+        &last_user_content,
+        cancel.clone(),
+    )
+    .await
+    {
         return err;
     }
 
@@ -325,7 +401,7 @@ async fn messages_handler(
     let message_id = format!("msg_{}", Uuid::new_v4().simple());
     let encoder = Encoder::new(message_id, req.model.clone());
 
-    let sse_body = build_sse_body(encoder, event_stream);
+    let sse_body = build_sse_body(encoder, event_stream, cancel);
 
     // 9. Compose response. Anthropic clients require a content-type of
     //    `text/event-stream`; `X-Accel-Buffering: no` neutralises nginx
@@ -395,11 +471,19 @@ async fn create_session(
 /// `lifed.Agent.SendMessage` call. lifed broadcasts the resulting
 /// events through its fanout registry; we read them back via
 /// `StreamSession`.
+///
+/// The upstream `SendMessage` returns its own event stream which we
+/// intentionally drop (`StreamSession` is canonical — see the WS
+/// dispatcher's same invariant). I-5 fix-round 1: the drain task obeys
+/// the caller-provided `cancel` token, so a client disconnect cancels
+/// the drain immediately instead of holding the upstream slot for up
+/// to `HARD_STREAM_TIMEOUT`.
 async fn send_message(
     client: &mut AgentClient<Channel>,
     tier2: &str,
     sid: &str,
     content: &str,
+    cancel: CancellationToken,
 ) -> Result<(), Response> {
     let mut req = tonic::Request::new(pb::SendMessageReq {
         sid: Some(aios_proto::aios::v1::SessionId {
@@ -431,21 +515,37 @@ async fn send_message(
         }
     };
 
-    // Drop the SendMessage event stream — like the WS dispatcher, we
-    // rely on `Agent.StreamSession` as the canonical event source so
-    // we don't double-emit on lifed's fanout registry. Spawning a
-    // background drain keeps the upstream from blocking on us if it
-    // expects to push the full reply through this RPC; we cap it at
-    // the hard timeout to avoid lingering tasks on a misbehaving
-    // upstream.
+    // Spawn a background drain that pulls (and drops) the SendMessage
+    // reply stream. We rely on `Agent.StreamSession` as the canonical
+    // event source so we don't double-emit on lifed's fanout registry.
+    //
+    // The drain stops on any of three signals (whichever wins):
+    //   - `cancel.cancelled()` — client disconnected / response body
+    //     dropped (the new behaviour).
+    //   - upstream EOF / error — natural stream end.
+    //   - HARD_STREAM_TIMEOUT — backstop against pathologically slow
+    //     upstreams that never close.
+    //
+    // Without the cancel arm, a client-side disconnect at second 5
+    // would still pump for up to 595 more seconds, holding the tonic
+    // client + upstream pool slot.
     tokio::spawn(async move {
         let mut s = resp.into_inner();
-        let _ = tokio::time::timeout(HARD_STREAM_TIMEOUT, async {
-            while s.next().await.is_some() {
-                // Intentionally drop. StreamSession is canonical.
+        let drain = async {
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => break,
+                    next = s.next() => {
+                        if next.is_none() {
+                            break;
+                        }
+                        // Intentionally drop the frame. StreamSession is canonical.
+                    }
+                }
             }
-        })
-        .await;
+        };
+        let _ = tokio::time::timeout(HARD_STREAM_TIMEOUT, drain).await;
     });
 
     Ok(())
@@ -502,9 +602,16 @@ fn attach_tier2<T>(req: &mut tonic::Request<T>, tier2: &str) -> Result<(), Respo
 /// `Infallible` as the stream's error type matches axum's
 /// `Body::from_stream` requirement and pairs with the codec's discipline
 /// of converting mid-stream faults into in-band `event: error` frames.
+///
+/// I-5 (fix-round 1): the stream owns the `DropGuard` derived from
+/// `cancel`. When axum drops the response body (client disconnect,
+/// hyper teardown, error path), the guard fires `cancel()` and the
+/// upstream `SendMessage` drain task spawned by [`send_message`] stops
+/// immediately.
 fn build_sse_body(
     encoder: Encoder,
     upstream: tonic::Streaming<pb::AgentEvent>,
+    cancel: CancellationToken,
 ) -> impl Stream<Item = Result<Bytes, Infallible>> + Send + 'static {
     // Box the upstream so the stream::unfold state type stays sized.
     let upstream: std::pin::Pin<
@@ -539,6 +646,15 @@ fn build_sse_body(
         queued: std::collections::VecDeque<AnthropicSseEvent>,
         /// Terminal flag — once true the stream returns None on next call.
         done: bool,
+        /// I-5 (fix-round 1): RAII guard that cancels the upstream
+        /// `SendMessage` drain task when this state machine is
+        /// dropped. The guard's `Drop` impl calls `cancel.cancel()`,
+        /// which wakes the drain's `cancel.cancelled()` arm.
+        ///
+        /// The field is kept alive for the full life of the SSE body —
+        /// when axum drops the body (any termination path: hyper
+        /// finished, client disconnect, error), the guard fires.
+        _drop_guard: tokio_util::sync::DropGuard,
     }
 
     let mut ping_interval = tokio::time::interval(PING_INTERVAL);
@@ -553,6 +669,7 @@ fn build_sse_body(
         ping_interval,
         queued: std::collections::VecDeque::new(),
         done: false,
+        _drop_guard: cancel.drop_guard(),
     };
 
     stream::unfold(state, |mut s| async move {
@@ -688,6 +805,49 @@ fn extract_last_user_content(req: &AnthropicMessagesRequest) -> String {
         .find(|m| m.role == Role::User)
         .map(|m| m.content.plain_text())
         .unwrap_or_default()
+}
+
+/// Resolve the request's peer IP for the rate-limiter's per-IP bucket.
+///
+/// Mirrors the precedence rules from `auth::middleware::peer_ip_from_request`
+/// but reads only the `HeaderMap` axum hands us (axum's `ConnectInfo`
+/// would have to be wired through a separate extractor, which would mean
+/// rebuilding the route mount point; XFF + Forwarded headers cover the
+/// only deployment topology that matters — lifegw behind Vercel edge —
+/// and the L7 in front sets one of those two headers for every request).
+///
+/// Order of precedence:
+/// 1. `X-Forwarded-For` (leftmost non-empty value).
+/// 2. `Forwarded` (RFC 7239 `for=<ip>` token).
+/// 3. `None` — caller falls back to `0.0.0.0` so the limiter still
+///    enforces a defence-in-depth single-shared-bucket budget.
+fn peer_ip_from_request(headers: &HeaderMap) -> Option<std::net::IpAddr> {
+    if let Some(hv) = headers.get("x-forwarded-for")
+        && let Ok(s) = hv.to_str()
+        && let Some(first) = s.split(',').map(str::trim).find(|x| !x.is_empty())
+        && let Some(ip) = crate::auth::middleware::parse_ip_or_socket(first)
+    {
+        return Some(ip);
+    }
+    if let Some(hv) = headers.get("forwarded")
+        && let Ok(s) = hv.to_str()
+    {
+        for part in s.split(';') {
+            for kv in part.split(',') {
+                let trimmed = kv.trim();
+                let rest = trimmed
+                    .strip_prefix("for=")
+                    .or_else(|| trimmed.strip_prefix("For="));
+                if let Some(rest) = rest {
+                    let raw = rest.trim_matches('"');
+                    if let Some(ip) = crate::auth::middleware::parse_ip_or_socket(raw) {
+                        return Some(ip);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Build a JSON Anthropic-shape error response with the given HTTP

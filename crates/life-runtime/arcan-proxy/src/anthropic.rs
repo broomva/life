@@ -19,7 +19,15 @@ pub const DEFAULT_MAX_TOKENS: u32 = 4096;
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_HISTORY_MESSAGES: usize = 20;
 
-#[derive(Debug, Clone)]
+/// `AnthropicArcanConfig` carries the credential + connection settings
+/// for the Anthropic Messages-backed `ArcanCall` adapter.
+///
+/// **Security:** [`Debug`] is implemented manually to redact `api_key`.
+/// Any future `tracing::debug!("{cfg:?}")` / `dbg!` / Vigil span attribute
+/// MUST stay safe by construction — the rest of the workspace uses the
+/// same redact-on-Debug pattern for secrets (`Zeroizing<String>` is the
+/// other axis, used in Spec D KMS keystore).
+#[derive(Clone)]
 pub struct AnthropicArcanConfig {
     pub api_key: String,
     pub base_url: String,
@@ -27,6 +35,19 @@ pub struct AnthropicArcanConfig {
     pub max_tokens: u32,
     pub request_timeout: Duration,
     pub system_prompt: Option<String>,
+}
+
+impl std::fmt::Debug for AnthropicArcanConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnthropicArcanConfig")
+            .field("api_key", &"<redacted>")
+            .field("base_url", &self.base_url)
+            .field("model", &self.model)
+            .field("max_tokens", &self.max_tokens)
+            .field("request_timeout", &self.request_timeout)
+            .field("system_prompt", &self.system_prompt)
+            .finish()
+    }
 }
 
 impl AnthropicArcanConfig {
@@ -62,6 +83,12 @@ impl AnthropicArcanConfig {
 pub struct AnthropicArcan {
     cfg: Arc<AnthropicArcanConfig>,
     client: reqwest::Client,
+    // TODO(BRO-1143): cross-sid eviction + LRU cap. The per-sid bound
+    // (`MAX_HISTORY_MESSAGES`) is sufficient for J-Sub-B's text-only flows,
+    // but production tool flows (J-Sub-D, when `AnthropicArcan` wires into
+    // lifed as a real `ArcanCall` impl) will accumulate sids indefinitely.
+    // Wrap in an LRU keyed by last-touch instant, or piggy-back on the
+    // routing-cache idle-TTL pattern, when J-Sub-D lands.
     history: Arc<Mutex<HashMap<String, Vec<ChatMessage>>>>,
 }
 
@@ -384,6 +411,34 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use futures::stream;
+
+    /// Fix-round 1 — C-2 regression guard. Asserts that the `Debug`
+    /// impl on `AnthropicArcanConfig` redacts the api_key field so a
+    /// future `tracing::debug!("{cfg:?}")` or Vigil span attribute can
+    /// not leak the credential into telemetry.
+    #[test]
+    fn debug_impl_redacts_api_key() {
+        let cfg = AnthropicArcanConfig {
+            api_key: "secret-key-value".to_string(),
+            base_url: DEFAULT_BASE_URL.to_string(),
+            model: DEFAULT_MODEL.to_string(),
+            max_tokens: DEFAULT_MAX_TOKENS,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            system_prompt: Some("you are a helpful assistant".to_string()),
+        };
+        let rendered = format!("{cfg:?}");
+        assert!(
+            rendered.contains("<redacted>"),
+            "Debug must print `<redacted>` placeholder: {rendered}"
+        );
+        assert!(
+            !rendered.contains("secret-key-value"),
+            "Debug must NOT contain the api_key value: {rendered}"
+        );
+        // Non-secret fields still appear.
+        assert!(rendered.contains(DEFAULT_MODEL));
+        assert!(rendered.contains("helpful assistant"));
+    }
 
     #[tokio::test]
     async fn parses_text_delta_and_finish() {
