@@ -1,7 +1,7 @@
 # Spec J — Claude Code Interoperability (Anthropic Messages ↔ lifegw)
 
 **Date**: 2026-05-18
-**Status**: Draft (Phase 0 — spec artifact only; implementation gated on user approval)
+**Status**: Phase 1 (5/6) shipped 2026-05-18; E2E smoke runbook ready for operator execution (BRO-1146). J-Sub-A..F merged on `main`; in-process E2E scaffold + operator runbook + deploy script ride this PR.
 **Sibling of**: Spec C₃ (lifegw edge gateway) — same wire-shape-at-the-edge pattern, applied to Anthropic Messages instead of native lifed gRPC/WS.
 **Owner**: `crates/life-runtime/lifegw/` + new `crates/life-runtime/lifegw-anthropic-codec/`
 **Linear umbrella**: [BRO-1140](https://linear.app/broomva/issue/BRO-1140/spec-j-claude-code-interoperability-anthropic-messages-lifegw)
