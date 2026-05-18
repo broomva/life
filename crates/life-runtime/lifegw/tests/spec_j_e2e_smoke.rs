@@ -49,7 +49,7 @@
 //!    plausible count and carries the `X-Life-Cost-Estimate-Usd-Micros`
 //!    header for a known-priced model.
 //!
-//! 5. [`e2e_drop_resume`] — Drop mid-stream by abandoning the response
+//! 5. [`e2e_drop_sid_stability`] — Drop mid-stream by abandoning the response
 //!    body early, re-request with the same first user message, assert
 //!    the synthesized sid matches across both calls (and that the mock
 //!    sees `from_sequence: None` on both — lifed-side replay against the
@@ -90,7 +90,7 @@
 //!   mock lifed plays the role of the substrate stack.
 //! * Real lago `from_sequence` cursor replay — Spec J L10-D3 makes
 //!   conversation state lago's responsibility, not this test's. The
-//!   `e2e_drop_resume` case asserts the sid is stable; lago-side
+//!   `e2e_drop_sid_stability` case asserts the sid is stable; lago-side
 //!   replay is exercised by `lago::replay --tree` in the operator
 //!   runbook.
 //! * Real OTLP exporter delivery — vigil span emission is verified
@@ -954,7 +954,7 @@ async fn e2e_count_tokens() {
     );
 }
 
-// ─── Test 5: e2e_drop_resume ────────────────────────────────────────────
+// ─── Test 5: e2e_drop_sid_stability ─────────────────────────────────────
 
 /// Drop the response body mid-stream (simulating a network hiccup or
 /// Claude Code SIGINT), then re-request with the same first user
@@ -964,14 +964,21 @@ async fn e2e_count_tokens() {
 /// layer (lago-side replay is the operator runbook's responsibility,
 /// not this in-process test's).
 ///
-/// The lifegw handler today passes `from_sequence: None` for both
-/// turns (see `messages_handler::open_stream` and
+/// **Test name honesty**: this test is named
+/// `e2e_drop_sid_stability`, NOT `e2e_drop_resume`, because the
+/// in-process surface does NOT actually exercise from_sequence
+/// replay. The "drop" portion has no server-side effect; the second
+/// request creates a fresh session that happens to land on the same
+/// sid because sid synthesis is deterministic over the canonical
+/// first-user-message. The lifegw handler today passes
+/// `from_sequence: None` for both turns (see
+/// `messages_handler::open_stream` and
 /// `anthropic_messages_integration::connection_drop_resume_replays_from_sequence`,
 /// the latter `#[ignore]`'d pending lifed-side wire-up). This test
-/// pins the sid-stability invariant; the lago replay is the live
-/// J-Sub-G smoke's responsibility.
+/// pins the sid-stability invariant; the lago replay surface is the
+/// live J-Sub-G smoke's responsibility.
 #[tokio::test(flavor = "multi_thread")]
-async fn e2e_drop_resume() {
+async fn e2e_drop_sid_stability() {
     let rig = E2ERig::build().await;
 
     // Turn 1: open the stream, read a few bytes, then drop the body.

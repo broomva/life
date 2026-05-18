@@ -30,6 +30,16 @@ evidence surface, then mark BRO-1146 Done.
 Code session is the centerpiece; the rest is deploy + capture +
 write-up.
 
+**Config-surface honesty note**: lifegw reads configuration from a
+single TOML file (default `/etc/lifegw/config.toml` inside the
+container, configured via the `LIFEGW_CONFIG` env var the Dockerfile
+sets). It does **not** consume `LIFEGW__*`-style env-var overlays. To
+enable the dev signer for this smoke, the deploy script edits the
+baked `deploy/railway/lifegw-stack/lifegw.toml` in place (flipping
+`dev_signer_enabled = false → true`) before `railway up`. A `.bak`
+backup is written; the script reminds you to revert it before
+committing. See §2.2 below for the full mutation list.
+
 **Pre-merged prerequisite**: the corresponding Phase 1 PRs are on
 `main`:
 
@@ -87,6 +97,17 @@ If the operator has not yet linked the local repo to a Railway
 project, run `railway link` and pick the `life-runtime` project (or
 create one).
 
+**The target service must already exist** before running the deploy
+script — the script's pre-flight calls `railway service link
+lifegw-spec-j` and bails if the service is missing. Create it once
+via either:
+
+```bash
+railway add --service lifegw-spec-j      # CLI
+# OR open https://railway.app, navigate to the project, add a new
+# empty service named `lifegw-spec-j`.
+```
+
 ### 1.3 — DNS / public URL
 
 The Loom recording is more legible if the operator's `ANTHROPIC_BASE_URL`
@@ -119,50 +140,97 @@ bash scripts/deploy_lifegw_staging.sh
 The script will:
 
 1. Validate the Railway CLI is logged in (`railway whoami`).
-2. Check the active branch is `main` (warn if not).
-3. Confirm the deployment with the operator (no auto-deploy without an
+2. Confirm the target service `lifegw-spec-j` exists in the linked
+   project (via `railway service link`), and bail with a clear
+   creation instruction if it doesn't.
+3. Check the active branch is `main` (warn if not).
+4. Confirm the deployment with the operator (no auto-deploy without an
    explicit `--yes` flag).
-4. Set the required env vars (see 2.2 below).
-5. `railway up --service lifegw-spec-j --environment staging`.
-6. Wait for the new deployment to become healthy (`/healthz` returns
-   200).
-7. Print the public URL + the `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`
-   the operator should set in Section 3.
+5. **Patch the baked `deploy/railway/lifegw-stack/lifegw.toml`** in
+   place to set `dev_signer_enabled = true` (see §2.2). A `.bak`
+   backup is written; the operator must revert before committing.
+6. Set the small set of env vars Railway *does* consume (see §2.2).
+7. `railway up --service lifegw-spec-j --environment staging`.
+8. Wait for the new deployment to become healthy (`/healthz` returns
+   200). The script **bails on health-probe failure**; a missing
+   `/healthz` after 5 minutes is treated as a hard failure, not a
+   warning, because the smoke cannot succeed against a half-up
+   deploy.
+9. Print the public URL + the `ANTHROPIC_BASE_URL` +
+   `ANTHROPIC_AUTH_TOKEN` the operator should set in Section 3, and
+   remind the operator to revert the TOML edit before committing.
 
-### 2.2 — Required environment variables
+### 2.2 — Configuration: TOML edits + Railway env vars
 
-The script sets these via `railway variables set`. If the operator
-runs the deploy manually, the variables must be set on the Railway
-service:
+lifegw reads only the TOML pointed at by `LIFEGW_CONFIG`. The
+Dockerfile bakes `LIFEGW_CONFIG=/etc/lifegw/config.toml` and copies
+`deploy/railway/lifegw-stack/lifegw.toml` into the image at build
+time. To enable the dev signer for this smoke, the deploy script
+**edits that file in place** before triggering `railway up`. The
+table below documents the mutation; the deploy script does it
+automatically. The operator who runs the commands manually must
+apply the same edit.
 
-| Variable | Value | Why |
-|---|---|---|
-| `LIFEGW__PUBLIC__BIND_ADDR` | `0.0.0.0:8443` | Railway exposes 8443 to the public-facing load balancer |
-| `LIFEGW__PUBLIC__TLS_CERT_PATH` | `/etc/lifegw/tls/cert.pem` | mounted from Railway secret; or use Railway's built-in TLS termination |
-| `LIFEGW__PUBLIC__TLS_KEY_PATH` | `/etc/lifegw/tls/key.pem` | as above |
-| `LIFEGW__AUTH__DEV_SIGNER_ENABLED` | `true` | accepts `Bearer dev-token-for-{user}` for the smoke |
-| `LIFEGW__BILLING__ENFORCE` | `false` | Phase 1 default per BRO-1144 — `StubHaimaClient` is wired; the live haima client lands post-Phase 1 |
-| `LIFEGW__OBSERVABILITY__OTLP_ENDPOINT` | `<langfuse-or-tempo-endpoint>` | so the Vigil traces show up in the operator's chosen observability platform |
-| `OTEL_SERVICE_NAME` | `lifegw-spec-j` | so spans tag distinctly from production |
-| `LIFEGW__UPSTREAM__UDS_PATH` | `/run/life/lifed.sock` | the lifed UDS the gateway proxies to |
+#### 2.2a — TOML mutations (committed-but-pre-deploy edit)
 
-**Important**: the **lifed substrate** also needs to be running on the
-same Railway service (or a sibling service over UDS-via-volume). If
-no lifed substrate is wired, every `/v1/messages` call returns 502
-because the upstream tonic channel is broken. For this smoke, either:
+| File | Field | Before | After | Why |
+|---|---|---|---|---|
+| `deploy/railway/lifegw-stack/lifegw.toml` | `[auth] dev_signer_enabled` | `false` | `true` | accepts `Bearer dev-token-for-{user}` for the smoke |
 
-* **Option A** (simpler) — deploy a single-binary `arcan serve` image
-  that bundles a minimal lifed-equivalent for development. This is
-  the Topology A path. The mock `cfg.billing.enforce = false` keeps
-  the substrate substrate-light.
-* **Option B** (production-faithful) — deploy lifed + arcand + lagod +
-  haimad as separate Railway services or sidecars connected via
-  Railway volumes. This matches Topology B.
+The deploy script writes a `.bak` backup next to the file before
+patching. After teardown, restore the original:
+
+```bash
+mv deploy/railway/lifegw-stack/lifegw.toml.bak \
+   deploy/railway/lifegw-stack/lifegw.toml
+```
+
+**Do not commit the patched TOML.** The repo's main-branch posture is
+production (`dev_signer_enabled = false`); the smoke is an ephemeral
+opt-in.
+
+The `[billing] enforce` flag does NOT exist in the baked TOML
+(`StubHaimaClient` is wired at the code level in BRO-1144; ledger is
+empty across the smoke regardless of the flag). The Phase 1 default
+is "billing not enforced" by construction. The runbook §6.1
+known-limitations log carries this honestly.
+
+#### 2.2b — Railway-level env vars (set on the service)
+
+These vars are read by **Railway's build system** (not by lifegw) or
+by **the entrypoint/vigil layer** (not lifegw's config loader):
+
+| Variable | Value | Consumed by | Why |
+|---|---|---|---|
+| `RAILWAY_DOCKERFILE_PATH` | `deploy/railway/lifegw-stack/Dockerfile` | Railway build picker | without this, Railway nixpacks-autodetects the monorepo and fails to use the multi-process Dockerfile |
+| `LIFEGW_OTLP_ENDPOINT` | `<langfuse-or-tempo-endpoint>` | `life_vigil::init_telemetry` | so Vigil traces reach the operator's observability platform |
+| `OTEL_SERVICE_NAME` | `lifegw-spec-j` | OpenTelemetry SDK | distinct service-name tagging vs production |
+| `LIFED_ALLOW_MOCK_FALLBACK` | `true` | lifed bootstrap | mock substrate fallback so the smoke runs against the lifegw-stack image without real lago/anima/haima daemons (this is the Dockerfile default; setting it on the service makes it operator-flippable without redeploying) |
+
+The deploy script sets these via `railway variables --set`. Manual
+operators run the same commands one at a time.
+
+**Important**: the **lifed substrate** runs *inside the same
+container* as lifegw via the multi-process `lifegw-stack` image (see
+`deploy/railway/lifegw-stack/Dockerfile` + `entrypoint.sh`). lifed
+binds the UDS at `/run/life/life.sock` that lifegw's TOML points
+to. This is the Topology A path documented at
+`deploy/railway/lifegw-stack/README.md`.
+
+* **Option A (in use here)** — single-container `lifegw-stack` image
+  with lifed + lifegw + caddy fanned out via tini. `lifed` runs with
+  `LIFED_ALLOW_MOCK_FALLBACK=true`, so arcand/lagod/haimad/animad/soma
+  are mocked. The full wire path through Caddy → lifegw → lifed is
+  real; substrate behavior is mocked.
+* **Option B (production-faithful, not used for this smoke)** — lifed +
+  arcand + lagod + haimad as separate Railway services / sidecars
+  over Railway volumes for the shared UDS dir. This matches Topology
+  B and is the surface post-Phase-1 work exercises.
 
 Phase 1 of Spec J is wire-shape only. **Option A is sufficient for
-the BRO-1146 smoke**; Option B is the surface the post-Phase-1 work
-exercises. Document which option the operator chose in Section 7's
-write-up.
+the BRO-1146 smoke** and is what the `lifegw-stack` Dockerfile +
+`scripts/deploy_lifegw_staging.sh` deploy. Document Option A in
+Section 7's write-up.
 
 ### 2.3 — Smoke-test the deploy
 
@@ -315,11 +383,16 @@ that closes BRO-1146 should reference all of them.
 ### 5.3 — `lago replay --tree` output
 
 Pick one of the conversation sids from the Vigil span attributes
-(`life.session.id`). On the staging deploy, SSH or `railway shell`
-into the service and run:
+(`life.session.id`). On the staging deploy, SSH into the running
+container and execute `lago replay --tree`:
 
 ```bash
-lago replay --tree <synthesized_sid>
+# `railway ssh` (with -- to pass a command) opens a shell INSIDE
+# the deployed container. NOTE: `railway shell` is a different
+# command — it opens a LOCAL subshell with Railway env vars
+# exported, which is not what we want here.
+railway ssh --service lifegw-spec-j --environment staging -- \
+  lago replay --tree <synthesized_sid>
 ```
 
 Capture stdout to:
@@ -328,16 +401,30 @@ Capture stdout to:
 docs/conformance/evidence/2026-05-18-lago-replay-tree.txt
 ```
 
-**Note**: this requires Option B (production-faithful deploy with
-real lagod). For Option A (single-binary arcan), `lago replay` is
-not available; record this gap in Section 7's known-limitations log.
+**Plan-tier note**: `railway ssh` into a running deployment may be
+restricted on Free/Hobby Railway plans. If SSH is unavailable on the
+operator's plan, capture the same output via the Railway Dashboard's
+in-browser shell, OR skip this evidence and record the gap in
+Section 7's known-limitations log (lago replay is also recorded
+asynchronously by the lago substrate — a follow-up PR can fetch the
+trace from the lagod journal).
+
+**Substrate-mode note**: Option A (the `lifegw-stack` Dockerfile in
+use here) runs `lifed` with `LIFED_ALLOW_MOCK_FALLBACK=true`, which
+mocks `lagod`. Real `lago replay --tree` requires Option B
+(production-faithful deploy with a real lagod). For this Phase 1
+smoke, recording "lago replay unavailable due to Option A mock
+substrate" in §7's known-limitations log is the expected outcome;
+the live lago-replay evidence is the surface BRO-1147+ exercises.
 
 ### 5.4 — `haima ledger show` output
 
-Same shell access pattern:
+Same SSH access pattern (see §5.3's plan-tier + Dashboard fallback
+guidance):
 
 ```bash
-haima ledger show did:life:broomva
+railway ssh --service lifegw-spec-j --environment staging -- \
+  haima ledger show did:life:broomva
 ```
 
 Capture to:
@@ -346,8 +433,9 @@ Capture to:
 docs/conformance/evidence/2026-05-18-haima-ledger-show.txt
 ```
 
-**Note**: with `LIFEGW__BILLING__ENFORCE=false` and the Phase 1
-`StubHaimaClient`, the haima ledger will be empty. **This is
+**Note**: with the Phase 1 `StubHaimaClient` wired in BRO-1144 (no
+billing-enforce flag exists in the baked TOML — billing is unwired
+at the code level), the haima ledger will be empty. **This is
 expected.** The Phase 1 surface that `BRO-1144` PR #1335 shipped
 records usage on the Vigil span but does not commit ledger entries
 because the live haima client is post-Phase-1. The ledger-empty
@@ -412,7 +500,8 @@ count as failures**:
   follow-up.
 * **`StubHaimaClient` returns `Ok(_)` unconditionally** — haima
   ledger remains empty across the smoke. This is the documented
-  Phase 1 default (`LIFEGW__BILLING__ENFORCE=false`).
+  Phase 1 default (billing is unwired at the code level; the live
+  haima client is post-Phase-1 work tracked under BRO-1147+).
 * **`/v1/messages/count_tokens` is approximate** — the edge
   estimator uses Vigil's `chars/4` heuristic. ±5% accuracy vs
   Anthropic's reference. Acceptable for Phase 1.
@@ -499,13 +588,33 @@ After results are filed, tear down the staging deploy unless it's
 useful as a development sandbox:
 
 ```bash
-railway environment delete staging --service lifegw-spec-j
-# OR
-railway service delete lifegw-spec-j
+# Removes the most recent deployment but keeps the service shell so
+# re-running scripts/deploy_lifegw_staging.sh is a one-command
+# re-deploy. This is the CLI surface Railway 4.x supports.
+railway down --service lifegw-spec-j --environment staging --yes
 ```
 
-This keeps the Railway bill clean. The smoke evidence is permanent
-in-repo; the running service is not.
+To **fully delete the service** (so it stops appearing in the
+project), use the Railway Dashboard — the CLI does not expose a
+`service delete` subcommand in 4.x:
+
+```text
+1. open https://railway.app
+2. navigate to the project → service "lifegw-spec-j"
+3. Settings → Delete service
+```
+
+After tear-down, also revert the TOML mutation the deploy script
+made:
+
+```bash
+mv deploy/railway/lifegw-stack/lifegw.toml.bak \
+   deploy/railway/lifegw-stack/lifegw.toml
+```
+
+This keeps the Railway bill clean and the repo at its production
+posture. The smoke evidence is permanent in-repo; the running service
+is not.
 
 ---
 
@@ -513,17 +622,39 @@ in-repo; the running service is not.
 
 ### A.1 — `/v1/messages` returns 502 immediately
 
-* lifed is not running on the upstream UDS.
+* lifed is not running on the upstream UDS, OR the lifegw config's
+  `[upstream] lifed_uds_path` doesn't match the lifed bind path.
 * Fix: verify `railway logs --service lifegw-spec-j` shows
-  `dial_upstream` succeeding. If not, check `LIFEGW__UPSTREAM__UDS_PATH`
-  matches the lifed bind path.
+  `dial_upstream` succeeding. If not, SSH into the container and
+  inspect both sides:
+
+  ```bash
+  railway ssh --service lifegw-spec-j --environment staging -- \
+    sh -c 'grep -E "lifed_uds_path|lago.sock|life.sock" /etc/lifegw/config.toml /etc/lifed/config.toml; ls -la /run/life/'
+  ```
+
+  Expect both configs to reference `/run/life/life.sock` and that
+  socket to exist with mode `srw-rw----`.
 
 ### A.2 — Claude Code shows "authentication_error"
 
 * The dev signer is not enabled, OR the token format is wrong.
-* Fix: `railway variables --service lifegw-spec-j | grep DEV_SIGNER`
-  should show `LIFEGW__AUTH__DEV_SIGNER_ENABLED=true`. The token
-  body (after `Bearer `) should be `dev-token-for-<username>`.
+* Fix (TOML side — the only one lifegw reads): SSH into the
+  container and check the baked config:
+
+  ```bash
+  railway ssh --service lifegw-spec-j --environment staging -- \
+    grep dev_signer_enabled /etc/lifegw/config.toml
+  # Expected: dev_signer_enabled = true
+  ```
+
+  If it shows `false`, the deploy script's TOML edit didn't take
+  (perhaps the operator deployed without the script, or the
+  pattern-match failed). Re-run `bash scripts/deploy_lifegw_staging.sh`
+  to re-apply the patch + re-deploy.
+* Fix (token side): the token body (after `Bearer `) should be
+  `dev-token-for-<username>`. Claude Code adds the `Bearer ` prefix
+  automatically; `ANTHROPIC_AUTH_TOKEN` carries just the body.
 
 ### A.3 — Vigil traces don't show up
 
@@ -556,10 +687,13 @@ through J-Sub-J — AnthropicArcan promotion, Praxis-side tool
 execution, life-claude launcher) will replace several manual steps
 here:
 
-* The `LIFEGW__BILLING__ENFORCE=false` Phase 1 default goes to
-  `true` after BRO-1147+ wires the live haima client.
-* The "dev signer enabled" env var goes off after the Tier-1 JWS
-  mint is hosted at broomva.tech `auth.callback`.
+* The Phase 1 "billing not enforced" default (currently a code-level
+  posture via `StubHaimaClient`) goes to enforcement after BRO-1147+
+  wires the live haima client.
+* The TOML `dev_signer_enabled = true` flag (the smoke's manual
+  pre-deploy edit, see §2.2a) stays `false` permanently once the
+  Tier-1 JWS mint is hosted at broomva.tech `auth.callback` and the
+  smoke flow runs without dev shortcuts.
 * The `apps/life-claude` launcher replaces the manual
   `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` env-var dance — the
   operator runs `life claude` and the launcher handles the env

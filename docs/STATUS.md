@@ -1542,9 +1542,11 @@ auth + recording haima:
    static catalogue with ≥ 5 required IDs.
 4. `e2e_count_tokens` — `/v1/messages/count_tokens` returns plausible
    count + `X-Life-Cost-Estimate-Usd-Micros` header.
-5. `e2e_drop_resume` — drop response body mid-stream, re-request,
-   sid is deterministic via codec synthesis (`from_sequence` replay
-   is the live smoke's lago-side responsibility).
+5. `e2e_drop_sid_stability` — drop response body mid-stream,
+   re-request, sid is deterministic via codec synthesis
+   (`from_sequence` replay is the live smoke's lago-side
+   responsibility; the rename from `e2e_drop_resume` was an honesty
+   fix in the P20 fix-round 1 — the test does not exercise replay).
 
 All 5 pass green. Joined with the existing
 `anthropic_messages_integration.rs` tests, the lifegw test surface
@@ -1556,13 +1558,23 @@ now covers Phase 1 end-to-end at the in-process level.
   sections covering prereqs, Railway staging deploy, Claude Code
   config, smoke session checklist, evidence capture, acceptance
   criteria (with the BRO-1144 carry-over known-limitations log), and
-  filing the results. Two-option deploy guidance (single-binary
-  arcan for Phase 1 vs full Topology B for production-faithful).
+  filing the results. Uses the `lifegw-stack` multi-process
+  Dockerfile (Option A, single-container Topology A with lifed running
+  alongside lifegw under tini); §6.1 records mock-substrate gaps as
+  expected limitations.
 - `scripts/deploy_lifegw_staging.sh` — idempotent Railway deploy
   wrapper. Pre-flight (CLI installed, logged in, project linked,
-  branch sanity), env-var set (8 `LIFEGW__*` vars per runbook §2.2),
-  `railway up` trigger with 5-minute health probe, then prints the
-  operator's next-step exports.
+  service exists via `railway service link`, branch sanity), then
+  edits the baked `deploy/railway/lifegw-stack/lifegw.toml` in place
+  to set `dev_signer_enabled = true` (lifegw reads TOML only, not
+  env vars — see runbook §2.2a). Sets a small set of Railway-level
+  env vars Railway *does* consume (`RAILWAY_DOCKERFILE_PATH`,
+  `LIFEGW_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`,
+  `LIFED_ALLOW_MOCK_FALLBACK`). Triggers `railway up --detach`, polls
+  `/healthz` for 5 minutes, and **bails on health-probe failure**
+  (no warn-and-exit-0 silent successes). Prints next-step exports
+  and reminds the operator to revert the TOML edit before
+  committing.
 
 **Known limitations carried from BRO-1144 PR #1335 (documented in
 the runbook §6.1 known-limitations log):**
@@ -1570,9 +1582,14 @@ the runbook §6.1 known-limitations log):**
 - `traceparent` not yet propagated to lifed (W3C tracecontext is
   emitted in lifegw's spans; lifed-side spans appear as a separate
   trace until the Phase 2 follow-up wires propagation).
-- `StubHaimaClient` is wired — Phase 1 default `cfg.billing.enforce
-  = false` keeps the live haima client out of scope; ledger is
-  empty across the smoke. Live haima client lands post-Phase-1.
+- `StubHaimaClient` is wired — billing is unwired at the code level
+  (no `cfg.billing.enforce` field exists in the baked TOML). Ledger
+  is empty across the smoke. Live haima client lands post-Phase-1
+  under BRO-1147+.
+- `lago replay --tree` evidence is mock-substrate-empty under
+  Option A's `LIFED_ALLOW_MOCK_FALLBACK=true` posture. Real lago
+  replay rides Option B (Topology B production-faithful deploy) and
+  is exercised by post-Phase-1 work.
 
 **Critical path next:** operator executes BRO-1146 live smoke per
 the runbook → Phase 1 SHIPPED; then queue Phase 2 (J-Sub-H/I/J)
