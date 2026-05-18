@@ -263,6 +263,28 @@ fn record_response(
     ))
 }
 
+/// State carried across SSE parse iterations.
+///
+/// Tracks upstream content-block indices that are bound to `tool_use`
+/// blocks so that subsequent `content_block_delta` / `content_block_stop`
+/// frames can look up the tool_use id without re-parsing the original
+/// start frame.
+///
+/// J-Sub-D (BRO-1143) extension: previously this parser was text-only;
+/// for the Anthropic tool-use bridge it must thread `(index → tool_use_id)`
+/// state across frames so that `input_json_delta` events know which tool
+/// the partial JSON belongs to.
+#[derive(Default)]
+struct ParserState {
+    /// Maps upstream `content_block` index → Anthropic `tool_use_id` for
+    /// every currently-open tool_use block.
+    tool_use_by_index: std::collections::HashMap<u64, String>,
+    /// Most recent stop_reason carried on `message_delta`. Surfaces in
+    /// the synthesized `Finish` event so the encoder downstream can
+    /// emit Anthropic's `message_delta {stop_reason: "tool_use"}`.
+    last_stop_reason: Option<String>,
+}
+
 fn parse_sse<S>(
     body: S,
     session_id: aios_proto::aios::v1::SessionId,
@@ -274,8 +296,15 @@ where
     let body: Pin<Box<dyn Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>> =
         Box::pin(body);
     Box::pin(stream::unfold(
-        (body, Vec::new(), 0_u64, false, session_id),
-        |(mut body, mut buffer, mut sequence, done, session_id)| async move {
+        (
+            body,
+            Vec::new(),
+            0_u64,
+            false,
+            session_id,
+            ParserState::default(),
+        ),
+        |(mut body, mut buffer, mut sequence, done, session_id, mut state)| async move {
             if done {
                 return None;
             }
@@ -295,7 +324,33 @@ where
                             continue;
                         };
                         match v.get("type").and_then(|t| t.as_str()) {
+                            Some("content_block_start") => {
+                                // J-Sub-D: tool_use blocks open here.
+                                // Track the upstream index → id mapping
+                                // and synthesize a `ToolCallPending`
+                                // event the encoder uses to open the
+                                // Anthropic-side tool_use content block.
+                                if let Some((idx, id, name)) = parse_tool_use_start(&v) {
+                                    state.tool_use_by_index.insert(idx, id.clone());
+                                    sequence += 1;
+                                    return Some((
+                                        Ok(event(
+                                            AgentEventKind::ToolCallPending,
+                                            "TOOL_CALL_PENDING",
+                                            &session_id,
+                                            sequence,
+                                            serde_json::json!({
+                                                "id": id,
+                                                "name": name,
+                                                "input": {},
+                                            }),
+                                        )),
+                                        (body, buffer, sequence, false, session_id, state),
+                                    ));
+                                }
+                            }
                             Some("content_block_delta") => {
+                                // Text deltas — existing path.
                                 if let Some(text) = v
                                     .get("delta")
                                     .and_then(|d| d.get("text"))
@@ -311,11 +366,91 @@ where
                                             sequence,
                                             serde_json::json!({"text": text}),
                                         )),
-                                        (body, buffer, sequence, false, session_id),
+                                        (body, buffer, sequence, false, session_id, state),
+                                    ));
+                                }
+                                // J-Sub-D: `input_json_delta` carries the
+                                // streamed tool_use input JSON. Look up
+                                // the tool_use id by the upstream index
+                                // (stashed at content_block_start) and
+                                // emit a ToolCallPending event with the
+                                // partial JSON fragment.
+                                //
+                                // If the index is unknown (upstream is
+                                // misbehaving) the delta is dropped
+                                // silently rather than panicking — keep
+                                // the stream healthy.
+                                if let Some((idx, partial)) = parse_input_json_delta(&v)
+                                    && let Some(id) = state.tool_use_by_index.get(&idx)
+                                {
+                                    sequence += 1;
+                                    let id = id.clone();
+                                    return Some((
+                                        Ok(event(
+                                            AgentEventKind::ToolCallPending,
+                                            "TOOL_CALL_PENDING",
+                                            &session_id,
+                                            sequence,
+                                            serde_json::json!({
+                                                "id": id,
+                                                "name": "",
+                                                "partial_json": partial,
+                                            }),
+                                        )),
+                                        (body, buffer, sequence, false, session_id, state),
                                     ));
                                 }
                             }
+                            Some("content_block_stop") => {
+                                // J-Sub-D: close tool_use block. Emit
+                                // ToolCallPending with `done: true` so
+                                // the encoder closes the Anthropic-side
+                                // content block. Text/thinking block
+                                // boundaries are synthesized at the
+                                // encoder layer, not here.
+                                if let Some(idx) = v.get("index").and_then(|i| i.as_u64())
+                                    && let Some(id) = state.tool_use_by_index.remove(&idx)
+                                {
+                                    sequence += 1;
+                                    return Some((
+                                        Ok(event(
+                                            AgentEventKind::ToolCallPending,
+                                            "TOOL_CALL_PENDING",
+                                            &session_id,
+                                            sequence,
+                                            serde_json::json!({
+                                                "id": id,
+                                                "name": "",
+                                                "done": true,
+                                            }),
+                                        )),
+                                        (body, buffer, sequence, false, session_id, state),
+                                    ));
+                                }
+                            }
+                            Some("message_delta") => {
+                                // J-Sub-D: capture stop_reason so the
+                                // synthesized Finish event downstream
+                                // carries it. Anthropic's upstream emits
+                                // `stop_reason: "tool_use"` on a
+                                // tool_use-terminated turn.
+                                if let Some(reason) = v
+                                    .get("delta")
+                                    .and_then(|d| d.get("stop_reason"))
+                                    .and_then(|s| s.as_str())
+                                {
+                                    state.last_stop_reason = Some(reason.to_string());
+                                }
+                                // message_delta itself produces no
+                                // synthesized AgentEvent — the Finish
+                                // event on `message_stop` carries the
+                                // reason.
+                            }
                             Some("message_stop") => {
+                                let reason = state
+                                    .last_stop_reason
+                                    .clone()
+                                    .unwrap_or_else(|| "stop".to_string());
                                 sequence += 1;
                                 return Some((
                                     Ok(event(
@@ -323,9 +458,9 @@ where
                                         "FINISH",
                                         &session_id,
                                         sequence,
-                                        serde_json::json!({"reason": "stop"}),
+                                        serde_json::json!({"reason": reason}),
                                     )),
-                                    (body, buffer, sequence, true, session_id),
+                                    (body, buffer, sequence, true, session_id, state),
                                 ));
                             }
                             _ => {}
@@ -340,7 +475,7 @@ where
                             Err(tonic::Status::internal(format!(
                                 "AnthropicArcan: stream read error: {err}"
                             ))),
-                            (body, buffer, sequence, true, session_id),
+                            (body, buffer, sequence, true, session_id, state),
                         ));
                     }
                     None => {
@@ -353,13 +488,44 @@ where
                                 sequence,
                                 serde_json::json!({"reason": "upstream_closed"}),
                             )),
-                            (body, buffer, sequence, true, session_id),
+                            (body, buffer, sequence, true, session_id, state),
                         ));
                     }
                 }
             }
         },
     ))
+}
+
+/// Extract `(index, id, name)` from a `content_block_start` event whose
+/// `content_block.type == "tool_use"`. Returns `None` for non-tool_use
+/// block_start frames (text / thinking are synthesized at the encoder,
+/// not parsed from upstream).
+fn parse_tool_use_start(v: &serde_json::Value) -> Option<(u64, String, String)> {
+    let idx = v.get("index").and_then(|i| i.as_u64())?;
+    let block = v.get("content_block")?;
+    if block.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
+        return None;
+    }
+    let id = block.get("id").and_then(|s| s.as_str())?.to_string();
+    let name = block.get("name").and_then(|s| s.as_str())?.to_string();
+    Some((idx, id, name))
+}
+
+/// Extract `(index, partial_json)` from a `content_block_delta` whose
+/// `delta.type == "input_json_delta"`. Returns `None` for non-tool_use
+/// deltas.
+fn parse_input_json_delta(v: &serde_json::Value) -> Option<(u64, String)> {
+    let idx = v.get("index").and_then(|i| i.as_u64())?;
+    let delta = v.get("delta")?;
+    if delta.get("type").and_then(|t| t.as_str()) != Some("input_json_delta") {
+        return None;
+    }
+    let partial = delta
+        .get("partial_json")
+        .and_then(|s| s.as_str())?
+        .to_string();
+    Some((idx, partial))
 }
 
 fn event(
@@ -458,5 +624,152 @@ mod tests {
             s.next().await.unwrap().unwrap().kind(),
             AgentEventKind::Finish
         );
+    }
+
+    /// J-Sub-D (BRO-1143): upstream `content_block_start` for a tool_use
+    /// block must emit a `ToolCallPending` event carrying `{id, name}`.
+    #[tokio::test]
+    async fn parses_tool_use_start() {
+        let body = b"event: content_block_start\n\
+                     data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_01\",\"name\":\"read_file\",\"input\":{}}}\n\n\
+                     event: message_stop\n\
+                     data: {\"type\":\"message_stop\"}\n\n";
+        let mut s = parse_sse(
+            stream::iter(vec![Ok::<_, reqwest::Error>(Bytes::from(body.to_vec()))]),
+            aios_proto::aios::v1::SessionId { value: "s".into() },
+        );
+        let first = s.next().await.unwrap().unwrap();
+        assert_eq!(first.kind(), AgentEventKind::ToolCallPending);
+        let record = first.record.as_ref().unwrap();
+        let payload: serde_json::Value =
+            serde_json::from_slice(&record.payload).expect("payload is valid json");
+        assert_eq!(payload["id"], "toolu_01");
+        assert_eq!(payload["name"], "read_file");
+        // Finish closes the stream.
+        let second = s.next().await.unwrap().unwrap();
+        assert_eq!(second.kind(), AgentEventKind::Finish);
+    }
+
+    /// J-Sub-D (BRO-1143): `content_block_delta` carrying
+    /// `input_json_delta` re-uses the index → tool_use_id binding to
+    /// emit one event per partial-JSON chunk.
+    #[tokio::test]
+    async fn parses_input_json_delta_chunks() {
+        let body = b"event: content_block_start\n\
+                     data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_01\",\"name\":\"read_file\",\"input\":{}}}\n\n\
+                     event: content_block_delta\n\
+                     data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\"}}\n\n\
+                     event: content_block_delta\n\
+                     data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\" \\\"foo.txt\\\"}\"}}\n\n\
+                     event: content_block_stop\n\
+                     data: {\"type\":\"content_block_stop\",\"index\":1}\n\n\
+                     event: message_stop\n\
+                     data: {\"type\":\"message_stop\"}\n\n";
+        let mut s = parse_sse(
+            stream::iter(vec![Ok::<_, reqwest::Error>(Bytes::from(body.to_vec()))]),
+            aios_proto::aios::v1::SessionId { value: "s".into() },
+        );
+        // Open: id + name carried.
+        let open = s.next().await.unwrap().unwrap();
+        assert_eq!(open.kind(), AgentEventKind::ToolCallPending);
+        // Partial 1.
+        let p1 = s.next().await.unwrap().unwrap();
+        assert_eq!(p1.kind(), AgentEventKind::ToolCallPending);
+        let v1: serde_json::Value =
+            serde_json::from_slice(&p1.record.as_ref().unwrap().payload).unwrap();
+        assert_eq!(v1["id"], "toolu_01");
+        assert_eq!(v1["partial_json"], "{\"path\":");
+        // Partial 2.
+        let p2 = s.next().await.unwrap().unwrap();
+        let v2: serde_json::Value =
+            serde_json::from_slice(&p2.record.as_ref().unwrap().payload).unwrap();
+        assert_eq!(v2["id"], "toolu_01");
+        assert_eq!(v2["partial_json"], " \"foo.txt\"}");
+        // Stop: done=true.
+        let stop = s.next().await.unwrap().unwrap();
+        let vs: serde_json::Value =
+            serde_json::from_slice(&stop.record.as_ref().unwrap().payload).unwrap();
+        assert_eq!(vs["id"], "toolu_01");
+        assert_eq!(vs["done"], true);
+        // Finish at message_stop.
+        let fin = s.next().await.unwrap().unwrap();
+        assert_eq!(fin.kind(), AgentEventKind::Finish);
+    }
+
+    /// J-Sub-D (BRO-1143): `message_delta {stop_reason: "tool_use"}`
+    /// propagates into the synthesized `Finish` event so the encoder
+    /// can render Anthropic's `message_delta {stop_reason: "tool_use"}`.
+    #[tokio::test]
+    async fn parses_message_delta_stop_reason_tool_use() {
+        let body = b"event: content_block_start\n\
+                     data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_02\",\"name\":\"do_x\",\"input\":{}}}\n\n\
+                     event: content_block_stop\n\
+                     data: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+                     event: message_delta\n\
+                     data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":47}}\n\n\
+                     event: message_stop\n\
+                     data: {\"type\":\"message_stop\"}\n\n";
+        let mut s = parse_sse(
+            stream::iter(vec![Ok::<_, reqwest::Error>(Bytes::from(body.to_vec()))]),
+            aios_proto::aios::v1::SessionId { value: "s".into() },
+        );
+        // open + stop + (no message_delta event surfaced) + finish.
+        let mut events = Vec::new();
+        while let Some(item) = s.next().await {
+            events.push(item.unwrap());
+        }
+        let kinds: Vec<AgentEventKind> = events.iter().map(|e| e.kind()).collect();
+        // Two ToolCallPending (open + done) + one Finish.
+        assert_eq!(
+            kinds,
+            vec![
+                AgentEventKind::ToolCallPending,
+                AgentEventKind::ToolCallPending,
+                AgentEventKind::Finish,
+            ]
+        );
+        // The Finish event carries reason="tool_use" from message_delta.
+        let finish = events.last().unwrap();
+        let payload: serde_json::Value =
+            serde_json::from_slice(&finish.record.as_ref().unwrap().payload).unwrap();
+        assert_eq!(payload["reason"], "tool_use");
+    }
+
+    /// J-Sub-D (BRO-1143): two interleaved tool_use blocks (parallel
+    /// tool_use is rare from Anthropic today but the protocol allows
+    /// it). Verify that index→id state stays correctly partitioned.
+    #[tokio::test]
+    async fn parses_multi_tool_use_with_distinct_indices() {
+        let body = b"event: content_block_start\n\
+                     data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_A\",\"name\":\"a\",\"input\":{}}}\n\n\
+                     event: content_block_start\n\
+                     data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_B\",\"name\":\"b\",\"input\":{}}}\n\n\
+                     event: content_block_delta\n\
+                     data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n\
+                     event: content_block_delta\n\
+                     data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n\
+                     event: message_stop\n\
+                     data: {\"type\":\"message_stop\"}\n\n";
+        let mut s = parse_sse(
+            stream::iter(vec![Ok::<_, reqwest::Error>(Bytes::from(body.to_vec()))]),
+            aios_proto::aios::v1::SessionId { value: "s".into() },
+        );
+        let mut events = Vec::new();
+        while let Some(item) = s.next().await {
+            events.push(item.unwrap());
+        }
+        // 2 starts + 2 deltas + 1 finish = 5 events.
+        assert_eq!(events.len(), 5);
+        let payload = |i: usize| -> serde_json::Value {
+            serde_json::from_slice(&events[i].record.as_ref().unwrap().payload).unwrap()
+        };
+        assert_eq!(payload(0)["id"], "toolu_A");
+        assert_eq!(payload(0)["name"], "a");
+        assert_eq!(payload(1)["id"], "toolu_B");
+        assert_eq!(payload(1)["name"], "b");
+        // Order of partial deltas: index 1 first (toolu_B), then index 0.
+        assert_eq!(payload(2)["id"], "toolu_B");
+        assert_eq!(payload(3)["id"], "toolu_A");
+        assert_eq!(events[4].kind(), AgentEventKind::Finish);
     }
 }
