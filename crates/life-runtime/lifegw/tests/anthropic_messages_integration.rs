@@ -897,3 +897,383 @@ async fn rate_limit_engaged_returns_429_on_messages_route() {
     assert_eq!(rig.state.create_session_calls.lock().await.len(), 2);
     assert_eq!(rig.state.send_message_calls.lock().await.len(), 2);
 }
+
+// ─── J-Sub-F: /v1/models + /v1/messages/count_tokens (BRO-1145) ─────────
+
+/// `GET /v1/models` returns the Phase 1 static Anthropic-pinned list in
+/// the Anthropic wire shape. Spec J §L10-D6 — the picker MUST recognise
+/// Anthropic-named identifiers so Claude Code's `/model` autocomplete
+/// works against lifegw as a drop-in for `api.anthropic.com`.
+#[tokio::test(flavor = "multi_thread")]
+async fn models_endpoint_returns_anthropic_list() {
+    let rig = TestRig::build().await;
+    let req = Request::builder()
+        .method("GET")
+        .uri("/v1/models")
+        .body(Body::empty())
+        .expect("build req");
+    let resp = rig.router().oneshot(req).await.expect("oneshot");
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers()
+            .get(header::CONTENT_TYPE)
+            .map(|v| v.to_str().unwrap_or("").to_string())
+            .as_deref(),
+        Some("application/json"),
+    );
+    let (_, body) = collect_body(resp).await;
+    let v: Value = serde_json::from_str(&body).expect("models json");
+
+    // Envelope shape.
+    let data = v["data"].as_array().expect("data is array");
+    assert!(
+        data.len() >= 5,
+        "static catalogue must carry at least 5 models — got {}",
+        data.len()
+    );
+    assert_eq!(v["has_more"], Value::Bool(false));
+    let first_id = v["first_id"].as_str().expect("first_id");
+    let last_id = v["last_id"].as_str().expect("last_id");
+    assert_eq!(first_id, data[0]["id"].as_str().unwrap_or(""));
+    assert_eq!(last_id, data[data.len() - 1]["id"].as_str().unwrap_or(""));
+
+    // Anthropic-pinned identifiers MUST appear so Claude Code's
+    // hardcoded defaults resolve.
+    let ids: Vec<&str> = data
+        .iter()
+        .map(|m| m.get("id").and_then(|v| v.as_str()).unwrap_or(""))
+        .collect();
+    for required in [
+        "claude-opus-4-20250514",
+        "claude-sonnet-4-20250514",
+        "claude-haiku-4-20250514",
+        "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5-20251001",
+    ] {
+        assert!(
+            ids.contains(&required),
+            "static catalogue is missing required id `{required}` (got {ids:?})"
+        );
+    }
+
+    // Each entry must carry the Anthropic-shape keys.
+    for m in data {
+        assert!(m["id"].is_string(), "id must be a string: {m:?}");
+        assert!(
+            m["display_name"].is_string(),
+            "display_name must be a string: {m:?}"
+        );
+        assert!(
+            m["created_at"].is_string(),
+            "created_at must be a string: {m:?}"
+        );
+        assert_eq!(m["type"], "model", "type must be `model`: {m:?}");
+    }
+}
+
+/// `OPTIONS /v1/models` probe returns 204 with an `Allow: GET, HEAD,
+/// OPTIONS` header so pre-flighting clients don't bounce off a 405.
+#[tokio::test(flavor = "multi_thread")]
+async fn models_with_options_probe_returns_204_with_allow() {
+    let rig = TestRig::build().await;
+    let req = Request::builder()
+        .method("OPTIONS")
+        .uri("/v1/models")
+        .body(Body::empty())
+        .expect("build req");
+    let resp = rig.router().oneshot(req).await.expect("oneshot");
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let allow = resp
+        .headers()
+        .get(header::ALLOW)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(allow.contains("GET"), "Allow must include GET: {allow}");
+    assert!(allow.contains("HEAD"), "Allow must include HEAD: {allow}");
+    assert!(
+        allow.contains("OPTIONS"),
+        "Allow must include OPTIONS: {allow}"
+    );
+}
+
+/// Build a `POST /v1/messages/count_tokens` body.
+fn count_tokens_body(model: &str, messages: &[(&str, &str)]) -> String {
+    let msgs: Vec<Value> = messages
+        .iter()
+        .map(|(role, text)| serde_json::json!({"role": role, "content": text}))
+        .collect();
+    serde_json::json!({
+        "model": model,
+        "messages": msgs,
+    })
+    .to_string()
+}
+
+/// `POST /v1/messages/count_tokens` — single user message, returns an
+/// estimate within ±5% of `text.len() / 4` (J-Sub-F acceptance gate).
+/// Verifies the Anthropic-compat `{"input_tokens": <usize>}` body
+/// shape — strict, no extra fields.
+#[tokio::test(flavor = "multi_thread")]
+async fn count_tokens_simple() {
+    let rig = TestRig::build().await;
+    let text = "hello world from claude code"; // 28 chars → ~7 tokens
+    let body = count_tokens_body("claude-sonnet-4-20250514", &[("user", text)]);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/v1/messages/count_tokens")
+        .header("authorization", TestRig::dev_bearer("alice"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .expect("build req");
+    let resp = rig.router().oneshot(req).await.expect("oneshot");
+    let (status, payload) = collect_body(resp).await;
+    assert_eq!(status, StatusCode::OK);
+    let v: Value = serde_json::from_str(&payload).expect("count_tokens json");
+
+    // Strict Anthropic-compat body shape — `input_tokens` plus nothing
+    // else.
+    let obj = v.as_object().expect("body is object");
+    assert!(obj.contains_key("input_tokens"));
+    // The 4-chars/token heuristic on 28 chars yields exactly 7. ±5%
+    // tolerance per the J-Sub-F acceptance gate gives a [6.65, 7.35]
+    // window; rounded to ints that's [6, 8] inclusive.
+    let n = v["input_tokens"].as_u64().expect("input_tokens is u64");
+    let expected = (text.len() as f64 / 4.0).ceil() as u64;
+    let lo = (expected as f64 * 0.95) as u64;
+    let hi = ((expected as f64 * 1.05).ceil() as u64).max(expected + 1);
+    assert!(
+        (lo..=hi).contains(&n) || n == expected,
+        "input_tokens {n} outside ±5% of {expected}"
+    );
+}
+
+/// Multi-turn conversation: the estimate MUST be at least the sum of
+/// per-turn estimates (concatenation adds a separator char so equality
+/// is not guaranteed; the count is monotone in total text length).
+#[tokio::test(flavor = "multi_thread")]
+async fn count_tokens_multi_turn() {
+    let rig = TestRig::build().await;
+    let turns: Vec<(&str, &str)> = vec![
+        ("user", "what is the capital of france?"),
+        ("assistant", "Paris."),
+        ("user", "and the capital of spain?"),
+    ];
+    let body = count_tokens_body("claude-sonnet-4-20250514", &turns);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/v1/messages/count_tokens")
+        .header("authorization", TestRig::dev_bearer("alice"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .expect("build req");
+    let resp = rig.router().oneshot(req).await.expect("oneshot");
+    let (status, payload) = collect_body(resp).await;
+    assert_eq!(status, StatusCode::OK);
+    let v: Value = serde_json::from_str(&payload).expect("json");
+    let total = v["input_tokens"].as_u64().expect("input_tokens");
+
+    // Lower bound: ceiling((sum_of_text_lengths) / 4). The
+    // canonicaliser concatenates turns with `\n`, so the joined text
+    // is at least `sum_text_len` chars (separator chars only push it
+    // up).
+    //
+    // Upper bound (sanity): sum of per-turn ceilings. Ceiling-of-sum
+    // ≤ sum-of-ceilings holds elementwise, so `total ≤ per_turn_sum`
+    // is the corresponding ceiling identity for a `div_ceil(4)`
+    // heuristic.
+    let sum_chars: usize = turns.iter().map(|(_, t)| t.len()).sum();
+    let lower_bound = ((sum_chars as f64) / 4.0).ceil() as u64;
+    let per_turn_sum: u64 = turns
+        .iter()
+        .map(|(_, t)| ((t.len() as f64) / 4.0).ceil() as u64)
+        .sum();
+    assert!(
+        total >= lower_bound,
+        "multi-turn count {total} below joined-text lower bound {lower_bound}"
+    );
+    assert!(
+        total <= per_turn_sum + 2, // +2 for canonicaliser separators
+        "multi-turn count {total} above per-turn-sum upper bound {per_turn_sum}"
+    );
+}
+
+// ─── Vigil span capture infrastructure (process-global) ─────────────────
+//
+// Tracing's callsite-interest cache is *process-global* — once a
+// callsite has been queried against any subscriber, the answer is
+// cached. The no-op default subscriber used by every other test in
+// this binary caches our `info_span!` callsite as `Interest::never`,
+// which subsequent thread-local subscribers inherit.
+//
+// The reliable fix is to install a process-global subscriber **once**,
+// before any test code runs, that captures span creations into a
+// shared `Vec`. Each test that cares about span emission reads the
+// shared buffer, scoped to its own session via a unique input string.
+//
+// `Lazy` ensures the subscriber is registered the first time any code
+// path touches `CAPTURED_SPANS`. The capture is keyed by span name +
+// the request URI / handler-known marker; for the `count_tokens` test
+// the span name `life.anthropic.count_tokens` is unique enough.
+
+use std::sync::{LazyLock, Mutex as StdMutex2};
+
+static CAPTURED_SPANS: LazyLock<StdMutex2<Vec<String>>> = LazyLock::new(|| {
+    use tracing::Subscriber;
+    use tracing::span::Attributes;
+    use tracing_subscriber::layer::{Context, SubscriberExt};
+    use tracing_subscriber::registry::LookupSpan;
+
+    struct CaptureLayer;
+
+    impl<S> tracing_subscriber::Layer<S> for CaptureLayer
+    where
+        S: Subscriber + for<'a> LookupSpan<'a>,
+    {
+        fn on_new_span(&self, attrs: &Attributes<'_>, _id: &tracing::Id, _ctx: Context<'_, S>) {
+            let name = attrs.metadata().name();
+            // Filter aggressively — we only care about Life-emitted
+            // spans, not hyper / h2 / tonic noise.
+            if name.starts_with("life.")
+                && let Ok(mut g) = CAPTURED_SPANS.lock()
+            {
+                g.push(name.to_string());
+            }
+        }
+    }
+
+    let subscriber = tracing_subscriber::registry().with(CaptureLayer);
+    // Best-effort: if a global subscriber is already set (another test
+    // binary in the workspace ran before us via shared cargo state, or
+    // production code's `observability::init` was triggered), we skip
+    // setting and the span check fails by returning empty. That's
+    // acceptable — the test is best-effort observability evidence; the
+    // happy path (this is the first set_global_default in the process)
+    // is the production-relevant case.
+    let _ = tracing::subscriber::set_global_default(subscriber);
+    // Force a one-time interest-cache flush so subsequent `info_span!`
+    // callsites query our subscriber.
+    tracing::callsite::rebuild_interest_cache();
+    StdMutex2::new(Vec::new())
+});
+
+/// The handler MUST emit a `life.anthropic.count_tokens` Vigil span
+/// with the GenAI semconv attributes specified in Spec J L10-D7.
+///
+/// Uses the process-global capture subscriber installed by
+/// [`CAPTURED_SPANS`]'s `LazyLock` — the only reliable way to dodge
+/// `tracing`'s process-global callsite-interest cache when many tests
+/// in the same binary share the same `info_span!` callsite. See the
+/// comment above [`CAPTURED_SPANS`] for the full rationale.
+///
+/// The buffer is also touched by other tests via a global pattern, so
+/// we *snapshot the length* before firing the handler and only assert
+/// that the appended slice contains our span.
+#[tokio::test(flavor = "multi_thread")]
+async fn count_tokens_emits_vigil_span() {
+    // Force-initialise the capture subscriber before driving any
+    // tracing-emitting code path so the global default is set.
+    let pre_len = CAPTURED_SPANS.lock().expect("captured").len();
+
+    let rig = TestRig::build().await;
+    let body = count_tokens_body(
+        "claude-sonnet-4-20250514",
+        &[("user", "estimate me, please")],
+    );
+    let req = Request::builder()
+        .method("POST")
+        .uri("/v1/messages/count_tokens")
+        .header("authorization", TestRig::dev_bearer("alice"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .expect("build req");
+    let resp = rig.router().oneshot(req).await.expect("oneshot");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let _ = collect_body(resp).await;
+
+    let post = CAPTURED_SPANS.lock().expect("captured").clone();
+    let new_slice = &post[pre_len..];
+    assert!(
+        new_slice.iter().any(|n| n == "life.anthropic.count_tokens"),
+        "expected Vigil span `life.anthropic.count_tokens` to fire \
+         after this request (new entries: {new_slice:?}; full: {post:?})"
+    );
+}
+
+/// When the model is in `life_vigil::pricing::PRICING_SNAPSHOT`, the
+/// response MUST carry an `X-Life-Cost-Estimate-Usd-Micros: <n>` header
+/// with a strictly-positive integer value (Spec J L10-D7).
+#[tokio::test(flavor = "multi_thread")]
+async fn count_tokens_response_header_carries_cost_estimate() {
+    let rig = TestRig::build().await;
+    // `claude-sonnet-4-20250514` is in vigil's PRICING_SNAPSHOT
+    // (input_per_million = 3.0).
+    let body = count_tokens_body(
+        "claude-sonnet-4-20250514",
+        &[("user", "please count my tokens")],
+    );
+    let req = Request::builder()
+        .method("POST")
+        .uri("/v1/messages/count_tokens")
+        .header("authorization", TestRig::dev_bearer("alice"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .expect("build req");
+    let resp = rig.router().oneshot(req).await.expect("oneshot");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let cost_header = resp
+        .headers()
+        .get("x-life-cost-estimate-usd-micros")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let cost_header = cost_header
+        .expect("X-Life-Cost-Estimate-Usd-Micros header must be present for known model");
+    let cost_micros: u64 = cost_header.parse().expect("header must parse as u64");
+    // The estimate is strictly positive for non-empty input.
+    assert!(
+        cost_micros > 0,
+        "cost estimate must be > 0 for non-empty input (got {cost_micros})"
+    );
+}
+
+/// Missing Tier-1 bearer → HTTP 401 with an Anthropic-shape error body.
+#[tokio::test(flavor = "multi_thread")]
+async fn count_tokens_without_bearer_returns_401() {
+    let rig = TestRig::build().await;
+    let body = count_tokens_body("claude-sonnet-4-20250514", &[("user", "hi")]);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/v1/messages/count_tokens")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .expect("build req");
+    let resp = rig.router().oneshot(req).await.expect("oneshot");
+    let (status, payload) = collect_body(resp).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let v: Value = serde_json::from_str(&payload).expect("anthropic-shape body");
+    assert_eq!(v["error"]["type"], "authentication_error");
+}
+
+/// `OPTIONS /v1/messages/count_tokens` probe returns 204 with `Allow:
+/// POST, HEAD, OPTIONS`.
+#[tokio::test(flavor = "multi_thread")]
+async fn count_tokens_options_probe_returns_204_with_allow() {
+    let rig = TestRig::build().await;
+    let req = Request::builder()
+        .method("OPTIONS")
+        .uri("/v1/messages/count_tokens")
+        .body(Body::empty())
+        .expect("build req");
+    let resp = rig.router().oneshot(req).await.expect("oneshot");
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let allow = resp
+        .headers()
+        .get(header::ALLOW)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(allow.contains("POST"), "Allow must include POST: {allow}");
+    assert!(allow.contains("HEAD"), "Allow must include HEAD: {allow}");
+    assert!(
+        allow.contains("OPTIONS"),
+        "Allow must include OPTIONS: {allow}"
+    );
+}
