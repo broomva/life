@@ -82,7 +82,13 @@ pub struct BillingConfig {
 }
 
 fn default_billing_enforce() -> bool {
-    true
+    // Default false until a real haima client is wired (Phase 1 ships a
+    // StubHaimaClient that returns Ok(_) unconditionally — Strata B P20
+    // r1 flagged the dissonance of `enforce=true` + stub). Operators opt
+    // into billing once the real client lands; until then, vigil still
+    // records usage for telemetry. See BRO-1144 PR #1335 known-limitation
+    // notes.
+    false
 }
 
 impl Default for BillingConfig {
