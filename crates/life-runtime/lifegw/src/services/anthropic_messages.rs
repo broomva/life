@@ -91,7 +91,7 @@ use axum::{
     extract::{DefaultBodyLimit, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use bytes::Bytes;
 use futures::stream::{self, Stream, StreamExt};
@@ -99,6 +99,7 @@ use lifegw_anthropic_codec::{
     AnthropicError, AnthropicErrorKind, AnthropicMessagesRequest, AnthropicSseEvent,
     AnthropicVersion, CodecError, Encoder, synthesize_sid,
 };
+use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Channel;
 use tracing::Instrument;
@@ -337,15 +338,37 @@ pub struct AnthropicMessagesState {
 
 /// Mount the route.
 ///
-/// Per Spec J §J-Sub-B, the route lives at `/v1/messages`. We use
-/// exact-route matching (not nesting) so the rest of the `/v1/*` space
-/// stays free for the agent / events surfaces that the tonic stack
-/// continues to serve.
+/// Per Spec J §J-Sub-B, the streaming route lives at `/v1/messages`. We
+/// use exact-route matching (not nesting) so the rest of the `/v1/*`
+/// space stays free for the agent / events surfaces that the tonic
+/// stack continues to serve.
+///
+/// Spec J §J-Sub-F adds two siblings:
+///
+/// - `GET /v1/models` — Anthropic-compat model picker. Phase 1 returns
+///   a static Anthropic-pinned list; Phase 2 will fan out to Spec E
+///   backend discovery (`life/<backend>/<model>` ids + `-no-thinking`
+///   variants). Unauthenticated probe — the picker is consulted by
+///   clients before they have established a Tier-1 bearer in some
+///   bootstrap flows (matching Anthropic's posture).
+/// - `POST /v1/messages/count_tokens` — token-count probe. Tier-1
+///   bearer required (mirrors `/v1/messages`); reuses Vigil's edge
+///   estimator (Spec J L10-D7 — no new tokenizer crate).
 pub fn router(state: AnthropicMessagesState) -> Router {
     Router::new()
         .route(
             "/v1/messages",
             post(messages_handler).options(probe).head(probe),
+        )
+        .route(
+            "/v1/models",
+            get(models_handler).options(models_probe).head(models_probe),
+        )
+        .route(
+            "/v1/messages/count_tokens",
+            post(count_tokens_handler)
+                .options(count_tokens_probe)
+                .head(count_tokens_probe),
         )
         // I-4 (fix-round 1): cap body size at the router boundary so
         // axum rejects oversized payloads during the read rather than
@@ -357,16 +380,29 @@ pub fn router(state: AnthropicMessagesState) -> Router {
 
 // ─── Probe (OPTIONS / HEAD) ─────────────────────────────────────────────
 
-/// Probe response for `OPTIONS` + `HEAD`. Some Anthropic-shaped clients
-/// pre-flight the route; we reply 204 with an `Allow` header so they
-/// don't bounce off a 405.
+/// Probe response for `OPTIONS` + `HEAD` on `/v1/messages`. Some
+/// Anthropic-shaped clients pre-flight the route; we reply 204 with an
+/// `Allow` header so they don't bounce off a 405.
 async fn probe() -> Response {
+    probe_with_allow("POST, HEAD, OPTIONS")
+}
+
+/// Probe response for `/v1/models` — only `GET` is supported as the
+/// real verb.
+async fn models_probe() -> Response {
+    probe_with_allow("GET, HEAD, OPTIONS")
+}
+
+/// Probe response for `/v1/messages/count_tokens` — `POST` only.
+async fn count_tokens_probe() -> Response {
+    probe_with_allow("POST, HEAD, OPTIONS")
+}
+
+fn probe_with_allow(allow: &'static str) -> Response {
     let mut resp = Response::new(Body::empty());
     *resp.status_mut() = StatusCode::NO_CONTENT;
-    resp.headers_mut().insert(
-        header::ALLOW,
-        HeaderValue::from_static("POST, HEAD, OPTIONS"),
-    );
+    resp.headers_mut()
+        .insert(header::ALLOW, HeaderValue::from_static(allow));
     resp
 }
 
@@ -1485,6 +1521,389 @@ fn sanitize_upstream(msg: &str, fallback_context: &str) -> String {
     } else {
         cleaned
     }
+}
+
+// ─── J-Sub-F: GET /v1/models ────────────────────────────────────────────
+
+/// One row in the Anthropic-shape `data: [...]` list returned by
+/// `GET /v1/models`. Matches Anthropic's [public response shape]
+/// for Claude Code's `/model` picker.
+///
+/// [public response shape]: https://docs.anthropic.com/en/api/models-list
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelInfo {
+    /// Stable model identifier (e.g. `claude-sonnet-4-20250514`).
+    pub id: String,
+    /// Human-readable display name surfaced in pickers.
+    pub display_name: String,
+    /// Release timestamp in RFC-3339 / ISO-8601. Anthropic uses
+    /// midnight-UTC for these.
+    pub created_at: String,
+    /// Always `"model"` per Anthropic's wire shape — exposed so
+    /// downstream clients that pattern-match on `type` work without
+    /// custom serde. `String` rather than `&'static str` so the type
+    /// is `Deserialize` (round-trippable through the integration test
+    /// rig and any future replay machinery).
+    #[serde(rename = "type", default = "model_kind_default")]
+    pub kind: String,
+}
+
+/// Default `kind` value for [`ModelInfo`] deserialization — always
+/// `"model"` per Anthropic's wire shape.
+fn model_kind_default() -> String {
+    "model".to_string()
+}
+
+/// Anthropic-shape `GET /v1/models` response envelope.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelListResponse {
+    /// Ordered list of available models. Anthropic's hosted endpoint
+    /// returns the newest entries first; we mirror that ordering.
+    pub data: Vec<ModelInfo>,
+    /// First `id` in `data` (or empty if `data` is empty). Anthropic's
+    /// pagination envelope.
+    pub first_id: String,
+    /// Whether more models are available beyond this page. Phase 1 is
+    /// always `false` — the static list fits comfortably in a single
+    /// response.
+    pub has_more: bool,
+    /// Last `id` in `data`.
+    pub last_id: String,
+}
+
+/// Build the Phase 1 static model list per Spec J §[Model picker].
+///
+/// The pinned Anthropic identifiers are the autocomplete defaults
+/// Claude Code ships with — keeping `/model` recognise these IDs makes
+/// the gateway a drop-in for `api.anthropic.com` even before Spec E
+/// backend fan-out lands.
+///
+/// **Phase 2 placeholder** — when Spec E's `InferenceRouter` exposes a
+/// discoverable backend catalogue, this function will additionally:
+///
+/// 1. Query the router for the active backend set.
+/// 2. For each backend `<b>` and model `<m>`, emit `id =
+///    "life/<b>/<m>"` plus, where the backend declares thinking
+///    support, a `<id>-no-thinking` companion (matching
+///    free-claude-code's `gateway_model_id` /
+///    `no_thinking_gateway_model_id` pattern).
+/// 3. Keep the Anthropic-pinned list first so Claude Code's default
+///    `/model` autocomplete still picks Anthropic identifiers.
+///
+/// That extension is **NOT** wired in this PR — Phase 2 surface area
+/// only. See `docs/superpowers/specs/2026-05-18-spec-j-claude-code-interop.md`
+/// §L10-D6 for the locked behaviour.
+fn static_model_catalogue() -> Vec<ModelInfo> {
+    vec![
+        ModelInfo {
+            id: "claude-opus-4-20250514".to_string(),
+            display_name: "Claude Opus 4".to_string(),
+            created_at: "2025-05-14T00:00:00Z".to_string(),
+            kind: "model".to_string(),
+        },
+        ModelInfo {
+            id: "claude-sonnet-4-20250514".to_string(),
+            display_name: "Claude Sonnet 4".to_string(),
+            created_at: "2025-05-14T00:00:00Z".to_string(),
+            kind: "model".to_string(),
+        },
+        ModelInfo {
+            id: "claude-haiku-4-20250514".to_string(),
+            display_name: "Claude Haiku 4".to_string(),
+            created_at: "2025-05-14T00:00:00Z".to_string(),
+            kind: "model".to_string(),
+        },
+        ModelInfo {
+            id: "claude-sonnet-4-5-20250929".to_string(),
+            display_name: "Claude Sonnet 4.5".to_string(),
+            created_at: "2025-09-29T00:00:00Z".to_string(),
+            kind: "model".to_string(),
+        },
+        ModelInfo {
+            id: "claude-haiku-4-5-20251001".to_string(),
+            display_name: "Claude Haiku 4.5".to_string(),
+            created_at: "2025-10-01T00:00:00Z".to_string(),
+            kind: "model".to_string(),
+        },
+    ]
+}
+
+/// Build the `ModelListResponse` envelope from a `Vec<ModelInfo>`.
+fn build_model_list_response(models: Vec<ModelInfo>) -> ModelListResponse {
+    let first_id = models.first().map(|m| m.id.clone()).unwrap_or_default();
+    let last_id = models.last().map(|m| m.id.clone()).unwrap_or_default();
+    ModelListResponse {
+        data: models,
+        first_id,
+        has_more: false,
+        last_id,
+    }
+}
+
+/// `GET /v1/models` handler. Returns the Phase 1 static catalogue as a
+/// JSON body in Anthropic's wire shape.
+///
+/// Unauthenticated by design — the picker is consulted at client
+/// bootstrap before a Tier-1 bearer has been negotiated in some
+/// deployments. The catalogue carries no per-tenant data; exposing it
+/// is equivalent to publishing the docs page.
+async fn models_handler(State(_state): State<AnthropicMessagesState>) -> Response {
+    let body = build_model_list_response(static_model_catalogue());
+    let payload = match serde_json::to_vec(&body) {
+        Ok(b) => b,
+        Err(e) => {
+            return anthropic_http_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AnthropicErrorKind::ApiError,
+                format!("encode models response: {e}"),
+            );
+        }
+    };
+    let mut resp = Response::new(Body::from(payload));
+    *resp.status_mut() = StatusCode::OK;
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    resp
+}
+
+// ─── J-Sub-F: POST /v1/messages/count_tokens ────────────────────────────
+
+/// Inbound body for `POST /v1/messages/count_tokens`. Mirrors
+/// Anthropic's published shape — `model` + `messages[]` are mandatory;
+/// `system` + `tools` are accepted but currently ignored by the
+/// estimator (tool definitions are excluded from text-count, matching
+/// Anthropic's own definition of "prompt tokens consumed by the
+/// caller-visible text").
+///
+/// The shape is forward-compatible — `serde(default)` on the missing
+/// envelope means new Anthropic-side fields don't break clients.
+#[derive(Debug, Clone, Deserialize)]
+struct CountTokensRequest {
+    /// Model identifier. Honoured for pricing lookup + the Vigil span
+    /// `gen_ai.request.model` attribute; does NOT influence the
+    /// estimator (the 4-chars/token heuristic is model-agnostic at
+    /// edge — Spec J L10-D7).
+    model: String,
+    /// Conversation history to estimate. Reused via the canonical
+    /// codec request shape so the same parsing rules apply
+    /// (`string`-or-`array` `content`, `tool_use` / `tool_result`
+    /// blocks contribute the empty string for sid synthesis, etc.).
+    messages: Vec<lifegw_anthropic_codec::Message>,
+    /// Optional system prompt — counted into the token estimate when
+    /// present.
+    #[serde(default)]
+    system: Option<lifegw_anthropic_codec::SystemPrompt>,
+    /// Tools available to the model — currently ignored by the
+    /// estimator (Anthropic's published count includes tool-def JSON
+    /// schema text, but that's a Phase-2 refinement; matching their
+    /// number to ±5% is sufficient for compact-window budgeting).
+    #[serde(default)]
+    #[allow(dead_code)]
+    tools: Vec<serde_json::Value>,
+}
+
+/// Response body for `POST /v1/messages/count_tokens`. Strict
+/// Anthropic-compat — no extra fields.
+#[derive(Debug, Clone, Serialize)]
+struct CountTokensResponse {
+    input_tokens: usize,
+}
+
+/// Concatenate all messages into a single text string for estimator
+/// input. Tool-use blocks are stripped (their schema is metadata, not
+/// caller-visible prompt text); tool-result content is included via
+/// `plain_text()`'s text-block-only contract.
+///
+/// System prompt text is prepended (Anthropic-aligned: the system
+/// prompt is part of the prompt-token count).
+fn canonicalize_messages_for_count(req: &CountTokensRequest) -> String {
+    let mut out = String::new();
+    if let Some(sys) = req.system.as_ref() {
+        use lifegw_anthropic_codec::SystemPrompt;
+        match sys {
+            SystemPrompt::Text(t) => out.push_str(t),
+            SystemPrompt::Blocks(blocks) => {
+                for b in blocks {
+                    if !out.is_empty() {
+                        out.push('\n');
+                    }
+                    out.push_str(&b.text);
+                }
+            }
+        }
+    }
+    for m in &req.messages {
+        let text = m.content.plain_text();
+        if text.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&text);
+    }
+    out
+}
+
+/// `POST /v1/messages/count_tokens` handler. Returns an Anthropic-shape
+/// `{"input_tokens": <usize>}` body computed via the 4-chars/token edge
+/// estimator (Spec J L10-D7). Emits a `life.anthropic.count_tokens`
+/// Vigil span carrying GenAI semconv attributes plus
+/// `life.estimated_cost_usd_micros` when the model is in the pricing
+/// snapshot, and a `X-Life-Cost-Estimate-Usd-Micros` response header.
+async fn count_tokens_handler(
+    State(state): State<AnthropicMessagesState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    // 1. Verify the Tier-1 bearer (same flow as `/v1/messages`).
+    let bearer = match headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+    {
+        Some(b) if !b.is_empty() => b,
+        _ => {
+            return anthropic_http_error(
+                StatusCode::UNAUTHORIZED,
+                AnthropicErrorKind::AuthenticationError,
+                "missing Tier-1 bearer",
+            );
+        }
+    };
+    let tier1 = match state.jwks.verify(bearer) {
+        Ok(c) => c,
+        Err(e) => {
+            return anthropic_http_error(
+                StatusCode::UNAUTHORIZED,
+                AnthropicErrorKind::AuthenticationError,
+                format!("invalid Tier-1: {e}"),
+            );
+        }
+    };
+
+    // 2. Rate-limit (same shared-budget posture as /v1/messages).
+    if let Some(limiter) = state.rate_limiter.as_ref() {
+        let peer_ip = peer_ip_from_request(&headers)
+            .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+        let decision = limiter.check(&tier1.user_id, peer_ip);
+        if decision.is_reject() {
+            return anthropic_http_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                AnthropicErrorKind::RateLimitError,
+                decision.reason().to_string(),
+            );
+        }
+    }
+
+    // 3. Parse the body.
+    let req: CountTokensRequest = match serde_json::from_slice(&body) {
+        Ok(req) => req,
+        Err(e) => {
+            return anthropic_http_error(
+                StatusCode::BAD_REQUEST,
+                AnthropicErrorKind::InvalidRequestError,
+                format!("invalid JSON body: {e}"),
+            );
+        }
+    };
+    if req.model.trim().is_empty() {
+        return anthropic_http_error(
+            StatusCode::BAD_REQUEST,
+            AnthropicErrorKind::InvalidRequestError,
+            "model must not be empty",
+        );
+    }
+    if req.messages.is_empty() {
+        return anthropic_http_error(
+            StatusCode::BAD_REQUEST,
+            AnthropicErrorKind::InvalidRequestError,
+            "messages must contain at least one entry",
+        );
+    }
+
+    // 4. Canonicalise + estimate.
+    let text = canonicalize_messages_for_count(&req);
+    let input_tokens = life_vigil::tokens::estimate_tokens(&text);
+
+    // 5. Look up pricing for the cost-estimate side-band. Vigil's
+    //    `lookup_pricing` accepts exact + substring matches so dated
+    //    variants resolve cleanly.
+    let pricing = life_vigil::pricing::lookup_pricing(&req.model);
+    let cost_micros: Option<u64> = pricing.map(|p| {
+        // Cost in USD micros (10⁻⁶ USD). `input_per_million` is USD per
+        // 1e6 tokens; we want micros per `input_tokens` tokens:
+        //   micros = tokens * (USD/1e6 tokens) * (1e6 micros/USD)
+        //          = tokens * input_per_million
+        // The factors cancel into a simple multiplication.
+        let micros_f = (input_tokens as f64) * p.input_per_million;
+        // Saturating cast — pricing snapshot keeps numbers small (max
+        // ~75.0 per million tokens for Opus output), so a 1 GB user
+        // message produces ~1.9e10 tokens → ~1.4e12 micros, well inside
+        // u64 range. Saturating is defensive against future bumps.
+        micros_f.max(0.0).min(u64::MAX as f64) as u64
+    });
+
+    // 6. Emit the Vigil span. We use `info_span!` so the
+    //    `tracing-opentelemetry` layer picks it up into OTLP. The
+    //    `life.estimated_cost_usd_micros` field is created up-front
+    //    with `tracing::field::Empty` so the conditional `record(...)`
+    //    call below has somewhere to write.
+    let anima_did = format!("did:life:{}", tier1.user_id);
+    let span = tracing::info_span!(
+        "life.anthropic.count_tokens",
+        gen_ai.system = "life",
+        gen_ai.operation.name = "count_tokens",
+        gen_ai.usage.input_tokens = input_tokens,
+        gen_ai.request.model = %req.model,
+        life.anima.did = %anima_did,
+        life.estimated_cost_usd_micros = tracing::field::Empty,
+    );
+    if let Some(c) = cost_micros {
+        span.record("life.estimated_cost_usd_micros", c);
+    }
+    let _enter = span.enter();
+    tracing::debug!(
+        user = %tier1.user_id,
+        model = %req.model,
+        input_tokens,
+        cost_micros = ?cost_micros,
+        "count_tokens estimate",
+    );
+    drop(_enter);
+
+    // 7. Build the response. Always JSON body (Anthropic-compat); when
+    //    pricing exists, surface the cost estimate via the
+    //    `X-Life-Cost-Estimate-Usd-Micros` header so haima-aware
+    //    clients see it without parsing the trace.
+    let payload = match serde_json::to_vec(&CountTokensResponse { input_tokens }) {
+        Ok(b) => b,
+        Err(e) => {
+            return anthropic_http_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AnthropicErrorKind::ApiError,
+                format!("encode count_tokens response: {e}"),
+            );
+        }
+    };
+    let mut resp = Response::new(Body::from(payload));
+    *resp.status_mut() = StatusCode::OK;
+    let h = resp.headers_mut();
+    h.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    if let Some(c) = cost_micros
+        && let Ok(v) = HeaderValue::from_str(&c.to_string())
+    {
+        h.insert(
+            header::HeaderName::from_static("x-life-cost-estimate-usd-micros"),
+            v,
+        );
+    }
+    resp
 }
 
 // Compile-time guard: IntoResponse on the handler's actual return type.
