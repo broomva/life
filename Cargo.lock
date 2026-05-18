@@ -6622,8 +6622,6 @@ dependencies = [
 name = "lifegw-anthropic-codec"
 version = "0.3.0"
 dependencies = [
- "bytes",
- "futures",
  "hex",
  "life-runtime-proto",
  "serde",

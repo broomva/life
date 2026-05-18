@@ -1217,9 +1217,20 @@ mod tests {
     fn resume_carries_block_index_state() {
         // Build encoder, advance, snapshot, resume — the resumed
         // encoder must allocate the next block index past where the
-        // original left off.
+        // original left off. We assert the property via the observable
+        // SSE wire shape: the `content_block_start` emitted on the
+        // resumed encoder must carry a higher `index` than any block
+        // emitted before the snapshot.
         let mut e = Encoder::new("msg_test", "m");
-        let _ = e.encode(&token_event(1, "first")).unwrap();
+        let pre = e.encode(&token_event(1, "first")).unwrap();
+        let max_pre_index = pre
+            .iter()
+            .filter_map(|ev| match ev {
+                AnthropicSseEvent::ContentBlockStart(p) => Some(p.index),
+                _ => None,
+            })
+            .max()
+            .expect("first encode must emit at least one content_block_start");
         let _ = e.encode(&finish_event(2, "stop")).unwrap();
         // Manually clear `finished` so resume can continue (in real
         // life replay only resumes mid-stream sessions, but the
@@ -1227,10 +1238,33 @@ mod tests {
         let mut state = e.state().clone();
         state.finished = false;
         let _ = state.blocks.close_all();
+        // Snapshot expectation: no second message_start on resume.
+        assert!(
+            state.started,
+            "snapshot must remember that message_start was already emitted"
+        );
         let mut resumed = Encoder::resume(state);
-        let _ = resumed.encode(&token_event(3, "second")).unwrap();
-        // Index used for "second" must be > 0.
-        let _ = resumed; // suppress unused warning if encoder doesn't expose state mutably
+        let post = resumed.encode(&token_event(3, "second")).unwrap();
+        // (a) Resume must NOT re-emit message_start.
+        assert!(
+            !post
+                .iter()
+                .any(|ev| matches!(ev, AnthropicSseEvent::MessageStart(_))),
+            "resume must not re-emit message_start"
+        );
+        // (b) The new content_block_start index must be strictly
+        //     greater than any index used pre-snapshot.
+        let post_start_index = post
+            .iter()
+            .find_map(|ev| match ev {
+                AnthropicSseEvent::ContentBlockStart(p) => Some(p.index),
+                _ => None,
+            })
+            .expect("resumed encode must emit a content_block_start for the new token");
+        assert!(
+            post_start_index > max_pre_index,
+            "resumed block index must be > pre-snapshot max ({post_start_index} <= {max_pre_index})"
+        );
     }
 
     #[test]

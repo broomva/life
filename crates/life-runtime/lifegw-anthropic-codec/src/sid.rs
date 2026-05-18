@@ -12,15 +12,32 @@
 //! The 16-hex-char prefix gives 2^64 collision space per anima — enough
 //! for any single user's lifetime per Spec J §[Locked Decisions L10-D2].
 //!
-//! ## Canonicalization
+//! ## Canonicalization — Phase 1 scope
 //!
-//! Claude Code re-injects prior `tool_result` content into subsequent
-//! requests by prefixing the first user message with a marker block
-//! (`<tool_result_re_injection>...</tool_result_re_injection>`). The
-//! re-injected bytes mean the *literal* `messages[0].content` differs
-//! between request 1 and request 2 even though the conversation is the
-//! same. Canonicalization strips that prefix and normalizes whitespace
-//! so sid stays stable across the tool-use HTTP round-trip.
+//! Phase 1 canonicalization is intentionally minimal:
+//!
+//! 1. Concatenate text-only content blocks (ignore tool_use /
+//!    tool_result / thinking — they aren't "what the user typed").
+//! 2. Collapse runs of whitespace to a single ASCII space, then trim.
+//!
+//! That is **the entire canonical form**. Spec J L10-D2 mentions
+//! stripping a "known tool-result re-injection wrapper" but does not
+//! pin the wire shape, because the wire shape is an observed property
+//! of Claude Code's runtime, not part of the Anthropic Messages public
+//! contract. In practice Claude Code's tool_result re-injection rides
+//! on subsequent `{type:"tool_result", tool_use_id, content}` content
+//! blocks in later messages — the *first* user message stays
+//! byte-identical across the tool-use HTTP round-trip — so the
+//! whitespace-normalization-only canonical form is sufficient for sid
+//! stability in current Claude Code (v0.x, May 2026).
+//!
+//! Empirical canonicalization of any future Claude Code re-injection
+//! shape is deferred to **J-Sub-D (BRO-1143)**, where we'll observe
+//! the actual tool round-trip behavior against a live Claude Code
+//! client and add evidence-backed prefix/wrapper stripping (with
+//! source-linked observed-bytes documentation) only if a real wire
+//! shape demands it. Until that evidence exists, this codec does not
+//! invent stripping rules.
 
 use sha2::{Digest, Sha256};
 
@@ -39,73 +56,20 @@ pub const SID_PREFIX: &str = "claude-code:";
 /// 16 hex chars == 64 bits == 2^64 collision space per anima.
 const SID_HEX_LEN: usize = 16;
 
-/// Tool-result re-injection wrapper Claude Code uses. The exact bytes
-/// are an *observed convention* — the public Anthropic Messages spec
-/// does not document them. If Claude Code changes this prefix, sid
-/// stability degrades to "best-effort"; the prefix list is the only
-/// mutable knob.
-///
-/// Each prefix is checked in order against the *trimmed* user message.
-/// If any matches, the matching prefix is stripped before hashing.
-const REINJECTION_PREFIXES: &[&str] = &[
-    "<tool_result_re_injection>",
-    "<system-tool-result>",
-    "<bash-stdout>",
-    "<file-content>",
-];
-
-/// Closing tag, only stripped when the matching opening prefix is
-/// present. Ordering must mirror [`REINJECTION_PREFIXES`].
-const REINJECTION_SUFFIXES: &[&str] = &[
-    "</tool_result_re_injection>",
-    "</system-tool-result>",
-    "</bash-stdout>",
-    "</file-content>",
-];
-
 /// Canonicalize the first user message body for sid hashing.
 ///
-/// Steps:
+/// Steps (Phase 1, whitespace-normalization-only — see module docs):
 /// 1. Concatenate text-only content blocks (ignore tool_use /
 ///    tool_result / thinking — they aren't "what the user typed").
-/// 2. Strip a known tool-result re-injection wrapper if present.
-/// 3. Collapse all whitespace runs to a single ASCII space, then trim.
+/// 2. Collapse all whitespace runs to a single ASCII space, then trim.
 ///
 /// The resulting bytes are deterministic for any *semantically*
-/// equivalent user turn — additional whitespace, mid-stream re-prompts
-/// with re-injection, and Claude Code's tool-result reformatting all
-/// collapse to the same canonical form.
+/// equivalent user turn that differs only in whitespace. The "strip a
+/// tool-result re-injection wrapper" requirement from Spec J L10-D2 is
+/// deferred to J-Sub-D once we have empirical evidence of Claude
+/// Code's actual re-injection shape.
 pub fn canonicalize_first_user_message(content: &MessageContent) -> String {
-    let raw = content.plain_text();
-    let stripped = strip_reinjection_wrapper(&raw);
-    collapse_whitespace(stripped)
-}
-
-fn strip_reinjection_wrapper(raw: &str) -> &str {
-    // Returns the slice of `raw` that remains AFTER the wrapper has
-    // been excised. If no wrapper is present, returns `raw` unchanged.
-    //
-    // The mental model: a re-injection wrapper is a *prefix* on the
-    // user's real first message — strip wrapper + wrapper body +
-    // optional close tag, keep the rest. Example:
-    //
-    //   <tool_result_re_injection>...</tool_result_re_injection>real message
-    //   ⇒ "real message"
-    let trimmed = raw.trim_start();
-    for (open, close) in REINJECTION_PREFIXES.iter().zip(REINJECTION_SUFFIXES.iter()) {
-        if let Some(after_open) = trimmed.strip_prefix(open) {
-            // Skip past the matching close tag (and everything before
-            // it). If no close is present (Claude Code occasionally
-            // drops it at message-end truncation), keep what's after
-            // the opening tag — best-effort recovery.
-            if let Some(idx) = after_open.find(close) {
-                let after_close = &after_open[idx + close.len()..];
-                return after_close;
-            }
-            return after_open;
-        }
-    }
-    raw
+    collapse_whitespace(&content.plain_text())
 }
 
 fn collapse_whitespace(s: &str) -> String {
@@ -236,18 +200,20 @@ mod tests {
     }
 
     #[test]
-    fn synthesize_sid_strips_tool_result_reinjection_prefix() {
-        let plain = req_with_user_text("read foo.txt");
-        let wrapped = req_with_user_text(
-            "<tool_result_re_injection>{\"path\":\"foo.txt\"}</tool_result_re_injection>read foo.txt",
-        );
+    fn synthesize_sid_stable_across_first_user_message_byte_identity() {
+        // Per Spec J §[Tool use] example, Claude Code's tool_result
+        // re-injection rides on subsequent content blocks in *later*
+        // messages — the first user message stays byte-identical
+        // across the tool-use HTTP round-trip. Whitespace-normalization
+        // canonicalization is sufficient for sid stability in this
+        // shape. (Empirical canonicalization of any future re-injection
+        // shape is deferred to J-Sub-D; see module docs.)
+        let req1 = req_with_user_text("read foo.txt");
+        let req2 = req_with_user_text("read foo.txt");
         let did = "did:life:user1";
-        let a = synthesize_sid(&plain, did).unwrap();
-        let b = synthesize_sid(&wrapped, did).unwrap();
-        assert_eq!(
-            a, b,
-            "sid must be stable across the tool-use HTTP round-trip"
-        );
+        let a = synthesize_sid(&req1, did).unwrap();
+        let b = synthesize_sid(&req2, did).unwrap();
+        assert_eq!(a, b);
     }
 
     #[test]
@@ -280,11 +246,13 @@ mod tests {
         let blocks = MessageContent::Blocks(vec![
             ContentBlock::Text {
                 text: "user typed".into(),
+                cache_control: None,
             },
             ContentBlock::ToolUse {
                 id: "id1".into(),
                 name: "t".into(),
                 input: serde_json::json!({"x":1}),
+                cache_control: None,
             },
         ]);
         let c = canonicalize_first_user_message(&blocks);
@@ -292,10 +260,13 @@ mod tests {
     }
 
     #[test]
-    fn canonicalize_handles_open_only_reinjection_tag() {
-        // Truncated close tag — still strip the opener.
-        let blocks = MessageContent::Text("<tool_result_re_injection>real user message".into());
+    fn canonicalize_preserves_xml_like_content_verbatim() {
+        // Phase 1 canonicalization is whitespace-normalization only.
+        // Any XML-looking content the user actually typed must reach
+        // the hasher unmodified. Empirical re-injection-prefix
+        // stripping is deferred to J-Sub-D.
+        let blocks = MessageContent::Text("<tool_result_re_injection>literal user text".into());
         let c = canonicalize_first_user_message(&blocks);
-        assert_eq!(c, "real user message");
+        assert_eq!(c, "<tool_result_re_injection>literal user text");
     }
 }

@@ -9,8 +9,12 @@ license.workspace = true
 repository.workspace = true
 
 # Spec J L10-D1: this crate is **edge-only** and **substrate-free**.
-# It MAY depend on: serde / serde_json / tokio / futures / bytes / sha2 /
-# hex / thiserror / tracing / life-runtime-proto.
+# Production deps are minimal — the codec is a pure synchronous wire-shape
+# translator with no I/O.
+# It MAY depend on: serde / serde_json / sha2 / hex / thiserror / tracing /
+# life-runtime-proto. Async / byte-buffer crates (tokio, futures, bytes)
+# would only land here if a future sub-phase needs them — currently unused
+# in src/.
 # It MUST NOT depend on: arcand, lago-*, haima-*, anima-*, arcan-core,
 # arcan-harness, arcan-aios-adapters, inference-core. Enforced by
 # scripts/verify_dependencies_lifegw_anthropic_codec.sh.
@@ -25,11 +29,6 @@ life-runtime-proto = { workspace = true }
 # canonical serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-# byte-level + async — used for SSE chunk shapes + stream adapters
-bytes = { workspace = true }
-futures = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time"] }
 
 # crypto + hex — used for synthesize_sid (Spec J L10-D2)
 sha2 = { workspace = true }

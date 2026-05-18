@@ -2,9 +2,28 @@
 //!
 //! Mirrors `core/anthropic/native_messages_request.py` from the
 //! free-claude-code reference: defines a typed Rust shape for the
-//! `POST /v1/messages` body, enforces `#[serde(deny_unknown_fields)]`
-//! so future Claude Code field drift is loud rather than silent, and
-//! validates the `anthropic-version` header (Spec J L10-D5).
+//! `POST /v1/messages` body and validates the `anthropic-version`
+//! header (Spec J L10-D5).
+//!
+//! ## Strictness policy
+//!
+//! Drift detection is layered:
+//!
+//! * **Header-level (strict)** — [`AnthropicVersion::parse`] rejects
+//!   unknown `anthropic-version` values with
+//!   [`CodecError::UnsupportedAnthropicVersion`]. Per Spec J L10-D5
+//!   the header is the canonical "what API version are you speaking"
+//!   pin and drift there must be loud.
+//! * **Body-level (forward-compatible)** — `AnthropicMessagesRequest`
+//!   does NOT use `deny_unknown_fields`. free-claude-code's reference
+//!   impl accepts an open list (`mcp_servers`, `context_management`,
+//!   `output_config`, `extra_body`, ...) and Anthropic itself adds
+//!   optional fields over time. Rejecting at the body envelope would
+//!   break working clients.
+//! * **Variant-level (strict)** — `ContentBlock` is a tagged enum, so
+//!   unknown `type:` discriminants still fail loudly (an unknown
+//!   content_block type means the encoder cannot translate it to a
+//!   `pb::AgentEvent`, which is a structural error).
 //!
 //! This module is a pure decoder. It does not call any substrate, does
 //! not perform authentication, and does not synthesize any state — it
@@ -38,15 +57,24 @@ pub enum Role {
 /// * `[{type:"text", text:"..."}, {type:"tool_use", ...}, ...]`.
 ///
 /// The codec accepts both; see [`MessageContent`].
+///
+/// Per Anthropic Messages, every content block (and `SystemBlock`)
+/// accepts an optional `cache_control: {"type":"ephemeral"}` marker
+/// for prompt caching. The codec doesn't act on it, but it must
+/// round-trip without error so requests using Anthropic's prompt
+/// caching (the recommended default for long system prompts + tool
+/// definitions) parse cleanly.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub enum ContentBlock {
     /// Plain text content.
     Text {
         /// UTF-8 text body.
         text: String,
+        /// Optional `cache_control` hint (e.g. `{type:"ephemeral"}`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_control: Option<serde_json::Value>,
     },
     /// Tool invocation block (assistant turn).
     ToolUse {
@@ -56,6 +84,9 @@ pub enum ContentBlock {
         name: String,
         /// Tool input — free-form JSON.
         input: serde_json::Value,
+        /// Optional `cache_control` hint.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_control: Option<serde_json::Value>,
     },
     /// Tool result block (user turn following an assistant tool_use).
     ToolResult {
@@ -69,6 +100,9 @@ pub enum ContentBlock {
         /// Whether the tool call failed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
+        /// Optional `cache_control` hint.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_control: Option<serde_json::Value>,
     },
     /// Thinking block — extended thinking traces.
     Thinking {
@@ -77,6 +111,9 @@ pub enum ContentBlock {
         /// Optional signed thinking signature.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         signature: Option<String>,
+        /// Optional `cache_control` hint.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_control: Option<serde_json::Value>,
     },
     /// Redacted thinking block — opaque encrypted bytes.
     RedactedThinking {
@@ -100,7 +137,10 @@ impl MessageContent {
     /// wrapping the `Text` shorthand into a single-block array.
     pub fn as_blocks(&self) -> Vec<ContentBlock> {
         match self {
-            Self::Text(s) => vec![ContentBlock::Text { text: s.clone() }],
+            Self::Text(s) => vec![ContentBlock::Text {
+                text: s.clone(),
+                cache_control: None,
+            }],
             Self::Blocks(b) => b.clone(),
         }
     }
@@ -115,7 +155,7 @@ impl MessageContent {
             Self::Blocks(blocks) => {
                 let mut out = String::new();
                 for b in blocks {
-                    if let ContentBlock::Text { text } = b {
+                    if let ContentBlock::Text { text, .. } = b {
                         if !out.is_empty() {
                             out.push('\n');
                         }
@@ -219,12 +259,20 @@ pub enum ThinkingConfig {
 
 /// Inbound `POST /v1/messages` body.
 ///
-/// `#[serde(deny_unknown_fields)]` is enforced per Spec J §[Sub-phase
-/// decomposition]: silent acceptance of unknown fields turns Claude
-/// Code version drift into hard-to-debug behaviour changes; explicit
-/// rejection surfaces drift as a 400.
+/// The body is **forward-compatible**: unknown top-level fields are
+/// silently ignored by serde's default. Spec J L10-D5's strictness
+/// applies to the `anthropic-version` *header* (see
+/// [`AnthropicVersion::parse`]), not to the body envelope.
+///
+/// Rationale: free-claude-code's reference impl
+/// (`core/anthropic/native_messages_request.py`) accepts an open list
+/// of fields including `mcp_servers`, `context_management`,
+/// `output_config`, and `extra_body`, and Anthropic itself adds new
+/// optional fields (e.g. `cache_control`-aware variants) without
+/// notice. Body-level `deny_unknown_fields` would reject the very
+/// clients this codec exists to serve. Drift detection lives at the
+/// header (`AnthropicVersion`) and per-`ContentBlock` `type` level.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct AnthropicMessagesRequest {
     /// Model identifier — Anthropic-named (`claude-sonnet-4-...`) or
     /// life-routed (`life/<backend>/<model>`).
@@ -357,21 +405,109 @@ mod tests {
     }
 
     #[test]
-    fn unknown_fields_are_rejected() {
-        // Spec J §[Sub-phase decomposition]: deny_unknown_fields is the
-        // anti-drift gate.
+    fn accepts_unknown_body_fields_silently() {
+        // The body envelope is forward-compatible (see struct docs).
+        // free-claude-code's reference impl accepts `mcp_servers`,
+        // `context_management`, `output_config`, `extra_body`, and
+        // future Anthropic-side additions. Rejecting unknown top-level
+        // fields here would break the very clients this codec serves.
         let body = r#"{
             "model": "claude-sonnet-4-20250514",
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 10,
+            "mcp_servers": [],
+            "context_management": {"edits": []},
+            "output_config": {},
+            "extra_body": {"future_field": 42},
             "totally_new_field": 42
         }"#;
+        let req: AnthropicMessagesRequest =
+            serde_json::from_str(body).expect("body envelope must accept unknown fields silently");
+        req.validate().unwrap();
+        assert_eq!(req.model, "claude-sonnet-4-20250514");
+    }
+
+    #[test]
+    fn unknown_content_block_types_still_fail_loudly() {
+        // Drift detection moves to per-`ContentBlock` `type` — an
+        // unknown content_block kind is a hard parse error since the
+        // codec's encoder branches on `pb::AgentEvent` ↔ block-type
+        // mappings and a new type means structural translation work.
+        let body = r#"{
+            "model": "m",
+            "max_tokens": 10,
+            "messages": [{"role":"user","content":[
+                {"type":"brand_new_block_type","whatever":1}
+            ]}]
+        }"#;
         let err = serde_json::from_str::<AnthropicMessagesRequest>(body)
-            .expect_err("deny_unknown_fields must reject");
+            .expect_err("ContentBlock unknown variants must reject");
         assert!(
-            err.to_string().contains("totally_new_field"),
-            "error should mention the unknown field: {err}"
+            err.to_string().contains("brand_new_block_type") || err.to_string().contains("variant"),
+            "error should reference the unknown content_block variant: {err}"
         );
+    }
+
+    #[test]
+    fn content_blocks_round_trip_with_cache_control() {
+        // Anthropic prompt caching attaches `cache_control` markers to
+        // any content block (and to system blocks + tools). The codec
+        // must accept the marker on text / tool_use / tool_result /
+        // thinking blocks without rejecting.
+        let body = r#"{
+            "model": "m",
+            "max_tokens": 1,
+            "messages": [
+                {"role":"user","content":[
+                    {"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}
+                ]},
+                {"role":"assistant","content":[
+                    {"type":"tool_use","id":"toolu_01","name":"f","input":{},"cache_control":{"type":"ephemeral"}}
+                ]},
+                {"role":"user","content":[
+                    {"type":"tool_result","tool_use_id":"toolu_01","content":"ok","cache_control":{"type":"ephemeral"}}
+                ]},
+                {"role":"assistant","content":[
+                    {"type":"thinking","thinking":"reasoning","cache_control":{"type":"ephemeral"}}
+                ]}
+            ]
+        }"#;
+        let req: AnthropicMessagesRequest = serde_json::from_str(body).unwrap();
+        let blocks0 = req.messages[0].content.as_blocks();
+        let ContentBlock::Text {
+            cache_control: cc0, ..
+        } = &blocks0[0]
+        else {
+            panic!("expected Text");
+        };
+        assert!(cc0.is_some(), "Text cache_control must round-trip");
+
+        let blocks1 = req.messages[1].content.as_blocks();
+        let ContentBlock::ToolUse {
+            cache_control: cc1, ..
+        } = &blocks1[0]
+        else {
+            panic!("expected ToolUse");
+        };
+        assert!(cc1.is_some(), "ToolUse cache_control must round-trip");
+
+        let blocks2 = req.messages[2].content.as_blocks();
+        let ContentBlock::ToolResult {
+            cache_control: cc2, ..
+        } = &blocks2[0]
+        else {
+            panic!("expected ToolResult");
+        };
+        assert!(cc2.is_some(), "ToolResult cache_control must round-trip");
+
+        let blocks3 = req.messages[3].content.as_blocks();
+        let ContentBlock::Thinking {
+            cache_control: cc3, ..
+        } = &blocks3[0]
+        else {
+            panic!("expected Thinking");
+        };
+        assert!(cc3.is_some(), "Thinking cache_control must round-trip");
     }
 
     #[test]
@@ -504,13 +640,20 @@ mod tests {
     #[test]
     fn plain_text_concatenates_text_blocks_only() {
         let blocks = MessageContent::Blocks(vec![
-            ContentBlock::Text { text: "a".into() },
+            ContentBlock::Text {
+                text: "a".into(),
+                cache_control: None,
+            },
             ContentBlock::ToolUse {
                 id: "id".into(),
                 name: "t".into(),
                 input: serde_json::json!({}),
+                cache_control: None,
             },
-            ContentBlock::Text { text: "b".into() },
+            ContentBlock::Text {
+                text: "b".into(),
+                cache_control: None,
+            },
         ]);
         assert_eq!(blocks.plain_text(), "a\nb");
     }
