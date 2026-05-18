@@ -24,10 +24,28 @@
 //! * `unknown_anthropic_version_returns_400` — Spec J L10-D5 strictness.
 //! * `rate_limit_engaged_returns_429` — upstream `ResourceExhausted`
 //!   maps to HTTP 429 + Anthropic-shape `rate_limit_error` body.
-//! * `connection_drop_resume` — re-requesting with the same body
-//!   resolves the same sid (deterministic sid synthesis).
+//! * `deterministic_sid_across_turns` (formerly `connection_drop_resume`)
+//!   — re-requesting with the same body resolves the same sid via the
+//!   codec's deterministic synthesis (`synthesize_sid(req, anima_did)`).
+//!   This is the sid-stability assertion, NOT a real mid-stream drop +
+//!   `from_sequence` replay test — the handler currently passes
+//!   `from_sequence: None` (see `open_stream`). The actual drop+resume
+//!   E2E lives in J-Sub-G; the unit-level companion is
+//!   `connection_drop_resume_replays_from_sequence` below (marked
+//!   `#[ignore]` until the mock lifed grows from_sequence playback).
+//! * `connection_drop_resume_replays_from_sequence` — placeholder for
+//!   the real drop+resume case once J-Sub-G lands.
 //! * `large_request_body` — 100K-character payload doesn't blow up
 //!   the streaming parser.
+//! * `oversize_body_returns_413` — bodies above `MAX_BODY_BYTES` get
+//!   rejected at the router boundary by axum's `DefaultBodyLimit`.
+//! * `rate_limit_engaged_returns_429_on_messages_route` (C-1 fix-round 1)
+//!   — when a `TokenBucketLimiter` is wired into `AnthropicMessagesState`,
+//!   over-budget traffic returns HTTP 429 with an Anthropic-shape
+//!   `rate_limit_error` body BEFORE the upstream saga fires.
+//! * SSE order helpers — `simple_chat_completion` now asserts the
+//!   `message_start → content_block_* → message_delta → message_stop`
+//!   order, not just that each frame appears somewhere in the body.
 //!
 //! Scope caveats (mirroring Spec J §J-Sub-B):
 //!
@@ -281,6 +299,17 @@ struct TestRig {
 
 impl TestRig {
     async fn build() -> Self {
+        Self::build_with_rate_limiter(None).await
+    }
+
+    /// Fix-round 1 (C-1): build a rig where the route shares the given
+    /// `TokenBucketLimiter` with the (in this isolated test) absent
+    /// AuthLayer. Production bootstrap wires the same handle across
+    /// AuthLayer + AnthropicMessagesState; this helper lets a unit
+    /// test exercise the limiter against `/v1/messages` directly.
+    async fn build_with_rate_limiter(
+        rate_limiter: Option<lifegw::services::rate_limit::TokenBucketLimiter>,
+    ) -> Self {
         // Mock lifed Agent service over a tempdir UDS.
         let temp = tempfile::tempdir().expect("tempdir");
         let socket_path = temp.path().join("lifed.sock");
@@ -331,6 +360,7 @@ impl TestRig {
             jwks,
             minter,
             upstream,
+            rate_limiter,
         };
         let router = anthropic_messages::router(state);
 
@@ -388,6 +418,79 @@ async fn collect_body(resp: axum::http::Response<axum::body::Body>) -> (StatusCo
     (status, String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// Parse an SSE body into an ordered list of `event:` names. We don't
+/// care about `data:` payloads for ordering assertions — just the
+/// sequence of event types as they appear on the wire.
+///
+/// I-3 (fix-round 1): the previous `simple_chat_completion` body used
+/// `body.contains(...)` for each frame name, which is order-independent.
+/// A broken encoder that emitted `content_block_delta` before
+/// `content_block_start` would have passed. This helper makes the test
+/// pin the wire shape: it returns the events in document order, and
+/// the assertion asserts the canonical ordering.
+fn sse_event_names(body: &str) -> Vec<&str> {
+    body.lines()
+        .filter_map(|l| l.strip_prefix("event: "))
+        .map(str::trim)
+        .collect()
+}
+
+/// Assert the canonical Anthropic SSE ordering invariant. The encoder
+/// MUST emit:
+///
+///   message_start → content_block_start → content_block_delta+
+///       → content_block_stop → message_delta → message_stop
+///
+/// Pings can intersperse anywhere (15 s keep-alive cadence, not
+/// expected in the unit tests but tolerated). The assertion walks the
+/// event list with a state machine.
+fn assert_canonical_sse_order(events: &[&str]) {
+    #[derive(Debug, PartialEq, Eq)]
+    enum Phase {
+        AwaitMessageStart,
+        AwaitBlockStart,
+        InBlock,
+        AfterBlockStop,
+        AfterMessageDelta,
+        Done,
+    }
+    let mut phase = Phase::AwaitMessageStart;
+    let mut block_open = false;
+    for e in events {
+        if *e == "ping" {
+            continue;
+        }
+        match (&phase, *e) {
+            (Phase::AwaitMessageStart, "message_start") => phase = Phase::AwaitBlockStart,
+            (Phase::AwaitBlockStart, "content_block_start") => {
+                phase = Phase::InBlock;
+                block_open = true;
+            }
+            (Phase::InBlock, "content_block_delta") => {
+                // 1+ deltas allowed.
+            }
+            (Phase::InBlock, "content_block_stop") => {
+                phase = Phase::AfterBlockStop;
+                block_open = false;
+            }
+            (Phase::AfterBlockStop, "content_block_start") => {
+                phase = Phase::InBlock;
+                block_open = true;
+            }
+            (Phase::AfterBlockStop, "message_delta") => phase = Phase::AfterMessageDelta,
+            (Phase::AfterMessageDelta, "message_stop") => phase = Phase::Done,
+            (p, e) => panic!(
+                "canonical SSE order violation: phase={p:?} unexpected event `{e}`; full events={events:?}"
+            ),
+        }
+    }
+    assert_eq!(
+        phase,
+        Phase::Done,
+        "stream did not reach `message_stop` (last phase {phase:?}, block_open={block_open})"
+    );
+}
+
 /// Helper that streams the response body and stops once `message_stop`
 /// is observed. Used by tests that need the SSE-shape assertions
 /// (`event: message_stop\n` is the terminal marker).
@@ -437,17 +540,16 @@ async fn simple_chat_completion() {
     );
 
     let body = stream_until_stop(resp, 8 * 1024).await;
-    assert!(
-        body.contains("event: message_start"),
-        "missing message_start in body: {body}"
-    );
-    assert!(
-        body.contains("event: content_block_start"),
-        "missing content_block_start: {body}"
-    );
+    // I-3 (fix-round 1): the previous version used per-frame
+    // `body.contains(...)` which is order-independent. Walk the SSE
+    // event names in document order and assert the canonical
+    // Anthropic ordering invariant via the state machine helper.
+    let events = sse_event_names(&body);
+    assert_canonical_sse_order(&events);
+    // Spot-check the encoded content — the text deltas carry the
+    // concatenated upstream tokens.
     assert!(body.contains("Hello"));
     assert!(body.contains(" world"));
-    assert!(body.contains("event: message_stop"), "missing terminal");
 
     // Upstream observed: create + send + stream.
     assert_eq!(rig.state.create_session_calls.lock().await.len(), 1);
@@ -577,12 +679,15 @@ async fn rate_limit_engaged_returns_429() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn connection_drop_resume() {
-    // Drive two POSTs back-to-back with the same body. The deterministic
-    // sid synthesis means both hit the same Life sid — the mock's
-    // CreateSession echoes the inbound resume_sid, so the recorded
-    // sids must match. This mirrors a Claude-Code-side disconnect +
-    // re-send.
+async fn deterministic_sid_across_turns() {
+    // I-2 fix-round 1 (rename from `connection_drop_resume`): the
+    // canonical assertion this test makes is that two completed POSTs
+    // with the same body produce the same sid via the codec's
+    // deterministic synthesis. The handler always passes
+    // `from_sequence: None` (see `open_stream`) so there is NO
+    // resume-from-cursor exercised here. The name was misleading; the
+    // body is right. See `connection_drop_resume_replays_from_sequence`
+    // below for the real-drop case (currently `#[ignore]`'d).
     let rig = TestRig::build().await;
 
     let body = TestRig::body("resume-marker");
@@ -607,6 +712,35 @@ async fn connection_drop_resume() {
         sid_a, sid_b,
         "resume must reuse sid via deterministic synthesis"
     );
+}
+
+/// I-2 fix-round 1: documented placeholder for the real drop+resume
+/// semantics. The handler currently passes `from_sequence: None` to
+/// `lifed.Agent.StreamSession` (see `open_stream`), so a mid-stream
+/// drop cannot today be replayed from a sequence cursor; lifed-side
+/// replay against the lago substrate is the J-Sub-G E2E surface (real
+/// lifed + real lago, not the in-memory mock used by this rig).
+///
+/// Kept `#[ignore]`'d so the test name documents the coverage gap
+/// without falsely passing CI. When the mock lifed grows
+/// from_sequence playback (or when J-Sub-G's E2E smoke takes over the
+/// assertion), unblock this and assert the recorded `SessionRef`'s
+/// `from_sequence` is `Some(n)` after a disconnect.
+#[ignore = "real drop+resume requires lifed-side from_sequence replay; \
+            the mock lifed in this rig cannot exercise it; the integration \
+            test is owned by J-Sub-G E2E smoke (BRO-1144)."]
+#[tokio::test(flavor = "multi_thread")]
+async fn connection_drop_resume_replays_from_sequence() {
+    // When un-ignored, this test should:
+    //   1. Open POST 1, read N tokens from the SSE body, then drop
+    //      the response (simulating client disconnect).
+    //   2. Wait for the upstream `StreamSession` to terminate.
+    //   3. Open POST 2 with the SAME body, expect the handler to
+    //      issue `StreamSession{from_sequence: Some(N)}`.
+    //   4. Assert via the mock's `stream_session_calls` log that the
+    //      second call carries `from_sequence=Some(N)`.
+    // For now the handler always passes `from_sequence: None`; this
+    // body is intentionally left blank pending that wire-up.
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -658,4 +792,108 @@ async fn options_probe_returns_204() {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     assert!(allow.contains("POST"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn oversize_body_returns_413() {
+    // I-4 fix-round 1: bodies above MAX_BODY_BYTES (8 MiB) MUST be
+    // rejected at the router boundary by axum's
+    // `DefaultBodyLimit::max(...)`. The expected status is 413; the
+    // body is whatever axum produces for the limit rejection (we don't
+    // pin its shape since axum owns the body — the security invariant
+    // is that the request never reaches the handler with a 1 GiB
+    // payload buffered into RAM).
+    let rig = TestRig::build().await;
+    // 9 MiB > 8 MiB MAX_BODY_BYTES. Synthesize a JSON body whose
+    // serialised form crosses the threshold — pad the user text with
+    // a long ASCII run.
+    let pad = "A".repeat(9 * 1024 * 1024);
+    let body = TestRig::body(&pad);
+    let body_len = body.len();
+    assert!(
+        body_len > 8 * 1024 * 1024,
+        "test body must exceed 8 MiB to exercise the limit: {body_len}"
+    );
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("authorization", TestRig::dev_bearer("alice"))
+        .header("anthropic-version", "2023-06-01")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .expect("build req");
+    let resp = rig.router().oneshot(req).await.expect("oneshot");
+    assert_eq!(
+        resp.status(),
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "oversize body must be rejected before reaching the handler"
+    );
+    // The handler MUST NOT have observed the upstream saga.
+    assert!(rig.state.create_session_calls.lock().await.is_empty());
+    assert!(rig.state.send_message_calls.lock().await.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rate_limit_engaged_returns_429_on_messages_route() {
+    // C-1 fix-round 1: the route now consults the shared
+    // `TokenBucketLimiter` post-Tier-1-verify and pre-Tier-2-mint. Wire
+    // a tiny budget (capacity 2, no refill) and assert the 3rd request
+    // returns 429 + an Anthropic-shape `rate_limit_error` body BEFORE
+    // the upstream `CreateSession` saga fires.
+    let limiter = lifegw::services::rate_limit::TokenBucketLimiter::new(
+        /* user_capacity */ 2, /* user_refill_per_sec */ 0,
+        /* ip_capacity */ 10_000, /* ip_refill_per_min */ 60, /* max_buckets */ 64,
+    );
+
+    let rig = TestRig::build_with_rate_limiter(Some(limiter)).await;
+
+    // First 2 requests succeed.
+    for i in 0..2 {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/messages")
+            .header("authorization", TestRig::dev_bearer("rl-burst"))
+            .header("anthropic-version", "2023-06-01")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(TestRig::body(&format!("hi-{i}"))))
+            .expect("build req");
+        let resp = rig.router().oneshot(req).await.expect("oneshot");
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "request {i} within budget must succeed"
+        );
+        let _ = stream_until_stop(resp, 8 * 1024).await;
+    }
+
+    // 3rd request — over budget, no refill → 429.
+    let req3 = Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("authorization", TestRig::dev_bearer("rl-burst"))
+        .header("anthropic-version", "2023-06-01")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(TestRig::body("third")))
+        .expect("build req");
+    let resp = rig.router().oneshot(req3).await.expect("oneshot");
+    let (status, body) = collect_body(resp).await;
+    assert_eq!(
+        status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "3rd request must hit the limiter — got body {body}"
+    );
+    let v: Value = serde_json::from_str(&body).expect("anthropic-shape body");
+    assert_eq!(v["type"], "error");
+    assert_eq!(v["error"]["type"], "rate_limit_error");
+    let msg = v["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("rate_limit"),
+        "rate-limit reason must surface in body: {msg}"
+    );
+
+    // The upstream saga MUST NOT have fired for the rejected request.
+    // Only 2 CreateSession calls (one per accepted POST).
+    assert_eq!(rig.state.create_session_calls.lock().await.len(), 2);
+    assert_eq!(rig.state.send_message_calls.lock().await.len(), 2);
 }

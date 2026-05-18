@@ -507,10 +507,18 @@ pub async fn serve_with_listener_and_signer(
     // shape SSE frames. The same `jwks` + `minter` handles wire the rest
     // of the auth pipeline so token verification + minting are uniform
     // across `/v1/agent/*` and `/v1/messages`.
+    //
+    // C-1 fix-round 1: share the same `TokenBucketLimiter` instance the
+    // AuthLayer uses for the tonic stack — `/v1/messages` is a 600 s
+    // streaming endpoint, so being outside the AuthLayer's rate-limit
+    // path was strictly worse than the `agent_http` precedent. Passing
+    // the limiter to the route makes the budget uniform across
+    // `/v1/agent/*` and `/v1/messages`.
     let anthropic_state = crate::services::anthropic_messages::AnthropicMessagesState {
         jwks: Arc::clone(&jwks),
         minter: Arc::clone(&minter),
         upstream: upstream_channel.clone(),
+        rate_limiter: Some(rate_limiter.clone()),
     };
     let anthropic_router = crate::services::anthropic_messages::router(anthropic_state);
 
