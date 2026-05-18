@@ -1277,4 +1277,103 @@ mod tests {
         // Message_start is still unsent.
         assert!(e.emit_message_start().is_some());
     }
+
+    /// J-Sub-D (BRO-1143): a tool_use event missing the required `id`
+    /// must produce a typed `CodecError::Upstream` rather than panic or
+    /// silently corrupting the stream.
+    #[test]
+    fn tool_call_pending_without_id_returns_upstream_error() {
+        let mut e = Encoder::new("msg_test", "m");
+        let bad = AgentEvent {
+            record: Some(EventRecord {
+                session_id: None,
+                sequence: 1,
+                at: None,
+                kind: "TOOL_CALL_PENDING".into(),
+                payload: serde_json::to_vec(&serde_json::json!({"name": "f"})).unwrap(),
+            }),
+            kind: AgentEventKind::ToolCallPending as i32,
+        };
+        let err = e.encode(&bad).unwrap_err();
+        assert!(
+            matches!(err, crate::errors::CodecError::Upstream(ref m) if m.contains("id")),
+            "expected CodecError::Upstream mentioning id, got {err:?}"
+        );
+    }
+
+    /// J-Sub-D (BRO-1143): a tool_use event missing the required `name`
+    /// likewise surfaces a typed `CodecError::Upstream`.
+    #[test]
+    fn tool_call_pending_without_name_returns_upstream_error() {
+        let mut e = Encoder::new("msg_test", "m");
+        let bad = AgentEvent {
+            record: Some(EventRecord {
+                session_id: None,
+                sequence: 1,
+                at: None,
+                kind: "TOOL_CALL_PENDING".into(),
+                payload: serde_json::to_vec(&serde_json::json!({"id": "toolu_01"})).unwrap(),
+            }),
+            kind: AgentEventKind::ToolCallPending as i32,
+        };
+        let err = e.encode(&bad).unwrap_err();
+        assert!(
+            matches!(err, crate::errors::CodecError::Upstream(ref m) if m.contains("name")),
+            "expected CodecError::Upstream mentioning name, got {err:?}"
+        );
+    }
+
+    /// J-Sub-D (BRO-1143): the `done: true` signal on a tool_call event
+    /// closes the tool_use block at the correct index; subsequent
+    /// tool_call events for a new id allocate a fresh index.
+    #[test]
+    fn tool_call_pending_done_closes_block_at_correct_index() {
+        let mut e = Encoder::new("msg_test", "m");
+        let mut out = Vec::new();
+        out.extend(
+            e.encode(&tool_call_event(
+                1,
+                serde_json::json!({"id":"toolu_A","name":"a","partial_json":"{}","done":true}),
+            ))
+            .unwrap(),
+        );
+        // First tool_use opened + closed at index 0.
+        let opens: Vec<_> = out
+            .iter()
+            .filter_map(|ev| match ev {
+                AnthropicSseEvent::ContentBlockStart(p) => match &p.content_block {
+                    ContentBlockInit::ToolUse { id, .. } => Some((p.index, id.clone())),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(opens, vec![(0, "toolu_A".to_string())]);
+        let closes: Vec<_> = out
+            .iter()
+            .filter_map(|ev| match ev {
+                AnthropicSseEvent::ContentBlockStop(p) => Some(p.index),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(closes, vec![0]);
+
+        // Now open a second tool_use — it gets a fresh index (1).
+        out.clear();
+        out.extend(
+            e.encode(&tool_call_event(
+                2,
+                serde_json::json!({"id":"toolu_B","name":"b","input":{}}),
+            ))
+            .unwrap(),
+        );
+        let second_idx = out
+            .iter()
+            .find_map(|ev| match ev {
+                AnthropicSseEvent::ContentBlockStart(p) => Some(p.index),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(second_idx, 1, "second tool_use must get a fresh index");
+    }
 }
