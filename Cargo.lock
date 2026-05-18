@@ -6587,6 +6587,7 @@ dependencies = [
  "life-runtime-proto",
  "life-vigil",
  "lifed",
+ "lifegw-anthropic-codec",
  "nix 0.31.2",
  "p256",
  "parking_lot",
