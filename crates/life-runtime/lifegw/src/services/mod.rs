@@ -7,6 +7,7 @@
 
 pub mod agent_http;
 pub mod anima_custody;
+pub mod anthropic_messages;
 pub mod cert_watch;
 pub mod health;
 pub mod rate_limit;

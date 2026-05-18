@@ -499,14 +499,30 @@ pub async fn serve_with_listener_and_signer(
     };
     let agent_http_router = crate::services::agent_http::router(agent_http_state);
 
+    // Spec J J-Sub-B: Anthropic Messages `POST /v1/messages` SSE route.
+    // Verifies Tier-1, mints Tier-2, synthesizes a deterministic sid
+    // from the caller's anima DID + first user message (codec L10-D2),
+    // and pipes lifed.Agent.{CreateSession, SendMessage, StreamSession}
+    // through the lifegw-anthropic-codec encoder to produce Anthropic-
+    // shape SSE frames. The same `jwks` + `minter` handles wire the rest
+    // of the auth pipeline so token verification + minting are uniform
+    // across `/v1/agent/*` and `/v1/messages`.
+    let anthropic_state = crate::services::anthropic_messages::AnthropicMessagesState {
+        jwks: Arc::clone(&jwks),
+        minter: Arc::clone(&minter),
+        upstream: upstream_channel.clone(),
+    };
+    let anthropic_router = crate::services::anthropic_messages::router(anthropic_state);
+
     // Compose: top-level axum router that nests `/anima/custody/*`,
-    // merges the `/v1/agent/create_session` route, and falls back to
-    // the tonic-stack adapter for everything else (including
-    // `/v1/agent/stream` which the WS layer handles inside the tonic
-    // stack).
+    // merges the `/v1/agent/create_session` + `/v1/messages` routes,
+    // and falls back to the tonic-stack adapter for everything else
+    // (including `/v1/agent/stream` which the WS layer handles inside
+    // the tonic stack).
     let app: axum::Router<()> = axum::Router::new()
         .nest("/anima/custody", anima_router)
         .merge(agent_http_router)
+        .merge(anthropic_router)
         .fallback_service(tonic_stack_adapted);
 
     // Convert the axum router's response body to tonic::body::Body so

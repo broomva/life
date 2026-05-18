@@ -44,6 +44,11 @@ life-runtime-proto.workspace = true
 # routes. Pulled in as a client-only dep — lifegw never serves the
 # CustodyOracle service, only proxies to it.
 life-kernel-proto.workspace = true
+# Spec J J-Sub-B: Anthropic Messages SSE codec — edge-only codec crate
+# that translates lifed `pb::AgentEvent` streams into Anthropic Messages
+# SSE chunks and validates Anthropic Messages request bodies. Workspace-
+# internal, substrate-free (Spec J L10-D1). Powers `services/anthropic_messages.rs`.
+lifegw-anthropic-codec.workspace = true
 
 # transport — tonic 0.14 + tonic-web for browser-compatible Connect protocol.
 tonic = "0.14"
