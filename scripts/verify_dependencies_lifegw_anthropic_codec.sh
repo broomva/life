@@ -22,6 +22,14 @@
 # here.
 #
 # Patterned after scripts/verify_dependencies_lifed.sh.
+#
+# SIGPIPE bug fix [BRO-1164]: this script previously used
+#   `echo "$tree" | grep -qE "..."`
+# under `set -o pipefail`. When grep -q matched early and closed the read end
+# of the pipe, echo received SIGPIPE on the next write and the pipeline exited
+# non-zero (signal 13). The `if` statement interpreted that as "no match" —
+# silently masking real FAILs on CI Linux runners. Replaced with `<<<` here-
+# strings (no pipe, no SIGPIPE).
 
 set -euo pipefail
 
@@ -33,19 +41,48 @@ FAIL=0
 # check_no_transitive_dep CRATE FORBIDDEN_REGEX
 # Fails if any crate matching FORBIDDEN_REGEX appears anywhere in the
 # full dep tree of CRATE.
+#
+# BRO-1164: uses here-string (`<<<`) instead of `echo | grep` to avoid
+# SIGPIPE on the echo side when grep -q matches early. Hits are limited
+# via `grep -m3` (also no pipe) for the same reason.
 check_no_transitive_dep() {
     local crate="$1"
     local forbidden_regex="$2"
     local tree
     tree=$(cd "$ROOT_DIR" && cargo tree -p "$crate" 2>/dev/null) || return 0
-    if echo "$tree" | grep -qE "[ ]${forbidden_regex} v"; then
+    if grep -qE "[ ]${forbidden_regex} v" <<< "$tree"; then
         local hits
-        hits=$(echo "$tree" | grep -E "[ ]${forbidden_regex} v" | head -3)
+        hits=$(grep -m3 -E "[ ]${forbidden_regex} v" <<< "$tree")
         echo "FAIL: $crate transitively depends on a crate matching ${forbidden_regex}:"
-        echo "$hits" | sed 's/^/    /'
+        sed 's/^/    /' <<< "$hits"
         FAIL=1
     fi
 }
+
+# --self-test: bypasses cargo and feeds a synthetic forbidden tree through the
+# check function to prove the FAIL path fires. BRO-1164 root cause was a silent
+# masking of FAILs; this asserts the regression cannot recur.
+if [ "${1:-}" = "--self-test" ]; then
+    echo "=== SELF-TEST: verify FAIL detection still works (BRO-1164 regression guard) ==="
+    cargo() {
+        cat <<'FAKE_TREE'
+fake-codec v0.1.0 (/tmp/fake)
+├── serde v1.0.0
+├── inference-core v0.1.0 (/tmp/fake/inference-core)
+└── tokio v1.0.0
+FAKE_TREE
+    }
+    export -f cargo
+    FAIL=0
+    check_no_transitive_dep "fake-codec" "inference-core"
+    if [ "$FAIL" -eq 1 ]; then
+        echo "OK: self-test passed — FAIL path fires when forbidden crate present"
+        exit 0
+    else
+        echo "REGRESSION: self-test FAILED — FAIL path did not fire (BRO-1164 returned)"
+        exit 2
+    fi
+fi
 
 echo "=== lifegw-anthropic-codec dependency rules (Spec J L10-D1) ==="
 
