@@ -82,6 +82,7 @@
 
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use axum::{
@@ -100,6 +101,7 @@ use lifegw_anthropic_codec::{
 };
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Channel;
+use tracing::Instrument;
 use uuid::Uuid;
 
 use life_runtime_proto::life::v1::{self as pb, agent_client::AgentClient};
@@ -107,6 +109,158 @@ use life_runtime_proto::life::v1::{self as pb, agent_client::AgentClient};
 use crate::auth::jwks::JwksCache;
 use crate::auth::tier2::Tier2Minter;
 use crate::services::rate_limit::TokenBucketLimiter;
+
+// ─── Spec J §[Vigil span emission] — semconv constants ──────────────────
+
+/// Child span: haima credit gate (pre-stream).
+///
+/// Note: other span names (root `life.anthropic.messages`, sid synthesis,
+/// auth verify) are emitted directly as string literals inside `info_span!`
+/// because the macro's first argument requires a literal, not a const ref.
+/// This single const survives because it's passed into a helper that
+/// accepts `&'static str`.
+const SPAN_HAIMA_CHECK: &str = "life.anthropic.haima_check";
+/// Child span: codec encoder construction.
+const SPAN_CODEC_ENCODE: &str = "life.anthropic.codec_encode";
+
+// Life-namespace attribute keys (Spec J §[Vigil span emission]).
+// `_ATTR_LIFE_*` constants document the wire shape — the
+// `tracing::info_span!` macro requires string literals for field names
+// rather than const references, so the constants are reference-only
+// (read by tests, asserted-on integration, and provide a single
+// rename-friendly source of truth).
+#[allow(dead_code)]
+pub(crate) const ATTR_LIFE_SESSION_ID: &str = "life.session.id";
+#[allow(dead_code)]
+pub(crate) const ATTR_LIFE_ANIMA_DID: &str = "life.anima.did";
+pub(crate) const ATTR_LIFE_HAIMA_COST_MICROS: &str = "life.haima.cost_usd_micros";
+#[allow(dead_code)]
+pub(crate) const ATTR_LIFE_BACKEND_ID: &str = "life.backend.id";
+#[allow(dead_code)]
+pub(crate) const ATTR_LIFE_BACKEND_KIND: &str = "life.backend.kind";
+
+/// Phase 1 default backend kind. Spec E backends override this when
+/// they ship (post-J-Sub-E).
+const BACKEND_KIND_DEFAULT: &str = "anthropic-arcan";
+/// Default backend id when the upstream substrate doesn't identify
+/// itself in the request path.
+const BACKEND_ID_DEFAULT: &str = "lifed-anthropic";
+
+// ─── Spec J §[Cost gate] — x402 challenge ───────────────────────────────
+
+/// x402 facilitator URL surfaced in the `X-Payment` challenge header
+/// when `haima_check` rejects a request for insufficient credits.
+const X402_FACILITATOR_DEFAULT: &str = "https://haima.broomva.dev/x402";
+
+/// x402 challenge token (USDC on Base mainnet — Spec J §[Cost gate]).
+const X402_CHAIN: &str = "base";
+const X402_TOKEN: &str = "USDC";
+
+/// Default x402 challenge amount (USD, decimal string). The amount is
+/// the *minimum* that satisfies the spend gate — clients can top up
+/// more. 0.10 USD matches Spec J's reference table.
+const X402_AMOUNT_USD_DEFAULT: &str = "0.10";
+
+// ─── Spec J §[Cost gate] — haima wire ───────────────────────────────────
+
+/// Tiny abstraction over haima's per-call billing surface.
+///
+/// Spec J §J-Sub-E ships the *handler shape* and the Vigil span tree
+/// regardless of whether haima exposes a live API yet. When the haima
+/// daemon doesn't have a check/settle RPC (today), production runs the
+/// [`StubHaimaClient`] which returns `Ok(_)` for every call. The trait
+/// gives us:
+///
+/// 1. A single seam to swap a real `haimad` gRPC client in when the
+///    wire shape lands (planned Phase F4 of haima's roadmap).
+/// 2. A test seam — `TestHaimaClient` records calls and lets us
+///    pre-arm a `HaimaCheckError::InsufficientCredits` rejection
+///    without standing up a separate process.
+///
+/// `Send + Sync + 'static` so the trait is dyn-callable from inside
+/// the per-request handler.
+#[async_trait::async_trait]
+pub trait HaimaClient: Send + Sync + 'static {
+    /// Pre-call gate. `estimated_cost_micros` is the worst-case spend
+    /// for the upcoming request derived from the model's pricing-table
+    /// rate × `max_tokens`. Returns `Ok(())` when the DID has at least
+    /// that much credit; `Err(InsufficientCredits)` triggers a 402 +
+    /// x402 challenge body. Other errors map to 500 — they represent a
+    /// haima-daemon outage and surface as `api_error`.
+    async fn check(&self, did: &str, estimated_cost_micros: u64) -> Result<(), HaimaCheckError>;
+
+    /// Post-call settlement. Called once the upstream stream has
+    /// drained successfully. The token counts are an approximation
+    /// from the encoder (no upstream-provided usage today) and the
+    /// `actual_cost_micros` is the worst-case computed via the same
+    /// pricing-table rate.
+    ///
+    /// Spec J §[Cost gate]: settlement records a `haima.charged` lago
+    /// event. Stub implementations log only.
+    async fn settle(
+        &self,
+        did: &str,
+        model: &str,
+        input_tokens: u32,
+        output_tokens: u32,
+        actual_cost_micros: u64,
+    );
+}
+
+/// Failure modes for [`HaimaClient::check`].
+#[derive(Clone, Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum HaimaCheckError {
+    /// DID does not have enough micro-USDC credit to cover the
+    /// estimated worst-case spend. Maps to HTTP 402 + x402 challenge.
+    #[error("insufficient credits")]
+    InsufficientCredits {
+        /// Amount the gate required (micro-USDC).
+        required_micros: u64,
+        /// Amount available (micro-USDC), if the haima daemon
+        /// returned it.
+        available_micros: Option<u64>,
+    },
+    /// Generic haima-daemon outage — UDS unreachable, gRPC error, etc.
+    /// Maps to HTTP 500.
+    #[error("haima daemon unavailable: {0}")]
+    Unavailable(String),
+}
+
+/// Default haima client used when the daemon isn't wired up yet.
+///
+/// Spec J J-Sub-E stop-condition: "If haima doesn't expose a
+/// check/settle API yet, document the gap and ship a feature-flag-
+/// gated stub that always returns Ok. The handler shape + vigil spans
+/// still ship." This is that stub.
+#[derive(Clone, Debug, Default)]
+pub struct StubHaimaClient;
+
+#[async_trait::async_trait]
+impl HaimaClient for StubHaimaClient {
+    async fn check(&self, _did: &str, _estimated_cost_micros: u64) -> Result<(), HaimaCheckError> {
+        Ok(())
+    }
+
+    async fn settle(
+        &self,
+        did: &str,
+        model: &str,
+        input_tokens: u32,
+        output_tokens: u32,
+        actual_cost_micros: u64,
+    ) {
+        tracing::debug!(
+            target: "lifegw::anthropic_messages::haima",
+            did = %did,
+            model = %model,
+            input_tokens,
+            output_tokens,
+            actual_cost_micros,
+            "StubHaimaClient::settle (logged only — no wire)"
+        );
+    }
+}
 
 /// Wall-clock cap on a single `/v1/messages` response stream.
 ///
@@ -169,6 +323,16 @@ pub struct AnthropicMessagesState {
     /// — strictly worse than the `agent_http` precedent (10 s unary).
     /// Tests opt out by leaving this `None`.
     pub rate_limiter: Option<TokenBucketLimiter>,
+    /// Spec J J-Sub-E: haima per-call billing client. Production
+    /// wires a real haimad gRPC handle; tests + the
+    /// `cfg.billing.enforce = false` path wire [`StubHaimaClient`].
+    /// `dyn` so the same field carries both the production client and
+    /// a test fake without monomorphisation.
+    pub haima: Arc<dyn HaimaClient>,
+    /// Spec J J-Sub-E: when `false`, the haima check + settle calls
+    /// are skipped (the vigil span still records usage). Mirrors
+    /// `cfg.billing.enforce`.
+    pub billing_enforce: bool,
 }
 
 /// Mount the route.
@@ -213,6 +377,41 @@ async fn messages_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    // Spec J §[Vigil span emission] (J-Sub-E): open the root
+    // `life.anthropic.messages` span at request entry. Required attrs
+    // per the spec table are populated as soon as the underlying value
+    // is known — `gen_ai.request.*` after body parse, `life.session.id`
+    // after sid synthesis, `life.haima.cost_usd_micros` +
+    // `gen_ai.usage.*` at settlement. Fields not yet known declare
+    // `tracing::field::Empty` so `record()` can stamp them later.
+    let request_id = Uuid::new_v4().simple().to_string();
+    let root_span = tracing::info_span!(
+        "life.anthropic.messages",
+        "gen_ai.system" = "life",
+        "gen_ai.operation.name" = "chat",
+        "gen_ai.request.model" = tracing::field::Empty,
+        "gen_ai.request.max_tokens" = tracing::field::Empty,
+        "gen_ai.request.temperature" = tracing::field::Empty,
+        "gen_ai.usage.input_tokens" = tracing::field::Empty,
+        "gen_ai.usage.output_tokens" = tracing::field::Empty,
+        "life.session.id" = tracing::field::Empty,
+        "life.anima.did" = tracing::field::Empty,
+        "life.haima.cost_usd_micros" = tracing::field::Empty,
+        "life.backend.id" = BACKEND_ID_DEFAULT,
+        "life.backend.kind" = BACKEND_KIND_DEFAULT,
+        "vigil.llm.request_id" = %request_id,
+    );
+    messages_handler_inner(state, headers, body, root_span.clone())
+        .instrument(root_span)
+        .await
+}
+
+async fn messages_handler_inner(
+    state: AnthropicMessagesState,
+    headers: HeaderMap,
+    body: Bytes,
+    root_span: tracing::Span,
+) -> Response {
     // 1. Validate `anthropic-version` header *before* doing any other
     //    work. Per Spec J L10-D5 unknown values are loud HTTP 400s.
     let version_raw = match headers
@@ -243,29 +442,35 @@ async fn messages_handler(
         );
     }
 
-    // 2. Verify the Tier-1 bearer (same flow as `agent_http.rs`).
-    let bearer = match headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-    {
-        Some(b) if !b.is_empty() => b,
-        _ => {
-            return anthropic_http_error(
-                StatusCode::UNAUTHORIZED,
-                AnthropicErrorKind::AuthenticationError,
-                "missing Tier-1 bearer",
-            );
-        }
-    };
-    let tier1 = match state.jwks.verify(bearer) {
-        Ok(c) => c,
-        Err(e) => {
-            return anthropic_http_error(
-                StatusCode::UNAUTHORIZED,
-                AnthropicErrorKind::AuthenticationError,
-                format!("invalid Tier-1: {e}"),
-            );
+    // 2. Verify the Tier-1 bearer (same flow as `agent_http.rs`). Run
+    //    inside the `life.anthropic.auth_verify` child span so the
+    //    span tree mirrors the spec's named sites.
+    let tier1 = {
+        let auth_span = tracing::info_span!("life.anthropic.auth_verify");
+        let _g = auth_span.enter();
+        let bearer = match headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|h| h.strip_prefix("Bearer "))
+        {
+            Some(b) if !b.is_empty() => b,
+            _ => {
+                return anthropic_http_error(
+                    StatusCode::UNAUTHORIZED,
+                    AnthropicErrorKind::AuthenticationError,
+                    "missing Tier-1 bearer",
+                );
+            }
+        };
+        match state.jwks.verify(bearer) {
+            Ok(c) => c,
+            Err(e) => {
+                return anthropic_http_error(
+                    StatusCode::UNAUTHORIZED,
+                    AnthropicErrorKind::AuthenticationError,
+                    format!("invalid Tier-1: {e}"),
+                );
+            }
         }
     };
 
@@ -331,22 +536,93 @@ async fn messages_handler(
         );
     }
 
+    // Spec J §[Vigil span emission]: stamp `gen_ai.request.*` on the
+    // root span now that the body is parsed.
+    root_span.record("gen_ai.request.model", req.model.as_str());
+    root_span.record("gen_ai.request.max_tokens", req.max_tokens);
+    if let Some(t) = req.temperature {
+        root_span.record("gen_ai.request.temperature", f64::from(t));
+    }
+
     // 5. Synthesize the deterministic Life sid from the Tier-1 caller's
     //    anima DID + the canonical first user message (Spec J L10-D2).
     //    Today the Tier-1 claim set carries `user_id`; the DID is
     //    "did:life:<user_id>" until Spec D's full DID claim threads
     //    through the gateway. The wire algorithm is stable either way.
     let anima_did = format!("did:life:{}", tier1.user_id);
-    let sid = match synthesize_sid(&req, &anima_did) {
-        Ok(s) => s,
-        Err(e) => {
-            return anthropic_http_error(
-                StatusCode::BAD_REQUEST,
-                AnthropicErrorKind::InvalidRequestError,
-                e.to_string(),
-            );
+    root_span.record("life.anima.did", anima_did.as_str());
+    let sid = {
+        let sid_span = tracing::info_span!("life.anthropic.sid_synthesis");
+        let _g = sid_span.enter();
+        match synthesize_sid(&req, &anima_did) {
+            Ok(s) => s,
+            Err(e) => {
+                return anthropic_http_error(
+                    StatusCode::BAD_REQUEST,
+                    AnthropicErrorKind::InvalidRequestError,
+                    e.to_string(),
+                );
+            }
         }
     };
+    root_span.record("life.session.id", sid.as_str());
+
+    // Spec J §[Cost gate]: estimate worst-case spend BEFORE the upstream
+    // saga fires. The estimate uses `life-vigil::pricing::lookup_pricing`
+    // — no new tokenizer, just the static rate table. When the model
+    // isn't metered we log a warning + fall back to "free tier" (Ok(0)).
+    let estimated_input_tokens = approximate_input_tokens(&req);
+    let cost_estimate = estimate_request_cost_micros(&req, estimated_input_tokens);
+
+    // Spec J §[Cost gate]: run `haima_check(did, estimated_cost)`
+    // BEFORE opening the upstream stream. On `InsufficientCredits` we
+    // emit a 402 + x402 challenge body. Other errors map to 500.
+    // When `billing_enforce = false`, the check is skipped (the
+    // settlement path still records usage on the vigil span).
+    if state.billing_enforce {
+        let haima_span = tracing::info_span!(
+            SPAN_HAIMA_CHECK,
+            "life.haima.estimated_cost_micros" = cost_estimate,
+        );
+        let check_result = state
+            .haima
+            .check(&anima_did, cost_estimate)
+            .instrument(haima_span)
+            .await;
+        match check_result {
+            Ok(()) => {}
+            Err(HaimaCheckError::InsufficientCredits {
+                required_micros, ..
+            }) => {
+                tracing::info!(
+                    target: "lifegw::anthropic_messages::billing",
+                    did = %anima_did,
+                    required_micros,
+                    "haima_check rejected — emitting 402 + x402 challenge"
+                );
+                return x402_payment_required_response(required_micros);
+            }
+            Err(HaimaCheckError::Unavailable(msg)) => {
+                tracing::warn!(
+                    target: "lifegw::anthropic_messages::billing",
+                    did = %anima_did,
+                    error = %msg,
+                    "haima_check failed (daemon outage) — surfacing 500"
+                );
+                return anthropic_http_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AnthropicErrorKind::ApiError,
+                    format!("haima unavailable: {msg}"),
+                );
+            }
+        }
+    } else {
+        tracing::debug!(
+            target: "lifegw::anthropic_messages::billing",
+            did = %anima_did,
+            "cfg.billing.enforce = false — skipping haima_check"
+        );
+    }
 
     // 6. Mint a Tier-2 cap. Same posture as `agent_http.rs`.
     let tier2 = match state.minter.mint(&tier1) {
@@ -397,11 +673,43 @@ async fn messages_handler(
     // 8. Build the SSE response. The encoder is fresh; `message_id`
     //    is freshly synthesised in the Anthropic `msg_<hex>` shape so
     //    clients log a recognisable id even though Life sessions don't
-    //    have a native equivalent.
+    //    have a native equivalent. Span-wrapped per Spec J §[Vigil
+    //    span emission] — the `life.anthropic.codec_encode` span
+    //    covers encoder construction (the SSE stream itself runs
+    //    under the root span via `Instrument`).
     let message_id = format!("msg_{}", Uuid::new_v4().simple());
-    let encoder = Encoder::new(message_id, req.model.clone());
+    let encoder = {
+        let codec_span = tracing::info_span!(SPAN_CODEC_ENCODE);
+        let _g = codec_span.enter();
+        Encoder::new(message_id, req.model.clone())
+    };
 
-    let sse_body = build_sse_body(encoder, event_stream, cancel);
+    // Spec J §[Cost gate]: per-stream usage telemetry. The
+    // `output_chars` counter is incremented inside the SSE-body
+    // state machine on every Token event. On stream complete the
+    // settlement task converts that to a token estimate, records the
+    // result on the root span, and calls `haima_settle`.
+    let usage_telemetry = Arc::new(UsageTelemetry {
+        output_chars: AtomicU64::new(0),
+        finished: AtomicU64::new(0),
+    });
+    let settlement_ctx = SettlementCtx {
+        haima: Arc::clone(&state.haima),
+        billing_enforce: state.billing_enforce,
+        anima_did: anima_did.clone(),
+        model: req.model.clone(),
+        estimated_input_tokens,
+        root_span: root_span.clone(),
+        usage: Arc::clone(&usage_telemetry),
+    };
+
+    let sse_body = build_sse_body(
+        encoder,
+        event_stream,
+        cancel,
+        Arc::clone(&usage_telemetry),
+        Some(settlement_ctx),
+    );
 
     // 9. Compose response. Anthropic clients require a content-type of
     //    `text/event-stream`; `X-Accel-Buffering: no` neutralises nginx
@@ -612,6 +920,8 @@ fn build_sse_body(
     encoder: Encoder,
     upstream: tonic::Streaming<pb::AgentEvent>,
     cancel: CancellationToken,
+    usage: Arc<UsageTelemetry>,
+    settlement: Option<SettlementCtx>,
 ) -> impl Stream<Item = Result<Bytes, Infallible>> + Send + 'static {
     // Box the upstream so the stream::unfold state type stays sized.
     let upstream: std::pin::Pin<
@@ -655,6 +965,17 @@ fn build_sse_body(
         /// when axum drops the body (any termination path: hyper
         /// finished, client disconnect, error), the guard fires.
         _drop_guard: tokio_util::sync::DropGuard,
+        /// Spec J J-Sub-E: cumulative output-token telemetry. Updated
+        /// from each Token event's payload `text` len. Shared with
+        /// the settlement context so the post-stream callback reads
+        /// the final value.
+        usage: Arc<UsageTelemetry>,
+        /// Spec J J-Sub-E: settlement context — fired once at stream
+        /// termination (any path: clean Finish, upstream error, hard
+        /// timeout, client drop via DropGuard). Wrapped in `Option`
+        /// so it can be `take()`n out on first fire to guarantee
+        /// at-most-once semantics.
+        settlement: Option<SettlementCtx>,
     }
 
     let mut ping_interval = tokio::time::interval(PING_INTERVAL);
@@ -670,10 +991,17 @@ fn build_sse_body(
         queued: std::collections::VecDeque::new(),
         done: false,
         _drop_guard: cancel.drop_guard(),
+        usage,
+        settlement,
     };
 
     stream::unfold(state, |mut s| async move {
         if s.done {
+            // J-Sub-E: at terminal, fire settlement exactly once.
+            if let Some(ctx) = s.settlement.take() {
+                let output_chars = s.usage.output_chars.load(Ordering::Relaxed);
+                ctx.settle_now(output_chars).await;
+            }
             return None;
         }
         // If there are queued frames from a prior upstream event, emit
@@ -702,11 +1030,20 @@ fn build_sse_body(
                         let bytes = Bytes::from(first.to_sse_frame());
                         return Some((Ok(bytes), s));
                     }
+                    if let Some(ctx) = s.settlement.take() {
+                        let output_chars = s.usage.output_chars.load(Ordering::Relaxed);
+                        ctx.settle_now(output_chars).await;
+                    }
                     return None;
                 }
                 evt = next_event => {
                     match evt {
                         Some(Ok(event)) => {
+                            // J-Sub-E: count Token text characters for
+                            // output-token approximation. We inspect
+                            // the proto payload directly (the codec
+                            // doesn't expose its internal accounting).
+                            tally_token_chars(&event, &s.usage);
                             match s.encoder.encode(&event) {
                                 Ok(frames) => {
                                     for f in frames {
@@ -732,6 +1069,14 @@ fn build_sse_body(
                                 let bytes = Bytes::from(first.to_sse_frame());
                                 return Some((Ok(bytes), s));
                             }
+                            if s.done {
+                                if let Some(ctx) = s.settlement.take() {
+                                    let output_chars =
+                                        s.usage.output_chars.load(Ordering::Relaxed);
+                                    ctx.settle_now(output_chars).await;
+                                }
+                                return None;
+                            }
                             // Empty translation — keep polling.
                             continue;
                         }
@@ -754,6 +1099,11 @@ fn build_sse_body(
                                 let bytes = Bytes::from(first.to_sse_frame());
                                 return Some((Ok(bytes), s));
                             }
+                            if let Some(ctx) = s.settlement.take() {
+                                let output_chars =
+                                    s.usage.output_chars.load(Ordering::Relaxed);
+                                ctx.settle_now(output_chars).await;
+                            }
                             return None;
                         }
                         None => {
@@ -767,6 +1117,11 @@ fn build_sse_body(
                                 let bytes = Bytes::from(first.to_sse_frame());
                                 return Some((Ok(bytes), s));
                             }
+                            if let Some(ctx) = s.settlement.take() {
+                                let output_chars =
+                                    s.usage.output_chars.load(Ordering::Relaxed);
+                                ctx.settle_now(output_chars).await;
+                            }
                             return None;
                         }
                     }
@@ -778,6 +1133,215 @@ fn build_sse_body(
             }
         }
     })
+}
+
+// ─── J-Sub-E billing + telemetry helpers ────────────────────────────────
+
+/// Per-request running counters shared between the SSE state machine
+/// (writer) and the post-stream settlement context (reader).
+#[derive(Debug)]
+pub(crate) struct UsageTelemetry {
+    /// Cumulative output character count, tallied from each Token
+    /// event's payload `text` length. Translated to a token estimate
+    /// (chars / 4) at settlement.
+    pub(crate) output_chars: AtomicU64,
+    /// Reserved for future use — a non-zero value signals that
+    /// settlement has already fired so the on-drop fallback can skip.
+    pub(crate) finished: AtomicU64,
+}
+
+/// Context captured at handler entry and consumed once at stream
+/// termination. Records `gen_ai.usage.*` + `life.haima.cost_usd_micros`
+/// on the root span and calls `haima_settle`.
+pub(crate) struct SettlementCtx {
+    pub(crate) haima: Arc<dyn HaimaClient>,
+    pub(crate) billing_enforce: bool,
+    pub(crate) anima_did: String,
+    pub(crate) model: String,
+    pub(crate) estimated_input_tokens: u32,
+    pub(crate) root_span: tracing::Span,
+    pub(crate) usage: Arc<UsageTelemetry>,
+}
+
+impl SettlementCtx {
+    /// Finalise telemetry + settle haima exactly once.
+    async fn settle_now(self, output_chars: u64) {
+        let SettlementCtx {
+            haima,
+            billing_enforce,
+            anima_did,
+            model,
+            estimated_input_tokens,
+            root_span,
+            usage,
+        } = self;
+        // Cap output_chars at u32::MAX so the chars/4 conversion can't
+        // overflow. In practice no Anthropic response approaches this.
+        let chars = output_chars.min(u64::from(u32::MAX));
+        // Approximate output tokens from char count (chars / 4 ±). The
+        // 4-bytes-per-token rule is documented in Anthropic's tokenizer
+        // FAQ as the canonical fallback when a real tokenizer is
+        // unavailable. We round up so users are not undercharged.
+        let approximate_output_tokens = chars.div_ceil(4).min(u64::from(u32::MAX)) as u32;
+        let actual_cost_micros =
+            compute_cost_micros(&model, estimated_input_tokens, approximate_output_tokens);
+
+        // Spec J §[Vigil span emission]: stamp final usage + cost on
+        // the root span. These are the load-bearing attributes for
+        // cost-attribution dashboards.
+        root_span.record("gen_ai.usage.input_tokens", estimated_input_tokens);
+        root_span.record("gen_ai.usage.output_tokens", approximate_output_tokens);
+        root_span.record(ATTR_LIFE_HAIMA_COST_MICROS, actual_cost_micros);
+
+        // Mark settlement fired (defensive — the at-most-once invariant
+        // already lives in the StreamState `Option::take`).
+        usage.finished.fetch_add(1, Ordering::Relaxed);
+
+        if billing_enforce {
+            haima
+                .settle(
+                    &anima_did,
+                    &model,
+                    estimated_input_tokens,
+                    approximate_output_tokens,
+                    actual_cost_micros,
+                )
+                .await;
+        }
+    }
+}
+
+/// Approximate the input-token count from the request body. Spec J
+/// J-Sub-E anti-rationalization: "Don't add a new tokenizer — use
+/// `life-vigil::pricing::lookup_model`'s side data for cost estimate".
+/// We approximate via the universal char/4 fallback over the
+/// concatenated system + messages text.
+fn approximate_input_tokens(req: &AnthropicMessagesRequest) -> u32 {
+    use lifegw_anthropic_codec::request::SystemPrompt;
+    let mut chars: u64 = 0;
+    if let Some(sys) = req.system.as_ref() {
+        chars += match sys {
+            SystemPrompt::Text(s) => s.len() as u64,
+            SystemPrompt::Blocks(b) => b.iter().map(|x| x.text.len() as u64).sum(),
+        };
+    }
+    for m in &req.messages {
+        chars += m.content.plain_text().len() as u64;
+    }
+    // chars / 4 rounded up, capped at u32.
+    chars.div_ceil(4).min(u64::from(u32::MAX)) as u32
+}
+
+/// Worst-case cost estimate: prompt rate × estimated input + output
+/// rate × `max_tokens`. Used as the gate amount for `haima_check`.
+fn estimate_request_cost_micros(
+    req: &AnthropicMessagesRequest,
+    estimated_input_tokens: u32,
+) -> u64 {
+    // max_tokens is the upper bound the *client* asked for; without a
+    // real tokenizer it's the only honest worst-case ceiling we have.
+    compute_cost_micros(&req.model, estimated_input_tokens, req.max_tokens)
+}
+
+/// Convert a (model, input_tokens, output_tokens) tuple to a cost in
+/// micro-USDC (1 USDC = 1_000_000 micro-USDC). Returns `0` when the
+/// model isn't in the pricing snapshot — Spec J anti-rationalization:
+/// "model not metered, defaulting to free tier" with a Vigil warning.
+fn compute_cost_micros(model: &str, input_tokens: u32, output_tokens: u32) -> u64 {
+    let Some(pricing) = life_vigil::pricing::lookup_pricing(model) else {
+        tracing::warn!(
+            target: "lifegw::anthropic_messages::billing",
+            model = %model,
+            "model not in life-vigil pricing snapshot — defaulting to free tier"
+        );
+        return 0;
+    };
+    // pricing.{input,output}_per_million is USD per 1M tokens.
+    // micros = (tokens / 1_000_000) * usd_per_million * 1_000_000
+    //        = tokens * usd_per_million
+    // i.e. tokens × USD-per-million == micro-USD.
+    let input_micros = (f64::from(input_tokens) * pricing.input_per_million).max(0.0);
+    let output_micros = (f64::from(output_tokens) * pricing.output_per_million).max(0.0);
+    let total = input_micros + output_micros;
+    if total.is_finite() && total >= 0.0 {
+        // Clamp to u64 — for any realistic request this is far below
+        // u64::MAX (claude-opus-4 max-tokens=4096 ≈ 320 µUSD).
+        total.min(f64::from(u32::MAX) * 1.0e6) as u64
+    } else {
+        0
+    }
+}
+
+/// Increment the per-stream `output_chars` counter from a Token-kind
+/// AgentEvent's payload `text` field. Other event kinds are ignored.
+fn tally_token_chars(evt: &pb::AgentEvent, usage: &Arc<UsageTelemetry>) {
+    if evt.kind != pb::AgentEventKind::Token as i32 {
+        return;
+    }
+    let Some(record) = evt.record.as_ref() else {
+        return;
+    };
+    // The payload is JSON `{"text":"..."}` for text tokens and
+    // `{"thinking":"..."}` for thinking deltas. We tally only the
+    // user-visible `text` field — thinking blocks aren't charged.
+    let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&record.payload) else {
+        return;
+    };
+    if let Some(s) = payload.get("text").and_then(serde_json::Value::as_str) {
+        usage
+            .output_chars
+            .fetch_add(s.len() as u64, Ordering::Relaxed);
+    }
+}
+
+/// Build the 402 + x402 challenge response per Spec J §[Cost gate].
+///
+/// The body is the Anthropic-shape `billing_error` JSON; the
+/// `X-Payment` header carries the x402 challenge so x402-aware clients
+/// can auto-pay and retry. The amount header is the required deposit
+/// surfaced via the pricing snapshot; defaults to `0.10 USD` when the
+/// upstream rate is unknown.
+fn x402_payment_required_response(required_micros: u64) -> Response {
+    // Spec J §[Cost gate] body shape:
+    //   { "type": "error",
+    //     "error": { "type": "billing_error",
+    //                "message": "Insufficient credits" } }
+    let err = AnthropicError::new(AnthropicErrorKind::BillingError, "Insufficient credits");
+    let body_json = err.to_sse_data();
+
+    // Convert micros → decimal-string USD. When the gate amount is
+    // unknown (model not metered) we fall back to the published
+    // 0.10 USD default so x402 still has a deposit number to show.
+    let amount_usd = if required_micros == 0 {
+        X402_AMOUNT_USD_DEFAULT.to_string()
+    } else {
+        // 1 USDC = 1_000_000 micro-USDC; format with 6-decimal precision.
+        format!("{:.6}", (required_micros as f64) / 1.0e6)
+    };
+    let payment_challenge = serde_json::json!({
+        "chain": X402_CHAIN,
+        "token": X402_TOKEN,
+        "amount": amount_usd,
+        "facilitator": X402_FACILITATOR_DEFAULT,
+    });
+    let payment_challenge_str = payment_challenge.to_string();
+
+    let mut resp = Response::new(Body::from(body_json));
+    *resp.status_mut() = StatusCode::PAYMENT_REQUIRED;
+    let h = resp.headers_mut();
+    h.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    // X-Payment is the x402 challenge envelope. We `from_maybe_shared`
+    // since the JSON contains characters that are not in the strict
+    // header-value charset — `HeaderValue::from_str` would reject
+    // braces. The challenge body is bounded (≈100 bytes) so the value
+    // is always a valid header value byte-wise.
+    if let Ok(hv) = HeaderValue::from_maybe_shared(payment_challenge_str.into_bytes()) {
+        h.insert(http::HeaderName::from_static("x-payment"), hv);
+    }
+    resp
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────

@@ -53,6 +53,44 @@ pub struct LifegwConfig {
     /// enabled MUST populate this with the soma admin UDS path.
     #[serde(default)]
     pub anima_custody: Option<AnimaCustodyConfig>,
+    /// Spec J J-Sub-E: haima billing configuration. Controls whether
+    /// `/v1/messages` requests are subject to a per-call `haima_check`
+    /// budget gate. Vigil span emission is independent of this — usage
+    /// is always recorded for telemetry.
+    #[serde(default)]
+    pub billing: BillingConfig,
+}
+
+/// Spec J J-Sub-E billing configuration.
+///
+/// Toggles per-call haima credit checking. When `enforce = true` (the
+/// default), every Anthropic Messages request runs through
+/// `haima_check(did, estimated_cost)` before the upstream saga fires.
+/// `Err(InsufficientCredits)` is translated into a `402 Payment
+/// Required` x402 challenge. When `enforce = false`, the gate is
+/// skipped (deployments that don't yet have haima wired) but the Vigil
+/// span still records `gen_ai.usage.*` and `life.haima.cost_usd_micros`
+/// on stream completion.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct BillingConfig {
+    /// Whether to call `haima_check` before opening the upstream
+    /// stream and `haima_settle` after it closes. Default `true`.
+    #[serde(default = "default_billing_enforce")]
+    pub enforce: bool,
+}
+
+fn default_billing_enforce() -> bool {
+    true
+}
+
+impl Default for BillingConfig {
+    fn default() -> Self {
+        Self {
+            enforce: default_billing_enforce(),
+        }
+    }
 }
 
 /// Spec D D-Sub-C anima custody configuration.

@@ -514,11 +514,19 @@ pub async fn serve_with_listener_and_signer(
     // path was strictly worse than the `agent_http` precedent. Passing
     // the limiter to the route makes the budget uniform across
     // `/v1/agent/*` and `/v1/messages`.
+    // Spec J J-Sub-E: stub haima client until the haimad gRPC surface
+    // ships. Vigil span emission still records `gen_ai.usage.*` +
+    // `life.haima.cost_usd_micros` regardless; the gate is no-op so
+    // requests are not actually charged in production yet.
+    let haima: std::sync::Arc<dyn crate::services::anthropic_messages::HaimaClient> =
+        std::sync::Arc::new(crate::services::anthropic_messages::StubHaimaClient);
     let anthropic_state = crate::services::anthropic_messages::AnthropicMessagesState {
         jwks: Arc::clone(&jwks),
         minter: Arc::clone(&minter),
         upstream: upstream_channel.clone(),
         rate_limiter: Some(rate_limiter.clone()),
+        haima,
+        billing_enforce: cfg.billing.enforce,
     };
     let anthropic_router = crate::services::anthropic_messages::router(anthropic_state);
 
