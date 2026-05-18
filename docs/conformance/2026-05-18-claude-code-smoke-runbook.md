@@ -50,6 +50,27 @@ committing. See §2.2 below for the full mutation list.
 
 ---
 
+## Quick local smoke (zero deploy, zero Railway)
+
+Before the full staging deploy, you can run lifegw locally against a
+mock lifed for a ~30 second interactive smoke:
+
+```sh
+cargo run -p lifegw --example local_smoke
+```
+
+Prints a localhost URL + dev-bearer; `curl` or `claude` against it.
+Useful for iterating on the Anthropic Messages route, validating
+Vigil span emission, and verifying the wire over a real TCP socket
+without burning Railway slots. See
+`crates/life-runtime/lifegw/examples/README.md` for the full curl
+recipes.
+
+The full Railway staging path (below) is what produces the
+Phase 1 conformance evidence.
+
+---
+
 ## Section 1 — Prerequisites
 
 Before starting, verify the following are installed and configured on
