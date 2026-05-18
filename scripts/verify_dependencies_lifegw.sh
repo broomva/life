@@ -101,11 +101,12 @@ fi
 echo "=== lifegw (edge gateway) dependency rules (Spec C₃ §11) ==="
 
 # Skip with a quiet message if the crate hasn't landed yet.
-if ! (cd "$ROOT_DIR" && cargo metadata --no-deps --format-version 1 \
-        | grep -qE "\"name\":\"lifegw\""); then
+metadata_json="$(cd "$ROOT_DIR" && cargo metadata --no-deps --format-version 1)"
+if ! grep -qE "\"name\":\"lifegw\"" <<< "$metadata_json"; then
     echo "skip: lifegw not in workspace yet"
     exit 0
 fi
+unset metadata_json
 
 # Arcan substrate runtime crates.
 check_no_transitive_dep "lifegw" "arcand|arcan-core|arcan-harness|arcan-aios-adapters"

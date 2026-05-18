@@ -87,11 +87,12 @@ fi
 echo "=== lifegw-anthropic-codec dependency rules (Spec J L10-D1) ==="
 
 # Skip with a quiet message if the crate hasn't landed yet.
-if ! (cd "$ROOT_DIR" && cargo metadata --no-deps --format-version 1 \
-        | grep -qE "\"name\":\"${CRATE}\""); then
+metadata_json="$(cd "$ROOT_DIR" && cargo metadata --no-deps --format-version 1)"
+if ! grep -qE "\"name\":\"${CRATE}\"" <<< "$metadata_json"; then
     echo "skip: ${CRATE} not in workspace yet"
     exit 0
 fi
+unset metadata_json
 
 # Arcan substrate runtime crates.
 check_no_transitive_dep "$CRATE" \

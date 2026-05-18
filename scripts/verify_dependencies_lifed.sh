@@ -93,11 +93,13 @@ echo "=== lifed + life-runtime-* dependency rules (Spec C₂ §11) ==="
 for crate in lifed arcan-proxy lago-proxy haima-proxy anima-proxy life-runtime-proto lifed-conformance life-runtime-pool; do
     # Skip with a quiet message if the crate hasn't landed yet (sub-phase B
     # introduces the real proxy bodies).
-    if ! (cd "$ROOT_DIR" && cargo metadata --no-deps --format-version 1 \
-            | grep -qE "\"name\":\"${crate}\""); then
+    metadata_json="$(cd "$ROOT_DIR" && cargo metadata --no-deps --format-version 1)"
+    if ! grep -qE "\"name\":\"${crate}\"" <<< "$metadata_json"; then
         echo "skip: ${crate} not in workspace yet"
+        unset metadata_json
         continue
     fi
+    unset metadata_json
 
     # Arcan substrate runtime crates.
     check_no_transitive_dep "$crate" "arcand|arcan-core|arcan-harness|arcan-aios-adapters"
