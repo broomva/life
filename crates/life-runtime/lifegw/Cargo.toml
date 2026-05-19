@@ -206,6 +206,11 @@ k256.workspace = true
 # apply to the production graph, not test rigs — verify_dependencies_lifegw.sh
 # checks `cargo tree`, which excludes dev-deps).
 lifed = { path = "../lifed" }
+# Spec J real-Anthropic local smoke example (`examples/local_smoke_anthropic.rs`).
+# Dev-only: the production graph never pulls arcan-proxy (Spec C₃ §11.2
+# LOCKED L4-D13). Same carve-out as the `lifed` dev-dep above — dev tooling
+# needs a real upstream; the production graph does not.
+arcan-proxy = { path = "../arcan-proxy" }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }

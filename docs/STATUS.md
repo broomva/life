@@ -1572,6 +1572,17 @@ now covers Phase 1 end-to-end at the in-process level.
   `crates/life-runtime/lifegw/examples/README.md` for the full curl
   recipes.
 
+A fourth iteration-only surface (`cargo run -p lifegw --example
+local_smoke_anthropic`, [BRO-1185]) lands as a follow-up: same shape
+as Path 3, but the in-process Agent service forwards to
+`arcan_proxy::AnthropicArcan` so every `/v1/messages` call hits
+`api.anthropic.com` for real (requires `ANTHROPIC_API_KEY`; defaults
+to Sonnet 4.5 — switch to `claude-haiku-4-5-20251001` for cheap
+iteration). Daily dogfooding loop; does NOT validate the lifed saga
+(use Path 2 for full conformance evidence). See the runbook §"Path 4"
+callout and `crates/life-runtime/lifegw/examples/README.md` for full
+recipes and the honest divergence notes.
+
 **Operator runbook + deploy script (this PR's other deliverables):**
 
 - `docs/conformance/2026-05-18-claude-code-smoke-runbook.md` — seven
