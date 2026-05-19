@@ -71,6 +71,49 @@ Phase 1 conformance evidence.
 
 ---
 
+## Path 4 — Real-Anthropic local smoke (daily dogfooding) [BRO-1185]
+
+> **For dev iteration, not conformance evidence.** Use this when you
+> want real Claude responses but don't want to burn a Railway slot.
+
+```sh
+export ANTHROPIC_API_KEY=sk-...
+export ANTHROPIC_MODEL=claude-haiku-4-5-20251001  # cheapest model for iteration
+cargo run -p lifegw --example local_smoke_anthropic
+```
+
+Prints a localhost URL + dev-bearer; point Claude Code at it exactly
+like Path 2 (the mock-upstream example), but every `/v1/messages`
+call hits `api.anthropic.com` via lifegw's real codec / auth /
+rate-limit / Vigil span paths. Same dev-bearer (`dev-token-for-broomva`)
+and same dev-mode JWKS shortcut as the mock example.
+
+**Cost warning**: every call is billed to your `ANTHROPIC_API_KEY`.
+Haiku is the cheapest model; default the example to it via
+`ANTHROPIC_MODEL=...` before sustained dogfooding.
+
+**Relation to the other paths**:
+
+| Path | Upstream | Saga | Use case |
+|---|---|---|---|
+| 1 (in-process E2E test) | mock | — | Automated regression gate. |
+| 2 (`local_smoke` example) | mock | — | Iterate on the gateway with zero upstream cost. |
+| 3 (Railway deploy, this runbook) | real | full lifed | **Conformance evidence** — Loom + Vigil + lago + haima. |
+| **4 (`local_smoke_anthropic` example)** | **real** | **no saga** | **Iterate with real Claude responses, no Railway slot.** |
+
+Paths 2 and 4 share the same edge wire (codec + auth + rate-limit +
+Vigil); they differ only in whether the in-process Agent service
+returns canned events (Path 2) or forwards to `AnthropicArcan` (Path
+4). Path 4 does NOT validate the full production saga / lago events /
+haima ledger — for that, the full Railway staging path below
+(Section 2 onwards) is the **conformance evidence** path. Path 4 is
+for iterating on the gateway without paying Railway latency.
+
+See `crates/life-runtime/lifegw/examples/README.md` for the full curl
+recipes, env-var knobs, and the honest divergence notes.
+
+---
+
 ## Section 1 — Prerequisites
 
 Before starting, verify the following are installed and configured on

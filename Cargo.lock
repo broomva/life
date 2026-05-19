@@ -6562,6 +6562,7 @@ dependencies = [
  "aios-protocol",
  "anyhow",
  "arc-swap",
+ "arcan-proxy",
  "async-trait",
  "aws-config",
  "aws-sdk-kms",
