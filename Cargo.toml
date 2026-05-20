@@ -162,6 +162,9 @@ members = [
     "crates/life-runtime/lifegw-anthropic-codec",
     # life-perturb — controlled perturbation injection for RCS λ̂ validation (BRO-947)
     "crates/life-perturb",
+    # Apps — leaf binaries that compose substrate crates into deliverables.
+    # bookkeeping-judge (BRO-1003): ergon-Workflow port of bellows-example-bookkeeping-judge.
+    "apps/bookkeeping-judge",
 ]
 exclude = ["crates/spaces/life-spaces/spacetimedb"]
 
