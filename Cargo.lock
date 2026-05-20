@@ -6507,6 +6507,7 @@ dependencies = [
  "chrono",
  "clap",
  "dashmap",
+ "ergon",
  "futures",
  "haima-proxy",
  "http 1.4.0",
