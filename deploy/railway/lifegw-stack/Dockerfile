@@ -54,10 +54,16 @@ FROM debian:bookworm-slim AS runtime
 
 # Caddy via the official .deb (small, current). openssl for self-signed cert
 # generation at boot. tini reaps zombies cleanly when caddy is PID 1.
+# netcat-openbsd provides `nc -zU <socket>` — a real UDS connect probe used
+# by entrypoint.sh to verify lifed has both bind()ed AND listen()ed before
+# lifegw starts dialing. `[[ -S … ]]` alone is insufficient because bind()
+# creates the socket file before listen() makes the kernel ready to queue
+# connections. See BRO-1193.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg debian-keyring debian-archive-keyring \
         apt-transport-https openssl tini \
+        netcat-openbsd \
  && curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
       | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
  && curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
