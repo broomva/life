@@ -172,6 +172,64 @@ jobs:
       - name: Run scripts/verify_dependencies_lifegw_anthropic_codec.sh
         run: bash scripts/verify_dependencies_lifegw_anthropic_codec.sh
 
+  # ── Gate 7e: ergon dependency rules (Spec ergon-v0.1 §3) ──────────
+  #
+  # Ergon is the Layer-2 workflow primitive (see
+  # `docs/architecture/agent-harness.md`). The dep-isolation rule is
+  # stricter than lifed's: `ergon` is vendor-neutral (zero substrate
+  # deps), `ergon-life-hooks` bridges only the 4 auto-hook substrates,
+  # `ergon-life-sinks` depends only on lago-core + tracing. Violations
+  # would silently couple the harness to a specific runtime and break
+  # the abstraction. See BRO-1004 / ergon §12.10.
+  verify-deps-ergon:
+    name: Verify ergon dependency rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Self-test (regression guard for FAIL-path detection)
+        run: bash scripts/verify_dependencies_ergon.sh --self-test
+      - name: Run scripts/verify_dependencies_ergon.sh
+        run: bash scripts/verify_dependencies_ergon.sh
+
+  # ── Gate 7f: ergon — focused check + clippy + test ────────────────
+  #
+  # Dedicated fast lane for the ergon crate cluster (ergon +
+  # ergon-life-hooks + ergon-life-sinks). The workspace lanes (Gates 1-3)
+  # already cover these via `--workspace`, but a focused lane gives:
+  #   - faster signal on PRs that only touch ergon (no waiting on the
+  #     full workspace clippy / test pass)
+  #   - explicit accountability if someone breaks ergon while editing
+  #     a sibling crate (the workspace lanes fail but the source is
+  #     ambiguous; this lane points at ergon)
+  #   - an audit trail that ergon's three crates are individually
+  #     fmt-clean, clippy-clean (with workspace-level `-D warnings`),
+  #     and test-green at every PR
+  #
+  # See BRO-1004 / ergon §12.10 / `docs/architecture/ergon.md`.
+  ergon-check:
+    name: ergon — check + clippy + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check (ergon)
+        run: cargo fmt -p ergon -p ergon-life-hooks -p ergon-life-sinks -- --check
+      - name: Clippy (ergon, deny warnings)
+        run: cargo clippy -p ergon -p ergon-life-hooks -p ergon-life-sinks --all-targets -- -D warnings -A clippy::too_many_arguments
+      - name: Check (ergon)
+        run: cargo check -p ergon -p ergon-life-hooks -p ergon-life-sinks --all-targets
+      - name: Test (ergon, all features)
+        run: cargo test -p ergon -p ergon-life-hooks -p ergon-life-sinks --all-features
+
   # ── Gate 8: Secret Scanning ───────────────────────────────────────
   secrets:
     name: Secret Scan
