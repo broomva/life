@@ -2069,6 +2069,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bookkeeping-judge"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "arcan-aios-adapters",
+ "arcan-core",
+ "arcan-ergon",
+ "arcan-provider",
+ "async-trait",
+ "ergon",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
