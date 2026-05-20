@@ -1,0 +1,2488 @@
+<!DOCTYPE html>
+<!--
+spec_metadata:
+  spec_letter: F
+  spec_name: Iris — Multi-Channel Communications Substrate
+  spec_codename: iris
+  date: 2026-05-18
+  status: Draft v0.1
+  category: B  # human-read + agent-loaded — bet-the-architecture exception authored as HTML directly
+  audience: [architects, substrate-implementers, tenant-integrators, future-bridge-authors]
+  authors:
+    - Carlos D. Escobar-Valbuena (broomva)
+  sibling_specs:
+    - 2026-04-29-spec-d-anima-custody.md       # custody trait + multi-backend fan-out
+    - 2026-05-07-spec-e-agent-loop-compute-contract.md  # inference trait + multi-backend fan-out
+  predecessors:
+    - 2026-05-11-spec-f-subscription-auth-tier-1.md  # NOTE: distinct prior Spec F (subscription auth) — see Preamble §0.3
+    - 2026-05-11-spec-g-external-trigger-ingress.md  # general external trigger spec; Iris is the messaging specialisation
+  successors:
+    - F-Sub-A — iris-core trait foundation (BLOCKING)
+    - F-Sub-B — iris-whatsapp-openwa adapter
+    - F-Sub-C — iris-telegram adapter
+    - F-Sub-D — iris-twilio SMS adapter
+    - F-Sub-E — iris-identity unification (phone/handle → DID)
+    - F-Sub-F — iris-vigil semconv instrumentation
+    - F-Sub-G — iris-conformance cross-channel battery
+    - F-Sub-H — iris-whatsapp-cloud official WA Cloud API adapter
+  linear_umbrella: BRO-Iris  # placeholder — real id assigned at scaffold time
+  trait_artifact: crates/iris/iris-core/src/connector.rs::ChannelConnector
+  daemon: bin/irisd
+  proxy: crates/life-runtime/lifed-proxies/iris-proxy/
+  skill: skills/life-iris/SKILL.md
+  protos:
+    - proto/life/iris/v1/conversation.proto
+    - proto/life/iris/v1/message.proto
+    - proto/life/iris/v1/connector.proto
+    - proto/life/iris/v1/channel.proto
+  policy_gates:
+    - iris.whatsapp.outbound.send
+    - iris.whatsapp.outbound.bulk
+    - iris.telegram.outbound.send
+    - iris.twilio.outbound.send
+    - iris.twilio.outbound.bulk
+    - iris.signal.outbound.send
+    - iris.slack.outbound.send
+    - iris.discord.outbound.send
+    - iris.matrix.outbound.send
+    - iris.imessage.outbound.send
+    - iris.web.outbound.send
+    - iris.identity.bootstrap.from_phone
+    - iris.identity.bootstrap.from_handle
+  lifegw_routes:
+    - POST /v1/iris/inbound
+    - POST /v1/iris/conversations
+    - WS   /v1/iris/stream
+  composes_with:
+    - anima        # identity unification (D)
+    - inference    # per-session compute (E)
+    - lago         # event log
+    - chronos      # 24h window timers, session expiry, schedules
+    - vigil        # OTel GenAI + Messaging semconv
+    - haima        # per-message billing
+  strategic_positioning: |
+    POSIX of agent messaging — own the canonical conversation contract,
+    let channels compete underneath. Same play as Spec E for silicon,
+    applied at the messaging layer.
+  out_of_scope_v1:
+    - voice / audio channels
+    - video calls
+    - real-time presence indicators
+    - advanced group-call features (multi-participant audio/video)
+    - cross-channel forwarding (message routed inbound on X forwarded outbound on Y)
+    - AI-generated multi-modal response rendering per-channel quirks
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Spec F — Iris (Multi-Channel Communications Substrate) — Draft v0.1 (2026-05-18)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  /* ---------- Spec-document style.  P18 §6 Category B HTML idiom. ---------- */
+  :root {
+    --serif: "Iowan Old Style", "Charter", "Georgia", "Times New Roman", serif;
+    --mono: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace;
+    --ink: #1a1a1a;
+    --ink-soft: #444;
+    --muted: #6a6a6a;
+    --paper: #fbfaf7;
+    --rule: #d8d4ca;
+    --callout-locked: #eef3ff;
+    --callout-locked-border: #4a6fb5;
+    --callout-rejected: #fff4f0;
+    --callout-rejected-border: #b56a4a;
+    --callout-note: #f6f5ee;
+    --callout-note-border: #b59a4a;
+    --callout-iris: #f4eef8;
+    --callout-iris-border: #7a4ab5;
+    --callout-warn: #fff7e0;
+    --callout-warn-border: #b58a4a;
+    --code-bg: #f3f1ea;
+    --code-border: #d8d4ca;
+  }
+  html { color: var(--ink); background: var(--paper); }
+  body {
+    font-family: var(--serif);
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 2.4rem 2.4rem 6rem 2.4rem;
+    line-height: 1.55;
+    font-size: 17px;
+  }
+  h1 { font-size: 2.2rem; margin: 1.4rem 0 0.6rem 0; line-height: 1.15; border-bottom: 2px solid var(--ink); padding-bottom: 0.35rem; }
+  h2 { font-size: 1.55rem; margin: 2.4rem 0 0.8rem 0; line-height: 1.2; border-bottom: 1px solid var(--rule); padding-bottom: 0.25rem; }
+  h3 { font-size: 1.22rem; margin: 1.6rem 0 0.6rem 0; line-height: 1.25; }
+  h4 { font-size: 1.05rem; margin: 1.1rem 0 0.4rem 0; line-height: 1.3; font-variant: small-caps; letter-spacing: 0.04em; color: var(--ink-soft); }
+  p { margin: 0.65rem 0; }
+  a { color: #224a8a; text-decoration: none; border-bottom: 1px dotted #224a8a; }
+  a:hover { background: #f0e9d0; }
+  code, pre, kbd {
+    font-family: var(--mono);
+    font-size: 0.9em;
+  }
+  code { background: var(--code-bg); padding: 0.06em 0.32em; border-radius: 3px; border: 1px solid var(--code-border); }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 4px;
+    padding: 0.9rem 1.1rem;
+    overflow-x: auto;
+    line-height: 1.42;
+    font-size: 0.85em;
+  }
+  pre code { background: transparent; border: none; padding: 0; }
+  blockquote { border-left: 3px solid var(--rule); margin: 1rem 0; padding: 0.4rem 1rem; color: var(--ink-soft); background: #f6f4ec; }
+  ul, ol { margin: 0.6rem 0 0.6rem 1.6rem; padding: 0; }
+  li { margin: 0.25rem 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.1rem 0;
+    font-size: 0.94em;
+  }
+  th, td {
+    border: 1px solid var(--rule);
+    padding: 0.45rem 0.65rem;
+    vertical-align: top;
+    text-align: left;
+  }
+  th { background: #efece2; font-weight: 600; }
+  caption { caption-side: bottom; font-style: italic; font-size: 0.88em; color: var(--muted); padding-top: 0.4rem; }
+  hr { border: none; border-top: 1px solid var(--rule); margin: 2rem 0; }
+
+  /* ---------- callouts ---------- */
+  aside.callout {
+    margin: 1.2rem 0;
+    padding: 0.85rem 1.1rem;
+    border-left: 4px solid var(--callout-note-border);
+    background: var(--callout-note);
+    border-radius: 0 4px 4px 0;
+  }
+  aside.callout.locked    { border-left-color: var(--callout-locked-border);    background: var(--callout-locked); }
+  aside.callout.rejected  { border-left-color: var(--callout-rejected-border);  background: var(--callout-rejected); }
+  aside.callout.iris      { border-left-color: var(--callout-iris-border);      background: var(--callout-iris); }
+  aside.callout.warn      { border-left-color: var(--callout-warn-border);      background: var(--callout-warn); }
+  aside.callout h4 { margin-top: 0; color: var(--ink); }
+  aside.callout p:last-child { margin-bottom: 0; }
+  aside.callout .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.78em;
+    padding: 0.06em 0.4em;
+    margin-right: 0.4em;
+    background: rgba(0,0,0,0.06);
+    border-radius: 3px;
+    color: var(--ink-soft);
+    letter-spacing: 0.04em;
+  }
+
+  /* ---------- TOC nav ---------- */
+  nav.toc {
+    background: #f3f1ea;
+    border: 1px solid var(--rule);
+    padding: 0.9rem 1.2rem 1.1rem 1.2rem;
+    margin: 1.4rem 0 2.4rem 0;
+    border-radius: 4px;
+    font-size: 0.93em;
+  }
+  nav.toc h4 { margin-top: 0; }
+  nav.toc ol { columns: 2; column-gap: 2rem; margin-left: 1.2rem; }
+  nav.toc li { break-inside: avoid; }
+
+  /* ---------- preamble block ---------- */
+  .preamble-meta {
+    background: #f6f4ec;
+    border: 1px solid var(--rule);
+    padding: 0.9rem 1.2rem;
+    border-radius: 4px;
+    margin-bottom: 1.4rem;
+    font-size: 0.93em;
+  }
+  .preamble-meta dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0; }
+  .preamble-meta dt { font-weight: 600; color: var(--ink-soft); }
+  .preamble-meta dd { margin: 0; }
+
+  /* ---------- diagrams ---------- */
+  figure { margin: 1.4rem 0; }
+  figure svg { display: block; margin: 0 auto; max-width: 100%; height: auto; background: #fff; border: 1px solid var(--rule); border-radius: 4px; }
+  figcaption { font-size: 0.88em; color: var(--muted); text-align: center; margin-top: 0.4rem; font-style: italic; }
+
+  /* ---------- footnotes ---------- */
+  .footnote { font-size: 0.85em; color: var(--muted); }
+
+  /* ---------- print ---------- */
+  @media print {
+    body { background: white; max-width: none; padding: 1.4rem; font-size: 11pt; }
+    nav.toc, aside.callout { break-inside: avoid; }
+    pre { break-inside: avoid; font-size: 9pt; }
+    h2, h3 { break-after: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<article>
+
+<!-- ============================================================== -->
+<!-- §0 — PREAMBLE                                                  -->
+<!-- ============================================================== -->
+<header>
+  <h1>Spec F — Iris<br><small style="font-size:0.55em;font-weight:normal;color:var(--ink-soft)">Multi-Channel Communications Substrate</small></h1>
+
+  <div class="preamble-meta">
+    <dl>
+      <dt>Date</dt>           <dd>2026-05-18</dd>
+      <dt>Status</dt>          <dd>Draft v0.1 (locked decisions inline; sub-phase A approved for immediate implementation)</dd>
+      <dt>Sibling of</dt>      <dd><a href="2026-04-29-spec-d-anima-custody.md">Spec D (Anima Custody)</a> and <a href="2026-05-07-spec-e-agent-loop-compute-contract.md">Spec E (Agent-Loop Compute Contract)</a> — same trait-and-multiple-backends pattern, applied to messaging.</dd>
+      <dt>Owner</dt>           <dd>messaging layer (<code>crates/iris/</code>, new)</dd>
+      <dt>Linear umbrella</dt> <dd><code>BRO-Iris</code> (placeholder; real ticket id assigned at scaffold time) — sub-tickets <code>F-Sub-A</code> through <code>F-Sub-H</code></dd>
+      <dt>Authorship</dt>      <dd>Carlos D. Escobar-Valbuena (broomva)</dd>
+      <dt>Category</dt>        <dd>B (human-read + agent-loaded). Bet-the-architecture exception per CLAUDE.md P18 §6 Category B Format Discernment — authored as HTML directly rather than markdown projection, because SVG architecture diagrams are load-bearing.</dd>
+    </dl>
+  </div>
+
+  <h2 id="s0">§0 Preamble</h2>
+
+  <h3 id="s0-1">§0.1 Naming &mdash; <em>Iris</em>, the messenger goddess</h3>
+  <p>
+    <strong>Iris</strong> (Ἶρις, <em>Îris</em>) is named for the Greek messenger goddess
+    &mdash; the rainbow-bridge between Olympus and the mortal realms, charged with
+    one duty: <em>carry the message faithfully, whatever its origin or destination</em>.
+    She is the <em>single-purpose</em> messenger, distinct from Hermes who carries
+    many roles (commerce, thieves, psychopomp, herald). This naming intentionally
+    contrasts the workspace&rsquo;s existing <code>hermes</code> tooling, which is
+    polymorphic; Iris is <em>one trait, many adapters</em>, no role creep.
+  </p>
+
+  <h3 id="s0-2">§0.2 Disambiguation &mdash; this is <em>not</em> Fisher&rsquo;s iris dataset</h3>
+  <aside class="callout iris">
+    <h4>Disambiguation</h4>
+    <p>
+      The <em>Iris</em> in this spec refers exclusively to the <strong>Greek
+      messenger goddess</strong>. It is unrelated to the
+      <a href="https://en.wikipedia.org/wiki/Iris_flower_data_set">Fisher iris flower
+      dataset</a> from statistical learning literature, the
+      <a href="https://en.wikipedia.org/wiki/Iris_(anatomy)">anatomical iris</a>
+      of the eye, the <code>iris-rs</code> ML crate, NASA Iris satellite missions,
+      JetBrains Iris, the Iris messaging library (Java), or any other prior
+      software-engineering use of the name.
+    </p>
+    <p>
+      When the substrate is referenced in code, prose, docs, or commit messages,
+      the form <em>"Iris (the Life messaging substrate)"</em> or just <em>Iris</em>
+      in context is preferred. The lowercase identifier <code>iris</code> is used
+      uniformly for crate names, daemon binaries (<code>irisd</code>), proto
+      paths, lifegw routes, and policy gates.
+    </p>
+  </aside>
+
+  <h3 id="s0-3">§0.3 Notation &mdash; this Spec F vs the prior Spec F (subscription auth)</h3>
+  <aside class="callout warn">
+    <h4>Spec letter collision &mdash; documented, deliberate</h4>
+    <p>
+      A prior draft document at <code>docs/superpowers/specs/2026-05-11-spec-f-subscription-auth-tier-1.md</code>
+      ("Spec F &mdash; Subscription Auth &amp; Tier-1 Agent Invocation") used the
+      letter <em>F</em> for a subscription-auth design that has not yet shipped.
+      Per workspace convention, spec letters are not strictly globally unique
+      until shipped; this document claims the <em>F</em> letter for the
+      <strong>Iris communications substrate</strong> on the strength of being the
+      next substrate-cluster spec in the
+      <a href="2026-04-29-spec-d-anima-custody.md">Spec D</a> &rarr;
+      <a href="2026-05-07-spec-e-agent-loop-compute-contract.md">Spec E</a> &rarr;
+      Spec F substrate-trait sequence.
+    </p>
+    <p>
+      Reconciliation options &mdash; to be resolved at scaffold time:
+    </p>
+    <ol>
+      <li><strong>Rename the prior document.</strong> The subscription-auth design
+        is in-flight but unshipped; if it remains undeployed at Iris F-Sub-A
+        merge, the prior document is renamed
+        <em>Spec H &mdash; Subscription Auth &amp; Tier-1 Agent Invocation</em>
+        (Spec G is already taken by external-trigger-ingress; Spec H is open
+        at the time of this writing).</li>
+      <li><strong>Promote Iris to a later letter.</strong> If the subscription-auth
+        Spec F ships first, this document is renamed
+        <em>Spec J &mdash; Iris</em> or the next-open letter; sub-phase ids
+        update accordingly.</li>
+    </ol>
+    <p>
+      The default assumption in this document is option&nbsp;1; references to
+      "Spec F" in this text mean Iris.
+      <a href="#o2">Open question O-2</a> tracks reconciliation.
+    </p>
+  </aside>
+
+  <h3 id="s0-4">§0.4 Scope sentence</h3>
+  <p>
+    <strong>Iris is the multi-channel messaging substrate of the Life Agent OS.</strong>
+    It bridges WhatsApp (Web automation and Cloud API), Telegram, Signal, Slack,
+    Discord, Matrix, iMessage, SMS via Twilio, and Web (in-app chat) &mdash; in
+    both directions &mdash; to the canonical Life agent loop. It owns one trait
+    (<code>ChannelConnector</code>), one canonical <code>Message</code> /
+    <code>ConversationRef</code> / <code>ParticipantRef</code> schema, a single
+    daemon (<code>irisd</code>), and a lifegw edge surface that mirrors
+    <code>lifed</code>&rsquo;s session-stream contract. Identity is bootstrapped
+    through <a href="2026-04-29-spec-d-anima-custody.md">Anima (Spec D)</a>;
+    compute is dispatched through
+    <a href="2026-05-07-spec-e-agent-loop-compute-contract.md">Inference (Spec E)</a>;
+    durability is via Lago; observability via Vigil; billing via Haima; timers
+    via Chronos.
+  </p>
+</header>
+
+<!-- ============================================================== -->
+<!-- TABLE OF CONTENTS                                              -->
+<!-- ============================================================== -->
+<nav class="toc">
+  <h4>Contents</h4>
+  <ol>
+    <li><a href="#s0">§0 Preamble</a></li>
+    <li><a href="#s1">§1 Why &mdash; The Substrate Gap</a></li>
+    <li><a href="#s2">§2 Prior-Art Convergence &mdash; The Eight Invariants</a></li>
+    <li><a href="#s3">§3 Locked Decisions (L6-D1 &ndash; L6-D8)</a></li>
+    <li><a href="#s4">§4 Trait Surface &mdash; <code>ChannelConnector</code> and friends</a></li>
+    <li><a href="#s5">§5 Architecture &amp; Diagrams</a></li>
+    <li><a href="#s6">§6 Sub-Phases F-Sub-A &hellip; F-Sub-H</a></li>
+    <li><a href="#s7">§7 Composition with Shipped Substrates</a></li>
+    <li><a href="#s8">§8 Strategic Positioning &mdash; POSIX of Agent Messaging</a></li>
+    <li><a href="#s9">§9 Concerns &amp; Mitigations</a></li>
+    <li><a href="#s10">§10 Open Questions</a></li>
+    <li><a href="#s11">§11 Out of Scope (Phase 2+)</a></li>
+    <li><a href="#s12">§12 References</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================== -->
+<!-- §1 — WHY                                                       -->
+<!-- ============================================================== -->
+<section id="s1">
+  <h2>§1 Why &mdash; The Substrate Gap</h2>
+
+  <h3>§1.1 Current state &mdash; ad-hoc Twilio across the workspace</h3>
+  <p>
+    Messaging integrations across the Broomva workspace have grown organically
+    and incoherently. As of 2026-05-18, the same ground &mdash; "let an agent
+    read inbound messages and send outbound replies on channel X" &mdash; is
+    re-implemented in at least <em>five</em> places:
+  </p>
+  <ul>
+    <li>
+      <strong>Exclusive Rentals (Life Module tenant).</strong> A bespoke Twilio
+      Programmable SMS webhook handler in <code>freelance/exclusive-rentals/</code>
+      forwards SMS into <code>arcand</code> via an HTTP relay; each tenant
+      configures its own Twilio account, signing secrets, and message-status
+      polling logic.
+    </li>
+    <li>
+      <strong>Stimulus (work).</strong> A WhatsApp Cloud API webhook handler
+      that posts to a custom internal queue; identity binding is by phone-number
+      string lookup; no rotation handling.
+    </li>
+    <li>
+      <strong>Hakip (habit assistant).</strong> A Telegram bot via
+      <code>teloxide</code> embedded directly in the app binary; deployment
+      lifecycle is coupled to the app&rsquo;s release schedule.
+    </li>
+    <li>
+      <strong>Sentinel (freelance).</strong> A Twilio Conversations integration
+      with its own per-tenant identity map and per-conversation lock that
+      reimplements roughly half of the canonical pattern.
+    </li>
+    <li>
+      <strong>chatOS web.</strong> An in-app WebSocket channel that has
+      semantics very similar to the others but no shared schema, no shared
+      trust model, and no integration with Anima or Lago.
+    </li>
+  </ul>
+
+  <p>
+    Each integration carries the same ten or so failure modes: HMAC signature
+    verification done inconsistently or skipped, per-conversation ordering not
+    enforced, the WhatsApp 24-hour customer-care window not tracked, identity
+    binding ad-hoc and unrotatable, observability mostly absent, no per-channel
+    capability negotiation (e.g.&nbsp;markdown formatting fallback differs by
+    channel), no central rate-limiting, no policy gate, and no billing tie-in
+    for outbound messages that may incur per-message costs.
+  </p>
+
+  <p>
+    Five tenants on the
+    <a href="2026-05-09-bro-1006-authored-agents-architecture.md">authored-agents</a>
+    deployment plan need at least three channels each (typically WhatsApp + SMS
+    + web). That implies fifteen near-duplicate integrations within twelve
+    weeks if nothing changes; that is the substrate gap.
+  </p>
+
+  <h3>§1.2 The three structural costs (mirror of Spec E&rsquo;s framing)</h3>
+
+  <p>Spec E framed the inference gap as three structural costs (no silicon
+  fan-out, no agent-loop primitives, no Lago/Anima integration). The messaging
+  gap has the same shape:</p>
+
+  <ol>
+    <li>
+      <strong>No channel fan-out.</strong> Each new channel
+      (Signal CLI, Matrix appservice, iMessage via a Mac mini bridge) requires
+      a one-off integration with no shared inbound/outbound shape. Adding the
+      sixth channel costs as much as adding the first.
+    </li>
+    <li>
+      <strong>No agent-loop primitives.</strong> Per-conversation
+      serialization, identity unification across handles, capability-typed
+      degradation (markdown &rarr; plaintext on SMS), and re-engagement window
+      timers (WhatsApp 24h) have no schema or trait surface; they are
+      re-implemented &mdash; usually wrong &mdash; per integration. Bot-Framework
+      and Twilio Conversations had to solve these in proprietary code;
+      libpurple has done it since 1998 as <code>prpl</code> plugins.
+    </li>
+    <li>
+      <strong>No Anima / Inference / Lago / Vigil integration.</strong>
+      Messages today don&rsquo;t carry the agent&rsquo;s DID, aren&rsquo;t
+      Lago-content-addressed, aren&rsquo;t Vigil-instrumented, aren&rsquo;t
+      Inference-routed (which model handles which channel?), aren&rsquo;t
+      identity-bound (a phone number swap is a manual database surgery), and
+      have no billing surface. Every other Life substrate is event-sourced and
+      identity-scoped; messaging is the substrate that escapes the contract.
+    </li>
+  </ol>
+
+  <h3>§1.3 Why now</h3>
+  <p>
+    Three triggers converge on 2026-05-18 to make this the right moment:
+  </p>
+  <ul>
+    <li>
+      <strong>Anima Spec D is 100% shipped</strong> with six custody backends.
+      Iris can bootstrap identity from a phone number to an
+      <code>EcdsaP256Identity</code> without needing to design custody itself.
+    </li>
+    <li>
+      <strong>Inference Spec E foundation (E-Sub-A) shipped</strong>. Per-channel,
+      per-session compute routing is a real handle Iris can consume rather than
+      a future hope.
+    </li>
+    <li>
+      <strong>Five tenant deployments needing channels are queued</strong>.
+      The cost of not having Iris is now scoped, dated, and quantified.
+    </li>
+  </ul>
+</section>
+
+<!-- ============================================================== -->
+<!-- §2 — PRIOR ART                                                 -->
+<!-- ============================================================== -->
+<section id="s2">
+  <h2>§2 Prior-Art Convergence &mdash; The Eight Invariants</h2>
+
+  <p>
+    Iris is not a green-field design. Five large, long-lived messaging substrates
+    converge on the same set of invariants from independent starting points.
+    The Iris trait surface is the intersection of their lessons, with a small
+    number of deliberate departures motivated by the
+    <a href="2026-04-29-spec-d-anima-custody.md">Anima</a> /
+    <a href="2026-05-07-spec-e-agent-loop-compute-contract.md">Inference</a>
+    substrate-cluster pattern.
+  </p>
+
+  <h3>§2.1 The five reference systems</h3>
+
+  <h4>libpurple (Pidgin, 1998 &mdash; present)</h4>
+  <p>
+    The longest-running multi-protocol messaging substrate in production. Defines
+    the <code>prpl</code> (PRotocol PLugin) ABI: a per-protocol dynamic-library
+    contract over a canonical account / buddy / conversation / IM-message model.
+    libpurple shipped ~25 protocols at peak; modern Pidgin still supports XMPP,
+    IRC, SIP, Matrix, and (historically) AIM, ICQ, MSN, Yahoo, Bonjour, Gadu-Gadu,
+    Zephyr. The plugin daemon pattern is the canonical alternative to
+    compiled-in adapters (see <a href="#l6-d8">L6-D8</a>).
+  </p>
+  <p>
+    Convergent lessons: (a) canonical message + conversation + participant
+    schema is essential; (b) per-protocol plugin trait, not per-protocol
+    inheritance, scales to twenty-plus channels; (c) per-conversation
+    serialization is so universal it became part of the core abstraction;
+    (d) "presence" is a separate axis from "message" and deserves its own
+    trait (deferred to Phase 2 &mdash; see <a href="#s11">§11</a>).
+    Cautionary lesson: plugin overload &mdash; libpurple&rsquo;s peak of ~25
+    protocols was largely <em>community-contributed</em> plugins with highly
+    variable quality, security, and conformance; the maintenance load eventually
+    fragmented the project. Iris mitigates by gating with a conformance battery
+    (<a href="#f-sub-g">F-Sub-G</a>) and requiring compiled-in Rust crates in
+    v1 (<a href="#l6-d8">L6-D8</a>).
+  </p>
+
+  <h4>Matrix mautrix &mdash; bridgev2 NetworkConnector (2024+)</h4>
+  <p>
+    The current state-of-the-art for federation-bridge design. Defines
+    <code>NetworkConnector</code> as the per-protocol trait, with bridgev2 (the
+    bridge framework) handling room/conversation lifecycle, identity
+    portal-puppeting (a remote-network user appears as a Matrix user under
+    bridge control), and end-to-bridge encryption. The mautrix bridges for
+    WhatsApp, Telegram, Signal, Discord, Slack, and iMessage all implement
+    <code>NetworkConnector</code> and share identical handling for room
+    creation, user portaling, and message reconciliation.
+  </p>
+  <p>
+    Convergent lessons: (a) a <em>NetworkConnector</em>-style trait with a few
+    methods (<code>send</code>, <code>receive</code>, <code>handle_event</code>,
+    capability declarations) is sufficient for the messaging side and forces
+    discipline; (b) the bridge frameworks centralise rate-limiting, retry, and
+    identity unification so per-channel impls stay small; (c) puppeting (one
+    side acts as the other identity) is one of three distinct trust regimes
+    &mdash; the others are relay and proxy &mdash; and the trait shape must let
+    the bridge declare which it implements (see <a href="#trustmode">TrustMode</a>).
+    Iris adopts this terminology and trait shape almost directly.
+  </p>
+
+  <h4>Microsoft Bot Framework &mdash; BotAdapter + Activity (2016+)</h4>
+  <p>
+    The most schema-disciplined messaging contract in the industry. Defines
+    <code>Activity</code> as the canonical message envelope (<code>id</code>,
+    <code>type</code>, <code>from</code>, <code>conversation</code>,
+    <code>recipient</code>, <code>text</code>, <code>attachments</code>,
+    <code>channelId</code>, &hellip;) and <code>BotAdapter</code> as the
+    per-channel translation layer. Channels covered include Microsoft Teams,
+    Skype, Slack, Facebook Messenger, Twilio SMS, Webex, Direct Line, Web Chat,
+    LINE, and Telegram.
+  </p>
+  <p>
+    Convergent lesson: the canonical schema must be channel-agnostic, with
+    capability declarations and graceful degradation tracking. Bot Framework
+    enforces <em>channel data passthrough</em> &mdash; channel-specific fields
+    travel in a typed <code>channelData</code> envelope so the canonical schema
+    doesn&rsquo;t bloat. Iris adopts this pattern as
+    <code>Message::channel_data: Option&lt;serde_json::Value&gt;</code>.
+    Cautionary lesson: schema drift across channel versions &mdash; the
+    framework has accumulated ~7 schema versions across a decade; new channels
+    arrive and old ones evolve. A conformance battery is mandatory.
+  </p>
+
+  <h4>Twilio Conversations API (2020+)</h4>
+  <p>
+    The clearest commercial framing of the multi-channel problem.
+    <code>Conversation</code>, <code>Participant</code>, and
+    <code>ProxyAddress</code> are the three primitive types; a single
+    <code>Conversation</code> can have participants on SMS, WhatsApp, MMS, web
+    chat, Facebook Messenger, and others, each represented by a
+    <code>Participant</code> bound to a <code>ProxyAddress</code> (the
+    Iris-side handle). The substrate guarantees per-conversation message
+    ordering and bridges identities across channels via
+    <code>ProjectedAddress</code>.
+  </p>
+  <p>
+    Convergent lessons: (a) the canonical identity is the
+    <code>Conversation</code>, not the channel-native conversation id;
+    (b) per-channel handles are owned by the substrate (the
+    <code>ProxyAddress</code> &mdash; e.g.&nbsp;a phone number you provisioned)
+    so identity binding survives channel-side reassignments; (c) per-conversation
+    ordering is non-negotiable and must be enforced by the substrate.
+  </p>
+
+  <h4>OpenClaw &mdash; 40+ channel relay (2025-2026, broomva)</h4>
+  <p>
+    OpenClaw is the workspace&rsquo;s most aggressive experiment in cross-channel
+    routing. It runs forty-plus adapters (WhatsApp Web via OpenWA, Telegram via
+    teloxide, Signal via signal-cli, Slack via slack-rs, Discord via serenity,
+    Matrix via matrix-rust-sdk, iMessage via a Mac-mini bridge, X DMs via
+    headless browser, IG DMs via similar, plus many smaller adapters) behind a
+    seven-stage processing loop: ingress &rarr; decode &rarr; canonicalise
+    &rarr; identity-resolve &rarr; queue &rarr; agent-dispatch &rarr; outbound.
+    Each <em>session</em> (loosely a conversation) holds a per-session command
+    queue that serializes inbound &rarr; agent &rarr; outbound order.
+  </p>
+  <p>
+    Convergent lessons (and unique additions Iris inherits):
+    (a) the seven-stage loop is the right pattern for inbound, but is too
+    deep at v1 &mdash; Iris collapses it to a four-stage loop
+    (decode &rarr; canonicalise &rarr; serialize &rarr; dispatch) and lets
+    Lago / Praxis / Inference own the rest;
+    (b) the per-session command queue maps cleanly onto a
+    <code>tokio::Mutex</code> keyed by <code>ConversationRef</code>;
+    (c) OpenClaw demonstrates that compiled-in Rust crates can scale to ~40
+    channels if (and only if) per-channel SDK churn is firewalled by a stable
+    canonical schema;
+    (d) the operational pain points OpenClaw discovered &mdash; webhook auth
+    sprawl, SMS-spoofing risks, capability degradation done in code instead of
+    declaratively &mdash; map directly to the L6-D2&hellip;L6-D7 decisions
+    below.
+  </p>
+
+  <h3 id="s2-invariants">§2.2 The eight convergent invariants</h3>
+
+  <p>
+    Distilling the five systems above &mdash; spanning 1998 (libpurple) through
+    2026 (OpenClaw) &mdash; produces a set of eight invariants that every
+    multi-channel messaging substrate ends up satisfying, by accident or
+    design. Iris satisfies all eight by construction.
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:5%">#</th>
+        <th style="width:30%">Invariant</th>
+        <th style="width:45%">Why it is non-negotiable</th>
+        <th style="width:20%">Iris artifact</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>I-1</td>
+        <td><strong>Canonical message schema</strong> &mdash; channel-agnostic envelope, channel-specific payload travels in a typed side-channel.</td>
+        <td>Bot Framework Activity. libpurple <code>PurpleMessage</code>. Without it, every agent has to know every channel&rsquo;s quirks; with it, agents are channel-blind.</td>
+        <td><code>iris-core::Message</code></td>
+      </tr>
+      <tr>
+        <td>I-2</td>
+        <td><strong>Per-protocol Connector trait</strong> &mdash; not inheritance, not switch-on-channel-id.</td>
+        <td>libpurple <code>prpl</code>. mautrix <code>NetworkConnector</code>. Bot Framework <code>BotAdapter</code>. The trait surface is small (≤10 methods); the implementation is the channel-specific work.</td>
+        <td><code>iris-core::ChannelConnector</code></td>
+      </tr>
+      <tr>
+        <td>I-3</td>
+        <td><strong>Per-conversation serialization</strong> &mdash; messages within a single conversation must be delivered to the agent loop in order.</td>
+        <td>Twilio Conversations enforces it. OpenClaw discovered it the hard way (out-of-order messages produced incoherent agent responses). All five systems converge on this.</td>
+        <td>Per-<code>ConversationRef</code> <code>tokio::Mutex</code> in <code>irisd</code></td>
+      </tr>
+      <tr>
+        <td>I-4</td>
+        <td><strong>Identity unification layer</strong> &mdash; a single agent identity spans WhatsApp phone, Telegram handle, Slack user, Discord snowflake.</td>
+        <td>Bot Framework projects via <code>Activity.from.id</code>; Twilio via <code>ProjectedAddress</code>; mautrix via portal-puppeting. Without it, the agent sees the same human as five different users.</td>
+        <td><code>iris-core::Participant</code> + Anima DID binding (L6-D4)</td>
+      </tr>
+      <tr>
+        <td>I-5</td>
+        <td><strong>Symmetric bidirectional pipelines</strong> &mdash; inbound and outbound use the same trait, the same schema, the same observability points.</td>
+        <td>Bot Framework <code>BotAdapter</code> handles both via the same <code>Activity</code>. libpurple <code>prpl</code> too. Asymmetry has historically been the source of "outbound works fine, inbound silently drops at 5% rate" bugs.</td>
+        <td><code>ChannelConnector::send</code> + <code>ChannelConnector::receive</code></td>
+      </tr>
+      <tr>
+        <td>I-6</td>
+        <td><strong>Capability-aware degradation</strong> &mdash; rich content (markdown, attachments, quote-reply, threads) declared per-channel; substrate gracefully degrades when target channel lacks support.</td>
+        <td>SMS doesn&rsquo;t do markdown; Telegram doesn&rsquo;t do iMessage tapbacks; Slack threads aren&rsquo;t WhatsApp quote-replies. Without typed capabilities, agents emit content the channel silently strips.</td>
+        <td><code>iris-core::ChannelCapabilities</code> + <code>DegradationPolicy</code></td>
+      </tr>
+      <tr>
+        <td>I-7</td>
+        <td><strong>Webhook + WS dual ingress</strong> &mdash; both push (HTTP webhook callbacks) and pull / stream (WebSocket, long-poll, gRPC streaming) must be first-class.</td>
+        <td>WhatsApp Cloud API is webhook-only; OpenWA is WS-only; Telegram supports both; Twilio is webhook-primary with streaming for Conversations. The substrate must handle both shapes uniformly.</td>
+        <td>lifegw routes <code>POST /v1/iris/inbound</code> + <code>WS /v1/iris/stream</code></td>
+      </tr>
+      <tr>
+        <td>I-8</td>
+        <td><strong>Trust-regime declaration</strong> &mdash; puppeting / relay / proxy &mdash; the bridge tells the world which identity model it uses.</td>
+        <td>mautrix names these explicitly. Puppeting (remote user appears as local user under bridge control) has different consent semantics from relay (bridge speaks on behalf of users) and proxy (bridge mediates without claiming identity). Conflating them is the source of every "the bot said something I didn&rsquo;t say" incident.</td>
+        <td><code>iris-core::TrustMode</code> + per-channel default in <code>capabilities()</code></td>
+      </tr>
+    </tbody>
+    <caption>The eight convergent invariants. All five reference systems satisfy at least six; mautrix is the only one satisfying all eight.</caption>
+  </table>
+
+  <aside class="callout note">
+    <h4>The pattern in one sentence</h4>
+    <p>
+      <em>A canonical message envelope, a per-protocol trait with a small surface,
+      a per-conversation lock, a typed capability declaration, and a typed
+      trust-mode declaration &mdash; produce a substrate that scales to dozens
+      of channels without losing coherence.</em> The eight invariants are
+      different angles on this single sentence.
+    </p>
+  </aside>
+</section>
+
+<!-- ============================================================== -->
+<!-- §3 — LOCKED DECISIONS                                          -->
+<!-- ============================================================== -->
+<section id="s3">
+  <h2>§3 Locked Decisions (L6-D1 &ndash; L6-D8)</h2>
+
+  <p>
+    Eight decisions are locked at draft-v0.1; further decisions may be added as
+    sub-phases land. Numbering follows the <code>L&lt;layer&gt;-D&lt;n&gt;</code>
+    convention &mdash; L4 is Anima (Spec D), L5 is Inference (Spec E), and L6 is
+    the messaging layer covered by this spec. Each decision is paired with the
+    <em>rejected alternative</em> to document the reasoning trail.
+  </p>
+
+  <h3 id="l6-d1">L6-D1 &mdash; <code>crates/iris/</code> as a new substrate cluster</h3>
+  <aside class="callout locked">
+    <h4><span class="tag">LOCKED</span> Cluster placement</h4>
+    <p>
+      Iris lives in a new top-level workspace cluster
+      <code>core/life/crates/iris/</code>, a sibling of <code>crates/anima/</code>,
+      <code>crates/inference/</code>, <code>crates/chronos/</code>,
+      <code>crates/vigil/</code>, and <code>crates/haima/</code>. Sub-crates:
+      <code>iris-core</code> (trait + types),
+      <code>iris-proto</code> (protobuf surfaces),
+      <code>iris-runtime</code> (per-conversation lock + connector registry +
+      Lago sink + Vigil instrumentation),
+      <code>iris-whatsapp-openwa</code>,
+      <code>iris-whatsapp-cloud</code>,
+      <code>iris-telegram</code>,
+      <code>iris-signal</code>,
+      <code>iris-slack</code>,
+      <code>iris-discord</code>,
+      <code>iris-matrix</code>,
+      <code>iris-twilio</code>,
+      <code>iris-imessage</code>,
+      <code>iris-web</code>,
+      <code>iris-conformance</code> (cross-channel test battery).
+      The daemon binary <code>bin/irisd</code> is sibling of <code>haimad</code> /
+      <code>lagod</code> / <code>arcand</code> / <code>anima-soma</code>.
+      The lifed proxy is <code>crates/life-runtime/lifed-proxies/iris-proxy/</code>.
+    </p>
+    <p class="footnote">
+      <strong>Rejected:</strong> putting Iris in <code>crates/life-relay/</code>.
+      <code>life-relay</code> is the agent-to-agent direct streaming crate
+      (peer-to-peer RTT for collaborative work) and has a different threat
+      model (mutually-authenticated agents) than Iris (one side is a
+      human-or-channel-controlled identity). Conflating them is the source of
+      the OpenClaw &rarr; relay confusion the workspace experienced in
+      Q4 2025.
+    </p>
+  </aside>
+
+  <h3 id="l6-d2">L6-D2 &mdash; Conversation event log is Lago-backed by default</h3>
+  <aside class="callout locked">
+    <h4><span class="tag">LOCKED</span> Lago is the durability substrate</h4>
+    <p>
+      Every inbound and outbound message is written to the Lago journal as a
+      typed event in the <code>iris.*</code> namespace before the agent loop
+      sees it (inbound) or before the channel receives it (outbound).
+      Event kinds:
+      <code>iris.message_received</code>,
+      <code>iris.message_sent</code>,
+      <code>iris.message_failed</code>,
+      <code>iris.conversation_opened</code>,
+      <code>iris.conversation_closed</code>,
+      <code>iris.participant_added</code>,
+      <code>iris.participant_removed</code>,
+      <code>iris.capability_degraded</code>,
+      <code>iris.engagement_window_opened</code> (WhatsApp 24h),
+      <code>iris.engagement_window_closed</code>,
+      <code>iris.identity_bootstrapped</code>.
+      Each event carries the <code>ConversationRef</code>, the
+      <code>ParticipantRef</code>, the <code>ChannelId</code>, the canonical
+      <code>Message</code>, and the Anima DID of any agent identity involved.
+    </p>
+    <p>
+      Replay semantics follow Lago conventions: a conversation can be replayed
+      to any point in time; an agent session can resume after a restart by
+      rehydrating from <code>iris.*</code> events; <code>lago replay --tree</code>
+      surfaces conversation history alongside the agent&rsquo;s decision events
+      (this is the <a href="#wf-tick">Workflow-tick</a> closure shape).
+    </p>
+    <p class="footnote">
+      <strong>Rejected:</strong> per-channel native log (WhatsApp&rsquo;s
+      "messages history" REST endpoint, Twilio&rsquo;s Message resource log).
+      Each channel exposes a partial log with different retention, search,
+      pricing, and access semantics. Treating them as authoritative produces
+      five different "what did the agent say to user X yesterday?" answers.
+      Iris&rsquo;s Lago log is authoritative; channel-native logs are
+      <em>witnesses</em> but not <em>truth</em>.
+    </p>
+  </aside>
+
+  <h3 id="l6-d3">L6-D3 &mdash; Per-conversation serialization via <code>tokio::Mutex</code></h3>
+  <aside class="callout locked">
+    <h4><span class="tag">LOCKED</span> One conversation, one writer at a time</h4>
+    <p>
+      <code>irisd</code> holds a <code>DashMap&lt;ConversationRef, Arc&lt;tokio::Mutex&lt;ConversationState&gt;&gt;&gt;</code>.
+      Every inbound and outbound message handling path acquires the conversation&rsquo;s
+      lock before any agent dispatch, Lago write, or outbound channel call.
+      The lock guarantees: (a) <em>within a conversation</em>, inbound message
+      ordering is preserved end-to-end; (b) agent reactions do not race;
+      (c) outbound writes within a conversation occur in the order the agent
+      intended; (d) Lago journal writes within a conversation are strictly
+      ordered.
+    </p>
+    <p>
+      The lock does <strong>not</strong> serialize across conversations &mdash;
+      <code>irisd</code> handles N conversations in parallel limited only by
+      tokio executor capacity. The lock is <em>per-conversation</em>, not
+      per-channel, not global.
+    </p>
+    <p>
+      Lock acquisition timeout is bounded (default 30s) and surfaces as
+      <code>iris.message_failed { reason: "conversation_lock_timeout" }</code>
+      so an agent-loop deadlock cannot wedge a conversation indefinitely.
+      Conversation locks are reaped after <code>idle_lock_ttl</code> (default
+      24h after last activity) by Chronos timers.
+    </p>
+    <p class="footnote">
+      <strong>Rejected:</strong> per-conversation actor with its own tokio
+      task. Conceptually clean but ~3&times; the memory per conversation
+      (~50 KB per actor vs ~16 KB per <code>Arc&lt;Mutex&lt;_&gt;&gt;</code>) and
+      complicates conversation-state migration on substrate restart. Five
+      tenants &times; 50K conversations each &times; 50 KB &asymp; 12.5 GB of
+      idle actor state vs &asymp; 4 GB locked-state which is feasible. The
+      mutex pattern is also the one OpenClaw production-validated at ~40K
+      concurrent conversations.
+    </p>
+  </aside>
+
+  <h3 id="l6-d4">L6-D4 &mdash; Identity bootstrap via AnimaCustody DID derivation</h3>
+  <aside class="callout locked">
+    <h4><span class="tag">LOCKED</span> Phone / handle &rarr; DID via Anima</h4>
+    <p>
+      A first-time inbound message from a previously-unseen
+      <code>ParticipantRef</code> (e.g.&nbsp;a new WhatsApp phone number)
+      triggers identity bootstrap. The flow:
+    </p>
+    <ol>
+      <li>
+        <code>iris-identity</code> generates an <em>ephemeral</em>
+        <code>EcdsaP256Identity</code> derived deterministically from
+        <code>(channel_id, participant_native_id, salt)</code> using HKDF-SHA-256.
+        The salt is a per-tenant secret in soma; rotation is supported by
+        bumping a salt version.
+      </li>
+      <li>
+        An <code>iris.identity_bootstrapped {
+          channel_id, participant_native_id, did, bootstrap_method:
+          "ephemeral_hkdf"
+        }</code> event lands in Lago, becoming the authoritative binding.
+      </li>
+      <li>
+        If the participant later upgrades &mdash; e.g.&nbsp;via a web app
+        passkey-based <code>WebCryptoAnima</code> enrollment that proves
+        ownership of the phone number &mdash; an
+        <code>anima.identity_rotated</code> event chains the ephemeral DID to
+        the new permanent DID (see Spec D L4-D10). The conversation history
+        remains attributable to the same human across the rotation.
+      </li>
+      <li>
+        For inbound channels that carry a verified identity claim natively
+        (e.g.&nbsp;Slack workspace identity, Telegram user-id), <code>iris-identity</code>
+        skips the ephemeral DID path and binds directly to the channel-native
+        claim, attested by the channel&rsquo;s webhook HMAC signature.
+      </li>
+    </ol>
+    <p>
+      Iris does <strong>not</strong> own custody backends; it consumes Anima.
+      The <code>Arc&lt;dyn AnimaCustody&gt;</code> used by <code>irisd</code>
+      is the same one used by Arcan; bootstrap events go through Anima&rsquo;s
+      journal-replay semantics, not Iris-specific identity logic. This is the
+      <a href="#composition-anima">composition surface with Spec D</a>.
+    </p>
+    <p class="footnote">
+      <strong>Rejected:</strong> Iris-internal identity store, keyed by phone
+      number. That would re-implement Anima in a parallel namespace and
+      reproduce the SMS-spoofing risk surface (see
+      <a href="#concern-spoofing">§9 concern C-2</a>) without the
+      WebCryptoAnima passkey-upgrade path. Forcing the DID layer through
+      Anima also unifies billing, observability, and audit across Iris and
+      every other substrate.
+    </p>
+  </aside>
+
+  <h3 id="l6-d5">L6-D5 &mdash; Tier-Service capability tokens for inbound adapters</h3>
+  <aside class="callout locked">
+    <h4><span class="tag">LOCKED</span> Webhook auth via lifegw Tier-Service caps</h4>
+    <p>
+      Every inbound webhook (Twilio HMAC, WhatsApp Cloud signature, Telegram
+      header secret, Slack signing secret) is verified <em>twice</em>:
+    </p>
+    <ol>
+      <li>
+        <strong>Channel-native signature.</strong> The per-channel adapter
+        verifies the inbound HTTP request using the channel&rsquo;s native
+        signature scheme (HMAC-SHA256 for Twilio and Slack, the WA Cloud
+        <code>X-Hub-Signature-256</code> for WhatsApp, Telegram&rsquo;s
+        <code>X-Telegram-Bot-Api-Secret-Token</code> header).
+      </li>
+      <li>
+        <strong>Tier-Service capability token.</strong> The inbound route on
+        lifegw (<code>POST /v1/iris/inbound</code>) requires a per-tenant
+        Tier-Service capability token (mirror of Spec D&rsquo;s Tier-User cap
+        but service-scoped) signed by lifegw&rsquo;s Tier-2 KMS key. The cap
+        carries the <code>channel_id</code> scope, an audience
+        <code>aud="iris.inbound"</code>, and a 15-minute TTL (refreshed by a
+        per-tenant agent process). Inbound requests without a valid Tier-Service
+        cap are rejected with HTTP 401, before any channel-native signature
+        check.
+      </li>
+    </ol>
+    <p>
+      The defence in depth: a stolen Twilio HMAC secret alone is not sufficient
+      to inject inbound messages &mdash; the attacker also needs to bypass the
+      Tier-Service cap, which never sits in the channel webhook configuration.
+      Conversely, a leaked Tier-Service cap allows replay only for its
+      15-minute lifetime and only against the scoped channel.
+    </p>
+    <p>
+      Outbound goes the other way: outbound calls from <code>irisd</code> to
+      channels are guarded by per-channel <code>iris.&lt;channel&gt;.outbound.*</code>
+      policy gates in <code>.control/policy.yaml</code> &mdash; the agent
+      cannot send a message without explicit policy authorisation.
+    </p>
+    <p class="footnote">
+      <strong>Rejected:</strong> HMAC-only inbound auth. Twilio HMAC keys are
+      static and have appeared in misconfigured repositories at the rate of
+      <em>several per quarter</em> in industry-wide credential leak reports;
+      defence-in-depth with a short-lived capability token reduces blast
+      radius by &asymp; 3 orders of magnitude.
+    </p>
+  </aside>
+
+  <h3 id="l6-d6">L6-D6 &mdash; Typed <code>ChannelCapabilities</code> + degradation tracking</h3>
+  <aside class="callout locked">
+    <h4><span class="tag">LOCKED</span> Capabilities are typed, not strings</h4>
+    <p>
+      Each <code>ChannelConnector</code> declares its
+      <code>ChannelCapabilities</code> at construction. The struct is a
+      <code>#[non_exhaustive]</code> set of typed flags and limits, not a
+      <code>HashMap&lt;String, serde_json::Value&gt;</code>. v0.1 fields:
+      <code>max_text_bytes</code>, <code>supports_markdown</code>,
+      <code>supports_html</code>, <code>supports_quote_reply</code>,
+      <code>supports_threads</code>, <code>supports_reactions</code>,
+      <code>supports_typing_indicators</code>,
+      <code>supports_read_receipts</code>,
+      <code>supports_edit</code>, <code>supports_delete</code>,
+      <code>supports_attachments</code>,
+      <code>max_attachment_bytes</code>,
+      <code>supported_attachment_types</code>,
+      <code>supports_voice_notes</code>,
+      <code>supports_location</code>,
+      <code>supports_buttons</code>,
+      <code>supports_lists</code>,
+      <code>supports_polls</code>,
+      <code>has_24h_reengagement_window</code> (WhatsApp),
+      <code>rate_limit</code>: <code>RateLimitProfile</code>.
+    </p>
+    <p>
+      When the agent emits content the target channel cannot fully render, the
+      <code>iris-runtime</code> degrades it according to a typed
+      <code>DegradationPolicy</code> (strip markdown, inline attachment URLs,
+      split long text, drop typing indicators silently) and emits an
+      <code>iris.capability_degraded { conversation, from_capability,
+      to_capability }</code> event so observability shows where degradation
+      occurred. Agents reading the conversation log can adjust subsequent
+      messages.
+    </p>
+    <p class="footnote">
+      <strong>Rejected:</strong> capabilities as opaque strings or feature
+      flags. Strings invite typos; feature flags don&rsquo;t carry limits
+      (e.g.&nbsp;<code>max_attachment_bytes</code>) and don&rsquo;t version
+      cleanly. The typed struct is more verbose but compiles, lints, and
+      versions correctly &mdash; the trade is worth it.
+    </p>
+  </aside>
+
+  <h3 id="l6-d7">L6-D7 &mdash; Public spec publication post-Phase-1</h3>
+  <aside class="callout locked">
+    <h4><span class="tag">LOCKED</span> Apache-2.0 publication after conformance green</h4>
+    <p>
+      After F-Sub-A &hellip; F-Sub-G ship, the conformance battery is green on
+      ≥ 3 channels, and the trait surface has been stable for ≥ 30 days,
+      <code>iris-core</code> + <code>iris-conformance</code> + the spec
+      document are extracted to a standalone repository
+      (<code>broomva/agent-comms-contract</code>, working name) published to
+      crates.io and Cargo registry under <strong>Apache-2.0</strong>. The
+      goals mirror Spec E&rsquo;s publication play (L5-D8):
+    </p>
+    <ol>
+      <li>
+        Any messaging vendor (Twilio, Vonage, MessageBird, Sinch, Plivo) can
+        target the contract &mdash; we become an aggregation surface, not a
+        captive customer.
+      </li>
+      <li>
+        Any agent runtime (LangGraph, LlamaIndex, AutoGen) can consume Iris
+        connectors written against the published trait. Life is the reference
+        implementation; downstream runtimes can fork.
+      </li>
+      <li>
+        Per-channel adapters become a viable community-contribution surface
+        gated by the conformance battery (mitigating the libpurple plugin-overload
+        failure mode &mdash; see <a href="#concern-plugin-overload">§9 concern C-7</a>).
+      </li>
+    </ol>
+    <p class="footnote">
+      <strong>Rejected:</strong> keep the contract private as a Broomva moat.
+      Six-month lead-time is real, but the structural moat is the substrate
+      <em>cluster</em> integration (Anima identity, Lago events, Vigil semconv,
+      Haima billing, Chronos windows) &mdash; not the trait itself. Owning the
+      contract by being its publisher and reference implementation is worth
+      more long-term than holding it private.
+    </p>
+  </aside>
+
+  <h3 id="l6-d8">L6-D8 &mdash; Adapters are compiled-in Rust crates in v1</h3>
+  <aside class="callout locked">
+    <h4><span class="tag">LOCKED</span> Compiled-in crates with conformance battery (plugin daemon deferred)</h4>
+    <p>
+      In Phase&nbsp;1, every channel adapter is a Rust crate (<code>iris-whatsapp-openwa</code>,
+      <code>iris-telegram</code>, &hellip;) that implements
+      <code>ChannelConnector</code> directly. Adapters are added to a release
+      build by adding to <code>Cargo.toml</code> and rebuilding
+      <code>irisd</code>. The trait surface is small enough that this is
+      genuinely cheap; the cross-channel conformance battery
+      (<a href="#f-sub-g">F-Sub-G</a>) is the gate for any new adapter.
+    </p>
+    <p>
+      A <em>plugin daemon</em> alternative &mdash; in which adapters are
+      separate processes (or WASM modules) that speak a wire protocol to
+      <code>irisd</code> &mdash; is documented as
+      <a href="#o1">Open Question O-1</a>. The expected payoff (community-contributable
+      adapters, language diversity, sandboxing safety) is real; the costs
+      (wire-protocol versioning, ABI stability, performance overhead, deployment
+      complexity, debugging complexity) are also real. The compiled-in path
+      is the v1 choice because:
+    </p>
+    <ul>
+      <li>
+        Phase 1 channels (WhatsApp OpenWA + WA Cloud + Telegram + Twilio SMS)
+        are all maintained in-house and Rust SDK availability is good.
+      </li>
+      <li>
+        Compiled-in is dramatically simpler to debug and observe &mdash; one
+        process, one stack trace, one Vigil span tree.
+      </li>
+      <li>
+        The libpurple lesson (community plugins fragment quality and security)
+        is a real risk that the conformance battery alone doesn&rsquo;t close.
+      </li>
+      <li>
+        Phase 2 can add a plugin-daemon mechanism without breaking the
+        compiled-in path &mdash; it&rsquo;s an additive change, not a swap.
+      </li>
+    </ul>
+    <p class="footnote">
+      <strong>Rejected for v1 (deferred to Phase 2):</strong> a libpurple-style
+      plugin daemon model. Re-evaluated as part of <a href="#o1">O-1</a> after
+      Phase 1 lands.
+    </p>
+  </aside>
+</section>
+
+<!-- ============================================================== -->
+<!-- §4 — TRAIT SURFACE                                             -->
+<!-- ============================================================== -->
+<section id="s4">
+  <h2>§4 Trait Surface &mdash; <code>ChannelConnector</code> and friends</h2>
+
+  <p>
+    This section presents the v0.1 trait surface as pseudo-Rust. <strong>No
+    code is shipped by this spec</strong>; the Rust here is the design
+    illustration that <a href="#f-sub-a">F-Sub-A</a> turns into real crates.
+  </p>
+
+  <h3>§4.1 The <code>ChannelConnector</code> trait</h3>
+
+<pre><code>// crates/iris/iris-core/src/connector.rs    (pseudo-Rust, design illustration)
+
+use std::pin::Pin;
+use std::sync::Arc;
+use futures::Stream;
+
+/// One channel adapter implements one ChannelConnector.
+/// All adapters expose this exact surface; channel-specific concerns
+/// live behind it (HMAC verification, native API calls, rate-limit handling).
+pub trait ChannelConnector: Send + Sync + 'static {
+
+    /// Identity of this connector instance, used in metrics + policy + Lago events.
+    /// E.g. "whatsapp-openwa", "telegram", "twilio-sms-us1".
+    fn channel_id(&self) -> &ChannelId;
+
+    /// Declared capabilities of this channel (markdown, attachments, rate limits, &c.).
+    /// Mostly static per channel, but may vary (e.g. WA Cloud business-account
+    /// rate-limit tier).  Refreshed at startup; capability change emits an
+    /// `iris.capability_degraded` event.
+    fn capabilities(&self) -> &ChannelCapabilities;
+
+    /// Trust regime under which this connector operates (Puppeting / Relay / Proxy).
+    fn trust_mode(&self) -> TrustMode;
+
+    /// Send an outbound message.  Returns the channel-native message id on success
+    /// and a typed error on failure; transient failures retry per the connector's
+    /// internal policy (capability-declared `rate_limit`).
+    fn send<'a>(&'a self, msg: &'a Message)
+        -> Pin<Box<dyn Future&lt;Output = Result&lt;ChannelMessageId, ConnectorError&gt;&gt; + Send + 'a&gt;&gt;;
+
+    /// Receive a stream of inbound messages.  Adapter chooses its native ingress
+    /// (webhook handler subscribes to lifegw inbound, WS client polls remote, &c.)
+    /// and surfaces them through this channel-typed stream.  Stream closes with a
+    /// typed CloseCode matching Spec C₃ §6.5 + Spec E §L5-D4 vocabulary so reconnect
+    /// is consistent across substrates.
+    fn receive(&self)
+        -> Pin<Box<dyn Stream&lt;Item = Result&lt;Message, ConnectorError&gt;&gt; + Send&gt;&gt;;
+
+    /// Rotate channel credentials.  Used when a channel requires periodic re-auth
+    /// (Telegram bot tokens, WA OpenWA session re-pair, Slack OAuth refresh) or
+    /// when an `iris-identity` flow upgrades an ephemeral identity to a Permanent
+    /// DID.  Implementations that have nothing to rotate return Ok(()).
+    fn rotate_credentials<'a>(&'a self, request: &'a RotationRequest)
+        -> Pin<Box<dyn Future&lt;Output = Result&lt;(), ConnectorError&gt;&gt; + Send + 'a&gt;&gt;;
+
+    /// Optional: declare a per-conversation re-engagement window.  WhatsApp's
+    /// 24-hour customer-care window is the canonical example.  Connectors that
+    /// have no such window return `None`; otherwise return the window
+    /// (`opened_at`, `closes_at`, `template_required_after`).  iris-runtime
+    /// consults Chronos to enforce.
+    fn engagement_window(&self, conv: &ConversationRef) -> Option&lt;EngagementWindow&gt; {
+        None
+    }
+}
+</code></pre>
+
+  <h3>§4.2 Canonical types</h3>
+
+<pre><code>// crates/iris/iris-core/src/message.rs    (pseudo-Rust, design illustration)
+
+/// A canonical message, channel-agnostic.  Channel-specific payload lives in
+/// `channel_data` &mdash; agents that want to opt into channel quirks read it;
+/// agents that don't, don't.
+#[non_exhaustive]
+pub struct Message {
+    pub id: MessageId,                       // ULID
+    pub conversation: ConversationRef,       // logical conversation handle
+    pub direction: Direction,                // Inbound | Outbound
+    pub from: ParticipantRef,                // resolved sender (DID + native handle)
+    pub to: Vec&lt;ParticipantRef&gt;,             // 0..N recipients
+    pub sent_at: DateTime&lt;Utc&gt;,              // channel-reported timestamp
+    pub received_at: Option&lt;DateTime&lt;Utc&gt;&gt;,  // irisd-observed wall clock
+    pub content: MessageContent,             // typed body (Text, Attachment, Template, ...)
+    pub reply_to: Option&lt;MessageId&gt;,         // if this is a quoted-reply
+    pub thread: Option&lt;ThreadRef&gt;,           // if channel supports threading
+    pub channel_data: Option&lt;serde_json::Value&gt;,   // channel-specific passthrough
+    pub trace_context: TraceContext,         // W3C traceparent for Vigil OTel
+}
+
+#[non_exhaustive]
+pub enum MessageContent {
+    Text { body: String, formatting: TextFormatting },
+    Attachment { url: Url, mime: String, byte_len: u64, alt_text: Option&lt;String&gt; },
+    VoiceNote { url: Url, duration_ms: u32, transcript: Option&lt;String&gt; },
+    Location { lat: f64, lon: f64, label: Option&lt;String&gt; },
+    Template { template_id: String, params: Vec&lt;TemplateParam&gt; },  // WA business templates
+    Buttons { prompt: String, choices: Vec&lt;ButtonChoice&gt; },
+    Reaction { target: MessageId, emoji: String },
+    Edit { target: MessageId, new_content: Box&lt;MessageContent&gt; },
+    Delete { target: MessageId },
+}
+
+#[non_exhaustive]
+pub enum TextFormatting { Plain, Markdown, Html }
+
+/// Logical conversation identifier.  Same conversation across channel restarts
+/// (e.g. WA session re-pair preserves ConversationRef) but bound to a single
+/// channel + native conversation id pair.
+#[non_exhaustive]
+pub struct ConversationRef {
+    pub id: ConversationId,            // ULID, our canonical handle
+    pub channel: ChannelId,            // "whatsapp-openwa", "telegram", ...
+    pub native: String,                // channel-native conversation id (phone, chat_id, ...)
+    pub kind: ConversationKind,        // Direct | Group | Channel | Broadcast
+    pub created_at: DateTime&lt;Utc&gt;,
+}
+
+/// Identity of one participant in one conversation.  The DID layer is provided
+/// by Anima (see L6-D4).  `native_id` is the channel-native handle.
+#[non_exhaustive]
+pub struct ParticipantRef {
+    pub did: Option&lt;Did&gt;,              // None for not-yet-bootstrapped channel-native identities
+    pub channel: ChannelId,
+    pub native_id: String,             // phone number, telegram user_id, slack user_id, ...
+    pub display_name: Option&lt;String&gt;,
+    pub role: ParticipantRole,         // Agent | Human | System | Bot
+}
+
+#[non_exhaustive]
+pub struct ChannelCapabilities {
+    pub max_text_bytes: usize,
+    pub supports_markdown: bool,
+    pub supports_html: bool,
+    pub supports_quote_reply: bool,
+    pub supports_threads: bool,
+    pub supports_reactions: bool,
+    pub supports_typing_indicators: bool,
+    pub supports_read_receipts: bool,
+    pub supports_edit: bool,
+    pub supports_delete: bool,
+    pub supports_attachments: bool,
+    pub max_attachment_bytes: u64,
+    pub supported_attachment_types: Vec&lt;String&gt;,    // mime patterns
+    pub supports_voice_notes: bool,
+    pub supports_location: bool,
+    pub supports_buttons: bool,
+    pub supports_lists: bool,
+    pub supports_polls: bool,
+    pub has_24h_reengagement_window: bool,
+    pub rate_limit: RateLimitProfile,
+}
+</code></pre>
+
+  <h3 id="trustmode">§4.3 <code>TrustMode</code> &mdash; the three trust regimes</h3>
+
+<pre><code>// crates/iris/iris-core/src/trust.rs   (pseudo-Rust, design illustration)
+
+/// Which identity model does this connector use?
+#[non_exhaustive]
+pub enum TrustMode {
+
+    /// Puppeting: the bridge controls the remote-side identity directly.
+    /// Example: a mautrix Telegram bridge that creates Matrix puppets for
+    /// each Telegram user it sees.  The agent speaks AS the user on the
+    /// other side. High consent burden &mdash; only legal with explicit user
+    /// authorisation.
+    Puppeting,
+
+    /// Relay: the bridge speaks on behalf of users to a foreign network.
+    /// Example: a Slack relay account that posts "carlos: hello" into a
+    /// Discord channel.  The agent has its own foreign-network identity;
+    /// users are mentioned by name, not by identity.  Lower consent burden;
+    /// the foreign network sees one identity (the relay).
+    Relay,
+
+    /// Proxy: the bridge mediates without claiming any identity.
+    /// Example: Twilio SMS &mdash; the agent has its own phone number; users
+    /// have theirs; nobody is puppeting anybody.  Default + lowest-friction.
+    Proxy,
+}
+</code></pre>
+
+  <p>
+    Per-channel default trust modes in v0.1: WhatsApp OpenWA = <em>Puppeting</em>
+    (the bridge logs into a user&rsquo;s WA account &mdash; this is the bridge&rsquo;s
+    risk surface). WhatsApp Cloud = <em>Proxy</em>. Telegram = <em>Proxy</em>
+    (bot account) or <em>Puppeting</em> (MTProto user account).
+    Signal = <em>Proxy</em> (signal-cli bot). Slack = <em>Proxy</em> (bot user).
+    Discord = <em>Proxy</em> (bot account). Matrix = configurable.
+    iMessage = <em>Puppeting</em> (bridge logs in as the user via Apple ID).
+    Twilio SMS = <em>Proxy</em>. Web = <em>Proxy</em>.
+  </p>
+
+  <p>
+    Puppeting connectors are gated by an additional
+    <code>iris.&lt;channel&gt;.puppeting.consent</code> policy that must be
+    explicitly enabled per tenant; the default deny prevents accidental puppeting.
+  </p>
+
+  <h3>§4.4 Error vocabulary</h3>
+
+<pre><code>// crates/iris/iris-core/src/error.rs   (pseudo-Rust)
+
+/// Error vocabulary mirrors Spec E InferenceError and Spec C₃ close codes
+/// so reconnect semantics are uniform across substrates.
+#[non_exhaustive]
+pub enum ConnectorError {
+    Auth { reason: String },             // channel-side auth failure (token expired, ...)
+    RateLimited { retry_after_ms: u64 }, // back off and try again
+    Capability { wanted: String },       // channel can't do what was asked (no markdown, no edit, ...)
+    PayloadTooLarge { limit: u64, got: u64 },
+    ConversationNotFound,
+    ParticipantNotFound,
+    Network(std::io::Error),
+    UpstreamUnavailable { code: u16 },   // 5xx from a webhook-receiver path
+    Cancelled,
+    EngagementWindowClosed,              // WhatsApp 24h expired; template required
+    Custom { code: String, message: String, retryable: bool },
+}
+
+/// Close codes for the inbound `receive()` stream.  Aligned with Spec E §L5-D4
+/// + Spec C₃ §6.5 vocabulary so reconnect-by-last_seq works across substrates.
+#[non_exhaustive]
+pub enum CloseCode {
+    Normal              = 1000,
+    UnsupportedFrame    = 1003,
+    Deadline            = 4001,
+    BackpressureEvict   = 4002,
+    CredentialsRotated  = 4003,
+    BackendUnavailable  = 4004,
+    AnimaInvalidated    = 4005,    // identity rotation invalidated cached binding
+    EngagementWindowClosed = 4011, // WhatsApp / re-engagement specific
+    ChannelMaintenance  = 4012,
+}
+</code></pre>
+</section>
+
+<!-- ============================================================== -->
+<!-- §5 — ARCHITECTURE & DIAGRAMS                                   -->
+<!-- ============================================================== -->
+<section id="s5">
+  <h2>§5 Architecture &amp; Diagrams</h2>
+
+  <p>
+    Four diagrams. <strong>SVG, not ASCII</strong> &mdash; per
+    <a href="../../../../CLAUDE.md">CLAUDE.md P18</a>, ASCII pseudo-diagrams
+    inside markdown / HTML are an explicit anti-pattern; SVG carries the
+    information density these diagrams need.
+  </p>
+
+  <h3>§5.1 Inbound flow: channel &rarr; lifegw &rarr; <code>irisd</code> &rarr; <code>lifed</code> Agent.StreamSession</h3>
+
+  <figure>
+    <svg viewBox="0 0 1100 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Inbound flow diagram: channel webhook to lifegw to irisd to lifed Agent.StreamSession to Lago and Vigil and Inference.">
+      <defs>
+        <marker id="arr-in" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#224a8a"/>
+        </marker>
+        <marker id="arr-side" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#7a4ab5"/>
+        </marker>
+        <style>
+          .lane { fill: #f6f4ec; stroke: #d8d4ca; }
+          .box  { fill: #fff; stroke: #224a8a; stroke-width: 1.2; rx: 4; }
+          .box-sub { fill: #eef3ff; stroke: #4a6fb5; stroke-width: 1; rx: 3; }
+          .box-side { fill: #f4eef8; stroke: #7a4ab5; stroke-width: 1; rx: 3; }
+          .lbl  { font-family: -apple-system, "Helvetica Neue", sans-serif; font-size: 12px; fill: #1a1a1a; }
+          .lbl-sm { font-family: -apple-system, sans-serif; font-size: 10px; fill: #6a6a6a; }
+          .lbl-bold { font-weight: 600; }
+          .arrow { stroke: #224a8a; stroke-width: 1.4; fill: none; }
+          .arrow-side { stroke: #7a4ab5; stroke-width: 1.2; fill: none; stroke-dasharray: 4 3; }
+          .stage { font-family: -apple-system, sans-serif; font-size: 11px; fill: #6a6a6a; font-style: italic; }
+        </style>
+      </defs>
+
+      <!-- channel -->
+      <rect class="lane" x="20" y="40" width="160" height="380"/>
+      <text class="lbl-bold lbl" x="100" y="60" text-anchor="middle">Channel side</text>
+      <rect class="box" x="40" y="90" width="120" height="60"/>
+      <text class="lbl" x="100" y="115" text-anchor="middle">WhatsApp /</text>
+      <text class="lbl" x="100" y="130" text-anchor="middle">Telegram / Twilio</text>
+      <text class="lbl-sm" x="100" y="144" text-anchor="middle">(channel-side webhook)</text>
+
+      <!-- lifegw -->
+      <rect class="lane" x="220" y="40" width="200" height="380"/>
+      <text class="lbl-bold lbl" x="320" y="60" text-anchor="middle">lifegw (edge)</text>
+      <rect class="box" x="240" y="90" width="160" height="60"/>
+      <text class="lbl" x="320" y="115" text-anchor="middle">POST /v1/iris/inbound</text>
+      <text class="lbl-sm" x="320" y="132" text-anchor="middle">TLS 1.3 + Tier-Service cap</text>
+      <text class="lbl-sm" x="320" y="146" text-anchor="middle">+ HMAC-passthrough</text>
+
+      <rect class="box-sub" x="240" y="180" width="160" height="40"/>
+      <text class="lbl" x="320" y="205" text-anchor="middle">rate-limit + JWKS-verify</text>
+
+      <rect class="box-sub" x="240" y="240" width="160" height="40"/>
+      <text class="lbl" x="320" y="265" text-anchor="middle">tonic UDS &rarr; irisd-proxy</text>
+
+      <!-- irisd -->
+      <rect class="lane" x="460" y="40" width="240" height="380"/>
+      <text class="lbl-bold lbl" x="580" y="60" text-anchor="middle">irisd</text>
+      <rect class="box" x="480" y="90" width="200" height="60"/>
+      <text class="lbl" x="580" y="115" text-anchor="middle">iris-whatsapp-openwa</text>
+      <text class="lbl-sm" x="580" y="132" text-anchor="middle">(channel adapter)</text>
+      <text class="lbl-sm" x="580" y="146" text-anchor="middle">verifies HMAC + decodes</text>
+
+      <rect class="box-sub" x="480" y="170" width="200" height="40"/>
+      <text class="lbl" x="580" y="195" text-anchor="middle">iris-runtime: canonicalise</text>
+
+      <rect class="box-sub" x="480" y="220" width="200" height="40"/>
+      <text class="lbl" x="580" y="245" text-anchor="middle">per-conversation Mutex acquire</text>
+
+      <rect class="box-sub" x="480" y="270" width="200" height="40"/>
+      <text class="lbl" x="580" y="295" text-anchor="middle">iris-identity: DID bootstrap</text>
+
+      <rect class="box-sub" x="480" y="320" width="200" height="40"/>
+      <text class="lbl" x="580" y="345" text-anchor="middle">Lago.append iris.message_received</text>
+
+      <rect class="box-sub" x="480" y="370" width="200" height="40"/>
+      <text class="lbl" x="580" y="395" text-anchor="middle">dispatch to lifed Agent.StreamSession</text>
+
+      <!-- lifed + agent -->
+      <rect class="lane" x="740" y="40" width="160" height="380"/>
+      <text class="lbl-bold lbl" x="820" y="60" text-anchor="middle">lifed</text>
+      <rect class="box" x="760" y="170" width="120" height="60"/>
+      <text class="lbl" x="820" y="195" text-anchor="middle">Agent.StreamSession</text>
+      <text class="lbl-sm" x="820" y="212" text-anchor="middle">(arcand session)</text>
+
+      <rect class="box-sub" x="760" y="260" width="120" height="40"/>
+      <text class="lbl" x="820" y="285" text-anchor="middle">Inference route</text>
+      <text class="lbl-sm" x="820" y="299" text-anchor="middle">(Spec E)</text>
+
+      <rect class="box-sub" x="760" y="320" width="120" height="40"/>
+      <text class="lbl" x="820" y="345" text-anchor="middle">tool dispatch</text>
+      <text class="lbl-sm" x="820" y="359" text-anchor="middle">(Praxis)</text>
+
+      <!-- side outputs: lago + vigil -->
+      <rect class="lane" x="930" y="40" width="150" height="380"/>
+      <text class="lbl-bold lbl" x="1005" y="60" text-anchor="middle">side substrates</text>
+
+      <rect class="box-side" x="945" y="100" width="120" height="40"/>
+      <text class="lbl" x="1005" y="125" text-anchor="middle">Lago journal</text>
+
+      <rect class="box-side" x="945" y="160" width="120" height="40"/>
+      <text class="lbl" x="1005" y="185" text-anchor="middle">Vigil OTel</text>
+
+      <rect class="box-side" x="945" y="220" width="120" height="40"/>
+      <text class="lbl" x="1005" y="245" text-anchor="middle">Anima custody</text>
+
+      <rect class="box-side" x="945" y="280" width="120" height="40"/>
+      <text class="lbl" x="1005" y="305" text-anchor="middle">Haima billing</text>
+
+      <rect class="box-side" x="945" y="340" width="120" height="40"/>
+      <text class="lbl" x="1005" y="365" text-anchor="middle">Chronos timers</text>
+
+      <!-- arrows: channel-> lifegw -->
+      <path class="arrow" d="M160 120 L240 120" marker-end="url(#arr-in)"/>
+      <text class="stage" x="200" y="110" text-anchor="middle">HTTPS</text>
+
+      <!-- lifegw internal -->
+      <path class="arrow" d="M320 150 L320 180" marker-end="url(#arr-in)"/>
+      <path class="arrow" d="M320 220 L320 240" marker-end="url(#arr-in)"/>
+
+      <!-- lifegw -> irisd -->
+      <path class="arrow" d="M400 260 L480 120" marker-end="url(#arr-in)"/>
+      <text class="stage" x="430" y="180" text-anchor="middle">tonic UDS</text>
+
+      <!-- irisd internal -->
+      <path class="arrow" d="M580 150 L580 170" marker-end="url(#arr-in)"/>
+      <path class="arrow" d="M580 210 L580 220" marker-end="url(#arr-in)"/>
+      <path class="arrow" d="M580 260 L580 270" marker-end="url(#arr-in)"/>
+      <path class="arrow" d="M580 310 L580 320" marker-end="url(#arr-in)"/>
+      <path class="arrow" d="M580 360 L580 370" marker-end="url(#arr-in)"/>
+
+      <!-- irisd -> lifed -->
+      <path class="arrow" d="M680 390 L760 200" marker-end="url(#arr-in)"/>
+
+      <!-- lifed internal -->
+      <path class="arrow" d="M820 230 L820 260" marker-end="url(#arr-in)"/>
+      <path class="arrow" d="M820 300 L820 320" marker-end="url(#arr-in)"/>
+
+      <!-- side arrows -->
+      <path class="arrow-side" d="M680 340 C870 340, 900 120, 945 120" marker-end="url(#arr-side)"/>
+      <path class="arrow-side" d="M680 195 C870 195, 900 180, 945 180" marker-end="url(#arr-side)"/>
+      <path class="arrow-side" d="M680 290 C870 290, 900 240, 945 240" marker-end="url(#arr-side)"/>
+      <path class="arrow-side" d="M880 195 C920 195, 920 300, 945 300" marker-end="url(#arr-side)"/>
+      <path class="arrow-side" d="M680 240 C870 240, 900 360, 945 360" marker-end="url(#arr-side)"/>
+    </svg>
+    <figcaption>Figure 5.1 — Inbound flow. Solid arrows: hot path. Dashed arrows: side substrate writes (Lago events, Vigil spans, Anima identity lookups, Haima billing tick, Chronos engagement timer arm).</figcaption>
+  </figure>
+
+  <h3>§5.2 Outbound flow: agent &rarr; <code>irisd</code> &rarr; adapter &rarr; channel</h3>
+
+  <figure>
+    <svg viewBox="0 0 1100 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Outbound flow diagram: agent in lifed to irisd to channel adapter to remote channel, with Lago / Haima / Vigil / Chronos / Anima side substrates.">
+      <defs>
+        <marker id="arr-out" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#224a8a"/>
+        </marker>
+        <marker id="arr-out-side" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#7a4ab5"/>
+        </marker>
+        <style>
+          .lane { fill: #f6f4ec; stroke: #d8d4ca; }
+          .box  { fill: #fff; stroke: #224a8a; stroke-width: 1.2; rx: 4; }
+          .box-sub { fill: #eef3ff; stroke: #4a6fb5; stroke-width: 1; rx: 3; }
+          .box-side { fill: #f4eef8; stroke: #7a4ab5; stroke-width: 1; rx: 3; }
+          .lbl  { font-family: -apple-system, sans-serif; font-size: 12px; fill: #1a1a1a; }
+          .lbl-sm { font-family: -apple-system, sans-serif; font-size: 10px; fill: #6a6a6a; }
+          .lbl-bold { font-weight: 600; }
+          .arrow { stroke: #224a8a; stroke-width: 1.4; fill: none; }
+          .arrow-side { stroke: #7a4ab5; stroke-width: 1.2; fill: none; stroke-dasharray: 4 3; }
+          .stage { font-family: -apple-system, sans-serif; font-size: 11px; fill: #6a6a6a; font-style: italic; }
+        </style>
+      </defs>
+
+      <!-- agent -->
+      <rect class="lane" x="20" y="40" width="160" height="300"/>
+      <text class="lbl-bold lbl" x="100" y="60" text-anchor="middle">agent (lifed)</text>
+      <rect class="box" x="40" y="100" width="120" height="60"/>
+      <text class="lbl" x="100" y="125" text-anchor="middle">arcand session</text>
+      <text class="lbl-sm" x="100" y="142" text-anchor="middle">emits outbound Message</text>
+
+      <!-- irisd -->
+      <rect class="lane" x="220" y="40" width="360" height="300"/>
+      <text class="lbl-bold lbl" x="400" y="60" text-anchor="middle">irisd</text>
+
+      <rect class="box-sub" x="240" y="90" width="320" height="38"/>
+      <text class="lbl" x="400" y="113" text-anchor="middle">.control/policy.yaml gate: iris.&lt;channel&gt;.outbound.send</text>
+
+      <rect class="box-sub" x="240" y="138" width="320" height="38"/>
+      <text class="lbl" x="400" y="161" text-anchor="middle">per-conversation Mutex acquire</text>
+
+      <rect class="box-sub" x="240" y="186" width="320" height="38"/>
+      <text class="lbl" x="400" y="209" text-anchor="middle">capability check &amp; degrade content</text>
+
+      <rect class="box-sub" x="240" y="234" width="320" height="38"/>
+      <text class="lbl" x="400" y="257" text-anchor="middle">Chronos: engagement window check (WA 24h)</text>
+
+      <rect class="box-sub" x="240" y="282" width="320" height="38"/>
+      <text class="lbl" x="400" y="305" text-anchor="middle">connector.send(msg) &amp; Lago iris.message_sent</text>
+
+      <!-- adapter -->
+      <rect class="lane" x="620" y="40" width="160" height="300"/>
+      <text class="lbl-bold lbl" x="700" y="60" text-anchor="middle">channel adapter</text>
+      <rect class="box" x="640" y="100" width="120" height="60"/>
+      <text class="lbl" x="700" y="125" text-anchor="middle">iris-twilio</text>
+      <text class="lbl-sm" x="700" y="142" text-anchor="middle">(REST client)</text>
+
+      <!-- remote -->
+      <rect class="lane" x="820" y="40" width="160" height="300"/>
+      <text class="lbl-bold lbl" x="900" y="60" text-anchor="middle">remote channel</text>
+      <rect class="box" x="840" y="100" width="120" height="60"/>
+      <text class="lbl" x="900" y="125" text-anchor="middle">Twilio API</text>
+      <text class="lbl-sm" x="900" y="142" text-anchor="middle">(or WA Cloud, Telegram, ...)</text>
+
+      <!-- side -->
+      <rect class="lane" x="1010" y="40" width="70" height="300"/>
+      <rect class="box-side" x="1018" y="100" width="55" height="30"/>
+      <text class="lbl-sm" x="1045" y="120" text-anchor="middle">Lago</text>
+      <rect class="box-side" x="1018" y="135" width="55" height="30"/>
+      <text class="lbl-sm" x="1045" y="155" text-anchor="middle">Vigil</text>
+      <rect class="box-side" x="1018" y="170" width="55" height="30"/>
+      <text class="lbl-sm" x="1045" y="190" text-anchor="middle">Haima</text>
+      <rect class="box-side" x="1018" y="205" width="55" height="30"/>
+      <text class="lbl-sm" x="1045" y="225" text-anchor="middle">Chronos</text>
+
+      <!-- arrows -->
+      <path class="arrow" d="M160 130 L240 109" marker-end="url(#arr-out)"/>
+      <path class="arrow" d="M400 128 L400 138" marker-end="url(#arr-out)"/>
+      <path class="arrow" d="M400 176 L400 186" marker-end="url(#arr-out)"/>
+      <path class="arrow" d="M400 224 L400 234" marker-end="url(#arr-out)"/>
+      <path class="arrow" d="M400 272 L400 282" marker-end="url(#arr-out)"/>
+      <path class="arrow" d="M560 300 L640 130" marker-end="url(#arr-out)"/>
+      <path class="arrow" d="M760 130 L840 130" marker-end="url(#arr-out)"/>
+
+      <!-- side -->
+      <path class="arrow-side" d="M560 110 C940 110, 990 110, 1018 115" marker-end="url(#arr-out-side)"/>
+      <path class="arrow-side" d="M560 250 C940 250, 990 155, 1018 150" marker-end="url(#arr-out-side)"/>
+      <path class="arrow-side" d="M560 300 C940 300, 990 190, 1018 185" marker-end="url(#arr-out-side)"/>
+      <path class="arrow-side" d="M560 260 C940 260, 990 225, 1018 220" marker-end="url(#arr-out-side)"/>
+    </svg>
+    <figcaption>Figure 5.2 — Outbound flow. Policy gate fires first; capability degradation second; Chronos engagement-window enforcement third. Lago, Vigil, Haima, and Chronos all receive side writes for each outbound message.</figcaption>
+  </figure>
+
+  <h3>§5.3 Identity bootstrap: phone &rarr; ephemeral <code>EcdsaP256Identity</code> &rarr; optional <code>WebCryptoAnima</code> upgrade</h3>
+
+  <figure>
+    <svg viewBox="0 0 1100 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Identity bootstrap flow: phone number to ephemeral EcdsaP256Identity to optional WebCryptoAnima upgrade, with rotation event linking both.">
+      <defs>
+        <marker id="arr-id" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#224a8a"/>
+        </marker>
+        <style>
+          .lane { fill: #f6f4ec; stroke: #d8d4ca; }
+          .box  { fill: #fff; stroke: #224a8a; stroke-width: 1.2; rx: 4; }
+          .box-eph { fill: #fff7e0; stroke: #b58a4a; stroke-width: 1.2; rx: 4; }
+          .box-perm{ fill: #eaf5e0; stroke: #4a8a45; stroke-width: 1.2; rx: 4; }
+          .box-evt { fill: #f4eef8; stroke: #7a4ab5; stroke-width: 1; rx: 3; }
+          .lbl  { font-family: -apple-system, sans-serif; font-size: 12px; fill: #1a1a1a; }
+          .lbl-sm { font-family: -apple-system, sans-serif; font-size: 10px; fill: #6a6a6a; }
+          .lbl-bold { font-weight: 600; }
+          .arrow { stroke: #224a8a; stroke-width: 1.4; fill: none; }
+        </style>
+      </defs>
+
+      <text class="lbl-bold lbl" x="540" y="30" text-anchor="middle">Identity bootstrap: phone/handle → ephemeral DID → optional permanent DID</text>
+
+      <!-- inbound participant -->
+      <rect class="box" x="40" y="80" width="180" height="60"/>
+      <text class="lbl" x="130" y="105" text-anchor="middle">Inbound WA message</text>
+      <text class="lbl-sm" x="130" y="122" text-anchor="middle">from +57 300 123 4567</text>
+
+      <!-- iris-identity lookup -->
+      <rect class="box" x="260" y="80" width="180" height="60"/>
+      <text class="lbl" x="350" y="100" text-anchor="middle">iris-identity</text>
+      <text class="lbl-sm" x="350" y="118" text-anchor="middle">lookup binding for</text>
+      <text class="lbl-sm" x="350" y="132" text-anchor="middle">(whatsapp-openwa, +5730…)</text>
+
+      <!-- decision -->
+      <polygon points="490,90 575,110 490,130 405,110" fill="#fff" stroke="#224a8a" stroke-width="1.2"/>
+      <text class="lbl-sm" x="490" y="108" text-anchor="middle">existing binding?</text>
+      <text class="lbl-sm" x="490" y="121" text-anchor="middle"></text>
+
+      <!-- yes -> use binding -->
+      <rect class="box-perm" x="610" y="80" width="180" height="60"/>
+      <text class="lbl" x="700" y="100" text-anchor="middle">yes &mdash; use binding</text>
+      <text class="lbl-sm" x="700" y="115" text-anchor="middle">return existing DID</text>
+      <text class="lbl-sm" x="700" y="130" text-anchor="middle">(ephemeral or permanent)</text>
+
+      <!-- no -> ephemeral -->
+      <rect class="box-eph" x="260" y="180" width="180" height="64"/>
+      <text class="lbl" x="350" y="200" text-anchor="middle">no &mdash; create ephemeral</text>
+      <text class="lbl-sm" x="350" y="216" text-anchor="middle">HKDF(salt, channel, native_id)</text>
+      <text class="lbl-sm" x="350" y="230" text-anchor="middle">→ P-256 keypair</text>
+      <text class="lbl-sm" x="350" y="244" text-anchor="middle">→ did:key:zDn…</text>
+
+      <rect class="box-evt" x="490" y="190" width="180" height="44"/>
+      <text class="lbl" x="580" y="208" text-anchor="middle">Lago.append</text>
+      <text class="lbl-sm" x="580" y="222" text-anchor="middle">iris.identity_bootstrapped</text>
+
+      <rect class="box-eph" x="720" y="180" width="180" height="64"/>
+      <text class="lbl" x="810" y="200" text-anchor="middle">return ephemeral DID</text>
+      <text class="lbl-sm" x="810" y="216" text-anchor="middle">subsequent inbound</text>
+      <text class="lbl-sm" x="810" y="230" text-anchor="middle">resolves to same DID</text>
+
+      <!-- optional upgrade -->
+      <rect class="box-perm" x="260" y="280" width="180" height="64"/>
+      <text class="lbl" x="350" y="300" text-anchor="middle">[later] user enrolls</text>
+      <text class="lbl-sm" x="350" y="316" text-anchor="middle">WebCryptoAnima via web app</text>
+      <text class="lbl-sm" x="350" y="330" text-anchor="middle">passkey + phone OTP proof</text>
+
+      <rect class="box-evt" x="490" y="290" width="180" height="44"/>
+      <text class="lbl" x="580" y="308" text-anchor="middle">Lago.append</text>
+      <text class="lbl-sm" x="580" y="322" text-anchor="middle">anima.identity_rotated</text>
+
+      <rect class="box-perm" x="720" y="280" width="180" height="64"/>
+      <text class="lbl" x="810" y="300" text-anchor="middle">permanent DID</text>
+      <text class="lbl-sm" x="810" y="316" text-anchor="middle">replaces ephemeral via</text>
+      <text class="lbl-sm" x="810" y="330" text-anchor="middle">rotation chain (Spec D L4-D10)</text>
+
+      <!-- arrows -->
+      <path class="arrow" d="M220 110 L260 110" marker-end="url(#arr-id)"/>
+      <path class="arrow" d="M440 110 L490 110" marker-end="url(#arr-id)"/>
+      <path class="arrow" d="M575 110 L610 110" marker-end="url(#arr-id)"/>
+      <path class="arrow" d="M490 130 L350 180" marker-end="url(#arr-id)"/>
+      <path class="arrow" d="M440 212 L490 212" marker-end="url(#arr-id)"/>
+      <path class="arrow" d="M670 212 L720 212" marker-end="url(#arr-id)"/>
+
+      <path class="arrow" d="M810 244 L810 280" marker-end="url(#arr-id)" stroke-dasharray="4 3"/>
+      <text class="lbl-sm" x="930" y="262" text-anchor="middle">(optional, async)</text>
+
+      <path class="arrow" d="M440 312 L490 312" marker-end="url(#arr-id)"/>
+      <path class="arrow" d="M670 312 L720 312" marker-end="url(#arr-id)"/>
+    </svg>
+    <figcaption>Figure 5.3 — Identity bootstrap. The ephemeral-DID path (top) lets Iris run with zero user action. The optional upgrade path (bottom) lets a verified user own a permanent DID; Anima rotation chains the two so the conversation history is preserved.</figcaption>
+  </figure>
+
+  <h3>§5.4 Substrate composition: Iris alongside Anima, Inference, Haima, Lago, Chronos, Vigil, Soma</h3>
+
+  <figure>
+    <svg viewBox="0 0 1100 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Substrate composition: Iris alongside Anima, Inference, Haima, Lago, Chronos, Vigil, Soma, with arrows showing which substrates Iris reads from and writes to.">
+      <defs>
+        <marker id="arr-com" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#224a8a"/>
+        </marker>
+        <style>
+          .lbl  { font-family: -apple-system, sans-serif; font-size: 13px; fill: #1a1a1a; }
+          .lbl-sm { font-family: -apple-system, sans-serif; font-size: 10px; fill: #6a6a6a; }
+          .lbl-tiny { font-family: -apple-system, sans-serif; font-size: 9px; fill: #6a6a6a; }
+          .lbl-bold { font-weight: 600; }
+          .iris-box   { fill: #f4eef8; stroke: #7a4ab5; stroke-width: 2; rx: 6; }
+          .sub-box    { fill: #fff; stroke: #224a8a; stroke-width: 1.2; rx: 4; }
+          .planned-box{ fill: #fbfaf7; stroke: #b1b1b1; stroke-width: 1; rx: 4; stroke-dasharray: 4 3; }
+          .arrow      { stroke: #224a8a; stroke-width: 1.2; fill: none; }
+          .arrow-r    { stroke: #4a8a45; stroke-width: 1.2; fill: none; stroke-dasharray: 3 2; }
+        </style>
+      </defs>
+
+      <text class="lbl-bold lbl" x="540" y="28" text-anchor="middle">Substrate composition map &mdash; Iris among siblings</text>
+
+      <!-- Iris in centre -->
+      <rect class="iris-box" x="430" y="200" width="220" height="100"/>
+      <text class="lbl-bold lbl" x="540" y="240" text-anchor="middle">Iris (this spec)</text>
+      <text class="lbl-sm" x="540" y="260" text-anchor="middle">crates/iris/* + irisd</text>
+      <text class="lbl-sm" x="540" y="276" text-anchor="middle">channels &harr; agent loop</text>
+
+      <!-- Anima (top-left) -->
+      <rect class="sub-box" x="80" y="60" width="180" height="70"/>
+      <text class="lbl-bold lbl" x="170" y="86" text-anchor="middle">Anima (Spec D)</text>
+      <text class="lbl-sm" x="170" y="104" text-anchor="middle">DID + custody</text>
+      <text class="lbl-sm" x="170" y="120" text-anchor="middle">6 backends shipped</text>
+
+      <!-- Inference (top-middle) -->
+      <rect class="sub-box" x="320" y="60" width="180" height="70"/>
+      <text class="lbl-bold lbl" x="410" y="86" text-anchor="middle">Inference (Spec E)</text>
+      <text class="lbl-sm" x="410" y="104" text-anchor="middle">per-session compute</text>
+      <text class="lbl-sm" x="410" y="120" text-anchor="middle">E-Sub-A foundation</text>
+
+      <!-- Haima (top-right) -->
+      <rect class="sub-box" x="580" y="60" width="180" height="70"/>
+      <text class="lbl-bold lbl" x="670" y="86" text-anchor="middle">Haima</text>
+      <text class="lbl-sm" x="670" y="104" text-anchor="middle">x402 + per-task billing</text>
+      <text class="lbl-sm" x="670" y="120" text-anchor="middle">Phase F0</text>
+
+      <!-- Chronos (top-rightmost) -->
+      <rect class="sub-box" x="820" y="60" width="180" height="70"/>
+      <text class="lbl-bold lbl" x="910" y="86" text-anchor="middle">Chronos</text>
+      <text class="lbl-sm" x="910" y="104" text-anchor="middle">temporal substrate</text>
+      <text class="lbl-sm" x="910" y="120" text-anchor="middle">M0 shipped 2026-05-13</text>
+
+      <!-- Lago (left) -->
+      <rect class="sub-box" x="80" y="220" width="180" height="70"/>
+      <text class="lbl-bold lbl" x="170" y="246" text-anchor="middle">Lago</text>
+      <text class="lbl-sm" x="170" y="264" text-anchor="middle">event journal +</text>
+      <text class="lbl-sm" x="170" y="280" text-anchor="middle">blob store</text>
+
+      <!-- Vigil (right) -->
+      <rect class="sub-box" x="820" y="220" width="180" height="70"/>
+      <text class="lbl-bold lbl" x="910" y="246" text-anchor="middle">Vigil</text>
+      <text class="lbl-sm" x="910" y="264" text-anchor="middle">OTel + GenAI</text>
+      <text class="lbl-sm" x="910" y="280" text-anchor="middle">+ Messaging semconv</text>
+
+      <!-- Soma (bottom-left) -->
+      <rect class="sub-box" x="80" y="370" width="180" height="70"/>
+      <text class="lbl-bold lbl" x="170" y="396" text-anchor="middle">Soma</text>
+      <text class="lbl-sm" x="170" y="414" text-anchor="middle">kernel daemon</text>
+      <text class="lbl-sm" x="170" y="430" text-anchor="middle">(no Iris dependency)</text>
+
+      <!-- Autonomic (bottom-middle) -->
+      <rect class="sub-box" x="320" y="370" width="180" height="70"/>
+      <text class="lbl-bold lbl" x="410" y="396" text-anchor="middle">Autonomic</text>
+      <text class="lbl-sm" x="410" y="414" text-anchor="middle">homeostasis</text>
+      <text class="lbl-sm" x="410" y="430" text-anchor="middle">(advisory consumer of Iris)</text>
+
+      <!-- Praxis (bottom-mid-right) -->
+      <rect class="sub-box" x="580" y="370" width="180" height="70"/>
+      <text class="lbl-bold lbl" x="670" y="396" text-anchor="middle">Praxis</text>
+      <text class="lbl-sm" x="670" y="414" text-anchor="middle">tool dispatch (no Iris dep)</text>
+      <text class="lbl-sm" x="670" y="430" text-anchor="middle">consumes Message</text>
+
+      <!-- planned: Aegis Nous Mnemo -->
+      <rect class="planned-box" x="820" y="370" width="180" height="70"/>
+      <text class="lbl-bold lbl" x="910" y="396" text-anchor="middle">Aegis / Nous / Mnemo</text>
+      <text class="lbl-sm" x="910" y="414" text-anchor="middle">planned; future composition</text>
+      <text class="lbl-sm" x="910" y="430" text-anchor="middle">surfaces post-Phase-1</text>
+
+      <!-- arrows: Iris reads -->
+      <path class="arrow" d="M260 95 L430 220" marker-end="url(#arr-com)"/>
+      <text class="lbl-tiny" x="335" y="155" text-anchor="middle">Anima.custody.* (identity bootstrap)</text>
+
+      <path class="arrow" d="M410 130 L470 200" marker-end="url(#arr-com)"/>
+      <text class="lbl-tiny" x="430" y="170" text-anchor="middle">Inference (per-conv routing)</text>
+
+      <path class="arrow" d="M670 130 L610 200" marker-end="url(#arr-com)"/>
+      <text class="lbl-tiny" x="660" y="170" text-anchor="middle">Haima (per-message billing)</text>
+
+      <path class="arrow" d="M910 130 L650 220" marker-end="url(#arr-com)"/>
+      <text class="lbl-tiny" x="820" y="160" text-anchor="middle">Chronos (engagement window)</text>
+
+      <path class="arrow" d="M260 255 L430 255" marker-end="url(#arr-com)"/>
+      <text class="lbl-tiny" x="350" y="246" text-anchor="middle">Lago.append iris.*</text>
+
+      <path class="arrow" d="M650 250 L820 250" marker-end="url(#arr-com)"/>
+      <text class="lbl-tiny" x="735" y="240" text-anchor="middle">Vigil OTel spans + metrics</text>
+
+      <!-- arrows: Praxis consumes -->
+      <path class="arrow-r" d="M670 370 L600 300" marker-end="url(#arr-com)"/>
+      <text class="lbl-tiny" x="650" y="340" text-anchor="middle">Message → Praxis tool</text>
+
+      <!-- Autonomic advisory -->
+      <path class="arrow-r" d="M410 370 L500 300" marker-end="url(#arr-com)"/>
+      <text class="lbl-tiny" x="450" y="345" text-anchor="middle">advisory feedback</text>
+
+    </svg>
+    <figcaption>Figure 5.4 — Substrate composition. Iris (centre) reads identity from Anima, routing from Inference, timers from Chronos, billing from Haima. Iris writes events to Lago and spans+metrics to Vigil. Praxis consumes the canonical Message for tool dispatch. Soma and the planned substrates (Aegis, Nous, Mnemo) have no direct dependency on Iris in v1.</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================== -->
+<!-- §6 — SUB-PHASES                                                -->
+<!-- ============================================================== -->
+<section id="s6">
+  <h2>§6 Sub-Phases F-Sub-A &hellip; F-Sub-H</h2>
+
+  <p>
+    Each sub-phase is one mergeable PR, mostly parallelisable after the
+    foundation (F-Sub-A) lands. The fan-out shape mirrors Spec D Wave 2A/2B
+    (which shipped six AnimaCustody backends across five days) and Spec E
+    sub-phases (one trait foundation, multiple backend impls in parallel,
+    instrumentation, conformance battery).
+  </p>
+
+  <h3 id="f-sub-a">F-Sub-A &mdash; <code>iris-core</code> trait foundation (BLOCKING)</h3>
+
+  <table>
+    <tbody>
+      <tr><th style="width:18%">Deliverable</th><td>The <code>crates/iris/iris-core</code> crate (trait + canonical types + capability struct + trust mode + error vocabulary + close codes) and <code>crates/iris/iris-runtime</code> (per-conversation Mutex map + connector registry + Lago sink scaffold + Vigil span scaffolding). Also <code>crates/iris/iris-proto</code> with the four protobuf files (<code>conversation.proto</code>, <code>message.proto</code>, <code>connector.proto</code>, <code>channel.proto</code>). No channel adapters in this PR.</td></tr>
+      <tr><th>Effort</th><td>5 points (~3 working days)</td></tr>
+      <tr><th>Blocks</th><td>All other F-Sub-* sub-phases</td></tr>
+      <tr><th>Acceptance</th><td><code>cargo test -p iris-core -p iris-runtime -p iris-proto</code> green; in-memory <code>EchoConnector</code> mock proves the trait compiles + the per-conversation lock serializes a 10-message echo correctly under parallel inbound load; Lago sink writes <code>iris.message_received</code> + <code>iris.message_sent</code> events.</td></tr>
+      <tr><th>Linear</th><td><code>F-Sub-A</code> (placeholder; real ticket id at scaffold time)</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="f-sub-b">F-Sub-B &mdash; <code>iris-whatsapp-openwa</code> (WhatsApp Web automation)</h3>
+  <table>
+    <tbody>
+      <tr><th style="width:18%">Deliverable</th><td>The <code>crates/iris/iris-whatsapp-openwa</code> crate implementing <code>ChannelConnector</code> over the OpenWA Web-automation SDK. Trust mode <em>Puppeting</em> (the bridge logs into a user&rsquo;s WA account). Session pairing via QR code; session persistence via Lago blob (encrypted with Anima-derived key). Capability declaration: full markdown, attachments up to 100 MB per WA limit, has-24h-reengagement-window.</td></tr>
+      <tr><th>Effort</th><td>5 points (~4 working days)</td></tr>
+      <tr><th>Blocks</th><td>Tenant deploys that need WA personal-account bridging (Exclusive Rentals)</td></tr>
+      <tr><th>Parallel with</th><td>F-Sub-C, F-Sub-D, F-Sub-H (after F-Sub-A)</td></tr>
+      <tr><th>Acceptance</th><td>Pair a test WA account; send + receive 10 messages with text, attachment, and quote-reply; verify per-conversation ordering under concurrent senders; verify <code>EngagementWindowClosed</code> close-code fires correctly after 24h.</td></tr>
+      <tr><th>Linear</th><td><code>F-Sub-B</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="f-sub-c">F-Sub-C &mdash; <code>iris-telegram</code></h3>
+  <table>
+    <tbody>
+      <tr><th style="width:18%">Deliverable</th><td>The <code>crates/iris/iris-telegram</code> crate implementing <code>ChannelConnector</code> over Telegram Bot API (<code>teloxide</code> 0.13+). Trust mode <em>Proxy</em>. Webhook + long-poll dual ingress per I-7. Capability declaration: markdown V2, attachments up to 50 MB per Telegram limit, supports threads, supports edit, supports buttons.</td></tr>
+      <tr><th>Effort</th><td>3 points (~2 working days)</td></tr>
+      <tr><th>Parallel with</th><td>F-Sub-B, F-Sub-D, F-Sub-H</td></tr>
+      <tr><th>Acceptance</th><td>Send + receive 10 messages on a test bot account; verify edit-message + delete-message round-trip; verify per-conversation ordering.</td></tr>
+      <tr><th>Linear</th><td><code>F-Sub-C</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="f-sub-d">F-Sub-D &mdash; <code>iris-twilio</code> (SMS first, then MMS)</h3>
+  <table>
+    <tbody>
+      <tr><th style="width:18%">Deliverable</th><td>The <code>crates/iris/iris-twilio</code> crate implementing <code>ChannelConnector</code> over Twilio Programmable SMS (and MMS as a follow-up). Trust mode <em>Proxy</em>. Webhook ingress via lifegw <code>POST /v1/iris/inbound</code> with Twilio X-Twilio-Signature HMAC verification. No markdown, no attachments at v0.1; MMS attachments added in F-Sub-D.2.</td></tr>
+      <tr><th>Effort</th><td>3 points (~2 working days)</td></tr>
+      <tr><th>Parallel with</th><td>F-Sub-B, F-Sub-C, F-Sub-H</td></tr>
+      <tr><th>Acceptance</th><td>Send + receive 10 SMS messages on a Twilio test account; verify HMAC double-auth path (channel-native HMAC + Tier-Service cap) rejects requests missing either; verify rate-limit-respect (Twilio Programmable SMS is 1 message/second per number on free trial).</td></tr>
+      <tr><th>Linear</th><td><code>F-Sub-D</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="f-sub-e">F-Sub-E &mdash; <code>iris-identity</code> unification</h3>
+  <table>
+    <tbody>
+      <tr><th style="width:18%">Deliverable</th><td>The <code>crates/iris/iris-identity</code> sub-module within <code>iris-runtime</code> (or extracted as its own crate; decision in F-Sub-E design review). Implements the L6-D4 ephemeral-HKDF DID path, the Anima-binding lookup, and the rotation-event consumption (when a participant upgrades to a permanent DID, downstream conversations resolve to the new DID through Anima&rsquo;s rotation chain).</td></tr>
+      <tr><th>Effort</th><td>3 points (~2 working days)</td></tr>
+      <tr><th>Depends on</th><td>F-Sub-A foundation; Anima Spec D shipped (already done)</td></tr>
+      <tr><th>Acceptance</th><td>Inbound message from new participant creates ephemeral DID + Lago event; second inbound from same native handle resolves to same DID; rotation event from Anima causes subsequent resolutions to return the new DID; conversation log replay across rotation gives a coherent identity timeline.</td></tr>
+      <tr><th>Linear</th><td><code>F-Sub-E</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="f-sub-f">F-Sub-F &mdash; <code>iris-vigil</code> semconv instrumentation</h3>
+  <table>
+    <tbody>
+      <tr><th style="width:18%">Deliverable</th><td>The <code>crates/iris/iris-vigil</code> crate (or sub-module of <code>iris-runtime</code>) implementing OTel GenAI + Messaging semantic conventions for every Iris hot-path operation. Eighteen metric series and twelve span kinds covering inbound, outbound, per-conversation lock acquisition, capability degradation, engagement-window state changes, identity bootstrap, identity rotation, and channel reconnect / close codes.</td></tr>
+      <tr><th>Effort</th><td>3 points (~2 working days)</td></tr>
+      <tr><th>Depends on</th><td>F-Sub-A foundation; Vigil crate (already operational across other substrates)</td></tr>
+      <tr><th>Acceptance</th><td>Local OTLP collector receives all 18 metric series during a 30-message smoke test across 2 channels; span tree shows inbound &rarr; canonicalise &rarr; lock-acquire &rarr; identity-resolve &rarr; lago-append &rarr; dispatch chain.</td></tr>
+      <tr><th>Linear</th><td><code>F-Sub-F</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="f-sub-g">F-Sub-G &mdash; <code>iris-conformance</code> cross-channel battery</h3>
+  <table>
+    <tbody>
+      <tr><th style="width:18%">Deliverable</th><td>The <code>crates/iris/iris-conformance</code> crate. Cross-channel test matrix: every channel adapter &times; { ordering, capability degradation, identity bootstrap, identity rotation, engagement-window expiry, rate-limit respect, reconnect-by-close-code, HMAC verification, Tier-Service cap rejection }. ≥ 60 tests; gates any new channel adapter (mitigation for libpurple plugin-overload lesson).</td></tr>
+      <tr><th>Effort</th><td>3 points (~2 working days)</td></tr>
+      <tr><th>Depends on</th><td>F-Sub-B, F-Sub-C, F-Sub-D (at minimum two channel adapters shipped)</td></tr>
+      <tr><th>Acceptance</th><td>Battery green on a CI runner against mocked channels + green against real test accounts on at least one channel (Telegram is the easiest external test target).</td></tr>
+      <tr><th>Linear</th><td><code>F-Sub-G</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="f-sub-h">F-Sub-H &mdash; <code>iris-whatsapp-cloud</code> (official WA Cloud API)</h3>
+  <table>
+    <tbody>
+      <tr><th style="width:18%">Deliverable</th><td>The <code>crates/iris/iris-whatsapp-cloud</code> crate implementing <code>ChannelConnector</code> over Meta&rsquo;s official WhatsApp Business Cloud API. Trust mode <em>Proxy</em>. Webhook ingress for inbound; REST outbound. Business-template handling (the 24h-window-required message templates). Significantly lower ToS risk than OpenWA at the cost of business-account requirements; both adapters ship in v1 so tenants can choose.</td></tr>
+      <tr><th>Effort</th><td>5 points (~3 working days)</td></tr>
+      <tr><th>Parallel with</th><td>F-Sub-B, F-Sub-C, F-Sub-D</td></tr>
+      <tr><th>Acceptance</th><td>Provision a test WA Business account; send + receive 10 messages including a template message after a deliberately-expired engagement window; verify template parameter substitution; verify <code>X-Hub-Signature-256</code> double-auth path.</td></tr>
+      <tr><th>Linear</th><td><code>F-Sub-H</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>§6.9 Critical path</h3>
+
+  <table>
+    <thead>
+      <tr><th>Day</th><th>Activity</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>D1-D3</td><td>F-Sub-A (foundation, blocking)</td></tr>
+      <tr><td>D4-D7</td><td>F-Sub-B (OpenWA) + F-Sub-C (Telegram) + F-Sub-D (Twilio) + F-Sub-H (WA Cloud) in parallel via worktree-driven dispatch (the proven pattern from Spec D Wave 2A which shipped six backends in two days)</td></tr>
+      <tr><td>D8</td><td>F-Sub-E (identity unification) + F-Sub-F (Vigil semconv) in parallel</td></tr>
+      <tr><td>D9-D10</td><td>F-Sub-G (conformance battery) gating any subsequent channel adapter</td></tr>
+    </tbody>
+  </table>
+  <p>
+    <strong>Critical path: ~10 working days</strong> conservatively. Worktree-driven
+    dispatch could compress D4-D7 if subagent fan-out is well-coordinated, mirroring
+    Spec D Wave 2A&rsquo;s observed cadence.
+  </p>
+</section>
+
+<!-- ============================================================== -->
+<!-- §7 — COMPOSITION WITH SHIPPED SUBSTRATES                        -->
+<!-- ============================================================== -->
+<section id="s7">
+  <h2>§7 Composition with Shipped Substrates</h2>
+
+  <h3 id="composition-anima">§7.1 Anima (Spec D)</h3>
+  <p>
+    Iris consumes Anima for all identity concerns. <code>irisd</code> holds an
+    <code>Arc&lt;dyn AnimaCustody&gt;</code> resolved at startup from the
+    tenant&rsquo;s Anima configuration (<code>InProcessAnima</code> in dev,
+    <code>VaultTransitAnima</code> or <code>SomaCustody</code> in production).
+  </p>
+  <ul>
+    <li>
+      <strong>Identity bootstrap</strong> (L6-D4) derives an ephemeral
+      <code>EcdsaP256Identity</code> via HKDF and emits an
+      <code>iris.identity_bootstrapped</code> event.
+    </li>
+    <li>
+      <strong>Permanent-DID upgrade</strong> arrives as an
+      <code>anima.identity_rotated</code> event in the Anima journal; Iris
+      replays the rotation chain to resolve historical conversations.
+    </li>
+    <li>
+      <strong>JWS / digest signing</strong> for outbound messages that carry
+      a verifiable agent identity claim uses Anima&rsquo;s
+      <code>sign_jws</code> / <code>sign_digest</code> directly. Iris never
+      holds key material.
+    </li>
+  </ul>
+
+  <h3>§7.2 Inference (Spec E)</h3>
+  <p>
+    Iris consumes Inference for per-channel, per-conversation compute routing.
+    The <code>InferenceRouter</code>&rsquo;s <code>RoutingHint</code> gets
+    extended (or extended via a side-channel until F-Sub-E lands) with channel
+    metadata (<code>channel_id</code>, <code>workload: ConversationReply</code>,
+    optional <code>latency_target_ms</code>). Channels with tight latency
+    requirements (SMS, voice IVR &mdash; out of scope) route to small-model
+    backends; long-form async channels (email, Matrix room with no urgency)
+    route to large-model backends.
+  </p>
+  <p>
+    Inference&rsquo;s close-code vocabulary (<code>CloseCode::ToolAwait</code>,
+    <code>BackendUnavailable</code>, <code>AnimaInvalidated</code>) maps onto
+    Iris&rsquo;s outbound-send failure handling. An Inference failure that
+    blocks outbound is reported back as a typed
+    <code>iris.message_failed { reason: inference_*, &hellip; }</code>
+    event so an operator dashboard can disambiguate channel failures from
+    inference failures.
+  </p>
+
+  <h3>§7.3 Lago</h3>
+  <p>
+    Lago is the durability substrate (L6-D2). Every Iris event is content-addressed,
+    journal-appended, and replayable. The Lago tag-walk pattern that Anima
+    uses for rotation chains is the same one Iris uses for engagement-window
+    state queries; the queries land in <code>lago-knowledge</code>.
+  </p>
+  <p>
+    <code>lago replay --tree</code> is extended to surface conversation
+    history alongside agent decision events, completing the workflow-tick
+    closure pattern <a href="../../../CLAUDE.md">documented in the
+    workspace</a>. The same authoring-agents adapter that <code>arcand</code>
+    uses for workflow events is the model for <code>iris-runtime</code>.
+  </p>
+
+  <h3>§7.4 Chronos</h3>
+  <p>
+    Chronos owns three Iris-relevant timer kinds:
+  </p>
+  <ol>
+    <li>
+      <strong>Engagement-window timers</strong> (WhatsApp 24h). When an inbound
+      WhatsApp message arrives, Iris arms a Chronos 24h timer keyed by
+      <code>ConversationRef</code>. On expiry, Chronos fires an event that
+      Iris consumes to close the window (transitioning outbound to
+      template-only).
+    </li>
+    <li>
+      <strong>Idle conversation reaping</strong> (default 24h after last
+      activity, configurable). Frees per-conversation locks.
+    </li>
+    <li>
+      <strong>Rate-limit window timers</strong> for connectors that need
+      explicit windows (e.g.&nbsp;Twilio 1 msg/sec, WA Cloud per-template
+      quotas). These are typically internal to connectors; surfaced via
+      Chronos when global coordination across <code>irisd</code> instances is
+      needed (Phase 2+).
+    </li>
+  </ol>
+
+  <h3>§7.5 Vigil</h3>
+  <p>
+    Vigil hosts the Iris-specific span kinds and metric series declared in
+    F-Sub-F. OTel GenAI semantic conventions extend cleanly to messaging
+    (the <code>messaging.*</code> namespace is well-established in OpenTelemetry);
+    Iris adopts the standard <code>messaging.system</code>,
+    <code>messaging.destination.name</code>, <code>messaging.operation</code>
+    attributes plus the Life-specific extensions
+    <code>iris.channel_id</code>, <code>iris.conversation_id</code>,
+    <code>iris.trust_mode</code>, <code>iris.capability_degraded</code>.
+  </p>
+
+  <h3>§7.6 Haima</h3>
+  <p>
+    Haima receives per-message billing ticks. Outbound message paths that have
+    a per-message cost (Twilio SMS at ~0.0075 USD per US-domestic message,
+    WhatsApp Cloud per-conversation fees) fire a Haima
+    <code>TaskBilled</code> event with the channel-specific cost loaded from
+    the connector&rsquo;s capability profile. Inbound paths typically have no
+    per-message cost; they fire only on the lifegw rate-limit budget surface.
+  </p>
+
+  <h3>§7.7 Soma</h3>
+  <p>
+    No direct composition surface. <code>irisd</code> does not call soma. The
+    relationship is mediated through Anima (which may consult <code>SomaCustody</code>
+    if that&rsquo;s the configured backend). Iris&rsquo;s threat model does
+    not place soma in its trust path.
+  </p>
+</section>
+
+<!-- ============================================================== -->
+<!-- §8 — STRATEGIC POSITIONING                                     -->
+<!-- ============================================================== -->
+<section id="s8">
+  <h2>§8 Strategic Positioning &mdash; POSIX of Agent Messaging</h2>
+
+  <p>
+    Spec E framed Inference as the <em>POSIX of agent silicon</em> &mdash; own
+    the runtime contract, hardware vendors compete underneath. Iris is the
+    same play at the messaging layer: <strong>own the canonical conversation
+    contract, channels compete underneath</strong>.
+  </p>
+
+  <h3>§8.1 The leverage</h3>
+  <ol>
+    <li>
+      <strong>Channel vendors aggregate around the contract.</strong> Twilio,
+      Vonage, MessageBird, Sinch, Plivo, BIRD/Twilio Conversations,
+      Meta&rsquo;s WA Cloud, Telegram, Discord all benefit from a runtime that
+      consumes them on equal footing. Lock-in is reduced; switching cost is
+      reduced; the contract owner sits above the substitution surface.
+    </li>
+    <li>
+      <strong>Agent runtimes downstream consume Iris connectors.</strong> Any
+      runtime that wants to send/receive on twenty channels can either
+      reimplement Iris or consume <code>iris-core</code>-conforming
+      connectors. The leverage flows toward the contract publisher.
+    </li>
+    <li>
+      <strong>Community-contributed adapters become feasible</strong> once
+      the conformance battery (F-Sub-G) gates entry. Iris adopts the
+      libpurple shape but mitigates the libpurple failure mode (quality drift)
+      via conformance.
+    </li>
+    <li>
+      <strong>Tenant deployments accelerate.</strong> The fifteen
+      near-duplicate integrations forecast across five tenants in twelve weeks
+      (see <a href="#s1">§1.1</a>) collapse to one substrate plus tenant-side
+      configuration. The marginal cost of channel N+1 approaches zero.
+    </li>
+  </ol>
+
+  <h3>§8.2 What we&rsquo;re not betting on</h3>
+  <p>
+    We are <em>not</em> betting on Iris becoming the universal messaging
+    abstraction across all of computing. We are betting on it becoming the
+    universal <em>agent-side</em> messaging abstraction &mdash; i.e.&nbsp;the
+    bridge between agent runtimes and channels &mdash; which is a narrower
+    surface where the existing prior art (libpurple, mautrix, Bot Framework,
+    Twilio Conversations, OpenClaw) has already converged on the eight
+    invariants. Iris&rsquo;s job is to ship the convergence, not to invent it.
+  </p>
+
+  <h3>§8.3 Adjacency to the published Spec E contract</h3>
+  <p>
+    Spec E&rsquo;s <code>agent-loop-compute-contract</code> publication and
+    Spec F&rsquo;s <code>agent-comms-contract</code> publication form a pair.
+    Together they describe the agent runtime&rsquo;s two largest external
+    interfaces: <em>compute</em> (silicon) and <em>communication</em>
+    (channels). The pair narrative &mdash; "the two contracts every agent
+    runtime needs" &mdash; is materially stronger than either alone for the
+    standardization play. Phase 2 may extract an umbrella spec
+    (<code>agent-runtime-contracts</code>) linking both; that&rsquo;s out of
+    scope for v1.
+  </p>
+</section>
+
+<!-- ============================================================== -->
+<!-- §9 — CONCERNS & MITIGATIONS                                     -->
+<!-- ============================================================== -->
+<section id="s9">
+  <h2>§9 Concerns &amp; Mitigations</h2>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:5%">#</th>
+        <th style="width:25%">Concern</th>
+        <th style="width:15%">Likelihood / Impact</th>
+        <th style="width:55%">Mitigation</th>
+      </tr>
+    </thead>
+    <tbody>
+
+      <tr id="concern-tos">
+        <td>C-1</td>
+        <td><strong>OpenWA WhatsApp Web automation ToS risk.</strong> OpenWA-class adapters automate WhatsApp Web sessions; this is in tension with WhatsApp&rsquo;s Terms of Service for personal accounts and has historically resulted in account bans.</td>
+        <td>High / High</td>
+        <td>
+          Ship <strong>both</strong> OpenWA (F-Sub-B) and WA Cloud (F-Sub-H) in v1. The Cloud API is ToS-blessed; OpenWA is opt-in per tenant with a documented risk-acknowledgment policy gate (<code>iris.whatsapp.openwa.acknowledge_tos_risk</code>) and a default-deny stance. Tenants who choose OpenWA accept the operational risk; tenants on regulated business workloads default to WA Cloud. Iris connectors are interchangeable from the agent&rsquo;s perspective.
+        </td>
+      </tr>
+
+      <tr id="concern-spoofing">
+        <td>C-2</td>
+        <td><strong>SMS spoofing during identity bootstrap.</strong> An attacker who can spoof inbound SMS from a target phone number could trigger ephemeral-DID creation for a number they don&rsquo;t control, then convince the agent to act on the spoofed identity.</td>
+        <td>Med / High</td>
+        <td>
+          The ephemeral-DID path (L6-D4) <em>does not</em> grant the agent the right to take any irreversible action (financial transfer, account creation, identity assertion) on the bootstrapped DID&rsquo;s behalf. Such actions require an <em>upgraded</em> permanent DID via the WebCryptoAnima passkey + phone-OTP-proof flow (Figure 5.3, bottom row), at which point the proof binds the phone number to a key the attacker cannot forge. Until then, the DID is treated as <em>provisional</em> and the policy gates require explicit per-action authorisation.
+        </td>
+      </tr>
+
+      <tr id="concern-webhook">
+        <td>C-3</td>
+        <td><strong>Webhook authentication sprawl.</strong> Each channel has its own HMAC scheme, its own signing secret, its own header conventions. A mistake in any one of them is a credential leak surface; collectively they&rsquo;re an attack surface that grows linearly with channel count.</td>
+        <td>Med / Med</td>
+        <td>
+          Double-auth pattern (L6-D5): channel-native HMAC verification + Tier-Service capability token, both required. A leak in either alone is insufficient. Plus per-channel adapter HMAC verifiers are factored into <code>iris-runtime::hmac</code> so the verification path is testable and shared across adapters. F-Sub-G conformance battery includes HMAC-rejection tests.
+        </td>
+      </tr>
+
+      <tr id="concern-affinity">
+        <td>C-4</td>
+        <td><strong>Session affinity / phone-bound resolver.</strong> Inbound messages need to land at the same <code>irisd</code> instance that holds the per-conversation lock; horizontal scaling of <code>irisd</code> requires routing.</td>
+        <td>Med / Med</td>
+        <td>
+          <code>irisd</code> instances form a consistent-hash ring keyed by <code>ConversationRef</code>. <code>lifegw</code> includes a session-affinity router (a small extension to existing tonic UDS routing) that forwards inbound to the right instance. Falls back to any-instance + lock-acquire-via-soma-coordinator if the affinity router is unhealthy. Per-conversation lock is then held via a soma-coordinated semaphore until idle reap. Phase 2 work; v1 ships single-instance <code>irisd</code>.
+        </td>
+      </tr>
+
+      <tr id="concern-ratelimit">
+        <td>C-5</td>
+        <td><strong>Rate limits.</strong> Channels enforce per-account and per-recipient rate limits (Twilio 1 msg/sec/number, WA Cloud per-quality-rating tier, Telegram 30 msg/sec/bot, etc.). Exceeding them produces deliveries silently dropped or accounts suspended.</td>
+        <td>High / Med</td>
+        <td>
+          Per-channel <code>RateLimitProfile</code> in <code>ChannelCapabilities</code> declares limits. <code>iris-runtime</code> consumes these via a token-bucket per (channel, destination); excess fires a typed <code>RateLimited { retry_after_ms }</code> error that the agent can choose to back-off-and-retry or surface. lifegw also enforces a global per-tenant outbound rate limit as a second safety net (configured in <code>.control/policy.yaml</code>).
+        </td>
+      </tr>
+
+      <tr id="concern-control-gate">
+        <td>C-6</td>
+        <td><strong>Control gate enforcement.</strong> Outbound messages can have material real-world consequence (financial, legal, reputational). Without explicit gating, an agent could send messages at scale before a human notices.</td>
+        <td>Low / Very High</td>
+        <td>
+          Every per-channel outbound is gated by a <code>iris.&lt;channel&gt;.outbound.send</code> policy in <code>.control/policy.yaml</code>. Bulk outbound (multiple recipients in one tick, or N&gt; threshold within a window) is gated by a separate <code>iris.&lt;channel&gt;.outbound.bulk</code> gate that defaults to require-approval. Puppeting connectors additionally require <code>iris.&lt;channel&gt;.puppeting.consent</code>. The control-metalayer harness reasoning enforces these (CLAUDE.md P2 Control Gate).
+        </td>
+      </tr>
+
+      <tr id="concern-plugin-overload">
+        <td>C-7</td>
+        <td><strong>Plugin overload &mdash; the libpurple lesson.</strong> Adding more channels makes the substrate harder to maintain, less reliable, less secure as community-contributed adapters of varying quality accumulate.</td>
+        <td>Med / High</td>
+        <td>
+          v1 ships compiled-in Rust crates only (L6-D8) with a conformance battery (F-Sub-G) gating any new adapter. Open Question O-1 evaluates a Phase 2 plugin daemon model with explicit conformance + sandboxing requirements. The libpurple failure mode &mdash; community plugins of varying quality entering production unaudited &mdash; is specifically what F-Sub-G prevents.
+        </td>
+      </tr>
+
+      <tr id="concern-schema-drift">
+        <td>C-8</td>
+        <td><strong>Schema drift &mdash; the Bot Framework lesson.</strong> Canonical message schemas accumulate channel-specific quirks; over years they drift and fragment.</td>
+        <td>Med / Med</td>
+        <td>
+          Channel-specific data lives in <code>Message::channel_data: Option&lt;serde_json::Value&gt;</code> (Bot Framework <code>channelData</code> pattern). The canonical schema itself is <code>#[non_exhaustive]</code> at every union; additive evolution is supported, breaking change requires a major version bump. Cross-channel conformance battery (F-Sub-G) tests the canonical schema against all adapters every CI run.
+        </td>
+      </tr>
+
+      <tr id="concern-imessage">
+        <td>C-9</td>
+        <td><strong>iMessage adapter operational cost.</strong> iMessage has no official server-side API; bridges (Beeper, mautrix-imessage, JMP.chat) require a Mac mini physically logged into an Apple ID. This is hardware + operational overhead, not just code.</td>
+        <td>Low / Low (only if iMessage adopted)</td>
+        <td>
+          <code>iris-imessage</code> is intentionally <em>last</em> in the adapter priority list. Document the operational requirement (a tenant-provided Mac mini); offer no v1 deployment of <code>iris-imessage</code> from Iris itself. The trait surface is designed to be implementable by such a bridge but the bridge ships separately.
+        </td>
+      </tr>
+
+      <tr id="concern-pii">
+        <td>C-10</td>
+        <td><strong>PII in Lago journal.</strong> Inbound message bodies frequently contain PII (names, addresses, account numbers, health information). Storing them indefinitely in Lago creates a data-retention concern.</td>
+        <td>Med / High</td>
+        <td>
+          Iris messages in Lago are scoped to the participant&rsquo;s Anima DID; PII deletion is implemented via <code>anima.identity_revoked</code> + a Lago tombstone pass (Phase 2 work; not v1 blocker). For v1, Iris ships with per-tenant configurable retention (default 90 days) implemented as a Chronos timer + a Lago purge pass that hashes message bodies after retention. Tenant deployments with regulated workloads can configure shorter retention.
+        </td>
+      </tr>
+
+    </tbody>
+    <caption>Ten concerns plus mitigations. C-1 (ToS) and C-2 (spoofing) carry the highest combined likelihood &times; impact and have first-class mitigations baked into the locked decisions.</caption>
+  </table>
+</section>
+
+<!-- ============================================================== -->
+<!-- §10 — OPEN QUESTIONS                                            -->
+<!-- ============================================================== -->
+<section id="s10">
+  <h2>§10 Open Questions</h2>
+
+  <p>
+    Open questions are <em>deliberately</em> deferred &mdash; either because
+    they don&rsquo;t affect v1 trait shape, because they need empirical data
+    from F-Sub-G conformance results, or because they require a decision the
+    spec author cannot make unilaterally.
+  </p>
+
+  <h3 id="o1">O-1 &mdash; Compiled-in Rust crates vs plugin-daemon adapters <em>(most consequential)</em></h3>
+  <p>
+    L6-D8 locks v1 to compiled-in Rust crates. Phase 2 may add a plugin-daemon
+    model (libpurple-style separate processes, or WASM components speaking a
+    wire protocol to <code>irisd</code>). The decision matrix:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:25%">Dimension</th>
+        <th style="width:37.5%">Compiled-in Rust (v1)</th>
+        <th style="width:37.5%">Plugin daemon (libpurple-style, Phase 2)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Community contribution velocity</td>
+        <td>Lower &mdash; contributors must clone the workspace and submit Rust PRs.</td>
+        <td>Higher &mdash; adapters can be in any language, published independently.</td>
+      </tr>
+      <tr>
+        <td>Sandboxing safety</td>
+        <td>None &mdash; adapter shares <code>irisd</code> address space and crashes the daemon on panic.</td>
+        <td>Strong &mdash; adapter crash is isolated; WASM impl gets capability-based sandboxing.</td>
+      </tr>
+      <tr>
+        <td>Binary size</td>
+        <td>Larger <code>irisd</code> binary; adapters not used are still linked unless feature-gated.</td>
+        <td>Smaller core; adapters loaded on demand.</td>
+      </tr>
+      <tr>
+        <td>Deployment complexity</td>
+        <td>One binary, one process; trivial.</td>
+        <td>N+1 processes; supervisor; IPC; observability tree spans multiple processes.</td>
+      </tr>
+      <tr>
+        <td>Performance overhead</td>
+        <td>Zero &mdash; in-process function call.</td>
+        <td>Wire-protocol overhead per call (likely sub-millisecond, but non-zero).</td>
+      </tr>
+      <tr>
+        <td>Debugging</td>
+        <td>Single stack trace, single span tree, single core dump.</td>
+        <td>Distributed stack trace; cross-process span correlation required.</td>
+      </tr>
+      <tr>
+        <td>ABI stability requirement</td>
+        <td>Source-level compatibility within a major version.</td>
+        <td>Wire-protocol versioning; semver of the wire is harder than semver of source.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    Decision criteria for Phase 2: if F-Sub-G conformance proves the trait
+    surface is stable after 60 days of v1 production and ≥ 3 tenants want
+    custom channel adapters that can&rsquo;t reasonably ship as Rust crates,
+    pursue the plugin daemon. Otherwise stay compiled-in. The trait shape is
+    designed to be wire-protocol-implementable from day one (every type is
+    serializable, every method is async or returns a future), so the Phase 2
+    add is genuinely additive.
+  </p>
+
+  <h3 id="o2">O-2 &mdash; Spec letter reconciliation <em>(very consequential, procedural)</em></h3>
+  <p>
+    Two specs claim the letter F (this Iris spec and the in-flight
+    subscription-auth spec at
+    <code>2026-05-11-spec-f-subscription-auth-tier-1.md</code>). Per
+    <a href="#s0-3">§0.3</a> the default is to rename the prior document to
+    Spec H once Iris F-Sub-A merges; the alternative is to rename Iris to the
+    next-open letter. Reconciliation must happen before any of F-Sub-A&rsquo;s
+    artifacts ship to <code>main</code>. <em>This is a notation question, not
+    a substrate question, but it&rsquo;s consequential because the letter
+    propagates into Linear tickets, branch names, commit messages, and
+    long-lived URLs.</em>
+  </p>
+
+  <h3 id="o3">O-3 &mdash; Group conversations and channel-native group semantics <em>(consequential)</em></h3>
+  <p>
+    Channels disagree about group conversations. WhatsApp groups have
+    administrators and join-by-link semantics; Telegram groups have a similar
+    but distinct model; Signal groups are end-to-end encrypted with a
+    different administrative shape; Slack channels have an org-wide namespace;
+    Discord channels live inside guilds. The canonical
+    <code>ConversationRef::Group</code> kind in v0.1 is intentionally
+    underspecified &mdash; sufficient for routing and ordering but not for
+    cross-channel group-management UX. Phase 2 needs a typed
+    <code>GroupCapabilities</code> sibling of <code>ChannelCapabilities</code>.
+    For v1, group conversations work but group <em>management</em> (add member,
+    remove member, change admin) is delegated to native channel APIs via
+    <code>Message::channel_data</code> passthrough.
+  </p>
+
+  <h3 id="o4">O-4 &mdash; Multi-instance <code>irisd</code> coordination <em>(operational, deferred)</em></h3>
+  <p>
+    v1 ships single-instance <code>irisd</code> per tenant. Multi-instance
+    horizontal scaling requires the consistent-hash router (concern C-4) and a
+    cross-instance per-conversation lock (probably via soma coordination or a
+    Lago-backed distributed lock with a Chronos TTL fallback). Both are
+    designed for but not implemented in v1; deferral lets v1 ship and
+    operational experience inform the design.
+  </p>
+
+  <h3 id="o5">O-5 &mdash; Inference channel-awareness <em>(routing, post-Phase-1)</em></h3>
+  <p>
+    The <code>RoutingHint</code> in Spec E v0.1 does not carry channel metadata.
+    A small extension &mdash; adding <code>channel_id: Option&lt;ChannelId&gt;</code>
+    and <code>latency_target_ms: Option&lt;u32&gt;</code> to
+    <code>RoutingHint</code> &mdash; would let Inference route, e.g., SMS
+    replies to low-TTFT backends and Matrix long-form responses to
+    higher-throughput backends. Coordinate with Spec E E-Sub-E
+    (<code>inference-autonomic</code>) post-F-Sub-A.
+  </p>
+
+  <h3 id="o6">O-6 &mdash; Voice and video channels <em>(scope boundary)</em></h3>
+  <p>
+    Voice calls (Twilio Voice, WhatsApp voice notes, Signal voice messages),
+    video calls (Whereby, Daily, Matrix VoIP), and presence indicators
+    (Slack online status, Discord typing) are explicitly out of scope for v1
+    (<a href="#s11">§11</a>). The trait surface is designed to be
+    voice-extensible (<code>VoiceConnector: ChannelConnector</code> sub-trait
+    is feasible) but adding voice would re-open every locked decision around
+    serialization, capabilities, and trust modes. Phase 2+ topic.
+  </p>
+
+  <h3 id="o7">O-7 &mdash; PII / retention <em>(regulatory)</em></h3>
+  <p>
+    Default retention of 90 days (concern C-10) is a guess, not a derived
+    constraint. Different tenants have different regulatory regimes (HIPAA in
+    healthcare, GLBA in financial, GDPR in EU, LGPD in Brazil, &hellip;);
+    Iris should ship configurable retention per tenant but the
+    workspace-level default needs review by counsel before any production
+    tenant onboarding. Documented as a v1 limitation; reviewed in the v1.1
+    cycle.
+  </p>
+
+  <h3 id="o8">O-8 &mdash; Engagement-window semantics across channels other than WhatsApp <em>(modeling)</em></h3>
+  <p>
+    WhatsApp&rsquo;s 24-hour customer-care window is the most prominent
+    example, but Telegram bot accounts have their own re-engagement
+    restrictions, Slack has Connect-channel external-message limits, and
+    iMessage has read-status implications. Should
+    <code>EngagementWindow</code> generalise to a typed sum across
+    channel-specific window kinds, or stay WhatsApp-flavoured? Decision
+    blocked on F-Sub-C (Telegram) implementation experience.
+  </p>
+</section>
+
+<!-- ============================================================== -->
+<!-- §11 — OUT OF SCOPE                                              -->
+<!-- ============================================================== -->
+<section id="s11">
+  <h2>§11 Out of Scope (Phase 2+)</h2>
+
+  <ul>
+    <li>
+      <strong>Voice / audio channels.</strong> Twilio Voice, WhatsApp voice
+      notes, Signal voice notes, telephony in general. The trait surface is
+      voice-extensible; Phase 2 may add <code>VoiceConnector: ChannelConnector</code>.
+    </li>
+    <li>
+      <strong>Video calls.</strong> Daily, Whereby, Jitsi, Matrix VoIP, Google
+      Meet, Zoom integration. Out of scope by an order of magnitude &mdash;
+      video calls are real-time, stream-based, and a different substrate
+      shape entirely.
+    </li>
+    <li>
+      <strong>Real-time presence indicators.</strong> Slack online status,
+      Discord typing indicators, WhatsApp last-seen. Different cadence (high-
+      frequency, low-information) from messaging; deserves its own substrate
+      or sub-substrate (provisional name: <em>Aura</em>).
+    </li>
+    <li>
+      <strong>Advanced group-call features.</strong> Multi-party voice/video,
+      meeting recording, transcription, screen-sharing, breakout rooms. All
+      compose with the planned Vigil + Mnemo + Aegis stack and need their own
+      design.
+    </li>
+    <li>
+      <strong>Cross-channel forwarding.</strong> "Inbound on WhatsApp,
+      outbound forwarded to Slack" &mdash; an interesting feature but
+      requires careful trust-mode reasoning (the forwarded message&rsquo;s
+      <code>from</code> on the receiving channel is the agent, not the
+      original sender; the trust regimes don&rsquo;t compose cleanly).
+      Documented; deferred.
+    </li>
+    <li>
+      <strong>AI-generated multi-modal response rendering per-channel
+      quirks.</strong> Channel-specific best-format detection ("this is best
+      rendered as a Slack-blocks layout", "this should be a Telegram inline
+      keyboard", "this is a WhatsApp template") is a separate optimisation
+      surface that consumes Iris but lives upstream in the agent.
+    </li>
+  </ul>
+</section>
+
+<!-- ============================================================== -->
+<!-- §12 — REFERENCES                                                -->
+<!-- ============================================================== -->
+<section id="s12">
+  <h2>§12 References</h2>
+
+  <h4>Sibling specs</h4>
+  <ul>
+    <li><a href="2026-04-29-spec-d-anima-custody.md">Spec D &mdash; Anima Production Custody</a> &mdash; the trait-and-multi-backends pattern this spec mirrors at the identity layer.</li>
+    <li><a href="2026-05-07-spec-e-agent-loop-compute-contract.md">Spec E &mdash; Agent-Loop Compute Contract</a> &mdash; the trait-and-multi-backends pattern this spec mirrors at the compute layer; close-code vocabulary referenced in <a href="#s4">§4</a>.</li>
+    <li><a href="2026-04-29-spec-c3-close-codes.md">Spec C₃ &mdash; lifegw close codes</a> &mdash; the canonical close-code vocabulary the Iris <code>CloseCode</code> enum extends.</li>
+    <li><a href="2026-05-09-bro-1006-authored-agents-architecture.md">BRO-1006 &mdash; Authored-agents-as-data architecture</a> &mdash; the agent dispatch surface Iris dispatches to.</li>
+    <li><a href="2026-05-11-spec-f-subscription-auth-tier-1.md">Prior Spec F &mdash; Subscription Auth &amp; Tier-1 Agent Invocation</a> (to be renamed; see <a href="#s0-3">§0.3</a> and <a href="#o2">O-2</a>).</li>
+    <li><a href="2026-05-11-spec-g-external-trigger-ingress.md">Spec G &mdash; External Trigger Ingress</a> &mdash; the general external-trigger spec; Iris is the messaging-channel specialisation.</li>
+  </ul>
+
+  <h4>Reference messaging systems</h4>
+  <ul>
+    <li><strong>libpurple / Pidgin</strong> &mdash; multi-protocol IM library, 1998+. <code>prpl</code> protocol plugin ABI; canonical message + conversation + account model. <a href="https://developer.pidgin.im/wiki/WhatIsLibpurple">developer.pidgin.im</a>.</li>
+    <li><strong>Matrix mautrix / bridgev2 NetworkConnector</strong> &mdash; the modern federation-bridge framework. <a href="https://docs.mau.fi/bridges/general/index.html">docs.mau.fi</a>.</li>
+    <li><strong>Microsoft Bot Framework</strong> &mdash; <code>BotAdapter</code> + <code>Activity</code> schema. <a href="https://learn.microsoft.com/en-us/azure/bot-service/bot-builder-basics">learn.microsoft.com</a>.</li>
+    <li><strong>Twilio Conversations API</strong> &mdash; <code>Conversation</code> / <code>Participant</code> / <code>ProxyAddress</code> primitive types. <a href="https://www.twilio.com/docs/conversations">twilio.com/docs/conversations</a>.</li>
+    <li><strong>OpenClaw</strong> &mdash; workspace-internal 40+ channel relay; the most aggressive prior art on the per-session command queue + identity unification.</li>
+  </ul>
+
+  <h4>Workspace governance &amp; conventions</h4>
+  <ul>
+    <li><a href="../../../../CLAUDE.md">CLAUDE.md</a> &mdash; bstack primitives, especially P14 (Dep-Chain), P15 (Snapshot), P18 (Audience), P20 (Cross-Review). This spec was authored in compliance with P18 §6 Category B HTML idiom.</li>
+    <li><a href="../../../AGENTS.md">AGENTS.md</a> &mdash; operational rules.</li>
+    <li><a href="../../../METALAYER.md">METALAYER.md</a> &mdash; control-systems manifest.</li>
+    <li><code>.control/policy.yaml</code> &mdash; setpoints + gates; <code>iris.*</code> gates added in F-Sub-A.</li>
+  </ul>
+
+  <h4>Knowledge-graph entities</h4>
+  <ul>
+    <li><code>research/entities/concept/iris-comms-substrate.md</code> &mdash; entity page (to be authored at F-Sub-A scaffold; not part of this spec PR).</li>
+    <li><code>research/entities/pattern/canonical-message-schema.md</code> &mdash; the I-1 invariant as a knowledge-graph pattern node.</li>
+    <li><code>research/entities/pattern/per-conversation-serialization.md</code> &mdash; the I-3 invariant.</li>
+    <li><code>research/entities/pattern/trust-mode-puppeting-relay-proxy.md</code> &mdash; the I-8 invariant.</li>
+  </ul>
+
+  <h4>Standards &amp; specifications referenced</h4>
+  <ul>
+    <li>W3C WebAuthn Level 3 &mdash; passkey spec (referenced via Anima Spec D).</li>
+    <li>OpenTelemetry Messaging semantic conventions &mdash; <code>messaging.*</code> attributes Iris adopts.</li>
+    <li>OpenTelemetry GenAI semantic conventions &mdash; <code>gen_ai.*</code> attributes for agent-side spans.</li>
+    <li>WhatsApp Business Cloud API documentation &mdash; <a href="https://developers.facebook.com/docs/whatsapp/cloud-api">developers.facebook.com/docs/whatsapp/cloud-api</a>.</li>
+    <li>Telegram Bot API documentation &mdash; <a href="https://core.telegram.org/bots/api">core.telegram.org/bots/api</a>.</li>
+    <li>Twilio Programmable SMS documentation &mdash; <a href="https://www.twilio.com/docs/sms">twilio.com/docs/sms</a>.</li>
+    <li>RFC 5869 (HKDF) &mdash; used in L6-D4 ephemeral-DID derivation.</li>
+    <li>did:key Method Specification &mdash; multicodec table (<code>0x1200</code> for P-256, via Spec D).</li>
+  </ul>
+
+  <h4>Substrate cluster crates referenced</h4>
+  <ul>
+    <li><code>core/life/crates/anima/</code> &mdash; identity custody.</li>
+    <li><code>core/life/crates/inference/</code> &mdash; compute routing.</li>
+    <li><code>core/life/crates/lago/</code> &mdash; event journal.</li>
+    <li><code>core/life/crates/chronos/</code> &mdash; temporal substrate (timers).</li>
+    <li><code>core/life/crates/vigil/</code> &mdash; observability.</li>
+    <li><code>core/life/crates/haima/</code> &mdash; finance / billing.</li>
+    <li><code>core/life/crates/life-runtime/lifegw/</code> &mdash; edge gateway routes.</li>
+    <li><code>core/life/crates/life-runtime/lifed/</code> &mdash; saga + Agent.StreamSession.</li>
+  </ul>
+
+  <h4>Skill</h4>
+  <ul>
+    <li><code>skills/life-iris/SKILL.md</code> &mdash; agent-facing skill page (to be authored at F-Sub-A scaffold; covers <em>when to use Iris</em>, <em>how to declare channels</em>, <em>policy-gate patterns</em>, and <em>composition with other substrates</em>).</li>
+  </ul>
+
+</section>
+
+<hr>
+<footer>
+  <p class="footnote">
+    <strong>End of Spec F (Iris) Draft v0.1, 2026-05-18.</strong> Locked
+    decisions L6-D1 through L6-D8. Sub-phases F-Sub-A through F-Sub-H.
+    Critical path ~10 working days. Reviewer SHOULD apply
+    <a href="../../../../CLAUDE.md">P20 Cross-Review</a> before F-Sub-A
+    merge; reviewer MAY apply <a href="../../../../CLAUDE.md">P14 Dep-Chain</a>
+    + <a href="../../../../CLAUDE.md">P15 Snapshot</a> verification on the
+    PR body. Format follows <a href="../../../../CLAUDE.md">P18 Audience</a>
+    Category B (bet-the-architecture HTML exception).
+  </p>
+</footer>
+
+</article>
+
+</body>
+</html>
