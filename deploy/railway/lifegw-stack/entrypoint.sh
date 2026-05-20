@@ -102,10 +102,24 @@ runuser --preserve-environment -u life -g life-runtime -- \
   &
 LIFED_PID=$!
 
+# BRO-1193: probe the socket with `nc -zU` instead of only checking
+# whether the file is a socket. `[[ -S ... ]]` passes the instant
+# lifed `bind()`s the UDS, but `bind()` happens *before* `listen()` +
+# `accept()` make the kernel ready to queue connections. lifegw boots
+# 1-2ms after the file appears, tries to `connect()`, and gets a
+# `transport error` against an unlistening socket. The fix forces an
+# actual UDS connect: kernel only succeeds when the listen backlog is
+# up. See `lifegw::bootstrap` "Error: upstream: dial uds: transport
+# error" → "[entrypoint] FATAL: lifegw exited before binding 127.0.0.1:8443"
+# crash loop in production (2026-05-20T04:18:40 onward).
 echo "[entrypoint] waiting for lifed UDS at ${LIFE_RUNTIME_DIR}/life.sock"
 for i in $(seq 1 60); do
-  if [[ -S "${LIFE_RUNTIME_DIR}/life.sock" ]]; then
-    echo "[entrypoint] lifed UDS ready (after ${i} half-seconds)"
+  # Belt-and-suspenders: cheap file-existence check first; only attempt
+  # the nc probe once the file is a socket. nc -zU returns 0 only when
+  # connect() succeeds — i.e., listen backlog is ready.
+  if [[ -S "${LIFE_RUNTIME_DIR}/life.sock" ]] \
+     && nc -zU "${LIFE_RUNTIME_DIR}/life.sock" 2>/dev/null; then
+    echo "[entrypoint] lifed UDS accepting connections (after ${i} half-seconds)"
     break
   fi
   if ! kill -0 "${LIFED_PID}" 2>/dev/null; then
@@ -115,8 +129,8 @@ for i in $(seq 1 60); do
   fi
   sleep 0.5
 done
-if [[ ! -S "${LIFE_RUNTIME_DIR}/life.sock" ]]; then
-  echo "[entrypoint] FATAL: lifed did not bind UDS within 30s" >&2
+if ! nc -zU "${LIFE_RUNTIME_DIR}/life.sock" 2>/dev/null; then
+  echo "[entrypoint] FATAL: lifed did not accept UDS connections within 30s" >&2
   exit 1
 fi
 
