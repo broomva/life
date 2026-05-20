@@ -175,10 +175,19 @@ impl ArcanProxy {
     /// `arcan.v1.AgentSubstrate.DispatchMessage` and translates the
     /// substrate-plane events into the public-plane shape (Phase 1
     /// maps TOKEN/FINISH/ERROR; tool kinds remain Phase 2 work).
+    ///
+    /// BRO-1206: `model` is accepted at the trait boundary so callers
+    /// (lifed) can plumb a per-session override end-to-end without a
+    /// trait signature change downstream. The arcan substrate wire
+    /// (`arcan.v1.AgentSubstrate.DispatchMessage`) does NOT yet carry a
+    /// `model` field — this proxy ignores the override when forwarding
+    /// to a real arcand. Override-or-env-fallback is honored by the
+    /// `VercelAiGatewayArcan` and `AnthropicArcan` HTTP-backed impls.
     pub async fn dispatch_message(
         &self,
         sid: &str,
         content: &str,
+        _model: Option<&str>,
     ) -> ArcanProxyResult<
         Pin<
             Box<
@@ -258,6 +267,14 @@ fn record_outcome(guard: Option<PoolGuard>, success_or_permanent: bool) {
 /// Object-safe trait covering the lifed-relevant subset of arcan operations.
 /// Used in `lifed::services::agent` so the integration tests can swap the
 /// real proxy for a mock under test.
+///
+/// BRO-1206: `dispatch_message` takes an optional `model` override that
+/// flows from `POST /v1/agent/create_session`'s `model` field through
+/// lifed's routing cache. `None` means "use the backend's env default"
+/// (`OPENAI_MODEL` / `ANTHROPIC_MODEL`). Mocks accept and ignore it; the
+/// substrate-gRPC `ArcanProxy` accepts and ignores it (the arcan
+/// substrate wire doesn't carry a model field yet); HTTP-backed impls
+/// (`VercelAiGatewayArcan`, `AnthropicArcan`) honour the override.
 #[async_trait]
 pub trait ArcanCall: Send + Sync {
     async fn create_agent(&self, sid: &str) -> ArcanProxyResult<String>;
@@ -266,6 +283,7 @@ pub trait ArcanCall: Send + Sync {
         &self,
         sid: &str,
         content: &str,
+        model: Option<&str>,
     ) -> ArcanProxyResult<
         Pin<
             Box<
@@ -288,6 +306,7 @@ impl ArcanCall for ArcanProxy {
         &self,
         sid: &str,
         content: &str,
+        model: Option<&str>,
     ) -> ArcanProxyResult<
         Pin<
             Box<
@@ -296,7 +315,7 @@ impl ArcanCall for ArcanProxy {
             >,
         >,
     > {
-        ArcanProxy::dispatch_message(self, sid, content).await
+        ArcanProxy::dispatch_message(self, sid, content, model).await
     }
 }
 
@@ -362,6 +381,7 @@ impl<C: ArcanCall> ArcanCall for Pooled<C> {
         &self,
         sid: &str,
         content: &str,
+        model: Option<&str>,
     ) -> ArcanProxyResult<
         Pin<
             Box<
@@ -372,7 +392,7 @@ impl<C: ArcanCall> ArcanCall for Pooled<C> {
     > {
         // Streams hold the guard until the inner stream terminates.
         let guard = self.pool.acquire().await.map_err(ArcanProxyError::from)?;
-        match self.inner.dispatch_message(sid, content).await {
+        match self.inner.dispatch_message(sid, content, model).await {
             Ok(stream) => Ok(Box::pin(PoolGuardedStream::new(stream, Some(guard)))),
             Err(e) => {
                 if e.is_retryable() {
@@ -498,6 +518,7 @@ mod tests {
                 &self,
                 _sid: &str,
                 _content: &str,
+                _model: Option<&str>,
             ) -> ArcanProxyResult<
                 Pin<
                     Box<
@@ -546,6 +567,7 @@ mod tests {
                 &self,
                 _sid: &str,
                 _content: &str,
+                _model: Option<&str>,
             ) -> ArcanProxyResult<
                 Pin<
                     Box<

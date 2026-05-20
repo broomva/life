@@ -169,7 +169,18 @@ impl VercelAiGatewayArcan {
 
     /// Build the chat-completions request body for a single user
     /// dispatch. The system prompt (if any) is prepended.
-    fn build_request_body(&self, user_message: &str) -> serde_json::Value {
+    ///
+    /// BRO-1206: when `model_override` is `Some(non_empty)` the override
+    /// wins; otherwise we fall back to `self.cfg.model` (today's behavior
+    /// — derived at construction from `OPENAI_MODEL` env or
+    /// [`DEFAULT_MODEL`]). The override is per-call (per-session in
+    /// practice) so a single backend can serve users on different
+    /// models without rebuilding.
+    fn build_request_body(
+        &self,
+        user_message: &str,
+        model_override: Option<&str>,
+    ) -> serde_json::Value {
         let mut messages: Vec<serde_json::Value> = Vec::with_capacity(2);
         if let Some(sys) = &self.cfg.system_prompt
             && !sys.trim().is_empty()
@@ -183,8 +194,12 @@ impl VercelAiGatewayArcan {
             "role": "user",
             "content": user_message,
         }));
+        let model: &str = model_override
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(self.cfg.model.as_str());
         serde_json::json!({
-            "model": self.cfg.model,
+            "model": model,
             "messages": messages,
             "stream": true,
         })
@@ -210,10 +225,13 @@ impl ArcanCall for VercelAiGatewayArcan {
         &self,
         sid: &str,
         content: &str,
+        model: Option<&str>,
     ) -> ArcanProxyResult<Pin<Box<dyn Stream<Item = Result<AgentEvent, tonic::Status>> + Send>>>
     {
         let url = format!("{}/chat/completions", self.cfg.base_url);
-        let body = self.build_request_body(content);
+        // BRO-1206: per-call model override → outbound request body.
+        // `None` / empty falls back to `self.cfg.model` (env-bound).
+        let body = self.build_request_body(content, model);
         let resp = self
             .client
             .post(&url)
@@ -477,7 +495,7 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use futures::stream;
-    use wiremock::matchers::{header, method, path};
+    use wiremock::matchers::{body_partial_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn cfg(base_url: String) -> VercelAiGatewayConfig {
@@ -522,7 +540,7 @@ mod tests {
     fn build_request_body_contains_model_and_user_message() {
         let arc =
             VercelAiGatewayArcan::new(cfg("http://localhost:8080".to_string())).expect("build");
-        let body = arc.build_request_body("hello world");
+        let body = arc.build_request_body("hello world", None);
         assert_eq!(body["model"], "test-model");
         assert_eq!(body["stream"], true);
         let messages = body["messages"].as_array().expect("messages");
@@ -536,12 +554,28 @@ mod tests {
         let mut c = cfg("http://localhost:8080".to_string());
         c.system_prompt = Some("be helpful".to_string());
         let arc = VercelAiGatewayArcan::new(c).expect("build");
-        let body = arc.build_request_body("hello");
+        let body = arc.build_request_body("hello", None);
         let messages = body["messages"].as_array().expect("messages");
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0]["role"], "system");
         assert_eq!(messages[0]["content"], "be helpful");
         assert_eq!(messages[1]["role"], "user");
+    }
+
+    /// BRO-1206: per-call model override wins over `cfg.model`.
+    #[test]
+    fn build_request_body_honors_model_override() {
+        let arc =
+            VercelAiGatewayArcan::new(cfg("http://localhost:8080".to_string())).expect("build");
+        // Override wins.
+        let body = arc.build_request_body("hi", Some("openai/gpt-4o-mini"));
+        assert_eq!(body["model"], "openai/gpt-4o-mini");
+        // Empty override falls back to cfg.model.
+        let body = arc.build_request_body("hi", Some("   "));
+        assert_eq!(body["model"], "test-model");
+        // None falls back to cfg.model.
+        let body = arc.build_request_body("hi", None);
+        assert_eq!(body["model"], "test-model");
     }
 
     #[tokio::test]
@@ -668,7 +702,7 @@ mod tests {
 
         let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
         let stream = arc
-            .dispatch_message("sess_x", "hello?")
+            .dispatch_message("sess_x", "hello?", None)
             .await
             .expect("dispatch");
         let mut tokens = Vec::new();
@@ -692,6 +726,73 @@ mod tests {
         assert!(finish_seen);
     }
 
+    /// BRO-1206: when `dispatch_message` is called with `Some(model)`,
+    /// the outbound HTTP body's `model` field MUST equal the override.
+    /// Verified via `wiremock::matchers::body_partial_json` — wiremock
+    /// only serves the mock when the `model` field matches the override,
+    /// proving the wire shape end-to-end.
+    #[tokio::test]
+    async fn dispatch_message_override_reaches_outbound_body() {
+        let server = MockServer::start().await;
+        let sse_body = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n\
+                        data: [DONE]\n\n";
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_partial_json(serde_json::json!({
+                "model": "openai/gpt-4o-mini"
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(sse_body),
+            )
+            .mount(&server)
+            .await;
+
+        let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
+        // Override should win over `cfg.model = "test-model"`.
+        let stream = arc
+            .dispatch_message("sess_x", "hi", Some("openai/gpt-4o-mini"))
+            .await
+            .expect("override reaches body");
+        let mut s = Box::pin(stream);
+        let first = s.next().await.expect("event").expect("ok");
+        assert_eq!(first.kind(), AgentEventKind::Token);
+    }
+
+    /// BRO-1206: when `dispatch_message` is called with `None` (or empty
+    /// override), the outbound HTTP body's `model` field MUST equal
+    /// `cfg.model` — i.e. the env-bound default. Mock will only respond
+    /// when the env-default flows through.
+    #[tokio::test]
+    async fn dispatch_message_env_fallback_reaches_outbound_body() {
+        let server = MockServer::start().await;
+        let sse_body = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n\
+                        data: [DONE]\n\n";
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_partial_json(serde_json::json!({
+                "model": "test-model"
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(sse_body),
+            )
+            .mount(&server)
+            .await;
+
+        let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
+        // No override → cfg.model is "test-model" (from `cfg(...)` helper).
+        let stream = arc
+            .dispatch_message("sess_x", "hi", None)
+            .await
+            .expect("env fallback reaches body");
+        let mut s = Box::pin(stream);
+        let first = s.next().await.expect("event").expect("ok");
+        assert_eq!(first.kind(), AgentEventKind::Token);
+    }
+
     #[tokio::test]
     async fn dispatch_propagates_http_errors_with_actionable_message() {
         let server = MockServer::start().await;
@@ -702,7 +803,7 @@ mod tests {
             .await;
 
         let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
-        match arc.dispatch_message("sess_x", "hi").await {
+        match arc.dispatch_message("sess_x", "hi", None).await {
             Ok(_) => panic!("must surface 401"),
             Err(ArcanProxyError::Transport(m)) => {
                 assert!(m.contains("401"), "msg: {m}");

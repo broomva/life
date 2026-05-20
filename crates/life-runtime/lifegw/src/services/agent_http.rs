@@ -118,6 +118,15 @@ pub struct CreateSessionBody {
     /// again.
     #[serde(default)]
     pub resume_sid: Option<String>,
+    /// BRO-1206: optional per-request LLM model override. When set,
+    /// forwarded to `life.v1.Agent.CreateSession.model` and stored on
+    /// lifed's routing-cache entry; every subsequent
+    /// `Agent.SendMessage` for this sid passes it to
+    /// `ArcanCall::dispatch_message`. When unset / empty, the backend
+    /// falls back to its env-bound default (`OPENAI_MODEL` /
+    /// `ANTHROPIC_MODEL`). Backwards-compatible (additive `Option`).
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -186,6 +195,20 @@ async fn create_session_handler(
             }),
         ));
     }
+    // BRO-1206: bound `model` at the same MAX_FIELD_LEN. Vendor-prefixed
+    // identifiers like `anthropic/claude-opus-4-7` or
+    // `openai/gpt-4o-mini` are well under 128 chars; anything longer
+    // is almost certainly malformed input.
+    if let Some(ref m) = body.model
+        && m.len() > MAX_FIELD_LEN
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrJson {
+                error: format!("model must be ≤ {MAX_FIELD_LEN} characters"),
+            }),
+        ));
+    }
     // sub/user_id binding (same pattern as anima_custody): the Tier-1
     // bearer's subject MUST match the body's user_id. Without this, a
     // Tier-1 cap minted for user X could be replayed to create a
@@ -214,6 +237,15 @@ async fn create_session_handler(
 
     // 4. Forward to lifed with the Tier-2 cap.
     let mut client = AgentClient::new(state.upstream.clone());
+    // BRO-1206: normalize the optional `model` override before forwarding.
+    // Empty / whitespace-only strings are dropped so lifed sees a single
+    // "not set" representation (matching `RoutingCache::insert_with_model`).
+    let model = body
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let mut tonic_req = tonic::Request::new(pb::CreateSessionReq {
         user_id: body.user_id.clone(),
         project_id: body.project_id.clone(),
@@ -226,6 +258,7 @@ async fn create_session_handler(
                 value: s.to_string(),
             }),
         inherit_policy: None,
+        model,
     });
     let bearer_value: tonic::metadata::MetadataValue<_> = format!("Bearer {tier2}")
         .parse()
@@ -497,6 +530,48 @@ mod tests {
             post_create_session(state, &[("authorization", auth.as_str())], &body_json).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(body.contains("characters"), "body: {body}");
+    }
+
+    /// BRO-1206: `model` field is accepted at the boundary and not
+    /// flagged as unknown by `deny_unknown_fields`. The handler reaches
+    /// the upstream call (which fails because the lazy connector is
+    /// unreachable — see `happy_path_reaches_upstream_call`). What
+    /// matters here is that the body deserializes cleanly.
+    #[tokio::test]
+    async fn accepts_optional_model_field() {
+        let state = dev_state().await;
+        let auth = format!("Bearer {}", dev_tier1_token("alice"));
+        let (status, body) = post_create_session(
+            state,
+            &[("authorization", auth.as_str())],
+            r#"{"user_id":"alice","project_id":"sentinel","model":"anthropic/claude-opus-4-7"}"#,
+        )
+        .await;
+        // Same shape as `happy_path_reaches_upstream_call`: we passed
+        // body validation + Tier-1 verify + Tier-2 mint and reached
+        // the upstream call. If `model` were rejected by serde, status
+        // would be 422 Unprocessable Entity.
+        assert!(
+            status == StatusCode::BAD_GATEWAY
+                || status == StatusCode::GATEWAY_TIMEOUT
+                || status == StatusCode::INTERNAL_SERVER_ERROR,
+            "unexpected status {status}, body: {body}",
+        );
+    }
+
+    /// BRO-1206: oversized `model` is rejected with 400 (mirrors the
+    /// other `MAX_FIELD_LEN`-bounded fields).
+    #[tokio::test]
+    async fn rejects_oversized_model() {
+        let state = dev_state().await;
+        let auth = format!("Bearer {}", dev_tier1_token("alice"));
+        let oversized = "m".repeat(MAX_FIELD_LEN + 1);
+        let body_json =
+            format!(r#"{{"user_id":"alice","project_id":"sentinel","model":"{oversized}"}}"#);
+        let (status, body) =
+            post_create_session(state, &[("authorization", auth.as_str())], &body_json).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body.contains("model"), "body: {body}");
     }
 
     #[tokio::test]

@@ -31,6 +31,13 @@ pub struct MockArcan {
     pub create_agent_calls: Arc<Mutex<Vec<String>>>,
     pub destroy_agent_calls: Arc<Mutex<Vec<String>>>,
     pub dispatch_calls: Arc<Mutex<Vec<(String, String)>>>,
+    /// BRO-1206: captures the per-call `model` override passed to
+    /// `dispatch_message`. Tests assert this to prove the override
+    /// travels end-to-end from `Agent.CreateSession` (stored on the
+    /// routing-cache entry) through `Agent.SendMessage` to the
+    /// substrate-call boundary.
+    #[allow(clippy::type_complexity)]
+    pub dispatch_models: Arc<Mutex<Vec<(String, Option<String>)>>>,
     /// When set, the next `create_agent` returns an error (then resets).
     pub fail_next: Arc<AtomicBool>,
     /// Sub-phase D: sustained failure mode for chaos tests.
@@ -115,11 +122,19 @@ impl ArcanCall for MockArcan {
         &self,
         sid: &str,
         content: &str,
+        model: Option<&str>,
     ) -> ArcanProxyResult<Pin<Box<dyn Stream<Item = Result<pb::AgentEvent, tonic::Status>> + Send>>>
     {
+        // BRO-1206: mock records the dispatch (sid, content) — model
+        // override is captured separately on `dispatch_models` so
+        // tests can assert plumbing without changing existing
+        // `dispatch_calls` semantics.
         self.dispatch_calls
             .lock()
             .push((sid.to_string(), content.to_string()));
+        self.dispatch_models
+            .lock()
+            .push((sid.to_string(), model.map(str::to_string)));
         if let Some(s) = self.force_fail_status() {
             return Err(ArcanProxyError::Substrate(s));
         }

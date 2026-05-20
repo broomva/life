@@ -150,11 +150,17 @@ impl Drop for PumpGuard {
 /// a `PoolGuardedStream` that records the breaker outcome on terminal
 /// poll. The `PumpGuard` retained here only governs the
 /// one-pump-per-session invariant. Drop is panic-safe (RAII).
+///
+/// BRO-1206: `model` carries the per-session LLM model override (looked
+/// up from the routing-cache entry's `model` field by the caller). Mocks
+/// + the substrate gRPC proxy accept and ignore it; the HTTP-backed
+///   `VercelAiGatewayArcan` / `AnthropicArcan` impls honour it.
 fn spawn_or_attach_fanout_pump(
     fanout: &Arc<FanoutRegistry>,
     arcan: Arc<dyn ArcanCall>,
     sid: String,
     content: String,
+    model: Option<String>,
 ) {
     let Some(pump_guard) = PumpGuard::try_claim(Arc::clone(fanout), sid.clone()) else {
         // A pump is already running for this session — the new
@@ -170,7 +176,10 @@ fn spawn_or_attach_fanout_pump(
         // lifetime. If the spawned future panics, Drop releases the
         // slot — Spec C₂ §6.4 invariant preserved.
         let _pump_guard = pump_guard;
-        match arcan.dispatch_message(&sid, &content).await {
+        match arcan
+            .dispatch_message(&sid, &content, model.as_deref())
+            .await
+        {
             Ok(mut up) => {
                 use futures::StreamExt;
                 while let Some(evt) = up.next().await {
@@ -309,8 +318,13 @@ impl pb::agent_server::Agent for AgentService {
             .run(ctx, steps)
             .await
             .map_err(|e| e.into_status())?;
+        // BRO-1206: persist optional per-request model override on the
+        // routing-cache entry. Empty / whitespace is normalised to None
+        // inside `insert_with_model`. The override flows out via
+        // `send_message` → `spawn_or_attach_fanout_pump` →
+        // `ArcanCall::dispatch_message`.
         self.routing
-            .insert_minimal(&sid, &body.user_id, &body.project_id);
+            .insert_with_model(&sid, &body.user_id, &body.project_id, body.model.clone());
         Ok(Response::new(pb::Session {
             sid: Some(sid),
             agent_id: Some(aios_v1::AgentId {
@@ -377,13 +391,21 @@ impl pb::agent_server::Agent for AgentService {
             .ok_or_else(|| Status::invalid_argument("missing sid"))?
             .value
             .clone();
+        let sid_proto = aios_v1::SessionId {
+            value: sid_value.clone(),
+        };
         let fanout = self
             .routing
-            .lookup_fanout(&aios_v1::SessionId {
-                value: sid_value.clone(),
-            })
+            .lookup_fanout(&sid_proto)
             .ok_or_else(|| Status::not_found("session not found"))?;
         let stream = fanout.attach(64);
+        // BRO-1206: lift the per-session model override from the
+        // routing-cache entry (None when `Agent.CreateSession` carried no
+        // `model` field — backends apply env fallback). Cached lookup is
+        // a single DashMap read + RwLock read; cheap enough on the
+        // hot path that an explicit per-`SendMessage` model field is
+        // unnecessary.
+        let model = self.routing.lookup_model(&sid_proto);
         // Sub-phase E: pool bracketing is inside the arcan-proxy `Pooled`
         // adapter; the pump only manages the one-pump-per-session slot
         // via `PumpGuard` (RAII).
@@ -392,6 +414,7 @@ impl pb::agent_server::Agent for AgentService {
             Arc::clone(&self.arcan_call),
             sid_value,
             body.content,
+            model,
         );
         Ok(Response::new(Box::pin(stream)))
     }
