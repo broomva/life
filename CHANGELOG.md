@@ -2,6 +2,79 @@
 
 ## Unreleased
 
+### Added — ergon v0.1 (Layer 2 — agent-harness primitive)
+- **`ergon` crate** (Layer 2 of the agent-harness stack — see
+  `docs/architecture/agent-harness.md`). Vendor-neutral workflow
+  primitive: a small trait crate (`Workflow`, `Step`, `StepCtx`, `Hook`,
+  `StreamSink`, `Role`) that a Broomva developer implements to express a
+  **bounded multi-turn agent operation** as plain async Rust. Ships
+  alongside `arcan-harness` — does NOT replace it (the original
+  framing in §6/§10 of `2026-05-05-ergon-v0.1.md` was corrected by
+  `2026-05-08-bro-1001-ergon-tick-body.md`: ergon supplies one *shape
+  of tick body* alongside the existing direct-call tick body; the
+  kernel still owns the long-horizon agent loop).
+  * Public traits: `Workflow` + `WorkflowExecutor` (deterministic
+    orchestration), `Step` + `StepCtx` (autonomous LLM step
+    boundaries), `Hook` + `HookRegistry` (cross-cutting policy /
+    observability), `Role` + `RoleScope` (call > session > agent
+    precedence), `Provider` + `ToolRegistry` + `RuntimeHandle`
+    (substrate-handle traits owned by ergon, not arcan).
+  * Canonical `StreamEvent` taxonomy (append-only after v1.0; consumers
+    MUST handle `StreamEvent::VendorEvent` for forward-compatibility).
+  * Default `StreamSink` impls in `ergon`: `BufferSink`, `FanoutSink`.
+  * Authored-agent substrate (BRO-1007): `Agent` + `AgentSpec` interpreter
+    + `TypedAgent` trait with auto-`Agent` impl; reads
+    `core/life/agents/*.md` markdown frontmatter and runs the body as a
+    workflow.
+  * Substrate-free: zero deps on `lago-journal`, `life-vigil`,
+    `praxis-*`, `arcan-*`, `anima-*`, `autonomic-*`, `nous-*` — the
+    arcan adapter (`arcan-ergon`) translates at the boundary.
+  * 99 unit tests + 15 integration tests in `crates/ergon/ergon/`.
+- **`ergon-life-hooks` crate** (Layer 2 substrate bridge — BRO-1000).
+  Four auto-registered hooks that wire ergon ticks to Life substrate:
+  `PraxisCapabilityHook` (capability tokens), `AutonomicBudgetHook`
+  (budget gate), `NousScoreHook` (post-execution scoring),
+  `AnimaAttestHook` (soul attestation). Each hook is constructed with
+  its own substrate adapter trait — ergon stays substrate-free; the
+  arcan adapter at `crates/arcan/arcan-ergon/` implements the adapter
+  traits. 8 tests.
+- **`ergon-life-sinks` crate** (Layer 2 stream-delivery — BRO-999b).
+  Three Life-coupled `StreamSink` impls: `LagoSink` (durable replay
+  via `lago_core::Journal::append`), `VigilSink` (observability via
+  `tracing::info!` — vigil's global subscriber forwards to OTel),
+  `LifegwSink` (user-facing SSE via `tokio::sync::mpsc::Sender`).
+  Three-tier failure model: durable first (Lago short-circuits on
+  error), observability infallible (Vigil never blocks), user-facing
+  surfaces backpressure (Lifegw → `StreamClosed`). Consumer wiring
+  for the workflow-tick path is the remaining v0.1 gap — see
+  `research/entities/concept/workflow-tick-stream-blind-spot.md`.
+  15 tests.
+- **Architecture doc**: `docs/architecture/ergon.md` — the read-on-
+  arrival map of ergon for future agents navigating the monorepo
+  (purpose, layered position, public API, lifecycle, delegation
+  boundaries, integration with Life, authored-agents pattern, known
+  gaps).
+- **CI**: dedicated `ergon-check` lane (`cargo fmt | clippy | check |
+  test` over `ergon` + `ergon-life-hooks` + `ergon-life-sinks` with
+  `-D warnings`) and `verify-deps-ergon` dep-isolation lane (mirrors
+  the lifed pattern from M5 sub-phase A — enforces ergon-core's
+  zero-substrate-dep invariant, `ergon-life-hooks` bridges-only-the-
+  4-auto-hook-substrates rule, and `ergon-life-sinks` lago-core-only
+  rule). Scripts at `scripts/verify_dependencies_ergon.sh` (with
+  `--self-test` regression guard).
+
+**Upcoming / in-flight** (parallel-dispatch wave, not yet merged when
+this PR opens):
+- `lifed` `Agent.StreamSession` route exposing ergon workflows over
+  tonic-web — [BRO-1002](https://linear.app/broomva/issue/BRO-1002)
+- `core/life/apps/bookkeeping-judge/` — first production ergon
+  workflow (Nous-gate evaluator) ported from Bellows with parity test
+  — [BRO-1003](https://linear.app/broomva/issue/BRO-1003)
+
+Both will be linked from `docs/architecture/ergon.md` once merged.
+When both land, the **ergon v0.1 Definition of Done** is closed
+(BRO-994).
+
 ### Added
 - **`anima.v1.IdentitySubstrate` gRPC server** — closes Phase 4 of the
   Topology B substrate-stub gap (BRO-1019), the FINAL piece of the
