@@ -247,9 +247,13 @@ impl Agent for AnthropicProxyAgentService {
         // bookkeeps multi-turn history per-sid internally
         // (`append_exchange` on `Finish`), so successive turns on the
         // same sid carry conversation context.
+        // BRO-1206: this local-smoke harness predates per-request model
+        // selection; it always uses the env-bound default by passing
+        // `None`. A production lifed wires the per-session override here
+        // from its routing-cache entry.
         let stream = self
             .arcan
-            .dispatch_message(&sid, &content)
+            .dispatch_message(&sid, &content, None)
             .await
             .map_err(|e| tonic::Status::internal(format!("AnthropicArcan dispatch failed: {e}")))?;
         Ok(tonic::Response::new(stream))

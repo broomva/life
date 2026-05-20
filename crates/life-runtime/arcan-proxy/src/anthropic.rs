@@ -127,7 +127,19 @@ impl AnthropicArcan {
         Self::new(AnthropicArcanConfig::from_env()?)
     }
 
-    fn request_body(&self, sid: &str, content: &str) -> serde_json::Value {
+    /// Build the Anthropic Messages API request body.
+    ///
+    /// BRO-1206: when `model_override` is `Some(non_empty)` the override
+    /// wins over `self.cfg.model` (env-bound default — `ANTHROPIC_MODEL`
+    /// or [`DEFAULT_MODEL`]). Empty / whitespace / `None` falls back to
+    /// the env default. Per-call override means a single backend can
+    /// serve sessions on different Claude models without re-construction.
+    fn request_body(
+        &self,
+        sid: &str,
+        content: &str,
+        model_override: Option<&str>,
+    ) -> serde_json::Value {
         let prior = self
             .history
             .lock()
@@ -139,8 +151,12 @@ impl AnthropicArcan {
             .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
             .collect();
         messages.push(serde_json::json!({"role": "user", "content": content}));
+        let model: &str = model_override
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(self.cfg.model.as_str());
         let mut body = serde_json::json!({
-            "model": self.cfg.model,
+            "model": model,
             "max_tokens": self.cfg.max_tokens,
             "messages": messages,
             "stream": true
@@ -188,6 +204,7 @@ impl ArcanCall for AnthropicArcan {
         &self,
         sid: &str,
         content: &str,
+        model: Option<&str>,
     ) -> ArcanProxyResult<Pin<Box<dyn Stream<Item = Result<AgentEvent, tonic::Status>> + Send>>>
     {
         let url = format!("{}/v1/messages", self.cfg.base_url);
@@ -198,7 +215,9 @@ impl ArcanCall for AnthropicArcan {
             .header("content-type", "application/json")
             .header("accept", "text/event-stream")
             .header("x-api-key", &self.cfg.api_key)
-            .json(&self.request_body(sid, content))
+            // BRO-1206: per-call override or env-bound default in the
+            // outbound `model` field.
+            .json(&self.request_body(sid, content, model))
             .send()
             .await
             .map_err(|e| ArcanProxyError::Transport(format!("POST {url}: {e}")))?;
@@ -604,6 +623,33 @@ mod tests {
         // Non-secret fields still appear.
         assert!(rendered.contains(DEFAULT_MODEL));
         assert!(rendered.contains("helpful assistant"));
+    }
+
+    /// BRO-1206: `request_body` honors model overrides per-call.
+    /// Empty / whitespace / `None` falls back to `cfg.model`.
+    #[test]
+    fn request_body_honors_model_override() {
+        let cfg = AnthropicArcanConfig {
+            api_key: "k".to_string(),
+            base_url: DEFAULT_BASE_URL.to_string(),
+            model: "claude-sonnet-4-5-default".to_string(),
+            max_tokens: DEFAULT_MAX_TOKENS,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            system_prompt: None,
+        };
+        let arc = AnthropicArcan::new(cfg).expect("build");
+        // Override wins.
+        let body = arc.request_body("sid", "hi", Some("claude-opus-4-7"));
+        assert_eq!(body["model"], "claude-opus-4-7");
+        // Empty override falls back to cfg.model.
+        let body = arc.request_body("sid", "hi", Some(""));
+        assert_eq!(body["model"], "claude-sonnet-4-5-default");
+        // Whitespace falls back too.
+        let body = arc.request_body("sid", "hi", Some("   "));
+        assert_eq!(body["model"], "claude-sonnet-4-5-default");
+        // None falls back.
+        let body = arc.request_body("sid", "hi", None);
+        assert_eq!(body["model"], "claude-sonnet-4-5-default");
     }
 
     #[tokio::test]

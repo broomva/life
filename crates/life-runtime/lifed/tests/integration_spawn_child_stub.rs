@@ -23,6 +23,7 @@ async fn spawn_child_returns_unimplemented() {
             label: "child".to_string(),
             resume_sid: None,
             inherit_policy: None,
+            model: None,
         }),
         budget_cap_micros: 100_000,
         inherit_policy: Some(ChildPolicy {

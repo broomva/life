@@ -790,6 +790,10 @@ async fn create_session(
             value: sid.to_string(),
         }),
         inherit_policy: None,
+        // BRO-1206: Spec J / Claude Code path passes the model per-turn
+        // via the Anthropic Messages API request body itself — the
+        // session-level override is intentionally not set here.
+        model: None,
     });
     attach_tier2(&mut req, tier2)?;
 

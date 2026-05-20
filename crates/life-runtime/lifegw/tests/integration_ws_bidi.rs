@@ -459,6 +459,7 @@ impl TestEnv {
             label: "ws-test".to_string(),
             resume_sid: None,
             inherit_policy: None,
+            model: None,
         });
         let bearer = format!("Bearer dev-token-for-{user_id}");
         req.metadata_mut()

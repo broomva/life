@@ -163,6 +163,20 @@ impl TestEnv {
         project_id: &str,
         label: &str,
     ) -> Result<Session, tonic::Status> {
+        self.create_session_dev_with_model(user_id, project_id, label, None)
+            .await
+    }
+
+    /// BRO-1206: build a `CreateSessionReq` with an optional `model`
+    /// override and dispatch it. Used by the per-request-model selection
+    /// integration tests to prove the field travels end-to-end.
+    pub async fn create_session_dev_with_model(
+        &self,
+        user_id: &str,
+        project_id: &str,
+        label: &str,
+        model: Option<&str>,
+    ) -> Result<Session, tonic::Status> {
         let mut client = self.agent_client().await;
         let mut req = tonic::Request::new(CreateSessionReq {
             user_id: user_id.to_string(),
@@ -170,6 +184,7 @@ impl TestEnv {
             label: label.to_string(),
             resume_sid: None,
             inherit_policy: None,
+            model: model.map(str::to_string),
         });
         // Sub-phase A: the dev signer accepts a deterministic test token whose
         // body is `bearer test-token-for-{user_id}`. Real ES256 lands in B5.

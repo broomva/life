@@ -43,6 +43,7 @@ async fn proxy_forwards_create_session() {
         label: "lifegw-roundtrip".to_string(),
         resume_sid: None,
         inherit_policy: None,
+        model: None,
     });
     req.metadata_mut().insert(
         "authorization",
@@ -90,6 +91,7 @@ async fn missing_bearer_returns_unauthenticated() {
         label: "no-auth".to_string(),
         resume_sid: None,
         inherit_policy: None,
+        model: None,
     });
     let err = client
         .create_session(req)
