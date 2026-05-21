@@ -14,12 +14,21 @@ pub mod listener;
 pub mod peercred;
 pub mod policy;
 pub mod service;
+// BRO-1215 — Spec D D-Sub-E M9-E: HashiCorp Vault Transit `CustodyKeyStore`
+// adapter. Gated by the `kms-vault` cargo feature so default builds
+// (freelance / dev) don't pay the Vault HTTP-client dep cost. Production
+// multi-tenant deploys flip `[custody] backend = "vault"` in the soma
+// config and select this module's store at bootstrap.
+#[cfg(feature = "kms-vault")]
+pub mod vault_keys;
 
 pub use keys::{InProcessCustodyKeys, derive_wallet_address};
 pub use listener::{AdminAcceptor, AdminConn, AdminConnInfo, bind};
 pub use peercred::{PeerCred, group_gid, peer_cred, supplementary_gids_of_uid};
 pub use policy::{AdminOp, AdminPolicy};
 pub use service::{CustodyKeyStore, CustodyOracleService};
+#[cfg(feature = "kms-vault")]
+pub use vault_keys::VaultCustodyKeys;
 
 use std::sync::Arc;
 

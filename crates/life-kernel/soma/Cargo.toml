@@ -21,6 +21,12 @@ default = ["vsock-listener"]
 # vsock-listener is a no-op on non-Linux builds; the feature flag exists so
 # downstream integrators can opt out without code changes.
 vsock-listener = []
+# BRO-1215 — Spec D D-Sub-E M9-E: opt in to the HashiCorp Vault Transit
+# custody backend for the admin `CustodyOracle`. Default OFF so freelance
+# / dev deploys keep using `InProcessCustodyKeys` without dragging in the
+# Vault HTTP client. Production multi-tenant deploys enable this feature
+# and select `[custody] backend = "vault"` in the soma config.
+kms-vault = ["dep:anima-identity"]
 
 [dependencies]
 aios-protocol.workspace = true
@@ -74,6 +80,13 @@ anima-core.workspace = true
 # BRO-1019: anima.v1.IdentitySubstrate codegen — wire-only; depends on
 # aios-proto + tonic only.
 anima-substrate-proto.workspace = true
+# BRO-1215 — Spec D D-Sub-E M9-E: optional Vault Transit custody backend.
+# anima-identity carries the `VaultTransitAnima` impl behind its own
+# `kms-vault` feature; we mirror that gating so soma's default build
+# stays slim. Pulls reqwest + tokio transitively only when the feature
+# is on. (anima-identity isn't a workspace dep — every consumer pins
+# via path, matching anima-lago / arcan-anima / lago-auth / haima-x402.)
+anima-identity = { path = "../../anima/anima-identity", version = "0.3.0", optional = true, features = ["kms-vault"] }
 hex = { workspace = true }
 prost-types = "0.14"
 
