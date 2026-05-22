@@ -1,0 +1,92 @@
+# M9-E PR-1 (BRO-1215) — Vault sidecar Docker compose for the
+# softhsm-backed secp256k1 stopgap. See README.md for the architectural
+# reality (Vault community doesn't sign secp256k1 natively) and the
+# upgrade path to Vault Enterprise / real HSM.
+#
+# What this compose stand-up gives the operator:
+#   - softhsm2 container with PKCS#11 + a secp256k1 keypair provisioned
+#     from the RFC 6979 §A.2.5 canonical private key (test-vector spike)
+#   - Vault community container for the *auth* half (P-256, which Vault
+#     supports natively via transit/ecdsa-p256)
+#   - Healthcheck on both
+#
+# What the operator still has to add for full M9-E:
+#   - A PKCS#11→HTTP bridge that fronts softhsm with the same
+#     `transit/sign/<key>` wire shape `VaultTransitAnima` expects.
+#     Filed as BRO-1215-followup-pkcs11-bridge — not in this PR scope.
+#   - Mainnet or any chain config beyond Base Sepolia — out of scope.
+#
+# Operator quickstart:
+#   docker-compose -f docker-compose.yml up -d
+#   ./init-softhsm.sh                 # provision the secp256k1 keypair
+#   ./test-vectors/secp256k1-sign.sh  # validate against the test vector
+#
+# The test-vector script's exit code is 0 iff softhsm produces the same
+# r||s the Rust test pins (see
+# crates/life-runtime/lifegw/tests/secp256k1_test_vector.rs).
+
+version: "3.8"
+
+services:
+  # ── softhsm2: holds the secp256k1 keypair ────────────────────────────
+  # Image: opendnssec/softhsm2 (well-maintained, published by the
+  # OpenDNSSEC project — the canonical maintainer). We don't pin a tag
+  # here because softhsm2's release cadence is slow + the operator
+  # should choose a tag aligned with their security review. For dev /
+  # the test-vector spike, `latest` is acceptable; production deploys
+  # MUST pin.
+  softhsm:
+    image: opendnssec/softhsm2:latest
+    container_name: lifegw-softhsm
+    # PKCS#11 isn't a network protocol — softhsm exposes itself via a
+    # shared filesystem (`/var/lib/softhsm/tokens/`). Anything that needs
+    # to call PKCS#11 mounts this volume and links against
+    # `libsofthsm2.so`.
+    volumes:
+      - softhsm-tokens:/var/lib/softhsm/tokens
+      - ./init-softhsm.sh:/init-softhsm.sh:ro
+      - ./test-vectors:/test-vectors:ro
+    # The container's default entrypoint is `softhsm2-util`. We keep it
+    # alive by replacing entrypoint with `tail -f /dev/null` so the
+    # operator can `docker-compose exec softhsm /init-softhsm.sh`
+    # interactively.
+    entrypoint: ["tail", "-f", "/dev/null"]
+    # softhsm2 doesn't need privileged or root-on-host; the user inside
+    # the container is the only one touching the token dir.
+    restart: unless-stopped
+
+  # ── Vault community: holds the P-256 (auth) keys via transit ─────────
+  # Vault community natively supports ecdsa-p256 in the transit engine.
+  # secp256k1 is NOT supported (community PR hashicorp/vault#23044 is
+  # still open) — that's why softhsm is the secp256k1 backend in this
+  # stopgap.
+  #
+  # The token here is the development root token. Production deploys:
+  #   (1) use a real auth method (AppRole / k8s / Cloud IAM), NOT the
+  #       root token;
+  #   (2) inject the resolved token to lifegw + soma via Docker secrets
+  #       mounted at /run/secrets/vault_token (see runbook.html);
+  #   (3) rotate per `renew_interval` in the lifegw/soma config TOMLs.
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: lifegw-vault
+    cap_add:
+      - IPC_LOCK   # Vault best practice — prevent core-dump leak of secrets
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: lifegw-dev-root-token
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    ports:
+      # Internal network only — staging deploy wraps this in a Docker
+      # network that no public route reaches. The host binding is here
+      # for the operator's local pre-flight only.
+      - "127.0.0.1:8200:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  softhsm-tokens:
+    driver: local

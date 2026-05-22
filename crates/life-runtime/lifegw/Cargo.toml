@@ -200,6 +200,12 @@ async-trait.workspace = true
 # verification). p256 + ciborium are already lifegw main deps and so
 # accessible from tests.
 k256.workspace = true
+# BRO-1215 M9-E PR-1: dev-only sha2 for the RFC 6979 §A.2.5
+# test-vector verifier (tests/secp256k1_test_vector.rs). sha2 is
+# already an opt-in main dep under the kms-gcp feature; the dev-dep
+# entry makes it unconditionally available to tests without forcing
+# kms-gcp on the production build.
+sha2 = { workspace = true }
 # Sub-phase A integration test stands up a real lifed instance with mock
 # substrates and proxies through lifegw. Allowed as a *dev*-dep only; the
 # production crate graph never pulls lifed (Spec C₃ §11.2 dependency rules
