@@ -218,6 +218,25 @@ where
             // Authorization wins when both are present so a forwarded
             // chain that copies the bearer twice always trusts the
             // canonical header form.
+            //
+            // BRO-1228 defense-in-depth (PR #1435): debug-level trace of
+            // what auth carriers actually arrived. Browser-WS upgrades
+            // ride `Sec-WebSocket-Protocol: bearer.<jwt>`; if any L7 in
+            // front strips that header (Caddy mis-config, Railway edge,
+            // Vercel rewrite), the only diagnostic was a generic
+            // "missing Tier-1 bearer token" grpc message. With this
+            // trace, `RUST_LOG=lifegw::auth=debug` surfaces the exact
+            // header state per request so future regressions are
+            // grepable in Railway logs without re-deploying instrumented
+            // builds.
+            tracing::debug!(
+                has_authorization = req.headers().contains_key("authorization"),
+                has_subprotocol = req.headers().contains_key("sec-websocket-protocol"),
+                subprotocol_value = ?req.headers().get("sec-websocket-protocol").and_then(|v| v.to_str().ok()),
+                path = req.uri().path(),
+                method = %req.method(),
+                "tier1 bearer extraction"
+            );
             let bearer = bearer_from_authorization(&req).or_else(|| bearer_from_subprotocol(&req));
 
             // `dev_signer_enabled` is informational here — both code
