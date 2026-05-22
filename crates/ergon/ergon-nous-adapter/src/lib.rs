@@ -57,10 +57,7 @@ impl NousAdapter {
 
 #[async_trait]
 impl ResponseScorer for NousAdapter {
-    async fn score(
-        &self,
-        _response: &ModelResponse,
-    ) -> Result<Value, String> {
+    async fn score(&self, _response: &ModelResponse) -> Result<Value, String> {
         // Implementation follow-up tracked in BRO-1225 implementation
         // ticket (filed after the ADR review pass).
         //
