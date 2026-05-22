@@ -28,10 +28,7 @@ pub trait AgentAttestationSigner: Send + Sync {
     /// Sign a step receipt. The receipt is opaque to this trait — the
     /// adapter chooses how to canonicalize before signing. Errors are
     /// non-fatal at the hook layer (same contract as `SoulAttester`).
-    async fn sign_step_receipt(
-        &self,
-        receipt: &Value,
-    ) -> std::result::Result<String, String>;
+    async fn sign_step_receipt(&self, receipt: &Value) -> std::result::Result<String, String>;
 }
 
 /// Adapter — wraps an `Arc<dyn AnimaCustody>` and implements both
@@ -62,10 +59,7 @@ impl AgentAttestationAdapter {
 
 #[async_trait]
 impl AgentAttestationSigner for AgentAttestationAdapter {
-    async fn sign_step_receipt(
-        &self,
-        _receipt: &Value,
-    ) -> std::result::Result<String, String> {
+    async fn sign_step_receipt(&self, _receipt: &Value) -> std::result::Result<String, String> {
         // Implementation follow-up tracked in BRO-1226 implementation
         // ticket (filed after the ADR review pass).
         //
