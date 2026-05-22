@@ -299,6 +299,164 @@ async fn ws_slow_consumer_eventually_closes() {
 }
 
 #[tokio::test]
+async fn ws_upgrade_with_subprotocol_bearer_succeeds() {
+    // BRO-1228: browser-style WS clients can't set the Authorization
+    // header on `new WebSocket(...)` — the platform doesn't expose
+    // request headers to the constructor. The canonical browser
+    // pattern (matching `LifedWsAgentSessionClient`) is to pass the
+    // bearer as a `Sec-WebSocket-Protocol: bearer.<jwt>` entry.
+    //
+    // Before BRO-1228 the AuthLayer only consulted the Authorization
+    // header, so this upgrade returned `missing Tier-1 bearer token`
+    // — breaking every `/api/chat` turn through broomva.tech after
+    // PR-3 of BRO-1208 routed it through lifegw.
+    //
+    // This integration test asserts:
+    //   1. The upgrade succeeds (AuthLayer extracts the bearer from
+    //      the subprotocol header).
+    //   2. The 101 response echoes a subprotocol value the browser
+    //      offered (here `bearer.<jwt>` — without this echo the
+    //      browser closes the WS with 1006 before handing it to JS).
+    //   3. A `send_message` frame round-trips to lifed and produces
+    //      an `agent_event` frame back (so the bearer survives the
+    //      Tier-1 → Tier-2 rewrite into the upstream `Agent.*` call).
+    let env = TestEnv::start().await;
+    let sid = env.create_session("user-ws-subproto").await;
+
+    // Mirror the browser-side `LifedWsAgentSessionClient`: ONLY the
+    // subprotocol header carries the bearer; NO `authorization`
+    // header. `dev-token-for-X` rides inside the bearer entry so the
+    // dev signer accepts it without a real JWKS round-trip.
+    let token = format!("dev-token-for-ws-subproto-{sid}");
+    let subprotocol = format!("bearer.{token}");
+    let req = HttpRequest::builder()
+        .method("GET")
+        .uri(format!("wss://localhost/v1/agent/stream?sid={sid}"))
+        .header("host", "localhost")
+        .header("upgrade", "websocket")
+        .header("connection", "Upgrade")
+        .header("sec-websocket-version", "13")
+        .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .header("sec-websocket-protocol", subprotocol.as_str())
+        // NB: NO Authorization header — the whole point of this test.
+        .body(())
+        .expect("ws req");
+
+    let tls = tls_dial(env.lifegw_addr, &env.cert_pem)
+        .await
+        .expect("tls dial");
+    let (mut ws, resp) = client_async(req, tls)
+        .await
+        .expect("ws upgrade must succeed when bearer rides Sec-WebSocket-Protocol");
+
+    // Acceptance criterion #2: the 101 response must echo a
+    // subprotocol value the client offered. The browser side
+    // (WHATWG WebSockets) rejects the connection with 1006 if the
+    // response carries a value NOT in the offered list. We offered
+    // only `bearer.<token>` so the gateway must echo exactly that.
+    let echoed = resp
+        .headers()
+        .get("sec-websocket-protocol")
+        .map(|v| v.to_str().expect("ascii subprotocol").to_string());
+    assert_eq!(
+        echoed.as_deref(),
+        Some(subprotocol.as_str()),
+        "101 response must echo the offered subprotocol verbatim",
+    );
+
+    // Acceptance criterion #3: the upgrade actually serves traffic —
+    // bearer survives the Tier-1 → Tier-2 rewrite into the upstream.
+    let frame = serde_json::json!({
+        "kind": "send_message",
+        "content": "hello via bearer.<jwt> subprotocol",
+    });
+    ws.send(Message::Text(frame.to_string().into()))
+        .await
+        .expect("send WS frame");
+
+    let mut got_event = false;
+    let timeout = tokio::time::sleep(Duration::from_secs(5));
+    tokio::pin!(timeout);
+    loop {
+        tokio::select! {
+            _ = &mut timeout => break,
+            msg = ws.next() => match msg {
+                Some(Ok(Message::Text(text))) => {
+                    let v: serde_json::Value =
+                        serde_json::from_str(&text).expect("valid json envelope");
+                    if v["kind"].as_str() == Some("agent_event") {
+                        got_event = true;
+                        break;
+                    }
+                }
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Err(_)) => break,
+                _ => continue,
+            }
+        }
+    }
+    assert!(
+        got_event,
+        "subprotocol-bearer upgrade must stream agent_event frames",
+    );
+
+    env.shutdown().await;
+}
+
+#[tokio::test]
+async fn ws_upgrade_with_mixed_subprotocol_picks_life_v1_agent_echo() {
+    // BRO-1228 follow-up: when the client offers BOTH
+    // `life.v1.agent` and `bearer.<jwt>` we echo `life.v1.agent` (the
+    // pre-BRO-1228 wire shape Rust integration tests depend on).
+    // The bearer entry is still consumed by AuthLayer for Tier-1.
+    let env = TestEnv::start().await;
+    let sid = env.create_session("user-ws-mixed-subproto").await;
+
+    let token = format!("dev-token-for-ws-mixed-{sid}");
+    let subprotocol = format!("life.v1.agent, bearer.{token}");
+    let req = HttpRequest::builder()
+        .method("GET")
+        .uri(format!("wss://localhost/v1/agent/stream?sid={sid}"))
+        .header("host", "localhost")
+        .header("upgrade", "websocket")
+        .header("connection", "Upgrade")
+        .header("sec-websocket-version", "13")
+        .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .header("sec-websocket-protocol", subprotocol.as_str())
+        .body(())
+        .expect("ws req");
+
+    let tls = tls_dial(env.lifegw_addr, &env.cert_pem)
+        .await
+        .expect("tls dial");
+    let (mut ws, resp) = client_async(req, tls).await.expect("ws upgrade");
+
+    let echoed = resp
+        .headers()
+        .get("sec-websocket-protocol")
+        .map(|v| v.to_str().expect("ascii subprotocol").to_string());
+    assert_eq!(
+        echoed.as_deref(),
+        Some("life.v1.agent"),
+        "mixed offer prefers life.v1.agent over the bearer entry",
+    );
+
+    // Best-effort polite close so the gateway doesn't surface a
+    // backpressure log noise warning during the test teardown.
+    let _ = ws
+        .send(Message::Close(Some(
+            tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                code: CloseCode::Normal,
+                reason: "test_done".into(),
+            },
+        )))
+        .await;
+    drop(ws);
+
+    env.shutdown().await;
+}
+
+#[tokio::test]
 async fn ws_upgrade_without_sid_returns_400() {
     // Spec deviation (BRO-938 C1): the user prompt path
     // /v1/agent/stream does not embed sid in the URL. We require
