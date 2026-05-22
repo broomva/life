@@ -444,6 +444,22 @@ mod tests {
         enforce("/v1/agent/stream", &t1).expect("ws upgrade requires agent:dispatch");
     }
 
+    /// BRO-1228: the broken-prod token is `tier: "anon"` with
+    /// `scopes: ["agent:dispatch"]` — confirms scope::enforce gates on
+    /// the scope string set, not on the tier label, so unblocking the
+    /// auth/middleware bearer-extraction fix is sufficient end-to-end.
+    #[test]
+    fn enforce_ws_upgrade_passes_for_anon_tier_with_dispatch_scope() {
+        let t1 = Tier1Claims {
+            user_id: "anon:019e4d01-60de-724d-88d5-1376b8b8021a".to_string(),
+            project_id: "default".to_string(),
+            scopes: vec!["agent:dispatch".to_string()],
+            tier: "anon".to_string(),
+        };
+        enforce("/v1/agent/stream", &t1)
+            .expect("anon tier with agent:dispatch scope must pass WS upgrade");
+    }
+
     #[test]
     fn enforce_ws_upgrade_without_dispatch_scope_rejected() {
         let t1 = Tier1Claims {
