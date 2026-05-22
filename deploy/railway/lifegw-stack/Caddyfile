@@ -54,6 +54,14 @@
 	reverse_proxy @websocket https://127.0.0.1:8443 {
 		header_up Connection Upgrade
 		header_up Upgrade websocket
+		# Explicitly forward Sec-WebSocket-Protocol upstream. Caddy's
+		# default reverse_proxy strips some hop-by-hop headers during a
+		# WebSocket upgrade; the bearer carrier MUST reach lifegw's
+		# auth middleware (see crates/life-runtime/lifegw/src/auth/
+		# middleware.rs:bearer_from_subprotocol, BRO-1228) or browser-
+		# style WS upgrades degrade to "missing Tier-1 bearer token"
+		# even when the client offered bearer.<jwt> as a sub-protocol.
+		header_up Sec-WebSocket-Protocol {>Sec-WebSocket-Protocol}
 		transport http {
 			tls_insecure_skip_verify
 			versions 1.1
