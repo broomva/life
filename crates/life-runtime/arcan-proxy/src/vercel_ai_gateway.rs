@@ -232,6 +232,27 @@ impl ArcanCall for VercelAiGatewayArcan {
         // BRO-1206: per-call model override → outbound request body.
         // `None` / empty falls back to `self.cfg.model` (env-bound).
         let body = self.build_request_body(content, model);
+
+        // BRO-1234: trace the substrate boundary so a silent gateway
+        // hang is distinguishable from a substrate-never-fires hang in
+        // production logs. The previous incarnation of this module
+        // emitted no log on entry / response → the broomva.tech-side
+        // dogfood saw "3 frames then silence" with no upstream signal
+        // to disambiguate H4 (gateway stalls) / H5 (parser bug) /
+        // H6 (ws-pump drops). These info lines + the per-chunk +
+        // per-emit logs in `parse_sse_token_stream` give every step
+        // of the body pump a name.
+        let t_start = std::time::Instant::now();
+        let resolved_model = model
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(&self.cfg.model);
+        tracing::info!(
+            sid = sid,
+            model = resolved_model,
+            content_len = content.len(),
+            url = %url,
+            "arcan.dispatch_message: starting",
+        );
         let resp = self
             .client
             .post(&url)
@@ -240,16 +261,38 @@ impl ArcanCall for VercelAiGatewayArcan {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ArcanProxyError::Transport(format!("POST {url}: {e}")))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
+            .map_err(|e| {
+                tracing::warn!(
+                    sid = sid,
+                    elapsed_ms = t_start.elapsed().as_millis() as u64,
+                    error = %e,
+                    "arcan.dispatch_message: gateway send failed",
+                );
+                ArcanProxyError::Transport(format!("POST {url}: {e}"))
+            })?;
+        let resp_elapsed_ms = t_start.elapsed().as_millis() as u64;
+        let status = resp.status();
+        if !status.is_success() {
             let bytes = resp.bytes().await.unwrap_or_default();
             let body_preview = String::from_utf8_lossy(&bytes);
+            tracing::warn!(
+                sid = sid,
+                status = status.as_u16(),
+                elapsed_ms = resp_elapsed_ms,
+                body_preview = %truncate_body(&body_preview, 128),
+                "arcan.dispatch_message: gateway returned non-2xx",
+            );
             return Err(ArcanProxyError::Transport(format!(
                 "POST {url} returned HTTP {status}: {}",
                 truncate_body(&body_preview, 256)
             )));
         }
+        tracing::info!(
+            sid = sid,
+            status = status.as_u16(),
+            elapsed_ms = resp_elapsed_ms,
+            "arcan.dispatch_message: gateway responded — attaching SSE parser",
+        );
 
         // Stream parser: SSE-style lines `data: {json}\n\n` with
         // `data: [DONE]\n\n` as the terminal marker.
@@ -286,6 +329,56 @@ struct ChatCompletionDelta {
     content: Option<String>,
 }
 
+/// Per-stream observability state threaded through the unfold
+/// closure. BRO-1234: gives every body-pump + emit boundary a named
+/// log line so a production dogfood can distinguish "gateway stops
+/// sending bytes" from "parser stops emitting events" from
+/// "downstream ws pump drops frames."
+struct ParserMetrics {
+    /// `sid` extracted from `session_id.value` so every log line
+    /// correlates with the lifegw saga / WS upgrade for the same chat.
+    sid: String,
+    /// Wall clock at which `parse_sse_token_stream` started consuming.
+    /// `Instant::elapsed()` measures time-to-first-chunk and time
+    /// between chunks — the key signal for distinguishing a gateway-
+    /// side stall from a parser bug.
+    t_start: std::time::Instant,
+    /// Set on each `body.next() → Some(Ok(chunk))`. `None` before the
+    /// first chunk arrives. The `pre-await` log line surfaces
+    /// `ms_since_last_chunk` so a long gap is immediately visible
+    /// even if the await itself never resolves.
+    last_chunk_at: Option<std::time::Instant>,
+    chunk_count: u64,
+    emit_count: u64,
+    total_bytes: u64,
+}
+
+impl ParserMetrics {
+    fn new(sid: String) -> Self {
+        Self {
+            sid,
+            t_start: std::time::Instant::now(),
+            last_chunk_at: None,
+            chunk_count: 0,
+            emit_count: 0,
+            total_bytes: 0,
+        }
+    }
+
+    fn ms_since_start(&self) -> u64 {
+        self.t_start.elapsed().as_millis() as u64
+    }
+
+    /// Returns `ms_since_last_chunk` when at least one chunk has
+    /// arrived, otherwise `ms_since_start` (so the first pre-await
+    /// log still shows useful elapsed time).
+    fn ms_since_last_chunk_or_start(&self) -> u64 {
+        self.last_chunk_at
+            .map(|t| t.elapsed().as_millis() as u64)
+            .unwrap_or_else(|| self.ms_since_start())
+    }
+}
+
 /// Convert a streaming HTTP body into a stream of `AgentEvent`s.
 ///
 /// SSE framing: `\n\n`-delimited records, each line beginning with
@@ -303,12 +396,13 @@ where
     let buffer = Vec::new();
     let sequence: u64 = 0;
     let done = false;
+    let metrics = ParserMetrics::new(session_id.value.clone());
     let body: Pin<Box<dyn Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>> =
         Box::pin(body);
 
     Box::pin(stream::unfold(
-        (body, buffer, sequence, done, session_id),
-        move |(mut body, mut buffer, mut sequence, mut done, session_id)| async move {
+        (body, buffer, sequence, done, session_id, metrics),
+        move |(mut body, mut buffer, mut sequence, mut done, session_id, mut metrics)| async move {
             if done {
                 return None;
             }
@@ -329,6 +423,16 @@ where
                         if payload == "[DONE]" {
                             done = true;
                             sequence += 1;
+                            metrics.emit_count += 1;
+                            tracing::info!(
+                                sid = %metrics.sid,
+                                seq = sequence,
+                                emit_count = metrics.emit_count,
+                                chunk_count = metrics.chunk_count,
+                                total_bytes = metrics.total_bytes,
+                                elapsed_ms = metrics.ms_since_start(),
+                                "arcan.parse: emit FINISH (reason=stop, [DONE] sentinel)",
+                            );
                             let finish_event = AgentEvent {
                                 record: Some(EventRecord {
                                     session_id: Some(session_id.clone()),
@@ -344,7 +448,7 @@ where
                             };
                             return Some((
                                 Ok(finish_event),
-                                (body, buffer, sequence, done, session_id),
+                                (body, buffer, sequence, done, session_id, metrics),
                             ));
                         }
                         if payload.is_empty() {
@@ -364,6 +468,18 @@ where
                                 }
                                 if !delta_text.is_empty() {
                                     sequence += 1;
+                                    metrics.emit_count += 1;
+                                    let delta_len = delta_text.len();
+                                    tracing::info!(
+                                        sid = %metrics.sid,
+                                        seq = sequence,
+                                        emit_count = metrics.emit_count,
+                                        delta_len,
+                                        chunk_count = metrics.chunk_count,
+                                        total_bytes = metrics.total_bytes,
+                                        elapsed_ms = metrics.ms_since_start(),
+                                        "arcan.parse: emit TOKEN",
+                                    );
                                     let token_event = AgentEvent {
                                         record: Some(EventRecord {
                                             session_id: Some(session_id.clone()),
@@ -379,12 +495,23 @@ where
                                     };
                                     return Some((
                                         Ok(token_event),
-                                        (body, buffer, sequence, done, session_id),
+                                        (body, buffer, sequence, done, session_id, metrics),
                                     ));
                                 }
                                 if let Some(reason) = finish_reason {
                                     done = true;
                                     sequence += 1;
+                                    metrics.emit_count += 1;
+                                    tracing::info!(
+                                        sid = %metrics.sid,
+                                        seq = sequence,
+                                        emit_count = metrics.emit_count,
+                                        reason = %reason,
+                                        chunk_count = metrics.chunk_count,
+                                        total_bytes = metrics.total_bytes,
+                                        elapsed_ms = metrics.ms_since_start(),
+                                        "arcan.parse: emit FINISH (finish_reason from delta)",
+                                    );
                                     let finish_event = AgentEvent {
                                         record: Some(EventRecord {
                                             session_id: Some(session_id.clone()),
@@ -400,15 +527,18 @@ where
                                     };
                                     return Some((
                                         Ok(finish_event),
-                                        (body, buffer, sequence, done, session_id),
+                                        (body, buffer, sequence, done, session_id, metrics),
                                     ));
                                 }
                             }
                             Err(err) => {
                                 tracing::warn!(
+                                    sid = %metrics.sid,
                                     error = %err,
                                     payload = %truncate_body(payload, 128),
-                                    "VercelAiGatewayArcan: skip malformed SSE chunk",
+                                    chunk_count = metrics.chunk_count,
+                                    total_bytes = metrics.total_bytes,
+                                    "arcan.parse: skip malformed SSE chunk",
                                 );
                             }
                         }
@@ -416,29 +546,69 @@ where
                     // Record consumed but produced no event (e.g. only role-only delta) — loop.
                     continue;
                 }
-                // No full record yet — pull more bytes.
+                // No full record yet — pull more bytes. The `pre-await`
+                // log line is the smoking-gun signal for H4 (gateway
+                // stops sending bytes): if logs show this line but the
+                // matching "got chunk" / "closed" / "stream error" log
+                // never follows, the `body.next().await` future is
+                // blocked indefinitely on upstream silence.
+                tracing::info!(
+                    sid = %metrics.sid,
+                    chunk_count = metrics.chunk_count,
+                    emit_count = metrics.emit_count,
+                    total_bytes = metrics.total_bytes,
+                    buffer_len = buffer.len(),
+                    ms_since_last_chunk = metrics.ms_since_last_chunk_or_start(),
+                    "arcan.parse: awaiting next upstream body chunk",
+                );
                 match body.next().await {
                     Some(Ok(chunk)) => {
+                        let bytes = chunk.len() as u64;
+                        metrics.chunk_count += 1;
+                        metrics.total_bytes += bytes;
+                        metrics.last_chunk_at = Some(std::time::Instant::now());
+                        tracing::info!(
+                            sid = %metrics.sid,
+                            chunk_count = metrics.chunk_count,
+                            bytes,
+                            total_bytes = metrics.total_bytes,
+                            emit_count = metrics.emit_count,
+                            elapsed_ms = metrics.ms_since_start(),
+                            "arcan.parse: got upstream body chunk",
+                        );
                         buffer.extend_from_slice(&chunk);
                     }
                     Some(Err(err)) => {
+                        tracing::warn!(
+                            sid = %metrics.sid,
+                            chunk_count = metrics.chunk_count,
+                            total_bytes = metrics.total_bytes,
+                            emit_count = metrics.emit_count,
+                            elapsed_ms = metrics.ms_since_start(),
+                            error = %err,
+                            "arcan.parse: upstream body stream error",
+                        );
                         return Some((
                             Err(tonic::Status::internal(format!(
                                 "VercelAiGatewayArcan: stream read error: {err}"
                             ))),
-                            (body, buffer, sequence, true, session_id),
+                            (body, buffer, sequence, true, session_id, metrics),
                         ));
                     }
                     None => {
                         // Upstream closed without [DONE] — synthesize a finish so
                         // the downstream pump exits cleanly.
-                        if !buffer.is_empty() {
-                            tracing::debug!(
-                                bytes_remaining = buffer.len(),
-                                "VercelAiGatewayArcan: upstream closed mid-record",
-                            );
-                        }
+                        tracing::info!(
+                            sid = %metrics.sid,
+                            chunk_count = metrics.chunk_count,
+                            total_bytes = metrics.total_bytes,
+                            emit_count = metrics.emit_count,
+                            elapsed_ms = metrics.ms_since_start(),
+                            bytes_remaining = buffer.len(),
+                            "arcan.parse: upstream closed (synthesising FINISH reason=upstream_closed)",
+                        );
                         sequence += 1;
+                        metrics.emit_count += 1;
                         let finish = AgentEvent {
                             record: Some(EventRecord {
                                 session_id: Some(session_id.clone()),
@@ -452,7 +622,10 @@ where
                             }),
                             kind: AgentEventKind::Finish as i32,
                         };
-                        return Some((Ok(finish), (body, buffer, sequence, true, session_id)));
+                        return Some((
+                            Ok(finish),
+                            (body, buffer, sequence, true, session_id, metrics),
+                        ));
                     }
                 }
             }
