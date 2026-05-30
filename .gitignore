@@ -83,3 +83,6 @@ crates/opsis/web/docs/conversations/
 crates/opsis/web/scripts/conversation-history.py
 crates/opsis/web/scripts/conversation-bridge-hook.sh
 .worktrees/
+
+# bstack RCS control-loop machine-local telemetry (not committed)
+.control/audit/*.jsonl
