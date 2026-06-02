@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<!--
+---
+type: pr-explainer
+pr: ml-explore/mlx-lm#1276
+title: "Add Gemma 4 assistant (MTP drafter) model class"
+linear: [BRO-1128, BRO-1129]
+spec: docs/superpowers/specs/2026-05-13-mlx-lm-gemma4-assistant.md
+status: open
+authored: 2026-06-01
+category: C
+audience: human
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR #1276 — Gemma 4 MTP drafter for mlx-lm</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#121722; --panel2:#161c2a; --ink:#e6edf3; --mut:#9aa7b8;
+    --line:#243044; --blue:#4c8dff; --cyan:#39d0d8; --green:#3fb950; --amber:#d29922;
+    --red:#f85149; --violet:#a371f7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:30px;line-height:1.2;margin:0 0 6px;letter-spacing:-.02em}
+  h2{font-size:20px;margin:48px 0 14px;letter-spacing:-.01em;
+    border-bottom:1px solid var(--line);padding-bottom:8px}
+  h3{font-size:15px;margin:24px 0 8px;color:var(--cyan)}
+  a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+  code{font:13px/1.5 "SF Mono",ui-monospace,Menlo,monospace;
+    background:#1c2333;padding:1px 6px;border-radius:5px;color:#c8d3e6}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:16px;overflow:auto}
+  pre code{background:none;padding:0}
+  .sub{color:var(--mut);font-size:15px;margin:0 0 24px}
+  .pill{display:inline-block;font-size:12px;font-weight:600;padding:3px 10px;
+    border-radius:999px;vertical-align:middle}
+  .pill.open{background:rgba(63,185,80,.14);color:var(--green);border:1px solid rgba(63,185,80,.3)}
+  .grid{display:grid;gap:14px}
+  .cards{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin:18px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card .n{font-size:26px;font-weight:700;letter-spacing:-.02em}
+  .card .l{font-size:12.5px;color:var(--mut);margin-top:2px}
+  .card .blue{color:var(--blue)}.card .green{color:var(--green)}
+  .card .amber{color:var(--amber)}.card .violet{color:var(--violet)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--mut);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
+  tr:last-child td{border-bottom:none}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin:16px 0}
+  .note{border-left:3px solid var(--amber);background:rgba(210,153,34,.06);
+    padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;font-size:14px}
+  .ok{color:var(--green)}.bad{color:var(--red)}.dim{color:var(--mut)}
+  figure{margin:20px 0}figcaption{color:var(--mut);font-size:13px;margin-top:8px;text-align:center}
+  .mono{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:12.5px}
+  .tag{font-size:11px;padding:1px 7px;border-radius:5px;background:#1c2333;color:var(--mut);
+    border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Gemma 4 MTP drafter for mlx-lm <span class="pill open">PR&nbsp;#1276 · OPEN</span></h1>
+  <p class="sub">A new <code>gemma4_assistant</code> model class that teaches Apple's mlx-lm to load
+  Google's Multi-Token-Prediction drafter — the missing piece for speculative decoding of Gemma 4 on Apple Silicon.
+  &nbsp;·&nbsp; <a href="https://github.com/ml-explore/mlx-lm/pull/1276">ml-explore/mlx-lm#1276</a>
+  &nbsp;·&nbsp; <a href="https://linear.app/broomva/issue/BRO-1129">BRO-1129</a></p>
+
+  <div class="grid cards">
+    <div class="card"><div class="n blue">404</div><div class="l">LOC, one new file</div></div>
+    <div class="card"><div class="n">+180</div><div class="l">test LOC, 3 methods</div></div>
+    <div class="card"><div class="n green">77</div><div class="l">tests pass · 0 regressions</div></div>
+    <div class="card"><div class="n violet">9/10</div><div class="l">P20 review (after fixes)</div></div>
+  </div>
+
+  <h2>Why this exists</h2>
+  <p>Standard speculative decoding pairs a big "target" model with a small "drafter" that guesses several
+  tokens ahead; the target verifies them in one pass, so output is <em>bit-for-bit identical</em> — just faster.
+  The catch: a <em>generic</em> small model makes a poor drafter. We measured it on an M4 Pro:</p>
+
+  <figure>
+  <svg viewBox="0 0 760 200" width="100%" role="img" aria-label="Benchmark bar chart">
+    <style>
+      .bar{rx:5}.lbl{fill:#9aa7b8;font:12px sans-serif}.val{font:13px monospace;font-weight:700}
+    </style>
+    <!-- baseline -->
+    <text x="0" y="40" class="lbl">Baseline (E4B alone)</text>
+    <rect x="250" y="28" width="330" height="22" class="bar" fill="#4c8dff"/>
+    <text x="590" y="44" class="val" fill="#4c8dff">24.72 tok/s · 1.00×</text>
+    <!-- standard spec dec -->
+    <text x="0" y="92" class="lbl">+ generic E2B drafter</text>
+    <rect x="250" y="80" width="204" height="22" class="bar" fill="#f85149"/>
+    <text x="464" y="96" class="val" fill="#f85149">15.31 tok/s · 0.62× SLOWER</text>
+    <!-- mtp -->
+    <text x="0" y="144" class="lbl">+ MTP drafter (this PR → PR2)</text>
+    <rect x="250" y="132" width="495" height="22" class="bar" fill="#3fb950" opacity=".55"/>
+    <text x="250" y="178" class="lbl" style="font-style:italic">target ≥ 1.7–2.2× — needs the stream_generate wiring in PR 2 to run end-to-end</text>
+  </svg>
+  <figcaption>A generic 2B drafter for a 4B target is <em>slower</em> than no drafter. Google's purpose-built 80M MTP
+  drafter is engineered to clear that bar — but mlx-lm couldn't even load it. This PR fixes that.</figcaption>
+  </figure>
+
+  <h2>What makes the MTP drafter special (and hard to port)</h2>
+  <p>It is not a normal transformer. Three architectural twists let an 80M model draft usefully — and each one
+  is why mlx-lm needed a dedicated class rather than reusing <code>gemma4_text</code>:</p>
+
+  <figure>
+  <svg viewBox="0 0 820 330" width="100%" role="img" aria-label="Q-only cross-attention architecture">
+    <style>
+      .box{rx:9;stroke-width:1.5}.t{fill:#e6edf3;font:13px sans-serif}
+      .tm{fill:#9aa7b8;font:11.5px monospace}.ar{stroke:#4c8dff;stroke-width:1.8;fill:none;marker-end:url(#a)}
+      .arc{stroke:#39d0d8;stroke-width:1.8;fill:none;marker-end:url(#ac);stroke-dasharray:5 4}
+    </style>
+    <defs>
+      <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L7,3 L0,6 Z" fill="#4c8dff"/></marker>
+      <marker id="ac" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L7,3 L0,6 Z" fill="#39d0d8"/></marker>
+    </defs>
+
+    <!-- target -->
+    <rect x="20" y="40" width="250" height="250" class="box" fill="#121722" stroke="#243044"/>
+    <text x="40" y="68" class="t" style="font-weight:700">Target — Gemma 4 E4B</text>
+    <rect x="40" y="86" width="210" height="44" class="box" fill="#161c2a" stroke="#243044"/>
+    <text x="52" y="104" class="t">42 layers, full K/V cache</text>
+    <text x="52" y="120" class="tm">last_hidden (2560) · per-layer K,V</text>
+    <rect x="40" y="150" width="210" height="38" class="box" fill="#161c2a" stroke="#243044"/>
+    <text x="52" y="173" class="tm">embed_tokens (last token)</text>
+    <text x="40" y="225" class="tm" style="fill:#3fb950">verifies N drafts in 1 pass</text>
+    <text x="40" y="244" class="tm" style="fill:#3fb950">→ output identical to baseline</text>
+
+    <!-- drafter -->
+    <rect x="430" y="40" width="370" height="250" class="box" fill="#121722" stroke="#39d0d8" stroke-opacity=".5"/>
+    <text x="450" y="68" class="t" style="font-weight:700">Drafter — gemma4_assistant (80M)</text>
+    <rect x="450" y="84" width="330" height="40" class="box" fill="#161c2a" stroke="#243044"/>
+    <text x="462" y="101" class="tm">pre_projection: 5120 → 256</text>
+    <text x="462" y="117" class="tm">(target_embed ⊕ target_last_hidden)</text>
+    <rect x="450" y="134" width="330" height="58" class="box" fill="#161c2a" stroke="#39d0d8" stroke-opacity=".4"/>
+    <text x="462" y="153" class="t">4× Q-only attention</text>
+    <text x="462" y="170" class="tm">q_proj · q_norm · o_proj — NO k/v</text>
+    <text x="462" y="185" class="tm" style="fill:#39d0d8">K,V borrowed from target ↓</text>
+    <rect x="450" y="202" width="330" height="38" class="box" fill="#161c2a" stroke="#243044"/>
+    <text x="462" y="225" class="tm">post_projection 256→2560 · centroid head</text>
+
+    <!-- arrows -->
+    <path class="ar" d="M270,108 C350,108 360,104 448,104"/>
+    <text x="300" y="98" class="tm" style="fill:#4c8dff">hidden + embed</text>
+    <path class="arc" d="M270,168 C350,210 360,165 448,163"/>
+    <text x="300" y="210" class="tm" style="fill:#39d0d8">shared_kv_states</text>
+    <path class="ar" d="M615,240 C615,275 400,275 270,200" />
+    <text x="430" y="292" class="tm" style="fill:#4c8dff">N draft tokens ↺</text>
+  </svg>
+  <figcaption><b>① Q-only cross-attention</b> — the drafter has no K/V projections; it attends to the
+  <em>target's</em> cached K/V (<code>shared_kv_states</code>, keyed by full vs sliding attention).
+  <b>② Shared-activation input</b> — its input is the target's last-layer hidden state concatenated with the
+  last token embedding (5120→256). <b>③ Constant position</b> — single-position MTP drafting.</figcaption>
+  </figure>
+
+  <h3>The centroid logit head — ② that makes 80M affordable</h3>
+  <p>A full softmax over Gemma's 262,144-token vocabulary on every draft step would dominate an 80M model's cost.
+  Instead the drafter clusters the vocab into 2048 centroids of 128 tokens, scores the centroids, takes the
+  <strong>top 32</strong>, and only computes real logits for those ~4096 tokens — roughly <strong>64× cheaper</strong>.</p>
+  <pre><code>centroid_logits = centroids(h)                    # (B, L, 2048)
+top = argpartition(-centroid_logits)[:32]         # 32 best clusters
+selected = token_ordering[top]                    # ~4096 candidate tokens
+logits = scatter(min-1, selected, h · emb[selected].T)   # functional put_along_axis</code></pre>
+
+  <h2>What shipped</h2>
+  <table>
+    <tr><th>File</th><th>Change</th><th>Contents</th></tr>
+    <tr><td class="mono">mlx_lm/models/gemma4_assistant.py</td><td><span class="tag">+404 new</span></td>
+      <td>ModelArgs · MaskedEmbedder · AssistantAttention · AssistantMLP · AssistantDecoderLayer · AssistantTextModel · Model</td></tr>
+    <tr><td class="mono">tests/test_models.py</td><td><span class="tag">+180</span></td>
+      <td>synthetic forward (fp32+fp16) · no-ordered-embeddings path · opt-in real-weight load</td></tr>
+  </table>
+  <p class="dim">11 commits · zero edits to existing files · registers automatically via mlx-lm's filename-based
+  <code>_get_classes</code> dispatch.</p>
+
+  <h2>The review story — why it's 9/10, not 6/10</h2>
+  <p>Two independent reviewers (a devil's-advocate brief and the <code>pr-review-toolkit</code> code-reviewer) ran in
+  parallel and <strong>converged on the same blockers</strong> — a strong signal. First pass: <span class="bad">6/10</span>.
+  None were happy-path math errors; all four were robustness traps that only bite in production:</p>
+
+  <table>
+    <tr><th>#</th><th>Trap</th><th>Fix</th></tr>
+    <tr><td>1</td><td>Real-weight load failed — the one full-attention layer uses <code>global_head_dim=512</code>, not 256</td>
+      <td>Per-layer-type head-dim dispatch (mirrors <code>gemma4_text</code>)</td></tr>
+    <tr><td>2</td><td><code>token_ordering</code> sat in <code>parameters()</code>; a <code>tree_map</code> dtype-cast would silently corrupt the int32 gather buffer into floats</td>
+      <td>Rename <code>_token_ordering</code> (underscore excludes it); install via <code>sanitize</code> side-channel</td></tr>
+    <tr><td>3</td><td><code>make_cache</code> returned <code>[]</code> → silently no-ops in <code>zip(layers, cache)</code> → attention without context</td>
+      <td>Raise <code>NotImplementedError</code> with guidance</td></tr>
+    <tr><td>4</td><td>Two <code>.item()</code> calls forced a GPU→host sync <em>per draft token</em> — defeating the drafter's whole purpose</td>
+      <td>Build the values on-device; pass RoPE offset as <code>mx.array</code></td></tr>
+  </table>
+  <p>After fixes, round 2: <span class="ok">9/10, passed</span>. Details in
+  <a href="../superpowers/specs/2026-05-13-mlx-lm-gemma4-assistant.md">the as-built spec §10</a>.</p>
+
+  <div class="note"><strong>Scope is deliberately one slice.</strong> This PR lands only the <em>model class</em> — it loads
+  and forwards correctly. Wiring it into mlx-lm's <code>stream_generate</code> speculative-decoding loop (so it
+  actually produces the speedup) is <strong>PR 2</strong> (<a href="https://linear.app/broomva/issue/BRO-1130">BRO-1130</a>),
+  kept separate so each PR reviews in isolation.</p>
+
+  <h2>What's left</h2>
+  <table>
+    <tr><th>Item</th><th>Owner</th></tr>
+    <tr><td>Sign Apple CLA (external gate; upstream CI/merge blocks on it)</td><td><strong>Carlos</strong></td></tr>
+    <tr><td>Respond to upstream maintainer review</td><td>agent, on comment</td></tr>
+    <tr><td>PR 2 — <code>stream_generate</code> integration + end-to-end ≥1.5× benchmark</td><td>BRO-1130</td></tr>
+  </table>
+
+  <p class="dim" style="margin-top:40px;border-top:1px solid var(--line);padding-top:16px">
+  Generated 2026-06-01 · P18 Category-C artifact · source of truth for code is
+  <a href="https://github.com/ml-explore/mlx-lm/pull/1276">PR #1276</a>,
+  for design is <a href="../superpowers/specs/2026-05-13-mlx-lm-gemma4-assistant.md">the as-built spec</a>.</p>
+
+</div>
+</body>
+</html>
