@@ -8,6 +8,7 @@
 #   chronos-core      → aios-protocol ONLY  (no other internal Life crates; tokio/serde/etc OK)
 #   chronos-triggers  → chronos-core ONLY  (depends on chronos-core; no other internal Life crates)
 #   chronos-lago      → chronos-core + aios-protocol + lago-core  (lago-journal allowed for dev only)
+#   chronos-api       → chronos-core ONLY  (axum/serde/tokio OK; concrete store + trigger injected)
 #   chronosd          → chronos-* + aios-protocol + lago-*        (no arcan/autonomic/haima/etc)
 #
 # Dev-dependencies are intentionally exempt — the rules constrain the PRODUCTION dep graph.
@@ -59,8 +60,9 @@ ALLOWED = {
     "chronos-core":     {"aios-protocol"},
     "chronos-triggers": {"chronos-core"},
     "chronos-lago":     {"chronos-core", "aios-protocol", "lago-core"},
+    "chronos-api":      {"chronos-core"},
     "chronosd":         {
-        "chronos-core", "chronos-triggers", "chronos-lago",
+        "chronos-core", "chronos-triggers", "chronos-lago", "chronos-api",
         "aios-protocol", "lago-core", "lago-journal",
     },
 }

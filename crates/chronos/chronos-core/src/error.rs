@@ -16,6 +16,16 @@ pub enum ChronosError {
     /// The router observed an invariant violation.
     #[error("chronos router error: {0}")]
     Router(String),
+
+    /// An agenda operation referenced an item id that does not exist in the store.
+    #[error("chronos agenda item not found: {0}")]
+    NotFound(String),
+
+    /// The agenda backing store failed (e.g. a lago journal append/read error in
+    /// `chronos-lago::LagoAgendaStore`). Carries the backend error rendered as a string so
+    /// `chronos-core` stays free of a `lago-core` dependency.
+    #[error("chronos agenda store error: {0}")]
+    Agenda(String),
 }
 
 /// Result alias used throughout chronos-core.

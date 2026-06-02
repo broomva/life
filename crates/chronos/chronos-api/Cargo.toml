@@ -1,25 +1,23 @@
 [package]
-name = "chronos-lago"
+name = "chronos-api"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Lago bridge for Chronos — records wake events to the Life journal"
+description = "HTTP wake-ingest + agenda inspection API for Chronos (M1)"
 
 [dependencies]
 chronos-core.workspace = true
-aios-protocol.workspace = true
-lago-core.workspace = true
-async-trait.workspace = true
+axum.workspace = true
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "rt", "net", "macros"] }
 tracing.workspace = true
 
 [dev-dependencies]
-lago-journal.workspace = true
-tempfile.workspace = true
+tower = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]

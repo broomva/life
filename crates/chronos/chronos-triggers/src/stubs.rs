@@ -8,19 +8,7 @@
 use async_trait::async_trait;
 use chronos_core::{WakeEvent, WakeTrigger};
 
-/// HTTP wake-trigger placeholder. Real impl in M1 backed by `chronos-api`.
-pub struct HttpTriggerStub;
-
-#[async_trait]
-impl WakeTrigger for HttpTriggerStub {
-    async fn next_wake(&mut self) -> Option<WakeEvent> {
-        None
-    }
-
-    fn name(&self) -> &'static str {
-        "http (stub)"
-    }
-}
+// `HttpTriggerStub` was promoted to the real `HttpTrigger` in M1 — see `http.rs`.
 
 /// Cron expression-driven wake-trigger placeholder. Real impl beyond M3 via `tokio-cron-scheduler`.
 pub struct CronTriggerStub;
@@ -102,7 +90,6 @@ mod tests {
     #[tokio::test]
     async fn every_stub_returns_none() {
         let stubs: Vec<Box<dyn WakeTrigger>> = vec![
-            Box::new(HttpTriggerStub),
             Box::new(CronTriggerStub),
             Box::new(FsWatchTriggerStub),
             Box::new(SubAgentReturnTriggerStub),

@@ -2236,6 +2236,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "chronos-api"
+version = "0.3.0"
+dependencies = [
+ "axum 0.8.8",
+ "chronos-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower 0.5.3",
+ "tracing",
+]
+
+[[package]]
 name = "chronos-core"
 version = "0.3.0"
 dependencies = [
@@ -2254,6 +2267,7 @@ name = "chronos-lago"
 version = "0.3.0"
 dependencies = [
  "aios-protocol",
+ "async-trait",
  "chronos-core",
  "lago-core",
  "lago-journal",
@@ -2281,6 +2295,7 @@ version = "0.3.0"
 dependencies = [
  "aios-protocol",
  "anyhow",
+ "chronos-api",
  "chronos-core",
  "chronos-lago",
  "chronos-triggers",

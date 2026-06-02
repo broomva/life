@@ -3,6 +3,7 @@
 //! Thin CLI front-end. All runtime logic lives in [`chronosd`] the library; see
 //! `src/lib.rs`.
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -39,6 +40,11 @@ struct Cli {
     /// trigger bursts; smaller values surface backpressure faster.
     #[arg(long, default_value_t = 64, env = "CHRONOSD_ROUTER_BUFFER")]
     router_buffer: usize,
+
+    /// Bind address for the M1 HTTP wake-ingest API, e.g. `127.0.0.1:3007`. When unset, chronosd
+    /// runs heartbeat-only (M0 behavior). Bind to localhost in M1 — auth lands with lifegw.
+    #[arg(long, env = "CHRONOSD_HTTP_BIND")]
+    http_bind: Option<SocketAddr>,
 }
 
 impl From<Cli> for DaemonConfig {
@@ -48,6 +54,7 @@ impl From<Cli> for DaemonConfig {
             data_dir: cli.data_dir,
             journal_filename: cli.journal_filename,
             router_buffer: cli.router_buffer.max(1),
+            http_bind: cli.http_bind,
         }
     }
 }
