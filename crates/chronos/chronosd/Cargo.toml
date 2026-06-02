@@ -21,6 +21,7 @@ aios-protocol.workspace = true
 chronos-core.workspace = true
 chronos-triggers.workspace = true
 chronos-lago.workspace = true
+chronos-api.workspace = true
 lago-core.workspace = true
 lago-journal.workspace = true
 anyhow.workspace = true
@@ -32,7 +33,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [dev-dependencies]
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "net", "io-util"] }
 
 [lints]
 workspace = true

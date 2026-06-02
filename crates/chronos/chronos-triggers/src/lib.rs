@@ -7,8 +7,8 @@
 //!
 //! ## Per-milestone roadmap
 //!
-//! - **M0** (this crate, today): [`HeartbeatTrigger`], stubs for the rest.
-//! - **M1**: real [`HttpTrigger`] backed by an axum server in `chronos-api`.
+//! - **M0**: [`HeartbeatTrigger`], stubs for the rest.
+//! - **M1** (today): real [`HttpTrigger`] fed by the `chronos-api` axum server via [`wake_channel`].
 //! - **M3**: real [`FsWatchTrigger`] (via the `notify` crate) and `SubAgentReturnTrigger`.
 //! - **Beyond**: cron, webhook, threshold.
 
@@ -16,10 +16,12 @@
 #![warn(missing_docs)]
 
 mod heartbeat;
+mod http;
 mod stubs;
 
 pub use heartbeat::HeartbeatTrigger;
+pub use http::{HttpTrigger, WakeSender, wake_channel};
 pub use stubs::{
-    CronTriggerStub, FsWatchTriggerStub, HttpTriggerStub, SubAgentReturnTriggerStub,
-    ThresholdTriggerStub, WebhookTriggerStub,
+    CronTriggerStub, FsWatchTriggerStub, SubAgentReturnTriggerStub, ThresholdTriggerStub,
+    WebhookTriggerStub,
 };

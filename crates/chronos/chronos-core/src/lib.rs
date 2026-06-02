@@ -5,20 +5,21 @@
 //! 1. **"When should an agent wake?"** — a unified surface that coalesces all wake sources
 //!    (HTTP `/runs`, cron, file changes, sub-agent completions, threshold crossings, webhooks,
 //!    heartbeats) into a single ordered event stream the kernel can subscribe to.
-//! 2. **"What should the agent do when it wakes?"** — a durable per-session agenda that survives
-//!    daemon restarts (introduced in M1; not in this crate's M0 surface).
+//! 2. **"What should the agent do when it wakes?"** — a durable per-session [`AgendaStore`] of
+//!    [`AgendaItem`]s that survives daemon restarts (introduced in M1).
 //!
 //! ## Dependency rule
 //!
 //! `chronos-core` depends ONLY on `aios-protocol` from the Life internal-crate graph. No lago,
 //! no arcan, no autonomic. Enforced by `scripts/architecture/verify_dependencies_chronos.sh`.
 //!
-//! ## Module shape (M0)
+//! ## Module shape
 //!
 //! - [`WakeEvent`] — universal wake shape (id, timestamp, source, payload, optional target session)
 //! - [`WakeSource`] — taxonomy of where a wake can come from
 //! - [`WakeTrigger`] — async trait every trigger implements (heartbeat, http, cron, fs, …)
 //! - [`WakeRouter`] — multiplexes triggers concurrently into a single stream
+//! - [`AgendaStore`] / [`AgendaItem`] / [`InMemoryAgendaStore`] — the durable agenda (M1)
 //! - [`ChronosError`] / [`ChronosResult`] — crate-local error type
 //!
 //! ## Why `tokio` in core?
@@ -32,11 +33,16 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod agenda;
 mod error;
 mod router;
 mod trigger;
 mod wake;
 
+pub use agenda::{
+    AgendaItem, AgendaItemId, AgendaItemState, AgendaStore, InMemoryAgendaStore, NewAgendaItem,
+    Priority, sort_for_dispatch,
+};
 pub use error::{ChronosError, ChronosResult};
 pub use router::WakeRouter;
 pub use trigger::WakeTrigger;
