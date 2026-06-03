@@ -56,6 +56,23 @@ pub struct LedgerEntry {
     pub sid: String,
 }
 
+/// Outcome of an [`HaimaCall::x402_pay`] round-trip. Flattens
+/// haima-x402's `X402PayResult` onto a single struct; `status` is the
+/// discriminant (`"settled"` / `"not_required"` / `"declined"`) and the
+/// remaining fields are populated per-variant. BRO-1354.
+#[derive(Clone, Debug)]
+pub struct X402PayOutcome {
+    pub status: String,
+    pub tx_hash: String,
+    pub network: String,
+    pub recipient: String,
+    pub micro_credits: i64,
+    pub declined_reason: String,
+    pub settled: bool,
+    pub resource_body: Vec<u8>,
+    pub resource_status: u32,
+}
+
 impl HaimaProxy {
     pub async fn connect(socket: PathBuf) -> HaimaProxyResult<Self> {
         let endpoint = Endpoint::try_from("http://[::]:0")
@@ -329,6 +346,51 @@ impl HaimaProxy {
             }
         }
     }
+
+    /// Initiate an x402 payment via `haima.v1.WalletSubstrate.X402Pay`.
+    /// BRO-1354. The substrate signs from the user's Anima-custodied
+    /// wallet and drives the full client round-trip; this proxy just
+    /// marshals the request + maps the flat response.
+    pub async fn x402_pay(
+        &self,
+        user_id: &str,
+        project_id: &str,
+        resource_url: &str,
+        network: &str,
+        max_amount_micros: Option<i64>,
+    ) -> HaimaProxyResult<X402PayOutcome> {
+        let guard = self.acquire_guard().await?;
+        let mut client = WalletSubstrateClient::new(self.channel.clone());
+        let mut req = tonic::Request::new(haima_pb::X402PayReq {
+            user_id: user_id.to_owned(),
+            project_id: project_id.to_owned(),
+            resource_url: resource_url.to_owned(),
+            network: network.to_owned(),
+            max_amount_micros,
+        });
+        self.attach_token(&mut req);
+        match client.x402_pay(req).await.map_err(HaimaProxyError::from) {
+            Ok(resp) => {
+                let body = resp.into_inner();
+                record_outcome(guard, true);
+                Ok(X402PayOutcome {
+                    status: body.status,
+                    tx_hash: body.tx_hash,
+                    network: body.network,
+                    recipient: body.recipient,
+                    micro_credits: body.micro_credits,
+                    declined_reason: body.declined_reason,
+                    settled: body.settled,
+                    resource_body: body.resource_body,
+                    resource_status: body.resource_status,
+                })
+            }
+            Err(e) => {
+                record_outcome(guard, !e.is_retryable());
+                Err(e)
+            }
+        }
+    }
 }
 
 /// Record a `PoolGuard` outcome based on whether the call succeeded
@@ -377,6 +439,14 @@ pub trait HaimaCall: Send + Sync {
         amount_micros: u64,
         memo: &str,
     ) -> HaimaProxyResult<(String, WalletBalance, WalletBalance)>;
+    async fn x402_pay(
+        &self,
+        user_id: &str,
+        project_id: &str,
+        resource_url: &str,
+        network: &str,
+        max_amount_micros: Option<i64>,
+    ) -> HaimaProxyResult<X402PayOutcome>;
 }
 
 #[async_trait]
@@ -432,6 +502,24 @@ impl HaimaCall for HaimaProxy {
             to_project,
             amount_micros,
             memo,
+        )
+        .await
+    }
+    async fn x402_pay(
+        &self,
+        user_id: &str,
+        project_id: &str,
+        resource_url: &str,
+        network: &str,
+        max_amount_micros: Option<i64>,
+    ) -> HaimaProxyResult<X402PayOutcome> {
+        HaimaProxy::x402_pay(
+            self,
+            user_id,
+            project_id,
+            resource_url,
+            network,
+            max_amount_micros,
         )
         .await
     }
@@ -548,6 +636,23 @@ impl<C: HaimaCall> HaimaCall for Pooled<C> {
             to_project,
             amount_micros,
             memo,
+        ))
+        .await
+    }
+    async fn x402_pay(
+        &self,
+        user_id: &str,
+        project_id: &str,
+        resource_url: &str,
+        network: &str,
+        max_amount_micros: Option<i64>,
+    ) -> HaimaProxyResult<X402PayOutcome> {
+        self.bracket(self.inner.x402_pay(
+            user_id,
+            project_id,
+            resource_url,
+            network,
+            max_amount_micros,
         ))
         .await
     }

@@ -9,6 +9,7 @@ pub mod agent_http;
 pub mod anima_custody;
 pub mod anthropic_messages;
 pub mod cert_watch;
+pub mod haima_x402;
 pub mod health;
 pub mod rate_limit;
 pub mod ws;

@@ -537,13 +537,26 @@ pub async fn serve_with_listener_and_signer(
     };
     let anthropic_router = crate::services::anthropic_messages::router(anthropic_state);
 
-    // Compose: top-level axum router that nests `/anima/custody/*`,
-    // merges the `/v1/agent/create_session` + `/v1/messages` routes,
-    // and falls back to the tonic-stack adapter for everything else
-    // (including `/v1/agent/stream` which the WS layer handles inside
-    // the tonic stack).
+    // BRO-1354: bespoke `POST /haima/x402/pay` JSON route. Verifies
+    // Tier-1, enforces `x402:pay` scope, mints Tier-2, and dials lifed's
+    // life.v1.Wallet.X402Pay over the same upstream channel. The
+    // broomva.tech edge proxy (slice P2) mirrors the `/anima/custody/*`
+    // JSON pattern against this surface. base-sepolia only in P1.
+    let haima_x402_state = crate::services::haima_x402::HaimaX402State {
+        jwks: Arc::clone(&jwks),
+        minter: Arc::clone(&minter),
+        upstream: upstream_channel.clone(),
+    };
+    let haima_x402_router = crate::services::haima_x402::router(haima_x402_state);
+
+    // Compose: top-level axum router that nests `/anima/custody/*` +
+    // `/haima/x402/*`, merges the `/v1/agent/create_session` +
+    // `/v1/messages` routes, and falls back to the tonic-stack adapter
+    // for everything else (including `/v1/agent/stream` which the WS
+    // layer handles inside the tonic stack).
     let app: axum::Router<()> = axum::Router::new()
         .nest("/anima/custody", anima_router)
+        .nest("/haima/x402", haima_x402_router)
         .merge(agent_http_router)
         .merge(anthropic_router)
         .fallback_service(tonic_stack_adapted);
