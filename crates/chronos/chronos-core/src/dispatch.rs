@@ -87,7 +87,12 @@ pub fn wake_dispatch_params(wake: &WakeEvent) -> Option<WakeDispatch> {
         .and_then(|v| v.as_str())
         .map(|s| AgendaItemId(s.to_string()));
     Some(WakeDispatch {
-        target_session: wake.target_session.clone(),
+        // Normalize an empty/whitespace target session to None (→ the loop's default/system
+        // session) so a hand-built or non-HTTP wake can't dispatch a tick on an empty session id.
+        target_session: wake
+            .target_session
+            .clone()
+            .filter(|s| !s.as_str().trim().is_empty()),
         intent: intent.to_string(),
         agenda_item_id,
     })

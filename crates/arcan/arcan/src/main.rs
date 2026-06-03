@@ -1001,7 +1001,7 @@ fn run_serve(
     // and run once the server's `block_on` starts. A plain `arcan serve` (no `--chronos`) skips
     // this entirely, so the default runtime path is byte-for-byte unchanged.
     if chronos_enabled {
-        chronos_wiring::spawn_chronos(Arc::clone(&runtime), journal.clone(), chronos_http_bind, 60);
+        chronos_wiring::spawn_chronos(Arc::clone(&runtime), journal.clone(), chronos_http_bind);
     }
 
     // ── Prosopon display-server sidecar (opt-in via `--features prosopon`) ──

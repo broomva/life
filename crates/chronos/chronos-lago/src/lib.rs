@@ -361,6 +361,22 @@ pub async fn run_kernel_wake_loop(
             .clone()
             .unwrap_or_else(|| chronos_core::SessionId::from_string(default_session.as_str()));
 
+        // 2b. Idempotency: a re-delivered wake (client retry / at-least-once delivery) for an
+        //     already-terminal agenda item must NOT re-run the agent — double token spend / double
+        //     side-effects. Skip the dispatch; the wake is still journaled above for observability.
+        if let Some(item_id) = &params.agenda_item_id
+            && let Ok(items) = agenda.list(&session).await
+            && items
+                .iter()
+                .any(|i| &i.id == item_id && i.state.is_terminal())
+        {
+            warn!(
+                item = item_id.as_str(),
+                "skipping wake — agenda item already in a terminal state"
+            );
+            continue;
+        }
+
         let outcome = match dispatcher.dispatch(&session, &params.intent).await {
             Ok(outcome) => outcome,
             Err(err) => chronos_core::DispatchOutcome::failed(err.to_string()),
@@ -872,5 +888,63 @@ mod wake_loop_tests {
         let state = poll_terminal(agenda.as_ref(), &session, &id).await;
         handle.abort();
         assert_eq!(state, Some(AgendaItemState::Failed));
+    }
+
+    /// Idempotency (P20 M3): a re-delivered wake for an already-terminal item must NOT re-dispatch.
+    #[tokio::test]
+    async fn wake_loop_skips_already_terminal_item() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let journal = open_journal(dir.path());
+        let agenda = Arc::new(LagoAgendaStore::new(journal.clone()));
+        let session = ChronosSessionId::from_string("user-3");
+        let id = agenda
+            .add(NewAgendaItem::new(
+                session.clone(),
+                "done already",
+                WakeSource::Http,
+            ))
+            .await
+            .unwrap();
+        agenda.complete(&id).await.unwrap(); // simulate a prior successful dispatch.
+
+        let mut router = WakeRouter::new(8);
+        router.add_trigger(Box::new(OneShotTrigger::new(
+            WakeEvent::new(WakeSource::Http)
+                .with_payload(
+                    serde_json::json!({ "intent": "done already", "agenda_item_id": id.as_str() }),
+                )
+                .with_target_session(session.clone()),
+        )));
+
+        let dispatcher = Arc::new(MockKernelDispatcher::completed(1));
+        let default_session = LagoSessionId::from_string(CHRONOS_SYSTEM_SESSION);
+        let branch = BranchId::from_string(CHRONOS_DEFAULT_BRANCH);
+
+        let agenda_task = agenda.clone();
+        let dispatcher_task = dispatcher.clone();
+        let handle = tokio::spawn(async move {
+            run_kernel_wake_loop(
+                &mut router,
+                journal,
+                agenda_task.as_ref(),
+                dispatcher_task.as_ref(),
+                &default_session,
+                &branch,
+            )
+            .await;
+        });
+
+        // Give the loop time to journal + skip the wake.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        handle.abort();
+
+        assert!(
+            dispatcher.calls().is_empty(),
+            "terminal agenda item must not be re-dispatched (got {:?})",
+            dispatcher.calls()
+        );
+        // The item remains completed (not re-transitioned).
+        let items = agenda.list(&session).await.unwrap();
+        assert_eq!(items[0].state, AgendaItemState::Completed);
     }
 }

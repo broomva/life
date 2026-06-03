@@ -9,7 +9,6 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 
 use aios_protocol::{BranchId, ModelRouting, PolicySet};
 use aios_runtime::{KernelRuntime, TickInput, TickKind};
@@ -17,12 +16,12 @@ use async_trait::async_trait;
 use chronos_api::ApiState;
 use chronos_core::{
     AgendaStore, ChronosError, ChronosResult, DispatchOutcome, KernelDispatcher,
-    SessionId as ChronosSessionId, WakeRouter, WakeTrigger,
+    SessionId as ChronosSessionId, WakeRouter,
 };
 use chronos_lago::{
     CHRONOS_DEFAULT_BRANCH, CHRONOS_SYSTEM_SESSION, LagoAgendaStore, run_kernel_wake_loop,
 };
-use chronos_triggers::{HeartbeatTrigger, wake_channel};
+use chronos_triggers::wake_channel;
 use lago_core::id::{BranchId as LagoBranchId, SessionId as LagoSessionId};
 use lago_core::journal::Journal;
 
@@ -89,48 +88,49 @@ impl KernelDispatcher for ArcandKernelDispatcher {
 
 /// Wire the Chronos wake-loop into the running runtime (M2, opt-in via `--chronos`).
 ///
-/// Spawns (1) the `chronos-api` HTTP wake-ingest server when `http_bind` is set, and (2) the
-/// `run_kernel_wake_loop` background task that drives each wake into [`ArcandKernelDispatcher`] and
-/// records the agenda outcome. Must be called from within the tokio runtime context (arcand enters
-/// it via `_rt_guard` before this runs, so the spawned tasks queue and execute once the server's
-/// `block_on` starts).
+/// Requires `--chronos-http-bind`: the HTTP `POST /v1/wake` API is the **only** M2 wake source. The
+/// M0 heartbeat is deliberately NOT wired here — until M3 adds an agenda-sweeping scheduler, a
+/// heartbeat pulse would only journal no-op `chronos.wake` events into the shared production journal
+/// (cost without function). Spawns the `chronos-api` server + the `run_kernel_wake_loop` task. Must
+/// be called from within the tokio runtime context (arcand enters it via `_rt_guard` first, so the
+/// spawned tasks queue and run once the server's `block_on` starts).
+///
+/// **Known M2 limitation (M3 follow-up):** these tasks are not gracefully drained — they're aborted
+/// when the tokio runtime drops on shutdown, so an in-flight `tick_on_branch` can be torn mid-await
+/// (a stranded run). Threading the daemon's shutdown signal into both the `chronos-api` shutdown
+/// future and a `select!` in the wake loop is deferred; acceptable for an opt-in milestone.
 pub fn spawn_chronos(
     runtime: Arc<KernelRuntime>,
     journal: Arc<dyn Journal>,
     http_bind: Option<SocketAddr>,
-    heartbeat_secs: u64,
 ) {
-    // Router: heartbeat pulse (journaled, never dispatched — no intent) + the HTTP wake source.
+    let Some(addr) = http_bind else {
+        tracing::warn!(
+            "--chronos set without --chronos-http-bind: no wake source configured; chronos idle"
+        );
+        return;
+    };
+
+    // The HTTP wake source feeds the router; the API holds the matching sender.
     let mut router = WakeRouter::new(64);
-    router.add_trigger(Box::new(HeartbeatTrigger::new(Duration::from_secs(
-        heartbeat_secs.max(60),
-    ))) as Box<dyn WakeTrigger>);
     let (wake_tx, http_trigger) = wake_channel(64);
     router.add_trigger(Box::new(http_trigger));
 
     let agenda: Arc<LagoAgendaStore> = Arc::new(LagoAgendaStore::new(journal.clone()));
     let dispatcher = Arc::new(ArcandKernelDispatcher::new(runtime));
 
-    // HTTP wake-ingest API (POST /v1/wake, GET /v1/agenda/{session}) when bound.
-    if let Some(addr) = http_bind {
-        let state = ApiState {
-            agenda: agenda.clone(),
-            wake_tx,
-            default_session: ChronosSessionId::from_string(CHRONOS_SYSTEM_SESSION),
-        };
-        tokio::spawn(async move {
-            // Runs for the lifetime of the daemon; aborted when the runtime drops on shutdown.
-            if let Err(err) = chronos_api::serve(addr, state, std::future::pending::<()>()).await {
-                tracing::warn!(error = %err, "chronos-api server exited with error");
-            }
-        });
-        tracing::info!(%addr, "chronos wake-ingest API listening (M2 --chronos)");
-    } else {
-        drop(wake_tx); // heartbeat-only; no HTTP source.
-        tracing::info!("chronos enabled, heartbeat-only (no --chronos-http-bind)");
-    }
+    let state = ApiState {
+        agenda: agenda.clone(),
+        wake_tx,
+        default_session: ChronosSessionId::from_string(CHRONOS_SYSTEM_SESSION),
+    };
+    tokio::spawn(async move {
+        if let Err(err) = chronos_api::serve(addr, state, std::future::pending::<()>()).await {
+            tracing::warn!(error = %err, "chronos-api server exited with error");
+        }
+    });
 
-    // The kernel wake loop: next_wake -> record_wake -> dispatch -> agenda transition.
+    // The kernel wake loop: next_wake -> record_wake -> idempotency guard -> dispatch -> agenda.
     let default_session = LagoSessionId::from_string(CHRONOS_SYSTEM_SESSION);
     let branch = LagoBranchId::from_string(CHRONOS_DEFAULT_BRANCH);
     tokio::spawn(async move {
@@ -144,5 +144,5 @@ pub fn spawn_chronos(
         )
         .await;
     });
-    tracing::info!("chronos kernel wake-loop started (M2 --chronos)");
+    tracing::info!(%addr, "chronos M2 wake-loop + HTTP wake-ingest started (--chronos)");
 }
