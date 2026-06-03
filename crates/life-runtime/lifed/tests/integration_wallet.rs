@@ -318,3 +318,31 @@ async fn transfer_rejects_cross_user_from() {
     assert_eq!(env.mocks.haima.transfer_calls.lock().len(), 0);
     env.shutdown().await;
 }
+
+#[tokio::test]
+async fn statement_rejects_cross_user() {
+    use life_runtime_proto::life::v1::StatementReq;
+    let env = TestEnv::start_with_mocks().await;
+    let mut client = env.wallet_client().await;
+    let mut req = tonic::Request::new(StatementReq {
+        wallet: Some(WalletRef {
+            user_id: "bob".to_string(), // ≠ token subject (alice)
+            project_id: "p".to_string(),
+        }),
+        since: None,
+        until: None,
+        limit: 0,
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    // statement is server-streaming; the cross-user rejection fires on the
+    // initial call, before any ledger entry streams.
+    let err = client
+        .statement(req)
+        .await
+        .expect_err("cross-user statement must reject");
+    assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    env.shutdown().await;
+}
