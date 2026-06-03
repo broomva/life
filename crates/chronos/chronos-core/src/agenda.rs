@@ -113,6 +113,8 @@ pub enum AgendaItemState {
     Deferred,
     /// Withdrawn before dispatch.
     Cancelled,
+    /// The kernel dispatched the item but the tick errored (M2). Terminal.
+    Failed,
 }
 
 impl AgendaItemState {
@@ -123,6 +125,7 @@ impl AgendaItemState {
             AgendaItemState::Completed => "completed",
             AgendaItemState::Deferred => "deferred",
             AgendaItemState::Cancelled => "cancelled",
+            AgendaItemState::Failed => "failed",
         }
     }
 
@@ -130,7 +133,7 @@ impl AgendaItemState {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            AgendaItemState::Completed | AgendaItemState::Cancelled
+            AgendaItemState::Completed | AgendaItemState::Cancelled | AgendaItemState::Failed
         )
     }
 }
@@ -269,8 +272,12 @@ pub trait AgendaStore: Send + Sync {
     /// Cancel an item. Errors with [`ChronosError::NotFound`] if the id is unknown.
     async fn cancel(&self, id: &AgendaItemId) -> ChronosResult<()>;
 
-    /// List the items for a session, in dispatch order. Terminal (completed/cancelled) items are
-    /// included so callers can inspect history; filter on [`AgendaItem::state`] if undesired.
+    /// Mark an item failed — the kernel dispatched it but the tick errored (M2). Errors with
+    /// [`ChronosError::NotFound`] if the id is unknown.
+    async fn fail(&self, id: &AgendaItemId) -> ChronosResult<()>;
+
+    /// List the items for a session, in dispatch order. Terminal (completed/cancelled/failed) items
+    /// are included so callers can inspect history; filter on [`AgendaItem::state`] if undesired.
     async fn list(&self, session: &SessionId) -> ChronosResult<Vec<AgendaItem>>;
 }
 
@@ -324,6 +331,15 @@ impl AgendaStore for InMemoryAgendaStore {
             .get_mut(id)
             .ok_or_else(|| ChronosError::NotFound(id.to_string()))?;
         item.state = AgendaItemState::Cancelled;
+        Ok(())
+    }
+
+    async fn fail(&self, id: &AgendaItemId) -> ChronosResult<()> {
+        let mut guard = self.items.lock().expect("agenda mutex poisoned");
+        let item = guard
+            .get_mut(id)
+            .ok_or_else(|| ChronosError::NotFound(id.to_string()))?;
+        item.state = AgendaItemState::Failed;
         Ok(())
     }
 

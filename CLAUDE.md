@@ -127,7 +127,7 @@ aiOS (kernel contract — types, traits, event taxonomy)
   │
   ├── Vigil (observability — OTel tracing + GenAI metrics)  [planned — dir exists, not scaffolded]
   │
-  ├── Chronos (temporality — scheduling + time awareness)   [planned]
+  ├── Chronos (temporality — wake router + agenda + kernel handoff)  [active — M2]
   ├── Aegis (security — sandbox + capability enforcement)   [planned]
   ├── Nous (world model — environment understanding)        [planned]
   └── Mnemo (knowledge — persistent memory + RAG)           [planned]
@@ -137,7 +137,7 @@ aiOS (kernel contract — types, traits, event taxonomy)
 
 **Planned projects (directories exist, not yet scaffolded)**: Vigil will provide OpenTelemetry-native observability with GenAI semantic conventions.
 
-**Planned projects**: Chronos, Aegis, Nous, and Mnemo will each implement a specific AOS primitive as a separate crate/service, integrating through the canonical `aios-protocol` contract.
+**Planned projects**: Aegis, Nous, and Mnemo will each implement a specific AOS primitive as a separate crate/service, integrating through the canonical `aios-protocol` contract. **Chronos is now active** — M0 (wake router + heartbeat), M1 (agenda store + HTTP `POST /v1/wake`), M2 (kernel wake handoff: wakes drive `tick_on_branch`, opt-in via `arcan serve --chronos`).
 
 ## Current State (v0.2.0 — What Works)
 

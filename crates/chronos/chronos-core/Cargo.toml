@@ -18,6 +18,10 @@ tokio = { workspace = true, features = ["sync", "rt", "macros", "time"] }
 tracing.workspace = true
 ulid.workspace = true
 
+[features]
+# Exposes MockKernelDispatcher for downstream crates' tests (chronos-lago, arcand).
+test-util = []
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 
