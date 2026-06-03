@@ -63,6 +63,11 @@ pub enum RequiredScope {
     WalletRead,
     /// `wallet:write` — Wallet.{Debit, Transfer}.
     WalletWrite,
+    /// `x402:pay` — Wallet.X402Pay. A WalletWrite-class scope minted
+    /// only into payment-capable tokens; not granted to read-only or
+    /// generic wallet:write tokens (initiating an external payment is
+    /// strictly more powerful than an internal ledger debit). BRO-1354.
+    X402Pay,
     /// `identity:read` — Identity.{ListSessions}.
     IdentityRead,
     /// `identity:write` — Identity.{UpdateProfile, RevokeSession}.
@@ -87,6 +92,7 @@ impl RequiredScope {
             RequiredScope::EventsRead => Some("events:read"),
             RequiredScope::WalletRead => Some("wallet:read"),
             RequiredScope::WalletWrite => Some("wallet:write"),
+            RequiredScope::X402Pay => Some("x402:pay"),
             RequiredScope::IdentityRead => Some("identity:read"),
             RequiredScope::IdentityWrite => Some("identity:write"),
             RequiredScope::AlwaysGranted => None,
@@ -153,6 +159,7 @@ pub fn required_scope(path: &str) -> Option<RequiredScope> {
         return Some(match rest {
             "GetBalance" | "Statement" => RequiredScope::WalletRead,
             "Debit" | "Transfer" => RequiredScope::WalletWrite,
+            "X402Pay" => RequiredScope::X402Pay,
             _ => return None,
         });
     }
@@ -304,6 +311,10 @@ mod tests {
             Some(RequiredScope::WalletWrite)
         );
         assert_eq!(
+            required_scope("/life.v1.Wallet/X402Pay"),
+            Some(RequiredScope::X402Pay)
+        );
+        assert_eq!(
             required_scope("/life.v1.Identity/Me"),
             Some(RequiredScope::AlwaysGranted)
         );
@@ -367,6 +378,31 @@ mod tests {
             }
             other => panic!("expected Insufficient, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn enforce_x402_pay_requires_dedicated_scope() {
+        // BRO-1354: Wallet.X402Pay needs `x402:pay`.
+        let with = Tier1Claims {
+            user_id: "u".to_string(),
+            project_id: "p".to_string(),
+            scopes: vec!["x402:pay".to_string()],
+            tier: "paid".to_string(),
+        };
+        enforce("/life.v1.Wallet/X402Pay", &with).expect("x402:pay passes");
+
+        // `wallet:write` must NOT cover `x402:pay` — initiating an
+        // external payment is strictly more powerful than an internal
+        // ledger debit, so the scopes are deliberately disjoint.
+        let only_write = Tier1Claims {
+            user_id: "u".to_string(),
+            project_id: "p".to_string(),
+            scopes: vec!["wallet:write".to_string()],
+            tier: "paid".to_string(),
+        };
+        let err = enforce("/life.v1.Wallet/X402Pay", &only_write)
+            .expect_err("wallet:write must not cover x402:pay");
+        assert!(matches!(err, ScopeError::Insufficient { .. }));
     }
 
     #[test]

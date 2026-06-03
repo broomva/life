@@ -217,4 +217,43 @@ impl pb::wallet_server::Wallet for WalletService {
         self.idem.persist(key, buf).await?;
         Ok(Response::new(receipt))
     }
+
+    /// Initiate an x402 payment from the user's Anima-custodied wallet
+    /// (BRO-1354). Forwards to haima-proxy's `x402_pay`, which dials
+    /// haimad's `WalletSubstrate.X402Pay`. The substrate owns the full
+    /// client round-trip + signing; this handler is a thin marshaller.
+    ///
+    /// Not idempotent-cached: a payment that settled on-chain cannot be
+    /// safely replayed from a cache, and the substrate's per-call nonce
+    /// (EIP-3009) already makes a re-submit a distinct authorization.
+    /// base-sepolia only in P1 — mainnet is rejected substrate-side.
+    async fn x402_pay(
+        &self,
+        req: Request<pb::X402PayReq>,
+    ) -> Result<Response<pb::X402PayResp>, Status> {
+        let _claims = Self::claims(&req)?;
+        let r = req.into_inner();
+        let outcome = self
+            .haima
+            .x402_pay(
+                &r.user_id,
+                &r.project_id,
+                &r.resource_url,
+                &r.network,
+                r.max_amount_micros,
+            )
+            .await
+            .map_err(Status::from)?;
+        Ok(Response::new(pb::X402PayResp {
+            status: outcome.status,
+            tx_hash: outcome.tx_hash,
+            network: outcome.network,
+            recipient: outcome.recipient,
+            micro_credits: outcome.micro_credits,
+            declined_reason: outcome.declined_reason,
+            settled: outcome.settled,
+            resource_body: outcome.resource_body,
+            resource_status: outcome.resource_status,
+        }))
+    }
 }
