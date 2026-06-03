@@ -23,7 +23,8 @@ use aios_protocol::EventKind;
 use async_trait::async_trait;
 use chronos_core::{
     AgendaItem, AgendaItemId, AgendaItemState, AgendaStore, ChronosError, ChronosResult,
-    NewAgendaItem, WakeEvent, sort_for_dispatch,
+    KernelDispatcher, NewAgendaItem, WakeEvent, WakeRouter, sort_for_dispatch,
+    wake_dispatch_params,
 };
 use lago_core::error::LagoError;
 use lago_core::event::EventEnvelope;
@@ -108,6 +109,8 @@ pub const CHRONOS_AGENDA_COMPLETED_EVENT_TYPE: &str = "chronos.agenda.completed"
 pub const CHRONOS_AGENDA_DEFERRED_EVENT_TYPE: &str = "chronos.agenda.deferred";
 /// Lago `event_type` written when an agenda item is cancelled.
 pub const CHRONOS_AGENDA_CANCELLED_EVENT_TYPE: &str = "chronos.agenda.cancelled";
+/// Lago `event_type` written when an agenda item's kernel dispatch errored (M2).
+pub const CHRONOS_AGENDA_FAILED_EVENT_TYPE: &str = "chronos.agenda.failed";
 
 /// Dedicated lago session holding the chronos agenda ledger.
 ///
@@ -209,6 +212,11 @@ impl LagoAgendaStore {
                         item.state = AgendaItemState::Cancelled;
                     }
                 }
+                CHRONOS_AGENDA_FAILED_EVENT_TYPE => {
+                    if let Some(item) = item_for(&mut items, data) {
+                        item.state = AgendaItemState::Failed;
+                    }
+                }
                 _ => {}
             }
         }
@@ -288,6 +296,17 @@ impl AgendaStore for LagoAgendaStore {
         Ok(())
     }
 
+    async fn fail(&self, id: &AgendaItemId) -> ChronosResult<()> {
+        self.require_exists(id).await?;
+        self.append_event(
+            CHRONOS_AGENDA_FAILED_EVENT_TYPE,
+            serde_json::json!({ "id": id.as_str() }),
+        )
+        .await
+        .map_err(agenda_err)?;
+        Ok(())
+    }
+
     async fn list(&self, session: &chronos_core::SessionId) -> ChronosResult<Vec<AgendaItem>> {
         let items = self.project().await.map_err(agenda_err)?;
         let mut out: Vec<AgendaItem> = items
@@ -296,6 +315,81 @@ impl AgendaStore for LagoAgendaStore {
             .collect();
         sort_for_dispatch(&mut out);
         Ok(out)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// M2 — Kernel wake loop (WakeRouter → dispatch → agenda transition)
+// ---------------------------------------------------------------------------
+
+/// Drive wakes from `router` into the kernel and record each agenda outcome — the M2 wake loop.
+///
+/// For every wake the loop:
+/// 1. journals it via [`record_wake`] (`chronos.wake` lands in lago, exactly as M0/M1);
+/// 2. if it carries an `intent` ([`wake_dispatch_params`]), calls
+///    `dispatcher.dispatch(session, intent)` — the kernel runs an actual agent tick;
+/// 3. records the outcome on the wake's agenda item: [`AgendaStore::complete`] on success,
+///    [`AgendaStore::fail`] on error.
+///
+/// Bare pulses (heartbeats — no `intent`) are journaled but never dispatched. The loop runs until
+/// `router` is exhausted (every trigger returned `None` and the router was shut down from another
+/// task). Host it wherever a [`KernelDispatcher`] lives — arcand embeds it behind `--chronos`.
+///
+/// `default_session` / `default_branch` are the lago routing fallbacks (the `chronos.system`
+/// session on `main`) used when a wake has no `target_session`.
+pub async fn run_kernel_wake_loop(
+    router: &mut WakeRouter,
+    journal: Arc<dyn Journal>,
+    agenda: &dyn AgendaStore,
+    dispatcher: &dyn KernelDispatcher,
+    default_session: &SessionId,
+    default_branch: &BranchId,
+) {
+    while let Some(wake) = router.next_wake().await {
+        // 1. Journal the wake (chronos.wake → target/system session).
+        if let Err(err) = record_wake(journal.clone(), &wake, default_session, default_branch).await
+        {
+            warn!(error = %err, "failed to record wake; continuing");
+        }
+
+        // 2. Only wakes carrying an intent dispatch to the kernel.
+        let Some(params) = wake_dispatch_params(&wake) else {
+            continue;
+        };
+        let session = params
+            .target_session
+            .clone()
+            .unwrap_or_else(|| chronos_core::SessionId::from_string(default_session.as_str()));
+
+        let outcome = match dispatcher.dispatch(&session, &params.intent).await {
+            Ok(outcome) => outcome,
+            Err(err) => chronos_core::DispatchOutcome::failed(err.to_string()),
+        };
+
+        // 3. Record the outcome on the agenda item, if the wake carried one.
+        if let Some(item_id) = &params.agenda_item_id {
+            let transition = if outcome.completed {
+                agenda.complete(item_id).await
+            } else {
+                agenda.fail(item_id).await
+            };
+            if let Err(err) = transition {
+                warn!(
+                    error = %err,
+                    item = item_id.as_str(),
+                    "failed to record agenda transition"
+                );
+            }
+        }
+
+        match &outcome.error {
+            Some(err) => warn!(session = session.as_str(), error = %err, "kernel dispatch failed"),
+            None => debug!(
+                session = session.as_str(),
+                tokens = outcome.total_tokens,
+                "kernel dispatch completed"
+            ),
+        }
     }
 }
 
@@ -582,5 +676,201 @@ mod agenda_tests {
             user.is_empty(),
             "agenda events do not pollute the target session"
         );
+    }
+}
+
+#[cfg(test)]
+mod wake_loop_tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use chronos_core::{
+        AgendaItemId, AgendaItemState, AgendaStore, MockKernelDispatcher, NewAgendaItem,
+        SessionId as ChronosSessionId, WakeEvent, WakeRouter, WakeSource, WakeTrigger,
+    };
+    use lago_core::id::{BranchId, SessionId as LagoSessionId};
+    use lago_core::journal::{EventQuery, Journal};
+    use lago_journal::RedbJournal;
+
+    use super::{
+        CHRONOS_DEFAULT_BRANCH, CHRONOS_SYSTEM_SESSION, CHRONOS_WAKE_EVENT_TYPE, LagoAgendaStore,
+        run_kernel_wake_loop,
+    };
+
+    /// Trigger that emits one configured wake, then exhausts.
+    struct OneShotTrigger {
+        wake: Option<WakeEvent>,
+    }
+    impl OneShotTrigger {
+        fn new(wake: WakeEvent) -> Self {
+            Self { wake: Some(wake) }
+        }
+    }
+    #[async_trait]
+    impl WakeTrigger for OneShotTrigger {
+        async fn next_wake(&mut self) -> Option<WakeEvent> {
+            self.wake.take()
+        }
+        fn name(&self) -> &'static str {
+            "oneshot-test"
+        }
+    }
+
+    fn open_journal(dir: &std::path::Path) -> Arc<dyn Journal> {
+        Arc::new(RedbJournal::open(dir.join("m2.redb")).expect("open redb")) as Arc<dyn Journal>
+    }
+
+    /// Poll the agenda until `id` reaches a terminal state (or time out → `None`).
+    async fn poll_terminal(
+        agenda: &LagoAgendaStore,
+        session: &ChronosSessionId,
+        id: &AgendaItemId,
+    ) -> Option<AgendaItemState> {
+        for _ in 0..100 {
+            let items = agenda.list(session).await.expect("list");
+            if let Some(item) = items.iter().find(|i| &i.id == id)
+                && item.state.is_terminal()
+            {
+                return Some(item.state);
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        None
+    }
+
+    #[tokio::test]
+    async fn fail_transition_roundtrips() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = LagoAgendaStore::new(open_journal(dir.path()));
+        let id = store
+            .add(NewAgendaItem::new(
+                ChronosSessionId::from_string("s"),
+                "x",
+                WakeSource::Http,
+            ))
+            .await
+            .unwrap();
+        store.fail(&id).await.unwrap();
+        let items = store
+            .list(&ChronosSessionId::from_string("s"))
+            .await
+            .unwrap();
+        assert_eq!(items[0].state, AgendaItemState::Failed);
+    }
+
+    #[tokio::test]
+    async fn wake_loop_dispatches_and_completes_agenda_item() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let journal = open_journal(dir.path());
+        let agenda = Arc::new(LagoAgendaStore::new(journal.clone()));
+        let session = ChronosSessionId::from_string("user-1");
+        let id = agenda
+            .add(NewAgendaItem::new(
+                session.clone(),
+                "do work",
+                WakeSource::Http,
+            ))
+            .await
+            .unwrap();
+
+        let mut router = WakeRouter::new(8);
+        let wake = WakeEvent::new(WakeSource::Http)
+            .with_payload(serde_json::json!({ "intent": "do work", "agenda_item_id": id.as_str() }))
+            .with_target_session(session.clone());
+        router.add_trigger(Box::new(OneShotTrigger::new(wake)));
+
+        let dispatcher = Arc::new(MockKernelDispatcher::completed(100));
+        let default_session = LagoSessionId::from_string(CHRONOS_SYSTEM_SESSION);
+        let branch = BranchId::from_string(CHRONOS_DEFAULT_BRANCH);
+
+        let agenda_task = agenda.clone();
+        let journal_task = journal.clone();
+        let dispatcher_task = dispatcher.clone();
+        let handle = tokio::spawn(async move {
+            run_kernel_wake_loop(
+                &mut router,
+                journal_task,
+                agenda_task.as_ref(),
+                dispatcher_task.as_ref(),
+                &default_session,
+                &branch,
+            )
+            .await;
+        });
+
+        let state = poll_terminal(agenda.as_ref(), &session, &id).await;
+        handle.abort();
+        assert_eq!(state, Some(AgendaItemState::Completed));
+
+        // The mock was dispatched with the wake's session + intent.
+        assert_eq!(
+            dispatcher.calls(),
+            vec![("user-1".to_string(), "do work".to_string())]
+        );
+
+        // chronos.wake was journaled to the target session.
+        let wakes = journal
+            .read(
+                EventQuery::new()
+                    .session(LagoSessionId::from_string("user-1"))
+                    .branch(BranchId::from_string(CHRONOS_DEFAULT_BRANCH)),
+            )
+            .await
+            .expect("read wakes");
+        assert!(
+            wakes.iter().any(|e| matches!(
+                &e.payload,
+                aios_protocol::EventKind::Custom { event_type, .. }
+                    if event_type == CHRONOS_WAKE_EVENT_TYPE
+            )),
+            "the wake should be journaled as chronos.wake in the target session"
+        );
+    }
+
+    #[tokio::test]
+    async fn wake_loop_marks_failed_on_dispatch_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let journal = open_journal(dir.path());
+        let agenda = Arc::new(LagoAgendaStore::new(journal.clone()));
+        let session = ChronosSessionId::from_string("user-2");
+        let id = agenda
+            .add(NewAgendaItem::new(
+                session.clone(),
+                "explode",
+                WakeSource::Http,
+            ))
+            .await
+            .unwrap();
+
+        let mut router = WakeRouter::new(8);
+        router.add_trigger(Box::new(OneShotTrigger::new(
+            WakeEvent::new(WakeSource::Http)
+                .with_payload(
+                    serde_json::json!({ "intent": "explode", "agenda_item_id": id.as_str() }),
+                )
+                .with_target_session(session.clone()),
+        )));
+
+        let dispatcher = Arc::new(MockKernelDispatcher::failing("kernel boom"));
+        let default_session = LagoSessionId::from_string(CHRONOS_SYSTEM_SESSION);
+        let branch = BranchId::from_string(CHRONOS_DEFAULT_BRANCH);
+
+        let agenda_task = agenda.clone();
+        let handle = tokio::spawn(async move {
+            run_kernel_wake_loop(
+                &mut router,
+                journal,
+                agenda_task.as_ref(),
+                dispatcher.as_ref(),
+                &default_session,
+                &branch,
+            )
+            .await;
+        });
+
+        let state = poll_terminal(agenda.as_ref(), &session, &id).await;
+        handle.abort();
+        assert_eq!(state, Some(AgendaItemState::Failed));
     }
 }

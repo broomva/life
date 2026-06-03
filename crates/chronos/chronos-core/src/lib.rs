@@ -34,6 +34,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod agenda;
+mod dispatch;
 mod error;
 mod router;
 mod trigger;
@@ -43,6 +44,9 @@ pub use agenda::{
     AgendaItem, AgendaItemId, AgendaItemState, AgendaStore, InMemoryAgendaStore, NewAgendaItem,
     Priority, sort_for_dispatch,
 };
+#[cfg(any(test, feature = "test-util"))]
+pub use dispatch::MockKernelDispatcher;
+pub use dispatch::{DispatchOutcome, KernelDispatcher, WakeDispatch, wake_dispatch_params};
 pub use error::{ChronosError, ChronosResult};
 pub use router::WakeRouter;
 pub use trigger::WakeTrigger;
