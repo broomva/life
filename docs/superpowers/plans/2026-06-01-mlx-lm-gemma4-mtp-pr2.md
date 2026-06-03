@@ -102,3 +102,24 @@ PR 1 ships `mask=None` (full attention; correct for single-position L=1 drafting
 - HF reference loop: `transformers/generation/candidate_generator.py::SinglePositionMultiTokenCandidateGenerator`
 - Spec: `docs/superpowers/specs/2026-05-13-mlx-lm-gemma4-assistant.md`
 - PR explainer: `docs/pr-explainers/PR-1276.html`
+
+---
+
+## AS BUILT (2026-06-03)
+
+This plan was written pre-build. The implementation + real-weight dogfooding
+diverged from it in important ways — **see the dogfood receipt for the canonical
+as-built record**: `docs/dogfood-receipts/2026-06-03-bro-1130-mtp-mlx.md`.
+
+Headline deltas the plan did not anticipate (all found only by real-weight dogfooding,
+invisible to the 82 passing synthetic tests):
+1. **`gemma4.Model` wrapper** — real checkpoints load as the multimodal wrapper, not
+   `gemma4_text.Model`; the loop needed wrapper support (`f5eb301`).
+2. **`embed_scale`** — the drafter needs the target's *scaled* token embedding; raw
+   embedding gave 1.4% accept (≈ random). Fix → 38% accept (`bfbdfa2`).
+3. **`num_draft` tuning** — drafter forward is only 0.05× a target forward, so the
+   speedup knob is `num_draft_tokens` (=1), not quantization/batching. Result:
+   **1.11–1.22× at batch=1** (`004de2e` + tuning).
+
+Final status: **correct + 1.1–1.2× faster**, shipped via fork + PyPI (`mlx-lm-broomva`,
+[BRO-1350](https://linear.app/broomva/issue/BRO-1350)). Upstream PR 2 opens when #1276 merges.
