@@ -3,9 +3,9 @@
 > *Chronos* (χρόνος, Greek: time) — the substrate that answers **when an agent should wake**
 > and **what it should do when it wakes**. Biological analogue: circadian rhythm.
 
-**Status**: M1 (agenda store + HTTP wake ingest). M2–M3 planned per
-`docs/superpowers/plans/2026-05-13-chronos-temporal-primitive.md` (the M1 spec also lives in
-Linear BRO-1069).
+**Status**: M2 (kernel wake handoff — wakes drive `tick_on_branch`, embedded in `arcan serve
+--chronos`). M3 planned. Specs in Linear BRO-1069 (M1) / BRO-1080 (M2) +
+`docs/superpowers/plans/2026-05-13-chronos-temporal-primitive.md`.
 
 ## Architecture
 
@@ -48,6 +48,7 @@ autonomic (`autonomic.*`) and haima (`finance.*`) convention.
 | `chronos.agenda.completed` | An agenda item completed (M1 exposes the transition; M2 drives it from the kernel). |
 | `chronos.agenda.deferred` | An agenda item was deferred to a later time (M1). Carries `not_before_unix_ms`. |
 | `chronos.agenda.cancelled` | An agenda item was withdrawn before dispatch (M1). |
+| `chronos.agenda.failed` | An agenda item's kernel dispatch errored (M2). |
 
 All `chronos.agenda.*` events land in the dedicated **`chronos.agenda`** ledger session (the item's
 *target* session is a field in the payload), so `LagoAgendaStore::{complete,defer,cancel}` can
@@ -147,7 +148,7 @@ cargo run -p lago-cli -- replay --tree --data /tmp/chronos-smoke/journal.redb
 |-----------|------|--------|
 | M0 | Scaffold + heartbeat trigger writes `chronos.wake` events to lago | **shipped** |
 | M1 | Agenda store + HTTP `POST /v1/wake` ingest | **shipped (BRO-1069)** |
-| M2 | Kernel wake handoff — `WakeEvent → kernel.dispatch(session_id, intent)` | planned (BRO-1080) |
+| M2 | Kernel wake handoff — wake → `KernelDispatcher` → `tick_on_branch`; agenda completed/failed | **shipped (BRO-1080)** |
 | M3 | File-watch + sub-agent return triggers | planned |
 | Beyond M3 | `chronos-substrate-proto`, cron, webhook, threshold triggers, multi-priority queue | planned |
 
@@ -165,7 +166,7 @@ cargo run -p lago-cli -- replay --tree --data /tmp/chronos-smoke/journal.redb
 
 | Crate | How Chronos integrates |
 |-------|------------------------|
-| **arcand** | (M2) calls `tick_on_branch(session_id, branch, TickInput { objective })` on wake fire |
+| **arcand** | (M2 ✅) `arcan serve --chronos` embeds the wake-loop: `ArcandKernelDispatcher` calls `tick_on_branch(session, main, TickInput { objective: intent })` on each wake; outcome → agenda completed/failed. `chronos_core::KernelDispatcher` is the only seam where chronos meets aios types. |
 | **Lago** | every wake journals as `Custom("chronos.wake")`; agenda transitions as `Custom("chronos.agenda.*")` |
 | **Nous** | (M3+) threshold trigger fires when `nous_score < 0.3` |
 | **Vigil** | (M2+) wake event spans carry `chronos.source` + `chronos.target_session` |
