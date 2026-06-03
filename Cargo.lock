@@ -4426,6 +4426,7 @@ version = "0.3.0"
 dependencies = [
  "aios-proto",
  "aios-protocol",
+ "anima-identity",
  "anyhow",
  "async-trait",
  "axum 0.8.8",
@@ -4444,8 +4445,10 @@ dependencies = [
  "life-vigil",
  "prost 0.14.3",
  "prost-types 0.14.3",
+ "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -4456,6 +4459,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+ "wiremock",
 ]
 
 [[package]]
