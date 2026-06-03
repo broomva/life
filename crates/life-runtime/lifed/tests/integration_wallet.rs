@@ -237,3 +237,84 @@ async fn transfer_without_idempotency_key_fails_precondition() {
     assert_eq!(err.code(), tonic::Code::FailedPrecondition);
     env.shutdown().await;
 }
+
+// ── BRO-1368: payer-binding backfill — a capability for `alice` cannot
+// read/debit/transfer-from another user's wallet. ──────────────────────
+
+#[tokio::test]
+async fn get_balance_rejects_cross_user() {
+    let env = TestEnv::start_with_mocks().await;
+    let mut client = env.wallet_client().await;
+    let mut req = tonic::Request::new(WalletRef {
+        user_id: "bob".to_string(), // ≠ token subject (alice)
+        project_id: "p".to_string(),
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    let err = client
+        .get_balance(req)
+        .await
+        .expect_err("cross-user must reject");
+    assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    env.shutdown().await;
+}
+
+#[tokio::test]
+async fn debit_rejects_cross_user() {
+    let env = TestEnv::start_with_mocks().await;
+    let mut client = env.wallet_client().await;
+    let mut req = tonic::Request::new(DebitReq {
+        wallet: Some(WalletRef {
+            user_id: "bob".to_string(), // ≠ token subject (alice)
+            project_id: "p".to_string(),
+        }),
+        amount_micros: 1000,
+        sid: "sid-1".to_string(),
+        reason: "test".to_string(),
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    req.metadata_mut()
+        .insert("idempotency-key", "cross-user-debit".parse().unwrap());
+    let err = client.debit(req).await.expect_err("cross-user must reject");
+    assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    // The substrate was never debited.
+    assert_eq!(env.mocks.haima.debit_calls.lock().len(), 0);
+    env.shutdown().await;
+}
+
+#[tokio::test]
+async fn transfer_rejects_cross_user_from() {
+    use life_runtime_proto::life::v1::TransferReq;
+    let env = TestEnv::start_with_mocks().await;
+    let mut client = env.wallet_client().await;
+    let mut req = tonic::Request::new(TransferReq {
+        from: Some(WalletRef {
+            user_id: "bob".to_string(), // payer ≠ token subject (alice)
+            project_id: "p".to_string(),
+        }),
+        to: Some(WalletRef {
+            user_id: "carol".to_string(),
+            project_id: "p".to_string(),
+        }),
+        amount_micros: 1000,
+        memo: "test".to_string(),
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    req.metadata_mut()
+        .insert("idempotency-key", "cross-user-transfer".parse().unwrap());
+    let err = client
+        .transfer(req)
+        .await
+        .expect_err("cross-user from must reject");
+    assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    assert_eq!(env.mocks.haima.transfer_calls.lock().len(), 0);
+    env.shutdown().await;
+}

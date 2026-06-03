@@ -63,8 +63,16 @@ impl pb::wallet_server::Wallet for WalletService {
         &self,
         req: Request<pb::WalletRef>,
     ) -> Result<Response<pb::Balance>, Status> {
-        let _claims = Self::claims(&req)?;
+        let claims_user = Self::claims(&req)?.user_id.clone();
         let r = req.get_ref();
+        // BRO-1368: bind the queried wallet to the authenticated subject —
+        // a capability for user A cannot read user B's balance. project_id
+        // is not pinned (it selects the caller's own project wallet).
+        if r.user_id != claims_user {
+            return Err(Status::permission_denied(
+                "get_balance: request user_id must match the capability subject",
+            ));
+        }
         let bal = self
             .haima
             .get_balance(&r.user_id, &r.project_id)
@@ -81,12 +89,18 @@ impl pb::wallet_server::Wallet for WalletService {
         &self,
         req: Request<pb::StatementReq>,
     ) -> Result<Response<Self::StatementStream>, Status> {
-        let _claims = Self::claims(&req)?;
+        let claims_user = Self::claims(&req)?.user_id.clone();
         let r = req.get_ref();
         let wref = r
             .wallet
             .as_ref()
             .ok_or_else(|| Status::invalid_argument("wallet"))?;
+        // BRO-1368: bind the statement's wallet to the authenticated subject.
+        if wref.user_id != claims_user {
+            return Err(Status::permission_denied(
+                "statement: request user_id must match the capability subject",
+            ));
+        }
         let since_ms = r.since.as_ref().map(|t| t.seconds * 1000).unwrap_or(0);
         let until_ms = r
             .until
@@ -139,6 +153,13 @@ impl pb::wallet_server::Wallet for WalletService {
         let wref = body
             .wallet
             .ok_or_else(|| Status::invalid_argument("wallet"))?;
+        // BRO-1368: bind the debited wallet to the authenticated subject —
+        // a capability for user A cannot debit user B's wallet.
+        if wref.user_id != claims.user_id {
+            return Err(Status::permission_denied(
+                "debit: request user_id must match the capability subject",
+            ));
+        }
         let (entry_id, bal) = self
             .haima
             .debit(
@@ -185,6 +206,14 @@ impl pb::wallet_server::Wallet for WalletService {
         let body = req.into_inner();
         let from = body.from.ok_or_else(|| Status::invalid_argument("from"))?;
         let to = body.to.ok_or_else(|| Status::invalid_argument("to"))?;
+        // BRO-1368: bind the `from` (payer) wallet to the authenticated
+        // subject — a capability for user A cannot transfer FROM user B's
+        // wallet. `to` (the recipient) is intentionally unconstrained.
+        if from.user_id != claims.user_id {
+            return Err(Status::permission_denied(
+                "transfer: `from` user_id must match the capability subject",
+            ));
+        }
         let (entry_id, fbal, tbal) = self
             .haima
             .transfer(
