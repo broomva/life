@@ -27,7 +27,7 @@ API-key-authenticated) — the public web faucets are all login/captcha-gated.
 
 ## Architecture
 
-```
+```text
 haimad X402Pay (rail, unmodified)            seller (this dir)           Base Sepolia
   resolve_custody(user,project)                                          USDC FiatTokenV2
   → InProcessAnima (deterministic)
