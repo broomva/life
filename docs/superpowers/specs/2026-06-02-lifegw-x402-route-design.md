@@ -114,6 +114,14 @@ Built across one PR with staged compile-green layer commits. Decision #4 was hon
 
 **Custody (P1, documented deviation).** haimad resolves a per-`(user_id, project_id)` **deterministic `InProcessAnima`** (SHA-256-seeded via `derive_custody_seed`), not yet the soma-resident `/account` Anima wallet. This exercises the full sign + policy + settlement path on base-sepolia. **Slice 2b** swaps `resolve_custody` to `SomaCustody`/`RemoteAnima` behind the same handler — a localized change, no wire impact. Until then the x402 signing address is stable per `(user, project)` but distinct from both the substrate `GetBalance` wallet and the production Anima wallet.
 
-**Deferred to follow-ups:** the live base-sepolia round-trip against a real funded wallet + facilitator config (P1 manual step); broomva.tech edge proxy + UI (slice P2); mainnet (slice 3, financial control gate); `method`/`body` request replay in the JSON route body.
+**Open caveat — Gate #4 (Lago audit event) NOT yet met (P20 cross-review MEDIUM).** A settled x402 payment currently emits **no** `finance.*` Lago event — the substrate's `FinancePublisher` is a daemon-wide F2 stub (`Debit`/`Transfer` don't emit either; see `substrate.rs` header). So BRO-1341 Gate #4 ("Every payment + settlement is a Lago event — auditable, replayable") is **outstanding**, tracked with the F2 ledger work. Acceptable for the testnet transport slice (no real funds) but **must close before mainnet (slice 3)**.
+
+**Deferred to follow-ups:**
+- The live base-sepolia round-trip against a real funded wallet + facilitator config (P1 manual step).
+- **Slice 2b** — swap `resolve_custody` from `InProcessAnima` to the soma-resident `SomaCustody`/`RemoteAnima` so the signing key IS the `/account` Anima wallet.
+- **Lago finance event** on settle (Gate #4, with the F2 publisher).
+- **Cross-user payer binding on the other Wallet RPCs** — `x402_pay` now binds the payer to the capability subject (P20 fix); `get_balance`/`debit`/`transfer` still trust the body `user_id` (pre-existing). Backfill the same guard as a separate hardening.
+- **Network-consistency assertion** — the response `network`/`recipient` reflect the server-advertised 402 scheme; the signature is correctly domain-bound to the resolved network regardless, but `handle_402` should reject a 402 whose advertised network ≠ the resolved signing network (belongs with the mainnet-enablement work in the engine, slice 2b/3).
+- broomva.tech edge proxy + UI (slice P2); mainnet (slice 3, financial control gate); `method`/`body` request replay in the JSON route body.
 
 **Validation:** `cargo fmt --all --check` ✓, `cargo clippy --workspace --all-targets -- -D warnings` ✓, workspace tests ✓ (haimad 14, lifegw scope 19 + haima_x402 8, lifed wallet 7 incl. x402); both `verify_dependencies_{lifed,lifegw}.sh` ✓. (Unrelated pre-existing load-sensitive flake in `chronosd`'s heartbeat test — passes idle on clean main + this branch.)

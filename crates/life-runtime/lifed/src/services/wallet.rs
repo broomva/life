@@ -231,8 +231,22 @@ impl pb::wallet_server::Wallet for WalletService {
         &self,
         req: Request<pb::X402PayReq>,
     ) -> Result<Response<pb::X402PayResp>, Status> {
-        let _claims = Self::claims(&req)?;
+        // BRO-1354 hardening (P20 cross-review MEDIUM): X402Pay initiates
+        // an EXTERNAL payment (scope `x402:pay`, strictly more powerful
+        // than an internal ledger debit), so bind the payer to the
+        // authenticated identity — a capability for user A must not pay
+        // from user B's wallet, even on the direct gRPC path. (The
+        // bespoke lifegw HTTP route already sources the user from the
+        // verified Tier-1 token.) `project_id` is intentionally NOT
+        // pinned: it selects which of the caller's OWN project wallets
+        // to draw from, not a cross-tenant boundary.
+        let claims_user = Self::claims(&req)?.user_id.clone();
         let r = req.into_inner();
+        if r.user_id != claims_user {
+            return Err(Status::permission_denied(
+                "x402_pay: request user_id must match the capability subject",
+            ));
+        }
         let outcome = self
             .haima
             .x402_pay(

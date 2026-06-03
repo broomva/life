@@ -183,6 +183,35 @@ async fn x402_pay_returns_settled_outcome() {
     env.shutdown().await;
 }
 
+/// BRO-1354 hardening (P20 cross-review): a capability for `alice`
+/// cannot initiate an x402 payment naming `bob` as the payer — the
+/// handler binds the payer to the authenticated subject.
+#[tokio::test]
+async fn x402_pay_rejects_cross_user_payer() {
+    use life_runtime_proto::life::v1::X402PayReq;
+    let env = TestEnv::start_with_mocks().await;
+    let mut client = env.wallet_client().await;
+    let mut req = tonic::Request::new(X402PayReq {
+        user_id: "bob".to_string(), // ≠ the token subject (alice)
+        project_id: "p".to_string(),
+        resource_url: "https://example.test/api/data".to_string(),
+        network: "base-sepolia".to_string(),
+        max_amount_micros: None,
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    let err = client
+        .x402_pay(req)
+        .await
+        .expect_err("cross-user must reject");
+    assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    // The substrate was never reached.
+    assert_eq!(env.mocks.haima.x402_pay_calls.lock().len(), 0);
+    env.shutdown().await;
+}
+
 #[tokio::test]
 async fn transfer_without_idempotency_key_fails_precondition() {
     use life_runtime_proto::life::v1::TransferReq;
