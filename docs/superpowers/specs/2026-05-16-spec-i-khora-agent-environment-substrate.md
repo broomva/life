@@ -48,6 +48,8 @@ This spec was put through a **P20 cross-model adversarial gate** before any code
 
 Blockers 1–9 are **correctable in a redesign** (the substrate/security decisions were wrong, not the ambition). Findings 11–14 are **strategic forks that are the principal's call** — they are surfaced for decision, not resolved here. A v2 spec is gated on that decision. Full review artifacts: Linear BRO-1377 (verdict comment); Codex transcript `/tmp/khora-p20-codex-out.md`.
 
+**→ RESOLVED 2026-06-04.** Principal chose **redesign v2 from scratch** + **keep Branch as a core primitive (solved properly via a dedicated research phase)**. The corrected spec is **`2026-06-04-spec-i-khora-v2-redesign.md`** — it maps every blocker B1–B10 to a corrected decision, rewrites Branch to real Firecracker `pause→diff-snapshot→resume→reflink→restore+divergence-hook` semantics with a gating **Sub-R** research phase, rewrites the egress/identity security model, and re-baselines phasing to ~11–14 weeks. This v1 file is preserved as the failed-review record.
+
 ---
 
 ## 1. Problem Statement
