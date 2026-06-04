@@ -1,0 +1,585 @@
+<!--
+---
+type: spec
+slug: khora
+handle: khora
+ticket: pending
+title: "Khora — the agent environment substrate"
+version: 1
+status: draft
+spec_id: Spec I
+supersedes: none
+related_entities:
+  - concept/khora-substrate
+  - pattern/anima-soma-khora
+  - project/life-runtime
+  - concept/aci-thesis
+  - pattern/firecracker-uffd
+related_specs:
+  - Spec C — Life Runtime Architecture (lifed + lifegw)
+  - Spec D — Anima Custody (identity binding + capability tokens)
+  - Spec E — InferenceBackend (paired compute contract)
+research:
+  - research/notes/2026-05-15-agent-sandbox-substrates-raw.md
+  - research/notes/2026-05-15-aci-thesis-literature-synthesis.md
+  - SWE-agent arXiv:2405.15793 (Agent-Computer Interface)
+  - Anthropic Computer Use (Oct 2024) — "general computer skills"
+  - E2B e2b-dev/infra (Firecracker + UFFD, OSS)
+  - Vercel Sandbox GA 2026-01-30 (Firecracker, Amazon Linux 2023)
+  - AgentBench arXiv:2308.03688
+  - Plato, Timaeus 48e–53c (the receptacle, χώρα)
+---
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Khora — the agent environment substrate (Spec I)</title>
+    <style>
+      :root{
+        --bg:#0a0d13;--panel:#121826;--panel2:#0e1420;--ink:#e7eaf0;--muted:#94a0b0;--line:#212a3a;
+        --accent:#5b8cff;--good:#3fc491;--warn:#e0a458;--bad:#e36b72;--violet:#b08cff;--cyan:#54c7d6;--gold:#d8b25a;
+        --mono:ui-monospace,SFMono-Regular,Menlo,monospace;--sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      }
+      @media(prefers-color-scheme:light){:root{--bg:#f6f7fa;--panel:#fff;--panel2:#f0f2f7;--ink:#161b24;--muted:#566072;--line:#e2e7f0;}}
+      *{box-sizing:border-box}
+      html{scroll-behavior:smooth}
+      body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.58;-webkit-font-smoothing:antialiased}
+      main{max-width:960px;margin:0 auto;padding:2.4rem 1.2rem 6rem}
+      h1{font-size:2rem;margin:0 0 .25rem;letter-spacing:-.025em;line-height:1.1}
+      .gk{font-family:Georgia,'Times New Roman',serif;font-style:italic}
+      .sub{color:var(--muted);margin:0 0 1.5rem;font-size:1.06rem;max-width:64ch}
+      h2{font-size:1.2rem;margin:2.8rem 0 .5rem;letter-spacing:-.01em;border-top:1px solid var(--line);padding-top:1.5rem}
+      h2 .n{font-family:var(--mono);font-size:.8rem;color:var(--accent);margin-right:.5rem;vertical-align:.12em}
+      h3{font-size:1.02rem;margin:1.5rem 0 .35rem;letter-spacing:-.005em}
+      p{margin:.6rem 0}
+      a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+      code{font-family:var(--mono);font-size:.84em;background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:.06em .38em}
+      pre{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem;overflow:auto;font-size:.82rem;line-height:1.5;margin:.8rem 0}
+      pre code{background:none;border:none;padding:0}
+      .pill{display:inline-block;font-size:.7rem;font-family:var(--mono);padding:.18em .6em;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-bottom:1rem}
+      table{width:100%;border-collapse:collapse;margin:.8rem 0;font-size:.86rem}
+      th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--line);vertical-align:top}
+      th{color:var(--muted);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.045em}
+      td code{font-size:.82em}
+      tbody tr:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+      svg{width:100%;height:auto;display:block;margin:.9rem 0;background:var(--panel2);border:1px solid var(--line);border-radius:14px}
+      ul,ol{margin:.45rem 0;padding-left:1.25rem}li{margin:.32rem 0}
+      .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1rem 1.2rem;margin:1rem 0}
+      .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.9rem;margin:1rem 0}
+      @media(max-width:680px){.grid2{grid-template-columns:1fr}}
+      .tag{font-family:var(--mono);font-size:.72rem;padding:.06em .45em;border-radius:4px;border:1px solid var(--line);white-space:nowrap}
+      .ok{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}.acc{color:var(--accent)}.vio{color:var(--violet)}.cy{color:var(--cyan)}.gd{color:var(--gold)}
+      .dec{border-left:3px solid var(--accent);padding:.5rem 0 .5rem .85rem;margin:1rem 0;background:color-mix(in srgb,var(--accent) 4%,transparent);border-radius:0 8px 8px 0}
+      .dec h3{margin:.1rem 0 .3rem}
+      .dec .lab{font-family:var(--mono);font-size:.72rem;color:var(--accent)}
+      .foot{color:var(--muted);font-size:.82rem;margin-top:3rem;border-top:1px solid var(--line);padding-top:1.2rem}
+      .cite{color:var(--muted);font-size:.78rem}
+      .lead{font-size:1.04rem}
+      .kbd{font-family:var(--mono);font-size:.82rem;background:var(--panel);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:.08em .42em}
+      .toc{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:.7rem 1rem;margin:1.4rem 0;font-size:.85rem;columns:2;column-gap:1.4rem}
+      @media(max-width:680px){.toc{columns:1}}
+      .toc a{display:block;padding:.12rem 0;color:var(--ink)}
+      .toc a:hover{color:var(--accent);text-decoration:none}
+      .toc .num{font-family:var(--mono);color:var(--muted);font-size:.78rem;margin-right:.4rem}
+      details{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.5rem .9rem;margin:.7rem 0}
+      summary{cursor:pointer;font-weight:600;font-size:.92rem}
+      summary::marker{color:var(--accent)}
+      .wedge{font-weight:700;color:var(--good)}
+      .x{color:var(--bad);font-weight:700}
+      .stripe{background:linear-gradient(90deg,color-mix(in srgb,var(--violet) 9%,transparent),transparent);border-left:3px solid var(--violet);border-radius:0 10px 10px 0;padding:.7rem 1rem;margin:1rem 0}
+      .quote{font-family:Georgia,serif;font-style:italic;color:var(--ink);border-left:3px solid var(--gold);padding:.3rem 0 .3rem 1rem;margin:1rem 0;font-size:1.02rem}
+      .quote .att{display:block;font-style:normal;font-family:var(--sans);font-size:.82rem;color:var(--muted);margin-top:.35rem}
+      .legend{display:flex;gap:1.1rem;flex-wrap:wrap;font-size:.76rem;color:var(--muted);margin:.3rem 0 .2rem}
+      .legend span{display:inline-flex;align-items:center;gap:.35rem}
+      .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="pill">SPEC I · KHORA · v1 · DRAFT · Life Agent OS · substrate primitive</span>
+      <h1>Khora — the receptacle where agents <span class="gk">become</span></h1>
+      <p class="sub lead">The environment substrate of the Life Agent OS: a Firecracker-backed habitat that hosts every agent — snapshotable, branchable, identity-bound, event-sourced. Not the agent. Not the shield around it. The <em>place</em> in which the agent acts, fails, forks, persists, and is metered.</p>
+
+      <div class="card">
+        <strong>The thesis in one line.</strong> Most agentic problems are not about the agent — they are about the <em>environment</em>. <code>filesystem + bash</code> is the right starting interface; the hard part is making the environment that runs it <strong>fast to spawn, cheap to idle, safe to share, possible to snapshot, and cheap to fork</strong>. Vercel Sandbox and E2B prove the market; neither was built to <em>be the body of an operating-system-grade agent</em>. Khora is. It is the <strong>soma module's</strong> sibling — where <span class="acc">anima</span> says <em>who</em>, <span class="vio">khora</span> says <em>where</em>.
+      </div>
+
+      <div class="toc">
+        <a href="#name"><span class="num">0</span>The name — and why not Aegis</a>
+        <a href="#anima-soma"><span class="num">1</span>Anima · Soma · Khora — how they compose</a>
+        <a href="#problem"><span class="num">2</span>The problem — the soft-sandbox ceiling</a>
+        <a href="#research"><span class="num">3</span>What the research actually says</a>
+        <a href="#substrate"><span class="num">4</span>Substrate decision — why Firecracker</a>
+        <a href="#arch"><span class="num">5</span>Architecture — layers &amp; crates</a>
+        <a href="#surface"><span class="num">6</span>The ACI surface — five primitives</a>
+        <a href="#branch"><span class="num">7</span>Branch — the novel wedge</a>
+        <a href="#integration"><span class="num">8</span>Life integration — cross-substrate</a>
+        <a href="#decisions"><span class="num">9</span>Locked decisions L7-D1..D8</a>
+        <a href="#diff"><span class="num">10</span>Differentiation vs Vercel &amp; E2B</a>
+        <a href="#econ"><span class="num">11</span>Economic model (Haima)</a>
+        <a href="#phasing"><span class="num">12</span>Phasing — six sub-waves</a>
+        <a href="#accept"><span class="num">13</span>Acceptance &amp; open questions</a>
+      </div>
+
+      <!-- ============================================================ 0 NAME -->
+      <h2 id="name"><span class="n">0</span>The name — and why <span class="gk">khora</span>, not Aegis</h2>
+      <p>The first instinct was <strong>Aegis</strong> — Athena's shield. Wrong frame. Aegis is the <em>protective wall</em>: capability attestation, secret management, sandbox <em>policy</em>. That primitive stays in the roadmap. What this spec builds is the layer underneath the shield: the habitat itself, the room the agent lives in. The Greek for that is <strong class="gk">χώρα</strong>.</p>
+      <blockquote class="quote">…there is a third nature, which is space (χώρα), and is eternal, and admits not of destruction, and provides a home for all created things…
+        <span class="att">— Plato, <em>Timaeus</em> 52a–b. The <em>receptacle of becoming</em> — neither the eternal Forms nor the sensible particulars, but the third kind: the place in which forms imprint into matter.</span>
+      </blockquote>
+      <p>The pairing with <strong>Anima</strong> (Latin: soul, the agent's immutable origin + mutable belief) is exact. Anima alone is a static document. Khora alone is an empty room. Together: <em>an agent that exists somewhere, doing something, accumulating a history</em>. Khora is where the agent's becoming actually happens.</p>
+
+      <div class="legend">
+        <span><span class="sw" style="background:var(--good)"></span>shipped</span>
+        <span><span class="sw" style="background:var(--cyan)"></span>active</span>
+        <span><span class="sw" style="background:var(--violet)"></span>this spec</span>
+        <span><span class="sw" style="background:var(--muted)"></span>planned</span>
+      </div>
+      <svg viewBox="0 0 920 270" role="img" aria-label="The Life primitive family by Greek and Latin etymology">
+        <defs>
+          <style>
+            .ttl{fill:var(--ink,#e7eaf0);font:700 13px var(--mono,monospace)}
+            .gky{fill:var(--muted,#94a0b0);font:italic 10.5px Georgia,serif}
+            .fn{fill:var(--muted,#94a0b0);font:10px system-ui}
+            .box{rx:11;stroke-width:1.4}
+          </style>
+        </defs>
+        <!-- center: khora -->
+        <rect class="box" x="360" y="104" width="200" height="62" fill="#0a0d13" stroke="#b08cff" stroke-width="2.4"/>
+        <text class="ttl" x="460" y="130" text-anchor="middle" fill="#b08cff">khora</text>
+        <text class="gky" x="460" y="148" text-anchor="middle">χώρα — place of becoming</text>
+        <text class="fn" x="460" y="161" text-anchor="middle">environment substrate</text>
+        <!-- ring of siblings -->
+        <!-- anima -->
+        <rect class="box" x="120" y="20" width="170" height="54" fill="#0a0d13" stroke="#54c7d6"/>
+        <text class="ttl" x="205" y="42" text-anchor="middle">anima</text><text class="gky" x="205" y="58" text-anchor="middle">L. soul · identity</text>
+        <!-- soma -->
+        <rect class="box" x="120" y="108" width="170" height="54" fill="#0a0d13" stroke="#3fc491"/>
+        <text class="ttl" x="205" y="130" text-anchor="middle">soma</text><text class="gky" x="205" y="146" text-anchor="middle">σῶμα body · kernel daemon</text>
+        <!-- aegis -->
+        <rect class="box" x="120" y="196" width="170" height="54" fill="#0a0d13" stroke="#94a0b0" stroke-dasharray="4 3"/>
+        <text class="ttl" x="205" y="218" text-anchor="middle">aegis</text><text class="gky" x="205" y="234" text-anchor="middle">αἰγίς shield · policy</text>
+        <!-- haima -->
+        <rect class="box" x="630" y="20" width="170" height="54" fill="#0a0d13" stroke="#54c7d6"/>
+        <text class="ttl" x="715" y="42" text-anchor="middle">haima</text><text class="gky" x="715" y="58" text-anchor="middle">αἷμα blood · finance</text>
+        <!-- vigil -->
+        <rect class="box" x="630" y="108" width="170" height="54" fill="#0a0d13" stroke="#54c7d6"/>
+        <text class="ttl" x="715" y="130" text-anchor="middle">vigil</text><text class="gky" x="715" y="146" text-anchor="middle">L. watch · observability</text>
+        <!-- praxis -->
+        <rect class="box" x="630" y="196" width="170" height="54" fill="#0a0d13" stroke="#54c7d6"/>
+        <text class="ttl" x="715" y="218" text-anchor="middle">praxis</text><text class="gky" x="715" y="234" text-anchor="middle">πρᾶξις action · runs inside</text>
+        <!-- connectors -->
+        <g stroke="#212a3a" stroke-width="1.3" fill="none">
+          <path d="M290,47 C330,60 340,100 360,118"/>
+          <path d="M290,135 L360,135"/>
+          <path d="M290,223 C330,210 340,170 360,152"/>
+          <path d="M560,118 C600,100 600,60 630,47"/>
+          <path d="M560,135 L630,135"/>
+          <path d="M560,152 C600,170 600,210 630,223"/>
+        </g>
+        <text class="fn" x="305" y="100" fill="#3fc491">holds keys for ▸</text>
+        <text class="fn" x="565" y="100" fill="#b08cff">◂ meters · observes · executes</text>
+      </svg>
+      <p class="cite">Greek × Latin cross-lineage is deliberate and already established in Life: soma/haima/praxis/nous (Greek) sit beside anima/vigil (Latin). Khora extends the Greek line. No crate, doc, or trademark collision in the agent/infra space.</p>
+
+      <!-- ============================================================ 1 ANIMA SOMA -->
+      <h2 id="anima-soma"><span class="n">1</span>Anima · Soma · Khora — complement, not conflict</h2>
+      <p>A precise distinction the spec rests on, because three different things share the word "identity":</p>
+      <table>
+        <thead><tr><th>Concern</th><th>Where it lives</th><th>Owner</th></tr></thead>
+        <tbody>
+          <tr><td><em>What is an identity</em> — soul, belief, DID, rotation semantics</td><td><code>crates/anima/anima-core/</code></td><td class="acc"><strong>Anima</strong> (the abstraction)</td></tr>
+          <tr><td><em>How does an identity sign</em> — trait surface, 6 backends</td><td><code>crates/anima/anima-identity/</code></td><td class="acc"><strong>Anima</strong> (one impl bound to soma)</td></tr>
+          <tr><td><em>Where do the keys physically live</em> — a daemon? TPM? Ledger? Vault? RAM?</td><td>varies — <strong>soma is one option</strong></td><td class="ok"><strong>the chosen backend</strong></td></tr>
+          <tr><td><em>Where does the agent act</em> — exec, fs, branch, persist, fail</td><td><code>crates/khora/</code></td><td class="vio"><strong>Khora</strong> (this spec)</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Soma is not a competing identity system.</strong> <code>AnimaCustody</code> is a <em>trait</em>; <code>SomaCustody</code> is <em>one of six</em> implementations of it — the one whose transport is the soma daemon's admin UDS. The agent loop only ever sees the trait; the operator picks the backend per deployment.</p>
+      <svg viewBox="0 0 920 250" role="img" aria-label="AnimaCustody trait with six backends, SomaCustody delegating to the soma daemon">
+        <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#54c7d6"/></marker></defs>
+        <rect x="300" y="14" width="320" height="48" rx="10" fill="#0a0d13" stroke="#54c7d6" stroke-width="2"/>
+        <text x="460" y="36" text-anchor="middle" fill="#e7eaf0" font="700 13px var(--mono)" style="font:700 13px ui-monospace,monospace">trait AnimaCustody</text>
+        <text x="460" y="52" text-anchor="middle" fill="#94a0b0" style="font:10px system-ui">sign_jws · sign_digest · sign_evm_tx · rotate · user_did</text>
+        <!-- 6 backends -->
+        <g style="font:600 10.5px ui-monospace,monospace">
+          <rect x="20" y="108" width="135" height="40" rx="8" fill="#0a0d13" stroke="#212a3a"/><text x="87" y="133" text-anchor="middle" fill="#e7eaf0">InProcess</text>
+          <rect x="167" y="108" width="135" height="40" rx="8" fill="#0a0d13" stroke="#212a3a"/><text x="234" y="133" text-anchor="middle" fill="#e7eaf0">VaultTransit</text>
+          <rect x="314" y="108" width="135" height="40" rx="8" fill="#0a0d13" stroke="#212a3a"/><text x="381" y="133" text-anchor="middle" fill="#e7eaf0">Tpm</text>
+          <rect x="461" y="108" width="135" height="40" rx="8" fill="#0a0d13" stroke="#212a3a"/><text x="528" y="133" text-anchor="middle" fill="#e7eaf0">HardwareWallet</text>
+          <rect x="608" y="108" width="135" height="40" rx="8" fill="#0a0d13" stroke="#212a3a"/><text x="675" y="133" text-anchor="middle" fill="#e7eaf0">WebCrypto</text>
+          <rect x="755" y="108" width="145" height="40" rx="8" fill="#0a0d13" stroke="#3fc491" stroke-width="2"/><text x="827" y="133" text-anchor="middle" fill="#3fc491">SomaCustody</text>
+        </g>
+        <g stroke="#212a3a" stroke-width="1.2" fill="none">
+          <path d="M460,62 L87,106"/><path d="M460,62 L234,106"/><path d="M460,62 L381,106"/>
+          <path d="M460,62 L528,106"/><path d="M460,62 L675,106"/>
+        </g>
+        <path d="M460,62 L827,106" stroke="#3fc491" stroke-width="1.8" fill="none"/>
+        <!-- soma daemon -->
+        <rect x="700" y="196" width="200" height="44" rx="10" fill="#0a0d13" stroke="#3fc491" stroke-width="2"/>
+        <text x="800" y="218" text-anchor="middle" fill="#3fc491" style="font:700 12px ui-monospace,monospace">soma daemon</text>
+        <text x="800" y="233" text-anchor="middle" fill="#94a0b0" style="font:9.5px system-ui">admin UDS · custody oracle</text>
+        <path d="M827,148 L810,194" stroke="#3fc491" stroke-width="1.8" fill="none" marker-end="url(#ar)"/>
+        <text x="700" y="178" fill="#94a0b0" style="font:9.5px system-ui">tonic / UnixStream</text>
+        <text x="20" y="226" fill="#94a0b0" style="font:11px system-ui">Anima owns the concept. Soma is one rentable home for the keys.</text>
+        <text x="20" y="242" fill="#94a0b0" style="font:11px system-ui">Swap soma → Vault and the identity is unchanged — it was never <tspan font-style="italic">in</tspan> soma.</text>
+      </svg>
+      <p>Khora binds an <code>Arc&lt;dyn AnimaCustody&gt;</code> at create-time (decision <a href="#decisions">L7-D5</a>). Whether that's <code>SomaCustody</code>, <code>VaultTransitAnima</code>, or <code>TpmAnima</code> is the operator's choice — Khora depends on <em>Anima's trait</em>, never on soma directly.</p>
+
+      <!-- ============================================================ 2 PROBLEM -->
+      <h2 id="problem"><span class="n">2</span>The problem — the soft-sandbox ceiling</h2>
+      <p>Life's agent loop today calls a <strong>soft sandbox</strong>. <code>praxis-core</code> ships <code>FsPolicy</code> (path-string boundary check) and <code>SandboxPolicy</code> (command-name allowlist). Both are advisory — they assume a cooperating agent. The <code>core/life/CLAUDE.md</code> "Known gaps" set names it directly:</p>
+      <div class="grid2">
+        <div class="card"><span class="x">✗</span> <strong>No OS-level isolation.</strong> A buggy or hostile tool call reads anything the daemon UID can read.</div>
+        <div class="card"><span class="x">✗</span> <strong>Network policy declared, not enforced.</strong> <code>policy.yaml</code> egress rules don't reach the kernel.</div>
+        <div class="card"><span class="x">✗</span> <strong>Mount trait unimplemented.</strong> No real volume model.</div>
+        <div class="card"><span class="x">✗</span> <strong>No pause / resume.</strong> Long-horizon agents (&gt;1h) retry-from-scratch or block the host.</div>
+      </div>
+      <p>The soft sandbox was correct for v0.1 — it proved the loop. It is the wrong substrate for multi-tenant hosting (chatOS user sessions, mission-control third-party skills, the <code>freelance/_template</code> Life Module pattern), for long-horizon work, for speculative exploration, and for any deployment where agent code is not fully trusted. Spec I builds the hard substrate.</p>
+
+      <!-- ============================================================ 3 RESEARCH -->
+      <h2 id="research"><span class="n">3</span>What the research actually says</h2>
+      <p>A discipline note before architecture: the popular phrasing <em>"filesystem and bash is all you need"</em> is <strong>more popular than primary</strong>. Here's the honest ledger of what the literature substantiates versus what is industry framing — so the spec grounds claims correctly. <span class="cite">(Full synthesis: <code>research/notes/2026-05-15-aci-thesis-literature-synthesis.md</code>.)</span></p>
+      <table>
+        <thead><tr><th>Claim</th><th>Primary substantiation</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td>"filesystem + bash is all you need" (strong form)</td><td>Not in the primary literature in that form. SWE-agent (arXiv:2405.15793) claims the narrower: a <em>tuned, small</em> ACI beats a baseline scaffold on SWE-bench Lite; posits LM agents as "a new category of end users".</td><td><span class="warn">heuristic, not theorem</span></td></tr>
+          <tr><td>Human-style primitives &gt; task-specific APIs</td><td>Anthropic Computer Use (Oct 2024): "Instead of making specific tools… we're teaching it general computer skills." Three tools: <code>computer_*</code>, <code>text_editor_*</code>, <code>bash_*</code>.</td><td><span class="ok">cleanest primary cite</span></td></tr>
+          <tr><td>Devin's environment</td><td>Cognition launch: shell + code editor + browser + sandboxed compute. Three tools.</td><td><span class="ok">direct quote</span></td></tr>
+          <tr><td>"Environment / harness is the bottleneck"</td><td>Citable as <strong>Hyung Won Chung</strong>: "Add structure for the level of compute you have, then remove it, because the structure becomes the bottleneck for the next level of compute." (The Karpathy attribution is folk — unverified.)</td><td><span class="warn">cite Chung</span></td></tr>
+          <tr><td>Environment quality bounds agent performance</td><td>Anthropic $1B+ on RL environments (TechCrunch 2025-09-21); AgentBench (arXiv:2308.03688).</td><td><span class="ok">economic + benchmark evidence</span></td></tr>
+          <tr><td>Determinism · snapshotable · typed failures as env properties</td><td>Not primary in this form — these are <em>our</em> tightening of looser framing.</td><td><span class="vio">Life-specific design constraint</span></td></tr>
+        </tbody>
+      </table>
+      <p>So Khora treats <code>{exec, fs.{read,write,edit,list}, net.policy}</code> as the <strong>right starting set</strong> — not because minimality is proven, but because three independent signals converge on it: SWE-agent (tuned-and-small beats fat), Computer Use (general skills generalize), and the products (Vercel, E2B, Devin all ship roughly this). Three signals is enough to commit.</p>
+
+      <!-- ============================================================ 4 SUBSTRATE -->
+      <h2 id="substrate"><span class="n">4</span>Substrate decision — why Firecracker</h2>
+      <p>Every credible 2025–2026 agent-sandbox provider converged on the same stack: <strong>Firecracker microVMs + UFFD lazy memory restore + per-host orchestrator + guest gRPC daemon</strong>. The comparison is not close for <em>long-running, snapshotable agent loops</em>.</p>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--good)"></span>chosen — primary</span>
+        <span><span class="sw" style="background:var(--cyan)"></span>chosen — sibling / inner</span>
+        <span><span class="sw" style="background:var(--bad)"></span>rejected</span>
+      </div>
+      <svg viewBox="0 0 920 250" role="img" aria-label="Substrate comparison for agent loops">
+        <rect x="350" y="96" width="220" height="58" rx="12" fill="#0a0d13" stroke="#3fc491" stroke-width="2.4"/>
+        <text x="460" y="120" text-anchor="middle" fill="#3fc491" style="font:700 14px ui-monospace,monospace">Firecracker</text>
+        <text x="460" y="138" text-anchor="middle" fill="#94a0b0" style="font:9.5px system-ui">p50 restore 3–28ms · &lt;5MiB/VM · KVM</text>
+        <!-- chosen siblings -->
+        <rect x="350" y="14" width="220" height="46" rx="10" fill="#0a0d13" stroke="#54c7d6"/>
+        <text x="460" y="32" text-anchor="middle" fill="#54c7d6" style="font:700 12px ui-monospace,monospace">Cloud Hypervisor</text>
+        <text x="460" y="48" text-anchor="middle" fill="#94a0b0" style="font:9px system-ui">sibling pool · GPU passthrough only</text>
+        <rect x="350" y="190" width="220" height="46" rx="10" fill="#0a0d13" stroke="#54c7d6"/>
+        <text x="460" y="208" text-anchor="middle" fill="#54c7d6" style="font:700 12px ui-monospace,monospace">wasmtime</text>
+        <text x="460" y="224" text-anchor="middle" fill="#94a0b0" style="font:9px system-ui">inner tool-eval sandbox · sub-ms</text>
+        <!-- rejected -->
+        <g style="font:600 11px ui-monospace,monospace">
+          <rect x="40" y="34" width="170" height="40" rx="9" fill="#0a0d13" stroke="#e36b72" stroke-dasharray="4 3"/><text x="125" y="52" text-anchor="middle" fill="#e36b72">gVisor</text><text x="125" y="66" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">18–125% syscall tax · no prod C/R</text>
+          <rect x="40" y="105" width="170" height="40" rx="9" fill="#0a0d13" stroke="#e36b72" stroke-dasharray="4 3"/><text x="125" y="123" text-anchor="middle" fill="#e36b72">V8 isolates</text><text x="125" y="137" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">no fs · no subprocess · 128MB</text>
+          <rect x="40" y="176" width="170" height="40" rx="9" fill="#0a0d13" stroke="#e36b72" stroke-dasharray="4 3"/><text x="125" y="194" text-anchor="middle" fill="#e36b72">Kata / runc</text><text x="125" y="208" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">heavier · no agent-specific win</text>
+          <rect x="710" y="105" width="180" height="40" rx="9" fill="#0a0d13" stroke="#e36b72" stroke-dasharray="4 3"/><text x="800" y="123" text-anchor="middle" fill="#e36b72">CRIU under µVM</text><text x="800" y="137" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">non-standard · FC has own snapshot</text>
+        </g>
+        <g stroke="#212a3a" stroke-width="1.2" fill="none">
+          <path d="M460,96 L460,60"/><path d="M460,154 L460,190"/>
+          <path d="M210,54 L350,110" stroke="#e36b72" stroke-dasharray="3 2"/>
+          <path d="M210,125 L350,125" stroke="#e36b72" stroke-dasharray="3 2"/>
+          <path d="M210,196 L350,140" stroke="#e36b72" stroke-dasharray="3 2"/>
+        </g>
+      </svg>
+      <table>
+        <thead><tr><th>Substrate</th><th>Cold boot</th><th>Snapshot/restore</th><th>Overhead</th><th>Fit for long agent loops</th></tr></thead>
+        <tbody>
+          <tr><td class="ok"><strong>Firecracker</strong></td><td>~125ms</td><td><strong>p50 3–8ms, ~28ms warm-pool</strong></td><td>&lt;5MiB/VM</td><td class="ok">✓ the only viable primary</td></tr>
+          <tr><td class="cy">Cloud Hypervisor</td><td>~150ms</td><td>similar</td><td>&lt;10MiB</td><td class="cy">✓ GPU sidetrack (VFIO)</td></tr>
+          <tr><td>gVisor</td><td>~50ms</td><td>no prod C/R</td><td>18% typ / 125% worst</td><td class="bad">✗ can't resume cross-host</td></tr>
+          <tr><td class="cy">wasmtime (WASI)</td><td>&lt;1ms</td><td>component-model</td><td>~0</td><td class="warn">✗ as outer (no subprocess); ✓ as inner</td></tr>
+          <tr><td>V8 isolates</td><td>&lt;1ms</td><td>n/a</td><td>~0</td><td class="bad">✗ no fs, no subprocess</td></tr>
+        </tbody>
+      </table>
+      <p class="cite">Anthropic's own Claude Code <code>bash</code> tool uses neither a microVM nor gVisor — it's <code>anthropic-experimental/sandbox-runtime</code> (macOS Seatbelt + Linux bubblewrap + a Unix-socket proxy), bash-scope only. Server-side Computer Use substrate is undisclosed. E2B (<code>e2b-dev/infra</code>, OSS) = Firecracker + UFFD, p50 78ms create. Vercel Sandbox (GA 2026-01-30) = Firecracker on Amazon Linux 2023, iad1-only, no GPU, max 4 inbound ports.</p>
+
+      <!-- ============================================================ 5 ARCH -->
+      <h2 id="arch"><span class="n">5</span>Architecture — layers &amp; crates</h2>
+      <p>Khora slots into Life's existing 8-layer model as a new substrate (L1) with adapters (L2), transport (L6), and a session-pinned surface (L5). It does not invent a new control plane — it joins the Topology B route Spec C already ships.</p>
+      <svg viewBox="0 0 920 340" role="img" aria-label="Khora layer model L0 to L7">
+        <defs><marker id="dn" viewBox="0 0 10 10" refX="5" refY="9" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,0 L5,10 z" fill="#5b8cff"/></marker></defs>
+        <g style="font:600 12px ui-monospace,monospace">
+          <rect x="40" y="14" width="840" height="34" rx="8" fill="#0a0d13" stroke="#212a3a"/><text x="54" y="36" fill="#94a0b0">L7</text><text x="120" y="36" fill="#e7eaf0">User</text><text x="300" y="36" fill="#94a0b0" style="font:400 11px system-ui">CLI · chatOS · mission-control — pause/resume long-lived sessions</text>
+          <rect x="40" y="54" width="840" height="34" rx="8" fill="#0a0d13" stroke="#212a3a"/><text x="54" y="76" fill="#94a0b0">L6</text><text x="120" y="76" fill="#b08cff">Transport</text><text x="300" y="76" fill="#94a0b0" style="font:400 11px system-ui">khorad + khora-proxy + lifegw /v1/khora/* · WS bearer for Exec stream</text>
+          <rect x="40" y="94" width="840" height="34" rx="8" fill="#0a0d13" stroke="#212a3a"/><text x="54" y="116" fill="#94a0b0">L5</text><text x="120" y="116" fill="#e7eaf0">Session</text><text x="300" y="116" fill="#94a0b0" style="font:400 11px system-ui">ConsciousnessActor pins one Khora per session (peer of Arc&lt;dyn AnimaCustody&gt;)</text>
+          <rect x="40" y="134" width="840" height="34" rx="8" fill="#0a0d13" stroke="#212a3a"/><text x="54" y="156" fill="#94a0b0">L4</text><text x="120" y="156" fill="#e7eaf0">Tick</text><text x="300" y="156" fill="#94a0b0" style="font:400 11px system-ui">arcand calls khora at the body of each tick (Perceive→…→Commit)</text>
+          <rect x="40" y="174" width="840" height="34" rx="8" fill="#0a0d13" stroke="#5b8cff"/><text x="54" y="196" fill="#94a0b0">L3</text><text x="120" y="196" fill="#5b8cff">Port traits</text><text x="300" y="196" fill="#94a0b0" style="font:400 11px system-ui">ToolHarnessPort impl · FsPolicyPort · NetPolicyPort</text>
+          <rect x="40" y="214" width="840" height="34" rx="8" fill="#0a0d13" stroke="#b08cff" stroke-width="1.8"/><text x="54" y="236" fill="#94a0b0">L2</text><text x="120" y="236" fill="#b08cff">Adapters</text><text x="300" y="236" fill="#94a0b0" style="font:400 11px system-ui">arcan-khora — kernel→khora bridge  ◂ NEW</text>
+          <rect x="40" y="254" width="840" height="34" rx="8" fill="#0a0d13" stroke="#b08cff" stroke-width="2.2"/><text x="54" y="276" fill="#94a0b0">L1</text><text x="120" y="276" fill="#b08cff">Substrate</text><text x="300" y="276" fill="#94a0b0" style="font:400 11px system-ui">khora-core + khora-envd + khora-orchestrator (Firecracker)  ◂ NEW</text>
+          <rect x="40" y="294" width="840" height="34" rx="8" fill="#0a0d13" stroke="#3fc491"/><text x="54" y="316" fill="#94a0b0">L0</text><text x="120" y="316" fill="#3fc491">Kernel</text><text x="300" y="316" fill="#94a0b0" style="font:400 11px system-ui">aios-protocol::ToolHarnessPort (existing contract Khora satisfies)</text>
+        </g>
+        <path d="M898,30 L898,312" stroke="#5b8cff" stroke-width="1.4" fill="none" marker-end="url(#dn)" opacity=".6"/>
+      </svg>
+      <h3>Crate layout</h3>
+      <pre><code>crates/khora/
+├── khora-core/          # KhoraId, Template, Snapshot, EgressPolicy, KhoraEventKind; trait KhoraSession
+├── khora-envd/          # guest daemon (PID 1 inside each VM); gRPC over vsock
+├── khora-orchestrator/  # host-side: Firecracker VMM lifecycle + UFFD page server
+├── khora-template/      # Buildx → rootfs.ext4 → boot → snapshot → Lago blob CAS
+├── khora-lago/          # event sink — KhoraEventKind ↔ EventEnvelope
+├── khora-haima/         # per-second meter → Haima FinancialState
+├── khora-vigil/         # OTLP spans for Exec/Fs/Net + Firecracker FIFO metrics
+├── khora-anima/         # AnimaCustody binding + capability-token brokerage
+├── khora-proxy/         # lifed-side proxy (sibling of arcan-proxy, anima-proxy)
+├── khora-conformance/   # public test battery — runs against any KhoraSession impl
+├── khorad/              # per-host orchestrator daemon binary
+└── khora-cli/           # life khora create|pause|resume|branch|stop|exec …</code></pre>
+
+      <!-- ============================================================ 6 SURFACE -->
+      <h2 id="surface"><span class="n">6</span>The ACI surface — five primitives</h2>
+      <p>Five ACI primitives. That's the whole agent-facing interface. Everything else — browsers, Jupyter, GPU compute, MCP servers, language servers — runs <em>inside</em> via <code>Exec</code>. This is the SWE-agent + Computer Use convergence: a small set the model already uses well, not a tool zoo.</p>
+      <div class="grid2">
+        <div class="card"><span class="tag acc">Exec</span> <strong>bash.</strong> <code>cmd, args, env, stdin, cwd, timeout → stream(stdout|stderr|exit)</code>. The universal escape valve.</div>
+        <div class="card"><span class="tag acc">FsRead</span> <code>path, byte_range? → bytes</code>.</div>
+        <div class="card"><span class="tag acc">FsWrite</span> <code>path, bytes, mode, create_if_missing → ack</code>.</div>
+        <div class="card"><span class="tag acc">FsEdit</span> <strong>hashline.</strong> Blake3 content-addressed line edits (the Praxis pattern) — verifiable atomic edits with collision detection.</div>
+        <div class="card"><span class="tag acc">FsList</span> glob + grep + inotify-watch in one verb.</div>
+        <div class="card" style="border-color:var(--violet)"><span class="tag vio">+ lifecycle</span> <code>Create · Pause · Resume · Branch · Stop</code> &nbsp;<span class="tag vio">+ policy</span> <code>UpdateNetPolicy · MintEgressToken</code> &nbsp;<span class="tag vio">+ obs</span> <code>Logs · Metrics</code></div>
+      </div>
+      <details>
+        <summary>The <code>KhoraSession</code> trait (Rust)</summary>
+<pre><code>#[async_trait]
+pub trait KhoraSession: Send + Sync {
+    fn khora_id(&amp;self) -&gt; KhoraId;
+    fn anima_did(&amp;self) -&gt; &amp;str;
+    fn parent(&amp;self) -&gt; Option&lt;KhoraId&gt;;
+
+    // ACI — 5 primitives
+    async fn exec(&amp;self, req: ExecRequest) -&gt; KhoraResult&lt;ExecStream&gt;;
+    async fn fs_read(&amp;self, path: &amp;Path, range: Option&lt;ByteRange&gt;) -&gt; KhoraResult&lt;Bytes&gt;;
+    async fn fs_write(&amp;self, path: &amp;Path, bytes: Bytes, mode: FsWriteMode) -&gt; KhoraResult&lt;()&gt;;
+    async fn fs_edit(&amp;self, path: &amp;Path, edit: HashlineEdit) -&gt; KhoraResult&lt;FsEditResult&gt;;
+    async fn fs_list(&amp;self, path: &amp;Path, pat: Option&lt;Glob&gt;, recursive: bool) -&gt; KhoraResult&lt;Vec&lt;FsEntry&gt;&gt;;
+
+    // Lifecycle — 5 primitives
+    async fn pause(&amp;self) -&gt; KhoraResult&lt;Snapshot&gt;;
+    async fn resume(snap: Snapshot, anima: Arc&lt;dyn AnimaCustody&gt;) -&gt; KhoraResult&lt;Arc&lt;dyn KhoraSession&gt;&gt;;
+    async fn branch(&amp;self) -&gt; KhoraResult&lt;Arc&lt;dyn KhoraSession&gt;&gt;;
+    async fn stop(&amp;self) -&gt; KhoraResult&lt;()&gt;;
+
+    // Policy + observability
+    async fn update_net_policy(&amp;self, p: EgressPolicy) -&gt; KhoraResult&lt;()&gt;;
+    async fn mint_egress_token(&amp;self, r: MintEgressTokenRequest) -&gt; KhoraResult&lt;EgressToken&gt;;
+    async fn logs(&amp;self, range: LogRange) -&gt; KhoraResult&lt;LogStream&gt;;
+    async fn metrics(&amp;self) -&gt; KhoraResult&lt;KhoraMetrics&gt;;
+}</code></pre>
+      </details>
+      <h3>Template pipeline</h3>
+      <p>A <code>Khorafile</code> (Dockerfile-shaped) builds to a content-addressed snapshot triple stored in Lago's blob CAS — every template version hashed, every restore replayable from a known base.</p>
+      <svg viewBox="0 0 920 132" role="img" aria-label="Khora template build pipeline">
+        <defs><marker id="r2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5b8cff"/></marker></defs>
+        <g style="font:600 10.5px ui-monospace,monospace">
+          <rect x="14" y="44" width="120" height="44" rx="9" fill="#0a0d13" stroke="#212a3a"/><text x="74" y="64" text-anchor="middle" fill="#e7eaf0">Khorafile</text><text x="74" y="79" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">Dockerfile-shaped</text>
+          <rect x="172" y="44" width="120" height="44" rx="9" fill="#0a0d13" stroke="#212a3a"/><text x="232" y="64" text-anchor="middle" fill="#e7eaf0">buildx</text><text x="232" y="79" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">OCI image</text>
+          <rect x="330" y="44" width="130" height="44" rx="9" fill="#0a0d13" stroke="#212a3a"/><text x="395" y="64" text-anchor="middle" fill="#e7eaf0">rootfs.ext4</text><text x="395" y="79" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">read-only base</text>
+          <rect x="498" y="44" width="140" height="44" rx="9" fill="#0a0d13" stroke="#212a3a"/><text x="568" y="62" text-anchor="middle" fill="#e7eaf0">boot + envd</text><text x="568" y="78" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">warm · KHORA_READY</text>
+          <rect x="676" y="44" width="100" height="44" rx="9" fill="#0a0d13" stroke="#3fc491"/><text x="726" y="62" text-anchor="middle" fill="#3fc491">snapshot</text><text x="726" y="78" text-anchor="middle" fill="#94a0b0" style="font:8px system-ui">mem+snap</text>
+          <rect x="800" y="44" width="106" height="44" rx="9" fill="#0a0d13" stroke="#54c7d6"/><text x="853" y="62" text-anchor="middle" fill="#54c7d6">Lago CAS</text><text x="853" y="78" text-anchor="middle" fill="#94a0b0" style="font:8px system-ui">sha256(manifest)</text>
+        </g>
+        <g stroke="#5b8cff" stroke-width="1.5" fill="none" marker-end="url(#r2)">
+          <path d="M134,66 L170,66"/><path d="M292,66 L328,66"/><path d="M460,66 L496,66"/><path d="M638,66 L674,66"/><path d="M776,66 L798,66"/>
+        </g>
+        <text x="14" y="24" fill="#94a0b0" style="font:600 11px system-ui">{ rootfs.ext4 · memfile · snapfile }  — the restorable triple, content-addressed in Lago</text>
+      </svg>
+
+      <!-- ============================================================ 7 BRANCH -->
+      <h2 id="branch"><span class="n">7</span>Branch — the novel wedge</h2>
+      <p><code>Branch</code> is the one primitive <strong>no comparison product ships</strong>. Vercel and E2B have snapshots; neither has <em>fork-a-running-sandbox-cheaply</em>. Khora does, because it already lives in the Life journal-branching model (<code>BranchId</code>): a child shares the parent's <code>rootfs.ext4</code> (read-only) + a CoW overlay, and clones the parent <code>memfile</code> via <code>cp --reflink=always</code> on XFS/Btrfs. Target: <strong>&lt;50ms</strong>.</p>
+      <div class="stripe"><strong>Speculation becomes economics.</strong> Agent at a decision point → <code>Branch × 4</code> → run all four paths to depth N → measure → keep best, <code>Stop</code> the rest. On a 4-vCPU class at ~30s/branch that's ≈ <strong>$0.04</strong> for a 4-way speculative exploration. Today, on Vercel/E2B, this is unaffordable (4 full snapshot+create cycles, parent stalls). Khora makes it a routine move — and <a href="#econ">Haima</a> bills per-branch, so the operator can <em>budget</em> speculation.</div>
+      <svg viewBox="0 0 920 230" role="img" aria-label="Branch primitive — fork a running khora into four speculative children">
+        <defs><marker id="b2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b08cff"/></marker></defs>
+        <rect x="40" y="92" width="150" height="50" rx="11" fill="#0a0d13" stroke="#54c7d6" stroke-width="2"/>
+        <text x="115" y="113" text-anchor="middle" fill="#54c7d6" style="font:700 13px ui-monospace,monospace">parent khora</text>
+        <text x="115" y="130" text-anchor="middle" fill="#94a0b0" style="font:9px system-ui">running · at decision pt</text>
+        <g style="font:600 10.5px ui-monospace,monospace">
+          <rect x="320" y="14" width="150" height="40" rx="9" fill="#0a0d13" stroke="#212a3a"/><text x="395" y="38" text-anchor="middle" fill="#e7eaf0">child A · path₁</text>
+          <rect x="320" y="66" width="150" height="40" rx="9" fill="#0a0d13" stroke="#212a3a"/><text x="395" y="90" text-anchor="middle" fill="#e7eaf0">child B · path₂</text>
+          <rect x="320" y="128" width="150" height="40" rx="9" fill="#0a0d13" stroke="#3fc491" stroke-width="2"/><text x="395" y="152" text-anchor="middle" fill="#3fc491">child C · path₃ ★</text>
+          <rect x="320" y="180" width="150" height="40" rx="9" fill="#0a0d13" stroke="#212a3a"/><text x="395" y="204" text-anchor="middle" fill="#e7eaf0">child D · path₄</text>
+        </g>
+        <g stroke="#b08cff" stroke-width="1.5" fill="none" marker-end="url(#b2)">
+          <path d="M190,108 C260,70 270,40 318,34"/><path d="M190,112 C260,95 270,86 318,86"/>
+          <path d="M190,120 C260,135 270,144 318,148"/><path d="M190,126 C260,165 270,196 318,200"/>
+        </g>
+        <text x="222" y="64" fill="#b08cff" style="font:9px system-ui">CoW + reflink</text>
+        <!-- measure + keep -->
+        <rect x="560" y="92" width="150" height="50" rx="11" fill="#0a0d13" stroke="#e0a458"/>
+        <text x="635" y="113" text-anchor="middle" fill="#e0a458" style="font:700 12px ui-monospace,monospace">measure</text>
+        <text x="635" y="130" text-anchor="middle" fill="#94a0b0" style="font:9px system-ui">score each path</text>
+        <rect x="752" y="92" width="150" height="50" rx="11" fill="#0a0d13" stroke="#3fc491" stroke-width="2"/>
+        <text x="827" y="113" text-anchor="middle" fill="#3fc491" style="font:700 12px ui-monospace,monospace">keep best</text>
+        <text x="827" y="130" text-anchor="middle" fill="#94a0b0" style="font:9px system-ui">Stop the rest</text>
+        <g stroke="#212a3a" stroke-width="1.3" fill="none" marker-end="url(#b2)">
+          <path d="M470,34 C520,60 520,90 558,108"/><path d="M470,86 L558,112"/><path d="M470,148 L558,120"/><path d="M470,200 C520,176 520,140 558,124"/>
+        </g>
+        <path d="M710,117 L750,117" stroke="#3fc491" stroke-width="1.8" fill="none" marker-end="url(#b2)"/>
+        <text x="560" y="170" fill="#94a0b0" style="font:9.5px system-ui">Each child = a parallel agent with shared origin · 4 sub-journals in Lago · 4 branches billed in Haima.</text>
+        <text x="560" y="186" fill="#e0a458" style="font:9.5px system-ui">Open risk (Sub-F): memfile-CoW under concurrent parent writes. Fallback = full memfile copy (~4s/GiB).</text>
+      </svg>
+
+      <!-- ============================================================ 8 INTEGRATION -->
+      <h2 id="integration"><span class="n">8</span>Life integration — cross-substrate by construction</h2>
+      <p>A khora is not a remote service the agent calls — it is a surface the agent <em>has</em>, like its anima. Every running khora emits to all five existing substrates in parallel. This is the wedge no standalone sandbox can match: identity, event-sourcing, metering, and observability are <strong>siblings, not bolt-ons</strong>.</p>
+      <svg viewBox="0 0 920 250" role="img" aria-label="Khora cross-substrate integration map">
+        <defs><marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#94a0b0"/></marker></defs>
+        <rect x="370" y="98" width="180" height="56" rx="13" fill="#0a0d13" stroke="#b08cff" stroke-width="2.4"/>
+        <text x="460" y="122" text-anchor="middle" fill="#b08cff" style="font:700 14px ui-monospace,monospace">khora</text>
+        <text x="460" y="140" text-anchor="middle" fill="#94a0b0" style="font:9px system-ui">running sandbox</text>
+        <g style="font:600 11px ui-monospace,monospace">
+          <rect x="60" y="20" width="190" height="42" rx="9" fill="#0a0d13" stroke="#54c7d6"/><text x="76" y="40" fill="#54c7d6">Lago</text><text x="76" y="55" fill="#94a0b0" style="font:8.5px system-ui">khora.* events · replay --tree</text>
+          <rect x="60" y="104" width="190" height="42" rx="9" fill="#0a0d13" stroke="#3fc491"/><text x="76" y="124" fill="#3fc491">Haima</text><text x="76" y="139" fill="#94a0b0" style="font:8.5px system-ui">per-sec meter → x402</text>
+          <rect x="60" y="188" width="190" height="42" rx="9" fill="#0a0d13" stroke="#e0a458"/><text x="76" y="208" fill="#e0a458">Vigil</text><text x="76" y="223" fill="#94a0b0" style="font:8.5px system-ui">OTLP spans · FC metrics</text>
+          <rect x="670" y="62" width="190" height="42" rx="9" fill="#0a0d13" stroke="#54c7d6"/><text x="686" y="82" fill="#54c7d6">Anima</text><text x="686" y="97" fill="#94a0b0" style="font:8.5px system-ui">identity bind · egress token</text>
+          <rect x="670" y="146" width="190" height="42" rx="9" fill="#0a0d13" stroke="#b08cff"/><text x="686" y="166" fill="#b08cff">Nous</text><text x="686" y="181" fill="#94a0b0" style="font:8.5px system-ui">scores tool-call observations</text>
+        </g>
+        <g stroke="#94a0b0" stroke-width="1.3" fill="none" marker-end="url(#m2)" opacity=".8">
+          <path d="M370,116 C320,60 300,45 252,41"/><path d="M370,126 L252,125"/><path d="M370,140 C320,180 300,205 252,209"/>
+          <path d="M550,118 C610,90 620,85 668,83"/><path d="M550,134 C610,150 620,160 668,167"/>
+        </g>
+        <text x="300" y="245" fill="#94a0b0" style="font:9.5px system-ui">One Exec call → Lago event + Haima meter tick + Vigil span (child of the agent-tick span) + Anima identity in metadata. One fabric.</text>
+      </svg>
+      <h3>Identity binding &amp; egress brokering</h3>
+      <p>Raw API keys never enter the khora. <code>MintEgressToken</code> issues a short-lived bearer scoped to the bound anima's Tier-User capability; <code>lifegw</code> injects the real secret at the egress-proxy edge (the Vercel forwarding-rule pattern, sharpened to per-mint scope + revocation). First compromise leaks a 60-second token, not a key.</p>
+<pre><code>let khora = khora_client.create(CreateRequest {
+    template_id:   "claude-code-base:v3",
+    vcpus: 4, ram_mb: 8192, timeout: Duration::from_secs(3600),
+    anima_did:     "did:key:zDn…",                 // who runs inside
+    egress_policy: EgressPolicy::AllowList(vec!["github.com", "*.anthropic.com"]),
+    haima_budget:  BudgetCap::CpuSeconds(10_000),  // hard ceiling
+    parent_session: Some(session_id),              // for branch lineage
+    ..Default::default()
+}).await?;</code></pre>
+
+      <!-- ============================================================ 9 DECISIONS -->
+      <h2 id="decisions"><span class="n">9</span>Locked design decisions — L7-D1 .. L7-D8</h2>
+      <p>Invariants downstream sub-phases inherit and cannot relitigate without a spec amendment (the Spec D / Spec E pattern).</p>
+      <div class="dec"><span class="lab">L7-D1 · Substrate</span><h3>Firecracker primary; Cloud Hypervisor sibling for GPU; wasmtime inner</h3>Only Firecracker has production snapshot/restore at agent scale. gVisor's 18–125% syscall tax and no-prod-C/R disqualify it. CH sibling pool for VFIO GPU only. wasmtime for sub-ms read-only inner ops.</div>
+      <div class="dec"><span class="lab">L7-D2 · Orchestration</span><h3>Per-host Rust <code>khorad</code>; Nomad/K8s schedules hosts only</h3>Reuses life-runtime-pool + breaker + saga + tonic-UDS. Per-host blast radius, not cluster-wide. Rust, because the rest of life-runtime is.</div>
+      <div class="dec"><span class="lab">L7-D3 · Templates</span><h3>Lago blob CAS — <code>template_id = sha256(manifest)</code></h3><code>{rootfs.ext4, memfile, snapfile}</code> triple, SHA-256+zstd, replayable from a known hash. Provenance joins to journal events; multi-region replication is by-hash pull.</div>
+      <div class="dec"><span class="lab">L7-D4 · ACI surface</span><h3>Five primitives + lifecycle + policy</h3><code>Exec · FsRead · FsWrite · FsEdit · FsList</code> + <code>Create/Pause/Resume/Branch/Stop</code> + <code>UpdateNetPolicy/MintEgressToken</code>. Anything else runs inside via <code>Exec</code>.</div>
+      <div class="dec"><span class="lab">L7-D5 · Identity</span><h3>Every khora binds <code>Arc&lt;dyn AnimaCustody&gt;</code> at create</h3>No outbound calls without a minted egress token (Tier-User cap, Spec D). Raw secrets never enter the VM. Opt-out is not available — secured-by-default.</div>
+      <div class="dec"><span class="lab">L7-D6 · Branch</span><h3>First-class; CoW rootfs + memfile reflink clone</h3>The wedge no competitor ships. &lt;50ms target. Open risk: memfile-CoW under concurrent writes; fallback full-copy (~4s/GiB). Stress-tested in Sub-F.</div>
+      <div class="dec"><span class="lab">L7-D7 · Events</span><h3>Every action → <code>khora.*</code> Lago event; every second → Haima meter</h3>Full replay via <code>lago replay --tree</code>. Per-branch billable. Vigil OTLP spans parent-linked to the agent tick.</div>
+      <div class="dec"><span class="lab">L7-D8 · Conformance</span><h3><code>khora-conformance</code> is the public contract</h3>One battery validates <code>InProcessKhora</code> + <code>FirecrackerKhora</code> + <code>RemoteKhora</code>. Third parties implement Khora-compat backends and prove compliance.</div>
+
+      <!-- ============================================================ 10 DIFF -->
+      <h2 id="diff"><span class="n">10</span>Differentiation — the honest matrix</h2>
+      <table>
+        <thead><tr><th>Capability</th><th>Vercel Sandbox</th><th>E2B</th><th>Khora</th></tr></thead>
+        <tbody>
+          <tr><td>Substrate</td><td>Firecracker (AL2023)</td><td>Firecracker</td><td>Firecracker + CH sibling</td></tr>
+          <tr><td>Cold start (target)</td><td>"ms" (undisclosed)</td><td>~78ms p50</td><td>&lt;100ms warm; match E2B within 30% by Sub-B</td></tr>
+          <tr><td><strong>Branch (fork running)</strong></td><td class="x">✗</td><td class="x">✗</td><td class="wedge">✓ first-class</td></tr>
+          <tr><td><strong>Identity binding</strong></td><td>OIDC (operator)</td><td>API key</td><td class="wedge">✓ AnimaCustody · DID · rotated · revocable</td></tr>
+          <tr><td><strong>Capability tokens</strong></td><td>egress forwarding rules</td><td>env-var inject</td><td class="wedge">✓ Tier-User caps, per-mint scope</td></tr>
+          <tr><td><strong>Event-sourced</strong></td><td>logs</td><td>OTLP</td><td class="wedge">✓ khora.* in Lago · replay --tree</td></tr>
+          <tr><td><strong>Economic accounting</strong></td><td>active-CPU-ms</td><td>flat per-sec</td><td class="wedge">✓ Haima per-meter · per-branch billable</td></tr>
+          <tr><td><strong>Cross-substrate fabric</strong></td><td>siloed</td><td>siloed</td><td class="wedge">✓ Anima+Lago+Haima+Vigil+Nous siblings</td></tr>
+          <tr><td>Self-host</td><td class="x">✗ proprietary</td><td>✓ OSS infra</td><td>✓ Apache-2.0 · Life Module</td></tr>
+          <tr><td>Multi-region</td><td class="x">iad1 only</td><td>✓</td><td>✓ content-addressed templates</td></tr>
+          <tr><td>GPU</td><td class="x">✗</td><td>partial</td><td>✓ CH sibling (gated on Spec E)</td></tr>
+          <tr><td>Max session</td><td>45m–5h</td><td>5m–24h</td><td>unbounded (paused TTL ∞; chronos-managed)</td></tr>
+        </tbody>
+      </table>
+      <details>
+        <summary>The non-wedges — honest accounting</summary>
+        <ul>
+          <li><strong>Cold start.</strong> Day-1 will lag E2B's 78ms p50. Target: match within 30% by Sub-B. Not a from-scratch win.</li>
+          <li><strong>Template ecosystem.</strong> Empty on day 1; E2B has hundreds. Catalog scale is a year-2 problem.</li>
+          <li><strong>Substrate engineering.</strong> We use Firecracker well; we are not out-engineering AWS on the VMM.</li>
+          <li><strong>Inbound exposure.</strong> Vercel/E2B expose <code>*-{id}</code> URLs. Khora's case is agent→outbound; inbound is carved out (Khora-Sub-G if demand emerges).</li>
+        </ul>
+      </details>
+      <div class="card"><strong>The product story.</strong> "Vercel Sandbox is a serverless function with a longer leash. E2B is a code-interpreter-as-a-service. <span class="vio">Khora is an agent operating-system kernel</span> — your agent isn't a guest; the sandbox is part of the agent's body." Khora is the <em>Life substrate first</em>; the standalone product story emerges if Life adoption proves it.</div>
+
+      <!-- ============================================================ 11 ECON -->
+      <h2 id="econ"><span class="n">11</span>Economic model — Haima metering</h2>
+      <p>Every khora is metered into Haima's <code>FinancialState</code> fold at 1 Hz. Per-branch billing is what turns speculation from a technical trick into a budgetable line item — the second Life wedge.</p>
+      <table>
+        <thead><tr><th>Meter</th><th>Granularity</th><th>Rationale</th></tr></thead>
+        <tbody>
+          <tr><td><code>khora.vcpu_seconds</code></td><td>per-second active vCPU</td><td>idle is cheap (the Vercel insight)</td></tr>
+          <tr><td><code>khora.ram_gb_seconds</code></td><td>per-second provisioned RAM-GB</td><td>predictable</td></tr>
+          <tr><td><code>khora.fs_bytes_written</code></td><td>per-second delta</td><td>storage</td></tr>
+          <tr><td><code>khora.net_egress_bytes</code></td><td>per-second delta</td><td>egress always meters</td></tr>
+          <tr><td><code>khora.snapshot_gb_hours</code></td><td>per-hour stored</td><td>paused state has cost</td></tr>
+          <tr><td><code>khora.branch_created</code></td><td>per-branch (one-time)</td><td><strong>speculation has a price</strong></td></tr>
+        </tbody>
+      </table>
+
+      <!-- ============================================================ 12 PHASING -->
+      <h2 id="phasing"><span class="n">12</span>Phasing — six sub-waves</h2>
+      <p>Mirrors Spec D Wave 1–4 and Spec E E-Sub-A..F: trait + first backend → real backend → transport → cross-cutting → end-to-end → novel primitive. Critical path <strong>A → B → C → E ≈ 15 working days</strong>; ~17 days wall-clock with parallel dispatch.</p>
+      <svg viewBox="0 0 920 240" role="img" aria-label="Khora phasing waves A through F">
+        <defs><marker id="p2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5b8cff"/></marker></defs>
+        <!-- wave lanes -->
+        <text x="20" y="26" fill="#94a0b0" style="font:600 10px ui-monospace,monospace">WAVE 1</text>
+        <text x="270" y="26" fill="#94a0b0" style="font:600 10px ui-monospace,monospace">WAVE 2 (parallel)</text>
+        <text x="640" y="26" fill="#94a0b0" style="font:600 10px ui-monospace,monospace">WAVE 3</text>
+        <text x="790" y="26" fill="#94a0b0" style="font:600 10px ui-monospace,monospace">WAVE 4</text>
+        <!-- Sub-A -->
+        <rect x="20" y="92" width="180" height="56" rx="11" fill="#0a0d13" stroke="#b08cff" stroke-width="2"/>
+        <text x="110" y="113" text-anchor="middle" fill="#b08cff" style="font:700 12px ui-monospace,monospace">Sub-A · 3–4d</text>
+        <text x="110" y="130" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">core + envd + InProcess</text>
+        <text x="110" y="142" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">ACI contract + conformance</text>
+        <!-- Sub B C D -->
+        <g style="font:600 11px ui-monospace,monospace">
+          <rect x="270" y="34" width="200" height="44" rx="10" fill="#0a0d13" stroke="#3fc491"/><text x="284" y="54" fill="#3fc491">Sub-B · 5–7d</text><text x="284" y="69" fill="#94a0b0" style="font:8.5px system-ui">Firecracker + UFFD + templates</text>
+          <rect x="270" y="92" width="200" height="44" rx="10" fill="#0a0d13" stroke="#5b8cff"/><text x="284" y="112" fill="#5b8cff">Sub-C · 4–5d</text><text x="284" y="127" fill="#94a0b0" style="font:8.5px system-ui">proxy + lifegw + cap tokens</text>
+          <rect x="270" y="150" width="200" height="44" rx="10" fill="#0a0d13" stroke="#e0a458"/><text x="284" y="170" fill="#e0a458">Sub-D · 3d</text><text x="284" y="185" fill="#94a0b0" style="font:8.5px system-ui">Lago + Haima + Vigil sinks</text>
+        </g>
+        <!-- Sub E -->
+        <rect x="620" y="92" width="150" height="56" rx="11" fill="#0a0d13" stroke="#54c7d6" stroke-width="2"/>
+        <text x="695" y="113" text-anchor="middle" fill="#54c7d6" style="font:700 12px ui-monospace,monospace">Sub-E · 3d</text>
+        <text x="695" y="130" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">arcan-khora adapter</text>
+        <text x="695" y="142" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">Topology B live smoke</text>
+        <!-- Sub F -->
+        <rect x="790" y="92" width="115" height="56" rx="11" fill="#0a0d13" stroke="#3fc491" stroke-width="2"/>
+        <text x="847" y="113" text-anchor="middle" fill="#3fc491" style="font:700 12px ui-monospace,monospace">Sub-F · 3d</text>
+        <text x="847" y="130" text-anchor="middle" fill="#94a0b0" style="font:8px system-ui">Branch + full</text>
+        <text x="847" y="142" text-anchor="middle" fill="#94a0b0" style="font:8px system-ui">conformance</text>
+        <g stroke="#5b8cff" stroke-width="1.5" fill="none" marker-end="url(#p2)">
+          <path d="M200,108 L268,56"/><path d="M200,116 L268,114"/><path d="M200,124 L268,172"/>
+          <path d="M470,56 C540,70 560,100 618,112"/><path d="M470,114 L618,118"/><path d="M470,172 C540,158 560,130 618,124"/>
+          <path d="M770,120 L788,120"/>
+        </g>
+        <text x="20" y="220" fill="#94a0b0" style="font:9.5px system-ui">B/C/D blocked-by A · E blocked-by A+B+C+D · F blocked-by B+E. Sub-D parallels everything; Sub-F is the novel-primitive capstone.</text>
+      </svg>
+
+      <!-- ============================================================ 13 ACCEPT -->
+      <h2 id="accept"><span class="n">13</span>Acceptance &amp; open questions</h2>
+      <h3>Spec I ships when</h3>
+      <ol>
+        <li><code>cargo test -p khora-conformance</code> green against InProcess + Firecracker + Remote.</li>
+        <li>claude-code-base template + BRO-1013 live-Anthropic smoke runs <em>inside</em> Khora; <code>khora.*</code> events visible via <code>lago replay --tree</code>.</li>
+        <li>Warm-pool restore p50 &lt; 100ms; cold boot p50 &lt; 200ms (<code>khora-bench</code>).</li>
+        <li>Pause 24h → resume on a different host → complete the task; journal contiguous across the boundary.</li>
+        <li>4-way speculation example runs to depth 5, keeps best; Haima shows 4 branches billed; Lago shows 4 sub-journals.</li>
+        <li>One Exec → Lago events + Haima meter + Vigil span (tick-parented) + Anima metadata.</li>
+        <li>A <code>freelance/_template</code> tenant runs their own <code>khorad</code> + soma-backed custody; conformance green.</li>
+        <li>CLAUDE.md "Known gaps" closed: OS-isolation, network-enforcement, Mount.</li>
+      </ol>
+      <h3>Open questions (SPEC-I-DEVIATION candidates)</h3>
+      <div class="grid2">
+        <div class="card"><strong>1 · Memfile CoW concurrency.</strong> If reflink + concurrent parent writes is unstable, fallback to full memfile copy. Branch still works; latency degrades. <span class="cite">Sub-F stress test; decision deferred to data.</span></div>
+        <div class="card"><strong>2 · CH GPU pool gating.</strong> Lands with Spec E E-Sub-C (CUDA). Pulled in as a hook only. <span class="cite">Deferred to Spec E coordination.</span></div>
+        <div class="card"><strong>3 · Mount trait.</strong> First-class <code>MountVolume</code> RPC or <code>Exec</code>-of-<code>mount</code>? <span class="cite">Sub-A decision.</span></div>
+        <div class="card"><strong>4 · Praxis migration.</strong> Default: <code>InProcessKhora</code> wraps praxis-tools as dev-mode, so dev workflows don't break. <span class="cite">Deprecation timeline open.</span></div>
+        <div class="card"><strong>5 · Inbound ports.</strong> Currently no — agent case is outbound. Carved out as Khora-Sub-G if demand emerges.</div>
+        <div class="card"><strong>6 · CRIU cross-host migration.</strong> FC snapshots are CPU-feature-pinned. Feature-pinned host pools vs CRIU. <span class="cite">Year-2.</span></div>
+      </div>
+
+      <div class="foot">
+        <p><strong>Spec I — Khora · the agent environment substrate.</strong> Draft v1 · Life Agent OS · sibling of Spec C (runtime), Spec D (anima custody), Spec E (inference). Aegis (security policy) composes on top — separate primitive.</p>
+        <p class="cite">Canonical markdown: <code>core/life/docs/superpowers/specs/2026-05-16-spec-i-khora-agent-environment-substrate.md</code> · Research: <code>research/notes/2026-05-15-agent-sandbox-substrates-raw.md</code>, <code>…-aci-thesis-literature-synthesis.md</code>. Primary sources: SWE-agent arXiv:2405.15793 · Anthropic Computer Use (Oct 2024) · AgentBench arXiv:2308.03688 · E2B <code>e2b-dev/infra</code> · Vercel Sandbox GA 2026-01-30 · Plato <em>Timaeus</em> 48e–53c.</p>
+      </div>
+    </main>
+  </body>
+</html>
