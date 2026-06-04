@@ -2,12 +2,51 @@
 
 **Date**: 2026-05-16
 **Author**: Carlos Escobar + Claude (Sonnet 4.7, 1M context)
-**Status**: Draft (pending design-decision lock + Linear umbrella)
+**Status**: ⛔ **v1 FAILED P20 cross-review (2026-06-04)** — redesign pending strategic decision. See §0.
 **Sibling specs**: Spec C (life-runtime), Spec D (Anima Custody), Spec E (InferenceBackend)
 **Research substrate**:
   - `research/notes/2026-05-15-agent-sandbox-substrates-raw.md` — Vercel Sandbox, E2B, Firecracker vs gVisor vs WASM vs V8 isolates substrate comparison
   - `research/notes/2026-05-15-aci-thesis-literature-synthesis.md` — SWE-agent, Anthropic Computer Use, Cognition Devin, the "filesystem + bash" thesis primary literature
 **Linear umbrella**: pending file (draft text at §11.1)
+
+---
+
+## 0. P20 Cross-Review Verdict — ⛔ FAIL (v1, 2026-06-04)
+
+This spec was put through a **P20 cross-model adversarial gate** before any code. Four independent reviewers — one cross-vendor (Codex / GPT-5, which web-searched the Firecracker snapshot docs to verify), three fresh-context Claude lenses (substrate, security, product) — were briefed to *refute, not praise*.
+
+| Reviewer | Lens | Anti-slop (≥7 to pass) | Verdict |
+|---|---|---|---|
+| Codex / GPT-5 (cross-vendor) | whole spec | **4/10** | FAIL |
+| Architect | substrate / distributed | **4/10** | FAIL |
+| Silas | security / capability | **3/10** | FAIL |
+| general-purpose | product / strategy | **3/10** | FAIL |
+
+**Mean 3.5/10 — decisive FAIL. Do NOT start Sub-A as written.** The gate worked: a polished, plausible v1 had several load-bearing decisions that are wrong or unbuildable.
+
+### Consensus blockers (named independently by ≥2 reviewers, incl. the cross-vendor leg)
+
+1. **Branch is mechanically invalid as specified.** You cannot `cp --reflink` a *live, un-paused* Firecracker memfile and keep the parent running — Firecracker requires `Pause → CreateSnapshot`, and loaded memory files must be immutable. Honest mechanism: `pause(parent ~ms) → snapshot → reflink the frozen snapshot → N× restore`. The "<50ms, parent keeps running, live fork" headline (L7-D6) is false. *(all 4)*
+2. **Cloned-memory divergence unhandled.** Children booted from one image share RNG/entropy, TCP/socket state, TSC, fds, MMDS identity → corrupted children + key/nonce collisions, absent a mandatory post-restore divergence hook (reseed CSPRNG via VMGenID, tear down sockets, rotate identity) before guest code runs. *(Architect, Codex, Silas)*
+3. **MintEgressToken is a confused deputy + the TLS model is contradictory.** The capability binds `user_id`+`scope`, never a destination host — a hostile guest names an allow-listed host (wildcard / redirect / SSRF / DNS-rebind) and the proxy injects the *real* credential into the attacker stream. Header injection also requires TLS-termination (proxy sees every tenant's plaintext secrets), contradicting "mTLS/SNI". The component doesn't exist. *(Codex, Silas)*
+4. **"Secured by default, no opt-out" is enforced nowhere.** No default-deny network namespace; a guest with a raw socket bypasses an app-layer proxy (raw TCP/UDP/DNS/QUIC). *(Codex, Silas)*
+5. **Snapshot / branch leaks secrets.** A paused snapshot = a memory dump in Lago CAS (by-hash, broadly readable, not stated encrypted); branch children inherit the parent's *live egress token*. *(Silas, Codex)*
+6. **L7-D3 CAS-for-memfile defeats UFFD.** You cannot lazily page-fault out of a zstd blob — you must inflate the whole GB-scale memfile first (seconds), killing the warm-pool target. Memfile must live local + uncompressed on NVMe; CAS is cold archive only. *(Architect)*
+7. **Cross-host resume (AC#4) contradicts the spec's own OQ#7** and is unsafe without CPU-feature-pinned host pools (TSC/AVX). *(Codex, Architect)*
+8. **L7-D2 "reuse life-runtime-pool" is an impedance mismatch** — it's a gRPC *channel* pool, not a stateful-VM lifecycle pool. *(Architect)*
+9. **Five ACI primitives are insufficient** — missing process control (signal/kill), PTY/TTY resize, port-forward, `MountVolume`, structured env/secret injection. PID-1 envd also understates the init contract (zombie reaping, signal forwarding, pseudo-fs mounts). *(Codex, Architect)*
+10. **Phasing is 3–5× optimistic** — 15 days for a from-scratch FC orchestrator + UFFD page server + template pipeline + egress proxy + conformance is not credible; realistic floor 6–10 weeks. *(all 4)*
+
+### Strategic findings (the "should we build this, now, this way" lens)
+
+11. **Build-vs-buy ignored.** E2B's infra is Apache-2.0 and already ships FC + UFFD + templates + orchestrator. The only cited reason to rewrite is "Rust vocabulary." Wrapping/forking E2B reclaims ~12 of 17 days; the cross-substrate fabric (Lago/Haima/Vigil/Anima sinks) is event-emission at the orchestration layer — achievable *over* a wrapper. *(Product, Codex)*
+12. **Mis-sequenced.** Spec E (the explicitly *paired* compute contract) is 17%; M9 apps/chat migration is the real critical path; nothing in v0.2.0 is blocked on OS-isolation. Khora's own GPU/exec path depends on Spec-E milestones that don't exist yet. *(Product)*
+13. **Three competing sandbox layers** — praxis soft-sandbox + planned Aegis + Khora, no consolidation plan. L7-D5 *is* policy, pre-empting Aegis's charter. *(Product)*
+14. **Branch may be a solution looking for a problem** — "no competitor ships it" is at least as likely a no-demand signal as a moat; the spec itself flags the core mechanism as unsolved. *(Product)*
+
+### Disposition
+
+Blockers 1–9 are **correctable in a redesign** (the substrate/security decisions were wrong, not the ambition). Findings 11–14 are **strategic forks that are the principal's call** — they are surfaced for decision, not resolved here. A v2 spec is gated on that decision. Full review artifacts: Linear BRO-1377 (verdict comment); Codex transcript `/tmp/khora-p20-codex-out.md`.
 
 ---
 

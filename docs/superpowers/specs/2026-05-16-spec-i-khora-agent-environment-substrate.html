@@ -99,10 +99,13 @@ research:
   </head>
   <body>
     <main>
-      <span class="pill">SPEC I · KHORA · v1 · DRAFT · Life Agent OS · substrate primitive</span>
+      <span class="pill" style="border-color:var(--bad);color:var(--bad)">SPEC I · KHORA · v1 · ⛔ P20 FAIL · Life Agent OS · substrate primitive</span>
       <h1>Khora — the receptacle where agents <span class="gk">become</span></h1>
       <p class="sub lead">The environment substrate of the Life Agent OS: a Firecracker-backed habitat that hosts every agent — snapshotable, branchable, identity-bound, event-sourced. Not the agent. Not the shield around it. The <em>place</em> in which the agent acts, fails, forks, persists, and is metered.</p>
 
+      <div style="border:1.5px solid var(--bad);background:color-mix(in srgb,var(--bad) 9%,transparent);border-radius:14px;padding:1rem 1.2rem;margin:1.2rem 0">
+        <strong class="bad">⛔ P20 cross-review verdict: FAIL (v1 · 2026-06-04).</strong> Four independent reviewers — Codex / GPT-5 (cross-vendor, web-verified against the Firecracker snapshot docs) + three Claude lenses (substrate · security · product) — scored this <strong>4 / 4 / 3 / 3 out of 10</strong> (≥7 to pass; mean 3.5). Consensus blockers: <strong>(1)</strong> Branch is mechanically invalid — you cannot reflink a <em>live, un-paused</em> Firecracker memfile and keep the parent running (the headline wedge, L7-D6); <strong>(2)</strong> MintEgressToken is a confused deputy + the TLS-injection model is self-contradictory (L7-D5); <strong>(3)</strong> cross-host resume contradicts the spec's own open question; <strong>(4)</strong> phasing is 3–5× optimistic (realistic 6–10 weeks, not 15 days); plus build-vs-buy (wrap E2B's Apache-2.0 infra) and mis-sequencing vs Spec E / M9. <strong>The diagrams and decisions below are the failed v1</strong>, preserved for the record. v2 is gated on a strategic decision — see the canonical spec §0 for the full 14-finding blocker list.
+      </div>
       <div class="card">
         <strong>The thesis in one line.</strong> Most agentic problems are not about the agent — they are about the <em>environment</em>. <code>filesystem + bash</code> is the right starting interface; the hard part is making the environment that runs it <strong>fast to spawn, cheap to idle, safe to share, possible to snapshot, and cheap to fork</strong>. Vercel Sandbox and E2B prove the market; neither was built to <em>be the body of an operating-system-grade agent</em>. Khora is. It is the <strong>soma module's</strong> sibling — where <span class="acc">anima</span> says <em>who</em>, <span class="vio">khora</span> says <em>where</em>.
       </div>
