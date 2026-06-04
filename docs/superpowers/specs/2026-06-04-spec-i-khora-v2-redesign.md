@@ -85,16 +85,19 @@ The principal kept Branch as the marquee differentiator. It is preserved — but
 Firecracker exposes exactly one snapshot path: `Pause → CreateSnapshot → (resume | restore)`. Loaded memory files must be immutable. So Branch is:
 
 ```
-1. khorad: Pause(parent)                         # parent halts — single-digit→low-tens of ms
-2. khorad: CreateSnapshot(parent, type=Diff)     # diff snapshot = only dirty pages since base; cheap
-3. khorad: Resume(parent)                         # parent runs again; total pause window is the snapshot cost
-4. khorad: reflink the now-IMMUTABLE snapshot memfile (cp --reflink) — O(metadata), instant
+0. khorad: FREEZE the parent's agent process tree (cgroup freezer)   # no agent userspace mid-execution in the captured image (§9-R2)
+1. khorad: Pause(parent)                          # vCPUs halt — pause window MEASURED in Sub-R, not asserted
+2. khorad: CreateSnapshot(parent, type=Diff)      # diff = dirty pages since base; pause scales with the DIRTY set (Sub-R variable)
+3. khorad: Resume(parent) + THAW its process tree # parent runs again
+4. khorad: reflink the BASE memfile (shared, refcounted) + per-child diff   # diff alone is NOT restorable — see §9-R1
 5. khorad: for each child i in 1..N:
-     restore(child_i) from {reflinked memfile, snapfile}   # UFFD lazy restore, ~tens of ms each
-     run the DIVERGENCE HOOK (§2.2) before unfreezing guest code
+     restore(child_i, resume=false)               # child vCPUs stay PAUSED
+     host-side barrier (while paused): inject entropy, set VMGenID, rotate identity, clear neighbor/flow tables   # §9-R2
+     Resume(child_i) under an envd init-gate: agent processes are blocked from starting
+       until khorad ACKs the child's rotated identity, then the agent runtime is re-exec'd
 ```
 
-**Honest framing:** the parent is *briefly paused* (the snapshot window), not "continuously running through a live fork." Children are *restores from a frozen snapshot*, not live clones. Diff snapshots keep the pause window small (only dirty pages serialized).
+**Honest framing:** the parent is *briefly paused* (the snapshot window) — its agent process tree is frozen first so nothing is mid-execution — not "continuously running through a live fork." Children are *restores from a frozen snapshot*, not live clones. **Pause-window and branch latency are NOT asserted here** — they are measured in Sub-R (pause scales with the *dirty-page set*, not memfile size). The authoritative restore + divergence mechanism is §9-R1/R2 (this §2 text predates the round-2 P20 correction).
 
 ### 2.2 The divergence hook (B2 — mandatory, was entirely missing)
 
@@ -109,7 +112,7 @@ N children booted from one memory image share state that **corrupts them** unles
 | **Inherited live egress token (B5)** | **invalidate parent's token; re-mint a fresh child-scoped one** — never inherit |
 | Duplicated open fds | close inherited external fds; workspace fs is the CoW overlay (safe) |
 
-Branch **refuses** if the parent holds open external sockets it cannot safely tear down (configurable: refuse vs force-close). Guest code is blocked until the barrier completes. This barrier cost is part of the Branch latency budget and is measured in Sub-R.
+> **⚠ SUPERSEDED BY §9-R2 (P20 round-3 correction).** The "`khora-envd` runs a mandatory barrier *before* any guest userspace code resumes" framing above is **mechanically impossible**: `restore` resumes vCPUs at the saved instruction pointer, so a *duplicated agent userspace can execute before envd acts* (the cross-vendor reviewer's round-3 blocker). VMGenID also reseeds only the **kernel** CSPRNG, not userspace PRNGs. The race-free model (§9-R2): **(a)** freeze the parent's agent process tree (cgroup freezer) *before* CreateSnapshot — so no agent userspace is captured mid-flight; **(b)** run the divergence barrier (entropy, identity, neighbor/flow tables) **host-side while the child vCPUs are paused** (`restore resume=false` → manipulate → Resume); **(c)** on Resume, `khora-envd` (as init) **gates all agent-process start** until khorad acknowledges the child's rotated identity, then **re-execs** the agent runtime (fresh userspace PRNG / fds / sockets). The freeze **+** init-gate (not the default re-exec alone) is what closes the race, and proving *no duplicated userspace executes pre-barrier* is a **hard Sub-R2 gate** — Branch does not ship until Sub-R2 demonstrates it. Branch still **refuses** on a parent holding un-tearable external sockets.
 
 ### 2.3 Sub-R — the dedicated Branch research phase (the principal's condition)
 
@@ -244,13 +247,15 @@ Round 2 confirmed the redesign's architecture but flagged that several fixes wer
 A Firecracker diff snapshot contains only pages dirtied since a base — it is **not** restorable alone. Corrected mechanism: Branch reflinks the **full base memfile once** (shared, immutable, resident, refcounted) **+ a per-child diff memfile**; each child's UFFD page server resolves a fault **diff-first-then-base**. If the shared-base + per-child-diff UFFD path proves unstable, the fallback is `snapshot-editor`-merge `base⊕diff → full` per child (the ~seconds/GiB path — explicitly *not* cheap). §2.1 steps 4–5 are corrected accordingly. **Sub-R1 primary gate:** validate N children faulting through one shared base + per-child diff with no base contention.
 
 ### R2 — Divergence barrier moves host-side, pre-Resume; agent process is re-exec'd *(C2/C3 blocker, A2 blocker)*
-"Block guest until the barrier completes / before any guest userspace resumes" is mechanically false — `restore` resumes vCPUs at the saved instruction pointer, and envd is itself a guest process scheduled *after* resume. Corrected: the barrier runs **host-side, while vCPUs are paused** (`restore(resume=false)`): khorad injects fresh entropy, sets VMGenID, rotates MMDS/identity, clears host-side neighbor/flow tables — **then** `Resume`. Because userspace PRNG state, open fds, and app-protocol state live in guest memory at arbitrary points and **cannot** be sanitized in place (VMGenID reseeds only the *kernel* CSPRNG), Branch's **default is to force-restart the agent runtime process tree (re-exec) on the child after resume** — a fresh process gets fresh userspace PRNG + fds + sockets. Branch is memory-cheap for the *kernel + page cache + warmed libraries*; the agent process re-execs. The alternative — Branch from a **declared-quiescent** parent (no live external sockets; secrets fetched post-genid) — is offered for the rare case needing process continuity. **Sub-R2 gate:** divergence correctness under this model.
+"Block guest until the barrier completes / before any guest userspace resumes" is mechanically false — `restore` resumes vCPUs at the saved instruction pointer, and envd is itself a guest process scheduled *after* resume. Corrected: the barrier runs **host-side, while vCPUs are paused** (`restore(resume=false)`): khorad injects fresh entropy, sets VMGenID, rotates MMDS/identity, clears host-side neighbor/flow tables — **then** `Resume`. Because userspace PRNG state, open fds, and app-protocol state live in guest memory at arbitrary points and **cannot** be sanitized in place (VMGenID reseeds only the *kernel* CSPRNG), the child's agent runtime is **re-exec'd** after resume — a fresh process gets fresh userspace PRNG + fds + sockets. Branch is memory-cheap for the *kernel + page cache + warmed libraries*; the agent process re-execs.
+
+**Round-3 refinement (closes the cross-vendor re-exec race).** Re-exec *after* Resume is necessary but not sufficient: between `Resume` and the re-exec, the *duplicated* agent userspace can run for a window. The race is closed by two mechanisms that are **primary, not optional**: **(1) freeze-before-snapshot** — khorad applies the cgroup freezer to the parent's agent process tree *before* `CreateSnapshot`, so the captured image contains no agent userspace mid-execution; **(2) an envd init-gate** — on the child, `khora-envd` (PID-1 supervisor) blocks every agent process from starting until khorad acknowledges the child's rotated identity, *then* re-execs. The "declared-quiescent parent" path is folded into (1). **Hard Sub-R2 gate:** Branch does not ship until Sub-R2 demonstrates that *no duplicated agent userspace executes before the barrier completes* (a conformance probe: two children must never emit a colliding nonce/UUID/TLS-client-random). VMGenID covers the kernel CSPRNG only — stated.
 
 ### R3 — Egress proxy is a per-khora sidecar, not a shared fleet *(C6 blocker, S1 blocker)*
 "Per-tenant trust domain" is now an architecture, not an assertion: **one proxy process per VM** (a sidecar), running in that VM's own host-side netns + cgroup, lifecycle-bound to the khora, holding **only that khora's** brokered credentials, with `kernel.yama.ptrace_scope=3`, coredumps disabled, `mlock` + swap-off. Blast radius = one VM; no shared connection pools across khora. This also fixes the netns topology: `tap → per-khora proxy sidecar socket → egress`. **Sub-G conformance:** khora-A proxy memory is unreachable from khora-B.
 
 ### R4 — The host is in the TCB; "never on heap" is retracted *(S2 blocker)*
-New invariant statement: **the host is part of the trusted computing base.** The per-tenant memfile-encryption key is HSM/KMS-wrapped, fetched per-restore, used to decrypt into `mlock`ed + `MADV_DONTDUMP` pages, zeroized post-decrypt; **swap is off** on khora hosts. The Vault-transit secret is **transiently** on the sidecar heap (mlocked, zeroized-on-drop — the ChaCha20-Poly1305 pattern already in `haima`). The honest invariant is **"HSM-custodied, minimized-residency, zeroized, mlocked, swap-off"** — the v2 phrase "never on heap" was literally false and is deleted. A host-root compromise yields plaintext; stated plainly.
+New invariant statement: **the host is part of the trusted computing base.** The per-tenant memfile-encryption key is HSM/KMS-wrapped, fetched per-restore, used to decrypt into `mlock`ed + `MADV_DONTDUMP` pages, zeroized post-decrypt; **swap is off** on khora hosts. The Vault-transit secret is **transiently** on the sidecar heap (mlocked, zeroized-on-drop). *Implementation note (round-3):* `haima` today has only `zeroize`-on-drop (`haima-wallet/src/signer.rs`); the `mlock` + `MADV_DONTDUMP` residency-pinning + swap-off is **new and lands in Sub-D/Sub-G** — it is a planned mechanism, not yet in-tree. The honest invariant is **"HSM-custodied, minimized-residency, zeroized, mlocked, swap-off"** — the v2 phrase "never on heap" was literally false and is deleted. A host-root compromise yields plaintext; stated plainly.
 
 ### R5 — Residual SSRF / tunnel closure for credential-bearing egress *(C5, S3)*
 For any credential-injecting destination: **CONNECT / Upgrade / WebSocket are rejected**; one **dedicated connection per token** (no pooling/coalescing across token scopes); **HTTP/2 connection coalescing rejected**; URLs canonicalized; `path_scope` + `method_scope` are a **mandatory deny-by-default exact-path allowlist** (no longer optional); and any credential destination must be vetted **non-forwarding** (no open `url`/`endpoint` params, no server-side fetch) as an operational admission gate. Stated residual: SPKI-pin bounds *where the bytes go*, not *what the trusted endpoint does with them*.
@@ -270,7 +275,7 @@ The serial sum is **12–14 weeks at phase minimums**; applying the conceded fir
 `max_warm_per_host = floor(nvme_budget / uncompressed_memfile_size)`, LRU eviction by `template_id`, replication across CPU-pinned pools factored in. New published SLO: **warm hit-rate**, alongside the two latency SLOs (§5 AC#3). Cold-miss (CAS pull + inflate) is a separate measured slow path with its own SLO. khora-pool admission refuses warm-checkout when the working set exceeds the NVMe budget (explicit cold degrade, not a silent miss).
 
 ### R10 — ACI: stable core vs privileged extension tier *(C10, P3)*
-Reconciled with the minimal-ACI thesis. **Stable core (MVP, proves the thesis):** `FsRead/Write/Edit/List` + `Exec` + `ProcessControl` (7). **Privileged extension tier (post-MVP, each gated by per-primitive policy + audit events + abuse tests):** `PtyExec`, `StreamFile`, `PortForward`, `MountVolume`, `SetEnv`. The "minimal ACI" claim is retained **for the core only**; extensions are an explicit runtime-management tier, not founding primitives. The differentiation table's "minimal ACI" row is scoped to the core.
+Reconciled with the minimal-ACI thesis. **Stable core (MVP, proves the thesis):** `FsRead/Write/Edit/List` (4) + `Exec` + `ProcessControl` = **6 primitives**. **Privileged extension tier (post-MVP, each gated by per-primitive policy + audit events + abuse tests):** `PtyExec`, `StreamFile`, `PortForward`, `MountVolume`, `SetEnv`. The "minimal ACI" claim is retained **for the core only**; extensions are an explicit runtime-management tier, not founding primitives. The differentiation table's "minimal ACI" row is scoped to the core.
 
 ### R11 — Cross-host compatibility tuple *(C7, A5)*
 L7-D9 sharpened: pool membership = the conjunction `{CPU family+stepping, microcode floor, invariant-TSC freq, host-kernel floor, KVM version, Firecracker version, device-model version}`; resume-admission verifies **every** field and rejects on any mismatch. Cross-host is **same-family, canary-tested** — AWS SnapStart's same-family restriction is **adopted as an invariant**, not cited as an analogy. Default same-host; cross-pool is gated + fail-closed.
@@ -287,4 +292,18 @@ Honest invariant: **Branch inherits all parent process memory by construction; o
 - Two real kill-switches (wrap-E2B; Branch-cut) now sit at the end of Sub-R, before major sunk cost.
 - GPU + Cloud-Hypervisor explicitly out of this build (Spec-E-gated follow-on).
 
-**Pending:** P20 round 3 on the v3-amended spec (final allowed round) before Sub-R kickoff.
+### P20 round 3 (final, 2026-06-04) — marginal PASS at mean 7.1
+
+| Reviewer | Score | Verdict |
+|---|---|---|
+| Architect (substrate) | **8** | PASS |
+| Silas (security) | **7** | PASS |
+| general-purpose (execution) | **7** | PASS |
+| Codex / GPT-5 (cross-vendor) | **6.5** | FAIL |
+| **Mean** | **7.1** | — |
+
+Trajectory across the gate: **3.5 → 6.0 → 7.1.** 3/4 reviewers + the mean clear the ≥7 bar, and the architecture is **unanimously validated against Firecracker primary sources** (the substrate reviewer web-confirmed the diff-restore merge path + the random-for-clones guidance; all of R1–R13 verified RESOLVED by 3/4, with R2/R5 graded PARTIAL only by the cross-vendor leg).
+
+The cross-vendor reviewer — the highest-signal seat in P20 by design — held at 6.5 on **one real residual**: the **Branch re-exec race** (after `Resume`, duplicated agent userspace runs for a window before envd acts). It is now closed above (§2.1 step 0 + §2.2 SUPERSEDED note + §9-R2 round-3 refinement) by **freeze-before-snapshot + an envd init-gate**, folded into a **hard Sub-R2 gate** — Branch ships only after Sub-R2 proves no duplicated userspace executes pre-barrier. The stale §2.2 text the cross-vendor flagged is rewritten.
+
+**Round cap reached (3/3). Disposition: substrate + security architecture validated; proceed to Sub-R with the Branch-race closure as a gating research deliverable.** Non-blocking residuals swept at Sub-R/Sub-G kickoff: `mlock`/swap-off residency-pinning is planned-not-in-tree (R4); add a per-tenant locked-memory budget to khora-pool admission; tag AC#5 conditional on the Branch kill-switch. Full panel + Codex transcript: Linear BRO-1377; `/tmp/khora-p20-v3-codex-out.md`.
