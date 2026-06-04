@@ -231,4 +231,60 @@ The principal chose build. The honest irreducible reasons (replacing v1's "Rust 
 
 ## 8. Status
 
-- 2026-06-04 — v2 drafted, addresses B1–B10 + S9/S11/S13; S12 acknowledged-and-overridden; S14 (Branch demand) accepted-as-principal's-bet, de-risked via Sub-R. Pending: re-run P20 on v2 before Sub-R kickoff.
+- 2026-06-04 — v2 drafted, addresses B1–B10 + S9/S11/S13; S12 acknowledged-and-overridden; S14 (Branch demand) accepted-as-principal's-bet, de-risked via Sub-R.
+- 2026-06-04 — **v2 re-gated through P20 (round 2): FAIL at mean 6.0** (Codex 5 · Architect **7 PASS** · Silas 6 · Product 6 — up from v1's 3.5). All reviewers agree the *architecture* is now sound ("removes the live-reflink lie"); held under 7 by specific over-claims, not wrongness. **§9 resolves every convergent round-2 blocker (R1–R13).**
+
+---
+
+## 9. v3 amendments — P20 round-2 response (2026-06-04)
+
+Round 2 confirmed the redesign's architecture but flagged that several fixes were "specified by adjective." Each convergent round-2 finding → a concrete, buildable resolution. (Codex Cn / Architect An / Silas Sn / Product Pn citations.)
+
+### R1 — Branch restore: reflink base + per-child diff, not the diff alone *(C1 blocker, A1)*
+A Firecracker diff snapshot contains only pages dirtied since a base — it is **not** restorable alone. Corrected mechanism: Branch reflinks the **full base memfile once** (shared, immutable, resident, refcounted) **+ a per-child diff memfile**; each child's UFFD page server resolves a fault **diff-first-then-base**. If the shared-base + per-child-diff UFFD path proves unstable, the fallback is `snapshot-editor`-merge `base⊕diff → full` per child (the ~seconds/GiB path — explicitly *not* cheap). §2.1 steps 4–5 are corrected accordingly. **Sub-R1 primary gate:** validate N children faulting through one shared base + per-child diff with no base contention.
+
+### R2 — Divergence barrier moves host-side, pre-Resume; agent process is re-exec'd *(C2/C3 blocker, A2 blocker)*
+"Block guest until the barrier completes / before any guest userspace resumes" is mechanically false — `restore` resumes vCPUs at the saved instruction pointer, and envd is itself a guest process scheduled *after* resume. Corrected: the barrier runs **host-side, while vCPUs are paused** (`restore(resume=false)`): khorad injects fresh entropy, sets VMGenID, rotates MMDS/identity, clears host-side neighbor/flow tables — **then** `Resume`. Because userspace PRNG state, open fds, and app-protocol state live in guest memory at arbitrary points and **cannot** be sanitized in place (VMGenID reseeds only the *kernel* CSPRNG), Branch's **default is to force-restart the agent runtime process tree (re-exec) on the child after resume** — a fresh process gets fresh userspace PRNG + fds + sockets. Branch is memory-cheap for the *kernel + page cache + warmed libraries*; the agent process re-execs. The alternative — Branch from a **declared-quiescent** parent (no live external sockets; secrets fetched post-genid) — is offered for the rare case needing process continuity. **Sub-R2 gate:** divergence correctness under this model.
+
+### R3 — Egress proxy is a per-khora sidecar, not a shared fleet *(C6 blocker, S1 blocker)*
+"Per-tenant trust domain" is now an architecture, not an assertion: **one proxy process per VM** (a sidecar), running in that VM's own host-side netns + cgroup, lifecycle-bound to the khora, holding **only that khora's** brokered credentials, with `kernel.yama.ptrace_scope=3`, coredumps disabled, `mlock` + swap-off. Blast radius = one VM; no shared connection pools across khora. This also fixes the netns topology: `tap → per-khora proxy sidecar socket → egress`. **Sub-G conformance:** khora-A proxy memory is unreachable from khora-B.
+
+### R4 — The host is in the TCB; "never on heap" is retracted *(S2 blocker)*
+New invariant statement: **the host is part of the trusted computing base.** The per-tenant memfile-encryption key is HSM/KMS-wrapped, fetched per-restore, used to decrypt into `mlock`ed + `MADV_DONTDUMP` pages, zeroized post-decrypt; **swap is off** on khora hosts. The Vault-transit secret is **transiently** on the sidecar heap (mlocked, zeroized-on-drop — the ChaCha20-Poly1305 pattern already in `haima`). The honest invariant is **"HSM-custodied, minimized-residency, zeroized, mlocked, swap-off"** — the v2 phrase "never on heap" was literally false and is deleted. A host-root compromise yields plaintext; stated plainly.
+
+### R5 — Residual SSRF / tunnel closure for credential-bearing egress *(C5, S3)*
+For any credential-injecting destination: **CONNECT / Upgrade / WebSocket are rejected**; one **dedicated connection per token** (no pooling/coalescing across token scopes); **HTTP/2 connection coalescing rejected**; URLs canonicalized; `path_scope` + `method_scope` are a **mandatory deny-by-default exact-path allowlist** (no longer optional); and any credential destination must be vetted **non-forwarding** (no open `url`/`endpoint` params, no server-side fetch) as an operational admission gate. Stated residual: SPKI-pin bounds *where the bytes go*, not *what the trusted endpoint does with them*.
+
+### R6 — Sub-E live-smoke decoupled from Spec E *(P4 blocker)*
+AC#2 was unsatisfiable because Sub-E soft-depended on Spec E (17%). Corrected: **Sub-E runs BRO-1013's existing live-Anthropic agent inside `FirecrackerKhora` using the current shipped inference path** (the Anthropic provider) — **not** Spec E's GPU/compute contract. **GPU-exec + the Cloud-Hypervisor sibling pool are scoped OUT of this build** (a separate, Spec-E-gated follow-on). Sub-E is now satisfiable within this build's envelope; the substrate is E2E-validatable without waiting on Spec E.
+
+### R7 — Phasing restated honestly + concrete kill-switches *(P1/P2/P5/P6, C11, A8)*
+The serial sum is **12–14 weeks at phase minimums**; applying the conceded first-time-FC/UFFD **×1.4 integration multiplier** ⇒ **planning range 16–24 weeks** (the "11–14" headline is retracted). **Sub-R split:** Sub-R1 (snapshot/UFFD/overlay-reflink + cost curve, 2–3 wk — its FC-orchestrator + UFFD scaffolding is *reused by* Sub-B1/B2, so the weeks are not additive) + Sub-R2 (divergence correctness under R2, 1 wk). **Sub-G split** into review + multi-week fuzzing as an independent gate (not 1 week). **Two concrete kill-switches at the end of Sub-R (before Sub-B2 sunk cost):**
+- **wrap-E2B trigger** — if the UFFD page server is not functionally correct within the Sub-R1 timebox **OR** `restore_child_ms` p50 exceeds the threshold set in Sub-R1's plan at 1 GiB → switch to **wrap-E2B**, cancel Sub-B2.
+- **Branch kill-switch** — if `branch_N_ms ≥ N × restore_warm_ms` (branching is not cheaper than N cold restores) → **Sub-F descoped to a research follow-on and Branch is cut from the MVP differentiation table.** This makes Sub-R a gate that *can fail the plan*, not theater.
+
+### R8 — khora-pool as an explicit FSM *(C8, A6)*
+`khora-pool` is specified as a state machine: `Warming → Idle → CheckedOut → Resetting → Destroyed` (+ `Draining`, `Abandoned`). `reset := destroy + re-restore from template` (**never** in-place — required by §3.7 multi-tenant scrub). Lease expiry + heartbeat liveness; crash recovery via an orphan-VM reaper (the Hawthorne stranded-run-reaper pattern); composite admission predicate `(kvm_slots_free ∧ nvme_warm_budget_ok ∧ cpu_pool_match ∧ tenant_quota_ok)`; exhaustion policy = queue-with-timeout then reject; memfile/overlay refcounts. Conformance cases land in Sub-B2.
+
+### R9 — Warm-pool capacity model + hit-rate SLO *(C9, A4)*
+`max_warm_per_host = floor(nvme_budget / uncompressed_memfile_size)`, LRU eviction by `template_id`, replication across CPU-pinned pools factored in. New published SLO: **warm hit-rate**, alongside the two latency SLOs (§5 AC#3). Cold-miss (CAS pull + inflate) is a separate measured slow path with its own SLO. khora-pool admission refuses warm-checkout when the working set exceeds the NVMe budget (explicit cold degrade, not a silent miss).
+
+### R10 — ACI: stable core vs privileged extension tier *(C10, P3)*
+Reconciled with the minimal-ACI thesis. **Stable core (MVP, proves the thesis):** `FsRead/Write/Edit/List` + `Exec` + `ProcessControl` (7). **Privileged extension tier (post-MVP, each gated by per-primitive policy + audit events + abuse tests):** `PtyExec`, `StreamFile`, `PortForward`, `MountVolume`, `SetEnv`. The "minimal ACI" claim is retained **for the core only**; extensions are an explicit runtime-management tier, not founding primitives. The differentiation table's "minimal ACI" row is scoped to the core.
+
+### R11 — Cross-host compatibility tuple *(C7, A5)*
+L7-D9 sharpened: pool membership = the conjunction `{CPU family+stepping, microcode floor, invariant-TSC freq, host-kernel floor, KVM version, Firecracker version, device-model version}`; resume-admission verifies **every** field and rejects on any mismatch. Cross-host is **same-family, canary-tested** — AWS SnapStart's same-family restriction is **adopted as an invariant**, not cited as an analogy. Default same-host; cross-pool is gated + fail-closed.
+
+### R12 — L2 network hardening + connection-to-VM binding *(S4)*
+The tap is **L3-only** (no bridge): `accept_ra=0`, static ARP/NDP, DHCP off (static IP injected by khorad), nftables drops all non-IP ethertypes (ARP/RA/DHCP/link-local). The proxy sidecar binds each connection to its **source VM** (tap/CID) and **rejects any inner token whose `khora_id` ≠ the connection's source VM** — guest self-asserted identity is never trusted.
+
+### R13 — Branch secret-residency: stated invariant + policy *(S5)*
+Honest invariant: **Branch inherits all parent process memory by construction; only externally-brokered capabilities (egress tokens) are rotated.** Therefore Branch is **forbidden on VMs flagged secret-bearing** unless either (a) the parent registered a guest-cooperative secret-zeroization callback run pre-snapshot, or (b) the workload fetches secrets only **after** the VMGenID generation change (post-branch). Combined with R2's default process re-exec, the agent re-fetches secrets fresh on each child. "Scrub the credential region without guest cooperation" is retracted as non-functional.
+
+### Net effect on the plan
+- Headline phasing: **16–24 weeks** (was an unreachable "11–14").
+- Branch latency: **no number stated** anywhere until Sub-R measures it; the differentiation row stays struck until `branch_N_ms < N × restore_warm_ms` is demonstrated.
+- Two real kill-switches (wrap-E2B; Branch-cut) now sit at the end of Sub-R, before major sunk cost.
+- GPU + Cloud-Hypervisor explicitly out of this build (Spec-E-gated follow-on).
+
+**Pending:** P20 round 3 on the v3-amended spec (final allowed round) before Sub-R kickoff.
