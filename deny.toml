@@ -26,6 +26,7 @@ version = 2
 allow = [
     "MIT",
     "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",  # ar_archive_writer (transitive via lance 0.28 → datafusion → sqlparser → stacker); the exception only grants extra permissions
     "CDLA-Permissive-2.0",  # webpki-roots v1.0.6 (transitive via rustls-tls / aws-smithy)
     "BSD-2-Clause",
     "BSD-3-Clause",
