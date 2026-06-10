@@ -138,11 +138,17 @@ impl AnthropicArcan {
     /// or [`DEFAULT_MODEL`]). Empty / whitespace / `None` falls back to
     /// the env default. Per-call override means a single backend can
     /// serve sessions on different Claude models without re-construction.
+    ///
+    /// `tools` carries client-supplied tool definitions (AI-SDK /
+    /// OpenAI function shape). Non-empty definitions are translated to
+    /// the Anthropic `{name, description, input_schema}` shape and
+    /// attached as the request's `tools` array.
     fn request_body(
         &self,
         sid: &str,
         content: &str,
         model_override: Option<&str>,
+        tools: &[serde_json::Value],
     ) -> serde_json::Value {
         let prior = self
             .history
@@ -165,6 +171,11 @@ impl AnthropicArcan {
             "messages": messages,
             "stream": true
         });
+        if !tools.is_empty() {
+            let tools_json: Vec<serde_json::Value> =
+                tools.iter().map(anthropic_tool_shape).collect();
+            body["tools"] = serde_json::Value::Array(tools_json);
+        }
         if let Some(system) = &self.cfg.system_prompt
             && !system.trim().is_empty()
         {
@@ -219,6 +230,7 @@ impl ArcanCall for AnthropicArcan {
         sid: &str,
         content: &str,
         model: Option<&str>,
+        tools: &[serde_json::Value],
     ) -> ArcanProxyResult<Pin<Box<dyn Stream<Item = Result<AgentEvent, tonic::Status>> + Send>>>
     {
         let url = format!("{}/v1/messages", self.cfg.base_url);
@@ -230,8 +242,9 @@ impl ArcanCall for AnthropicArcan {
             .header("accept", "text/event-stream")
             .header("x-api-key", &self.cfg.api_key)
             // BRO-1206: per-call override or env-bound default in the
-            // outbound `model` field.
-            .json(&self.request_body(sid, content, model))
+            // outbound `model` field. Client tool definitions ride
+            // along as the Anthropic-shape `tools` array.
+            .json(&self.request_body(sid, content, model, tools))
             .send()
             .await
             .map_err(|e| ArcanProxyError::Transport(format!("POST {url}: {e}")))?;
@@ -256,6 +269,34 @@ impl ArcanCall for AnthropicArcan {
             content.to_string(),
         ))
     }
+}
+
+/// Translate one client tool definition into the Anthropic Messages
+/// `tools` entry shape: `{name, description, input_schema}`.
+///
+/// Accepted inputs:
+/// - AI-SDK / bare shape: `{"name", "description"?, "parameters"?}`
+/// - OpenAI envelope: `{"type": "function", "function": {…}}` (unwrapped)
+/// - Anthropic-native: `{"name", "input_schema"}` (passed through)
+///
+/// Missing schemas default to an empty object schema so the provider
+/// never sees a structurally-invalid tool entry.
+fn anthropic_tool_shape(tool: &serde_json::Value) -> serde_json::Value {
+    let inner = if tool.get("type").and_then(|t| t.as_str()) == Some("function") {
+        tool.get("function").unwrap_or(tool)
+    } else {
+        tool
+    };
+    let schema = inner
+        .get("input_schema")
+        .or_else(|| inner.get("parameters"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}}));
+    serde_json::json!({
+        "name": inner.get("name").cloned().unwrap_or_else(|| serde_json::json!("")),
+        "description": inner.get("description").cloned().unwrap_or_else(|| serde_json::json!("")),
+        "input_schema": schema,
+    })
 }
 
 fn record_response(
@@ -643,17 +684,62 @@ mod tests {
         };
         let arc = AnthropicArcan::new(cfg).expect("build");
         // Override wins.
-        let body = arc.request_body("sid", "hi", Some("claude-opus-4-7"));
+        let body = arc.request_body("sid", "hi", Some("claude-opus-4-7"), &[]);
         assert_eq!(body["model"], "claude-opus-4-7");
         // Empty override falls back to cfg.model.
-        let body = arc.request_body("sid", "hi", Some(""));
+        let body = arc.request_body("sid", "hi", Some(""), &[]);
         assert_eq!(body["model"], "claude-sonnet-4-5-default");
         // Whitespace falls back too.
-        let body = arc.request_body("sid", "hi", Some("   "));
+        let body = arc.request_body("sid", "hi", Some("   "), &[]);
         assert_eq!(body["model"], "claude-sonnet-4-5-default");
         // None falls back.
-        let body = arc.request_body("sid", "hi", None);
+        let body = arc.request_body("sid", "hi", None, &[]);
         assert_eq!(body["model"], "claude-sonnet-4-5-default");
+    }
+
+    /// Client tool definitions (AI-SDK / OpenAI shapes) are translated
+    /// to the Anthropic `{name, description, input_schema}` shape.
+    #[test]
+    fn request_body_emits_anthropic_tools_array() {
+        let cfg = AnthropicArcanConfig {
+            api_key: "k".to_string(),
+            base_url: DEFAULT_BASE_URL.to_string(),
+            model: DEFAULT_MODEL.to_string(),
+            max_tokens: DEFAULT_MAX_TOKENS,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            system_prompt: None,
+        };
+        let arc = AnthropicArcan::new(cfg).expect("build");
+        let tools = vec![
+            // AI-SDK bare shape.
+            serde_json::json!({
+                "name": "get_weather",
+                "description": "Look up the weather",
+                "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+            }),
+            // OpenAI envelope — unwrapped.
+            serde_json::json!({
+                "type": "function",
+                "function": {"name": "wrapped", "parameters": {"type": "object"}},
+            }),
+        ];
+        let body = arc.request_body("sid", "hi", None, &tools);
+        let tools_json = body["tools"].as_array().expect("tools array");
+        assert_eq!(tools_json.len(), 2);
+        assert_eq!(tools_json[0]["name"], "get_weather");
+        assert_eq!(tools_json[0]["description"], "Look up the weather");
+        assert_eq!(
+            tools_json[0]["input_schema"]["properties"]["city"]["type"],
+            "string"
+        );
+        assert_eq!(tools_json[1]["name"], "wrapped");
+        assert_eq!(
+            tools_json[1]["input_schema"],
+            serde_json::json!({"type": "object"})
+        );
+        // No tools → no `tools` key.
+        let body = arc.request_body("sid", "hi", None, &[]);
+        assert!(body.get("tools").is_none());
     }
 
     /// The grounded default (used when `LIFED_ARCAN_SYSTEM_PROMPT` is
@@ -672,7 +758,7 @@ mod tests {
             system_prompt: crate::grounding::resolve_system_prompt_from(None),
         };
         let arc = AnthropicArcan::new(cfg).expect("build");
-        let body = arc.request_body("sid", "Who is Carlos Escobar-Valbuena?", None);
+        let body = arc.request_body("sid", "Who is Carlos Escobar-Valbuena?", None, &[]);
         let system = body["system"].as_array().expect("system is a block array");
         assert_eq!(system.len(), 1, "single grounding system block");
         assert_eq!(system[0]["type"], "text");
