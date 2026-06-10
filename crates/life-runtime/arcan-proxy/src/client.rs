@@ -173,8 +173,11 @@ impl ArcanProxy {
     /// Dispatch a message and stream the substrate's events back as
     /// `life.v1.AgentEvent`s. BRO-1016 wires this to
     /// `arcan.v1.AgentSubstrate.DispatchMessage` and translates the
-    /// substrate-plane events into the public-plane shape (Phase 1
-    /// maps TOKEN/FINISH/ERROR; tool kinds remain Phase 2 work).
+    /// substrate-plane events into the public-plane shape. Phase 2
+    /// (harness arc): TOKEN/FINISH/ERROR plus the tool lifecycle —
+    /// TOOL_CALL_PENDING / TOOL_RESULT pass through with their
+    /// structured payloads as `EventRecord`s (see
+    /// [`crate::conversions::SubstrateEventTranslator`]).
     ///
     /// BRO-1206: `model` is accepted at the trait boundary so callers
     /// (lifed) can plumb a per-session override end-to-end without a
@@ -218,34 +221,15 @@ impl ArcanProxy {
         };
 
         // Map arcan.v1.AgentEvent → life.v1.AgentEvent at the wire
-        // boundary. Phase 1 emits the kind mapping; structured
-        // EventRecords stay None until the Phase 2 wire is shipped.
+        // boundary. Phase 2 (harness arc): the translator builds a
+        // structured `EventRecord` per event (session id, sequence,
+        // kind tag, JSON payload) so token text and tool payloads
+        // survive the hop — see `conversions::SubstrateEventTranslator`.
         use futures::StreamExt;
-        let mapped = upstream.map(|res| res.map(translate_event));
+        let mut translator = crate::conversions::SubstrateEventTranslator::new(sid);
+        let mapped = upstream.map(move |res| res.map(|evt| translator.translate(evt)));
         let inner = Box::pin(mapped);
         Ok(Box::pin(PoolGuardedStream::new(inner, guard)))
-    }
-}
-
-/// Translate a substrate-plane `arcan.v1.AgentEvent` into the
-/// public-plane `life.v1.AgentEvent` shape that lifed's fan-out
-/// expects. Phase 1 maps three kinds; everything else falls back to
-/// `Token` with the inner text (preserves payload, avoids data loss).
-fn translate_event(evt: arcan_pb::AgentEvent) -> life_runtime_proto::life::v1::AgentEvent {
-    use arcan_pb::AgentEventKind as Sub;
-    use life_runtime_proto::life::v1::AgentEventKind as Pub;
-    // Phase 1 only emits TOKEN/FINISH/ERROR substrate-side; any other
-    // kind we receive in the future maps to TOKEN so downstream
-    // streams don't drop the payload silently.
-    let kind = match Sub::try_from(evt.kind).unwrap_or(Sub::Unspecified) {
-        Sub::Token => Pub::Token,
-        Sub::Finish => Pub::Finish,
-        Sub::Error => Pub::Error,
-        Sub::Unspecified => Pub::Unspecified,
-    };
-    life_runtime_proto::life::v1::AgentEvent {
-        record: None,
-        kind: kind as i32,
     }
 }
 
