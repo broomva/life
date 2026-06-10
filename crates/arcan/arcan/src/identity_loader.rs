@@ -231,6 +231,36 @@ mod tests {
         assert_eq!(jws.split('.').count(), 3);
     }
 
+    /// The boot wiring contract end-to-end (sans daemon): a loaded
+    /// custody handle feeds `AgentAttestationAdapter`, which attests a
+    /// workflow session boundary under the on-disk identity's stable
+    /// DID — exactly what `run_serve` wires via `with_soul_attester`.
+    #[tokio::test]
+    async fn loaded_custody_drives_agent_attestation_adapter() {
+        use ergon_life_hooks::SoulAttester as _;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let identity_dir = write_identity(tmp.path(), SEED);
+
+        let custody = load_custody_from_disk(&identity_dir)
+            .unwrap()
+            .expect("identity loads");
+        let expected_did = custody.user_did().to_owned();
+
+        let attester = ergon_anima_adapter::AgentAttestationAdapter::new(custody);
+        assert_eq!(attester.agent_did(), expected_did, "stable DID from disk");
+
+        let sid = ergon::SessionId::from_string("sid-boot-wiring");
+        attester
+            .sign_session_start(&sid, "greeter")
+            .await
+            .expect("session start attested");
+        attester
+            .sign_session_end(&sid, "greeter", true)
+            .await
+            .expect("session end attested");
+    }
+
     #[test]
     fn corrupt_soul_json_errors() {
         let tmp = tempfile::tempdir().unwrap();
