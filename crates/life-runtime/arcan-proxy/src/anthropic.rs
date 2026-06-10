@@ -11,6 +11,7 @@ use life_runtime_proto::life::v1::{AgentEvent, AgentEventKind, EventRecord};
 use serde::{Deserialize, Serialize};
 
 use crate::client::ArcanCall;
+use crate::conversions::now_timestamp;
 use crate::error::{ArcanProxyError, ArcanProxyResult};
 
 pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
@@ -584,16 +585,6 @@ fn double_newline(buf: &[u8]) -> Option<usize> {
         .enumerate()
         .find(|(_, w)| *w == b"\n\n")
         .map(|(i, _)| i)
-}
-
-fn now_timestamp() -> Option<prost_types::Timestamp> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?;
-    Some(prost_types::Timestamp {
-        seconds: now.as_secs() as i64,
-        nanos: now.subsec_nanos() as i32,
-    })
 }
 
 fn truncate(s: &str, limit: usize) -> String {
