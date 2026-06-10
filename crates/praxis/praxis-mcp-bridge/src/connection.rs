@@ -152,32 +152,24 @@ mod tests {
 
     #[test]
     fn mcp_tool_to_definition_conversion() {
-        let mcp_tool = McpToolDef {
-            name: "read_file".into(),
-            title: Some("Read File".to_string()),
-            description: Some("Reads a file from disk".into()),
-            input_schema: Arc::new(
-                serde_json::from_value(json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string" }
-                    },
-                    "required": ["path"]
-                }))
-                .unwrap(),
-            ),
-            output_schema: None,
-            annotations: Some(McpAnnotations {
-                title: None,
-                read_only_hint: Some(true),
-                destructive_hint: Some(false),
-                idempotent_hint: Some(true),
-                open_world_hint: Some(false),
-            }),
-            execution: None,
-            icons: None,
-            meta: None,
-        };
+        let schema: Arc<serde_json::Map<String, serde_json::Value>> = Arc::new(
+            serde_json::from_value(json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" }
+                },
+                "required": ["path"]
+            }))
+            .unwrap(),
+        );
+        let mut mcp_tool = McpToolDef::new("read_file", "Reads a file from disk", schema);
+        mcp_tool.title = Some("Read File".to_string());
+        let mut ann = McpAnnotations::new();
+        ann.read_only_hint = Some(true);
+        ann.destructive_hint = Some(false);
+        ann.idempotent_hint = Some(true);
+        ann.open_world_hint = Some(false);
+        mcp_tool.annotations = Some(ann);
 
         let (def, original_name) = mcp_tool_to_definition("test-server", &mcp_tool);
 
@@ -198,17 +190,9 @@ mod tests {
 
     #[test]
     fn mcp_tool_without_annotations() {
-        let mcp_tool = McpToolDef {
-            name: "simple".into(),
-            title: None,
-            description: Some("A simple tool".into()),
-            input_schema: Arc::new(serde_json::from_value(json!({"type": "object"})).unwrap()),
-            output_schema: None,
-            annotations: None,
-            execution: None,
-            icons: None,
-            meta: None,
-        };
+        let schema: Arc<serde_json::Map<String, serde_json::Value>> =
+            Arc::new(serde_json::from_value(json!({"type": "object"})).unwrap());
+        let mcp_tool = McpToolDef::new("simple", "A simple tool", schema);
 
         let (def, _) = mcp_tool_to_definition("srv", &mcp_tool);
         assert_eq!(def.name, "mcp_srv_simple");

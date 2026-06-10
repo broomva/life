@@ -86,11 +86,10 @@ where
 {
     let session_manager = Arc::new(LocalSessionManager::default());
 
-    let mcp_config = StreamableHttpServerConfig {
-        stateful_mode: config.stateful,
-        cancellation_token: config.cancel,
-        ..Default::default()
-    };
+    // rmcp 1.x: config is #[non_exhaustive] — Default + mutation.
+    let mut mcp_config = StreamableHttpServerConfig::default();
+    mcp_config.stateful_mode = config.stateful;
+    mcp_config.cancellation_token = config.cancel;
 
     let service = StreamableHttpService::new(factory, session_manager, mcp_config);
 

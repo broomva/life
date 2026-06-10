@@ -6,7 +6,6 @@ use aios_protocol::tool::{
 use rmcp::model::{CallToolRequestParams, RawContent};
 use rmcp::service::{Peer, RoleClient};
 use serde_json::json;
-use std::borrow::Cow;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use tracing::info;
@@ -55,12 +54,9 @@ impl Tool for McpTool {
 
         let arguments = call.input.as_object().cloned();
 
-        let params = CallToolRequestParams {
-            meta: None,
-            name: Cow::Owned(self.mcp_tool_name.clone()),
-            arguments,
-            task: None,
-        };
+        // rmcp 1.x: params are #[non_exhaustive].
+        let mut params = CallToolRequestParams::new(self.mcp_tool_name.clone());
+        params.arguments = arguments;
 
         let peer = self.peer.clone();
         let mcp_result = self

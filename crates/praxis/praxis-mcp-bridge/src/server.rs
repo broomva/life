@@ -83,25 +83,22 @@ impl PraxisMcpServer {
 
 impl ServerHandler for PraxisMcpServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: Default::default(),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation {
-                name: self.server_name.clone(),
-                version: self.server_version.clone(),
-                title: Some("Praxis Tool Engine".to_string()),
-                description: Some(
-                    "Canonical tool execution engine for the Life Agent OS".to_string(),
-                ),
-                icons: None,
-                website_url: None,
-            },
-            instructions: Some(
-                "Praxis exposes filesystem, shell, editing, and memory tools. \
-                 All filesystem operations are sandboxed within the workspace root."
-                    .to_string(),
-            ),
-        }
+        // rmcp 1.x: ServerInfo / Implementation are #[non_exhaustive] —
+        // build via Default / constructors and set fields by mutation.
+        let mut server_info =
+            Implementation::new(self.server_name.clone(), self.server_version.clone());
+        server_info.title = Some("Praxis Tool Engine".to_string());
+        server_info.description =
+            Some("Canonical tool execution engine for the Life Agent OS".to_string());
+        let mut info = ServerInfo::default();
+        info.capabilities = ServerCapabilities::builder().enable_tools().build();
+        info.server_info = server_info;
+        info.instructions = Some(
+            "Praxis exposes filesystem, shell, editing, and memory tools. \
+             All filesystem operations are sandboxed within the workspace root."
+                .to_string(),
+        );
+        info
     }
 
     fn list_tools(
@@ -375,17 +372,14 @@ mod tests {
 
         let result = client
             .peer()
-            .call_tool(CallToolRequestParams {
-                name: std::borrow::Cow::Borrowed("echo"),
-                arguments: Some(
+            .call_tool(
+                CallToolRequestParams::new("echo").with_arguments(
                     json!({"message": "protocol test"})
                         .as_object()
                         .unwrap()
                         .clone(),
                 ),
-                meta: None,
-                task: None,
-            })
+            )
             .await
             .unwrap();
 
@@ -411,12 +405,7 @@ mod tests {
         // Tool that exists but always fails → returns error content, not protocol error
         let result = client
             .peer()
-            .call_tool(CallToolRequestParams {
-                name: std::borrow::Cow::Borrowed("fail"),
-                arguments: None,
-                meta: None,
-                task: None,
-            })
+            .call_tool(CallToolRequestParams::new("fail"))
             .await
             .unwrap();
 
@@ -440,12 +429,7 @@ mod tests {
         // Nonexistent tool → protocol-level error
         let err = client
             .peer()
-            .call_tool(CallToolRequestParams {
-                name: std::borrow::Cow::Borrowed("nonexistent"),
-                arguments: None,
-                meta: None,
-                task: None,
-            })
+            .call_tool(CallToolRequestParams::new("nonexistent"))
             .await
             .unwrap_err();
 
