@@ -1,0 +1,87 @@
+# soma production config — M9-E (BRO-1215).
+#
+# Scope: drop-in production TOML for soma with the admin custody-oracle
+# UDS exposed and the `[custody]` backend flipped to Vault. This is the
+# config that PR-2 (life#1422 — c6a7d5d9) made possible. PR-1 (this PR)
+# ships the deploy artifact that wires it up.
+#
+# **What this enables:**
+# - lifegw at `/anima/custody/*` proxies to soma's admin UDS here
+# - soma's CustodyOracle dispatches to `VaultCustodyKeys` (kms-vault feature)
+# - Per-user wallet keys live in Vault Transit; soma never holds plaintext
+#
+# **What's still on the operator:**
+# - Provision Vault keys (`anima-{user_id}-auth-v1`, `anima-{user_id}-wallet-v1`)
+#   per the convention encoded in `VaultTransitAnima::new`. Operator runs
+#   the bootstrap on first use; see runbook.html.
+# - Inject SOMA_VAULT_TOKEN via the deploy platform's secret manager.
+#   The env-var indirection (`token_env`) is the same shape lifegw uses.
+
+[server]
+unix_socket       = "/run/life/soma.sock"
+unix_socket_mode  = 0o660
+unix_socket_group = "life-runtime"
+drain_secs        = 30
+
+# ── Backends ──────────────────────────────────────────────────────────────
+# Production defaults: local arcan-provider stays on for the in-process
+# dispatch path. cube + vercel backends are not enabled in this deploy.
+[backends]
+local = true
+
+# ── Gates ─────────────────────────────────────────────────────────────────
+# Phase 2 defaults — production deploys flip these to real impls when
+# policy / budget / network shields land (Phase 4).
+[gates]
+policy  = "static"
+budget  = "noop"
+network = "noop"
+
+# ── Lago wiring ───────────────────────────────────────────────────────────
+[lago]
+namespace = "soma"
+
+[lago.store]
+kind = "in_memory"
+
+# ── Vigil ─────────────────────────────────────────────────────────────────
+[vigil]
+level = "info"
+
+[vigil.exporter]
+kind = "console"
+
+# ── Admin plane (Spec D D-Sub-E) ──────────────────────────────────────────
+# This is the UDS lifegw's anima_custody.soma_uds_path points at. lifegw
+# and soma share `life-runtime` as the gating group; SO_PEERCRED on the
+# socket + group membership = RBAC root.
+[admin_plane]
+unix_socket       = "/run/life/soma-admin.sock"
+unix_socket_mode  = 0o660
+unix_socket_group = "life-runtime"
+
+# ── Custody (BRO-1215 — Spec D D-Sub-E M9-E) ─────────────────────────────
+# Backend = "vault" requires the `kms-vault` cargo feature. Build:
+#   cargo build -p soma --release --features kms-vault
+#
+# The token env (SOMA_VAULT_TOKEN) is the *name* of the env var; the
+# token value is injected by the deploy platform's secret manager and
+# read by soma at bootstrap. soma refuses to embed the token in the TOML.
+#
+# kid_prefix is the convention encoded in `VaultTransitAnima::new` — the
+# transit key names derive as `{kid_prefix}-{user_id}-auth-v{n}` and
+# `{kid_prefix}-{user_id}-wallet-v{n}`. Don't change this without
+# coordinating a key migration.
+#
+# renew_interval_secs = 43200 means: soma renews the Vault token every
+# 12h. Vault token TTL must be ≥ 24h for this to be safe (renewal at
+# half-life). Use `vault token create -ttl=24h -renewable=true` when
+# provisioning the soma role token.
+[custody]
+backend = "vault"
+
+[custody.vault]
+addr                  = "http://vault:8200"
+token_env             = "SOMA_VAULT_TOKEN"
+kid_prefix            = "anima"
+renew_interval_secs   = 43200

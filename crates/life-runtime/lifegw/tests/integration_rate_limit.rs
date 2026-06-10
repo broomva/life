@@ -38,6 +38,7 @@ async fn rate_limit_returns_resource_exhausted_after_burst() {
             label: format!("attempt-{i}"),
             resume_sid: None,
             inherit_policy: None,
+            model: None,
         });
         req.metadata_mut().insert(
             "authorization",
@@ -55,6 +56,7 @@ async fn rate_limit_returns_resource_exhausted_after_burst() {
         label: "attempt-3-rejected".to_string(),
         resume_sid: None,
         inherit_policy: None,
+        model: None,
     });
     req3.metadata_mut().insert(
         "authorization",

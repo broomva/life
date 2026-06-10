@@ -1,0 +1,27 @@
+[package]
+name = "chronos-lago"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Lago bridge for Chronos — records wake events to the Life journal"
+
+[dependencies]
+chronos-core.workspace = true
+aios-protocol.workspace = true
+lago-core.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+chronos-core = { workspace = true, features = ["test-util"] }
+lago-journal.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

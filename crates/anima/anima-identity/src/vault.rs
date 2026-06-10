@@ -501,6 +501,43 @@ impl VaultTransitAnima {
     }
 }
 
+impl VaultTransitAnima {
+    /// Spec D D-Sub-E adapter surface (BRO-1215): expose the raw-digest
+    /// secp256k1 signing path as a public method so soma's admin
+    /// `CustodyKeyStore` adapter can delegate `sign_wallet_digest` directly
+    /// without re-implementing the Vault wire shape. Returns a 65-byte
+    /// `r||s||v` signature where `v ∈ {27, 28}` (legacy form — matches
+    /// haima-wallet's `LocalSigner` and the `CustodyKeyStore::sign_wallet_digest`
+    /// trait contract).
+    ///
+    /// The recovery byte is selected via the same ecrecover loop that
+    /// `sign_evm_tx` uses — Vault's transit/sign doesn't return v, so we
+    /// recover it client-side. Two scalar multiplications per call.
+    pub fn sign_wallet_digest_evm(&self, digest: &[u8; 32]) -> AnimaResult<[u8; 65]> {
+        let r_s = self.vault_sign_digest_secp256k1(digest)?;
+        let (v_legacy, _recid) = self.compute_v_byte(digest, &r_s)?;
+        let mut out = [0u8; 65];
+        out[..64].copy_from_slice(&r_s);
+        out[64] = v_legacy;
+        Ok(out)
+    }
+
+    /// Spec D D-Sub-E adapter surface (BRO-1215): expose the raw-digest
+    /// P-256 (auth) signing path as a public method. Returns the 64-byte
+    /// IEEE-P1363 `r||s` form expected by
+    /// `CustodyKeyStore::sign_auth_digest`.
+    pub fn sign_auth_digest_raw(&self, digest: &[u8; 32]) -> AnimaResult<[u8; 64]> {
+        self.vault_sign_digest_p256(digest)
+    }
+
+    /// Cached SEC1-uncompressed (65-byte, `0x04 || x || y`) wallet
+    /// pubkey accessor. Used by adapters that need the wallet pubkey
+    /// without dragging in the full `AnimaCustody` trait.
+    pub fn wallet_pubkey_uncompressed_sec1(&self) -> [u8; 65] {
+        self.wallet_pubkey_uncompressed
+    }
+}
+
 impl AnimaCustody for VaultTransitAnima {
     fn user_did(&self) -> &str {
         &self.user_did

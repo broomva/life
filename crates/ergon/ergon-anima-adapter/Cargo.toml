@@ -1,0 +1,23 @@
+[package]
+name = "ergon-anima-adapter"
+description = "Anima-backed implementation of ergon's attestation traits (SoulAttester + new AgentAttestationSigner). Skeleton-only; see docs/architecture/adr/2026-05-22-anima-signing-surface-for-ergon-attestation.md (BRO-1226)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ergon.workspace = true
+ergon-life-hooks.workspace = true
+anima-identity = { path = "../../anima/anima-identity", version = "0.3.0" }
+async-trait.workspace = true
+serde_json.workspace = true
+tracing.workspace = true

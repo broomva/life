@@ -1,0 +1,29 @@
+[package]
+name = "chronos-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Core types and traits for Chronos — the temporal substrate of the Life Agent OS"
+
+[dependencies]
+aios-protocol.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "rt", "macros", "time"] }
+tracing.workspace = true
+ulid.workspace = true
+
+[features]
+# Exposes MockKernelDispatcher for downstream crates' tests (chronos-lago, arcand).
+test-util = []
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true

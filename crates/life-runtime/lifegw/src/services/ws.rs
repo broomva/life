@@ -287,6 +287,23 @@ struct UpgradeRequest {
     /// Original Tier-2 bearer header set by AuthLayer. Forwarded on
     /// the upstream `Agent.StreamSession` request via tonic metadata.
     tier2_bearer: Option<String>,
+    /// Subprotocol value to echo in the 101 response (BRO-1228).
+    ///
+    /// Per the WHATWG WebSockets spec, the browser rejects the upgrade
+    /// (close 1006) unless the response `Sec-WebSocket-Protocol` is one
+    /// of the values the client offered. If the client only offered
+    /// `bearer.<jwt>` (canonical browser-client behaviour — see
+    /// `lifed-ws-client.ts`), echoing the previously-hardcoded
+    /// `life.v1.agent` would silently break every browser session.
+    ///
+    /// Precedence when the client offered both: `life.v1.agent`
+    /// (preserves the pre-BRO-1228 wire shape Rust integration tests +
+    /// non-browser clients depend on); fall back to the matching
+    /// `bearer.<jwt>` entry only when `life.v1.agent` was NOT offered.
+    /// When neither is offered we suppress the response header entirely
+    /// — RFC 6455 §4.2.2 makes the response subprotocol optional, and
+    /// the browser only enforces equality when the header is present.
+    chosen_subprotocol: Option<String>,
 }
 
 /// Validate WS upgrade headers + extract the resume cursor. Returns
@@ -353,12 +370,66 @@ fn parse_upgrade_request<B>(
     // still sees the canonical header form.
     let tier2_bearer = bearer_from_authorization(req).or_else(|| bearer_from_subprotocol(req));
 
+    // BRO-1228: choose the subprotocol value the 101 response will
+    // echo. See `UpgradeRequest::chosen_subprotocol` doc for the
+    // precedence rule.
+    let chosen_subprotocol = choose_response_subprotocol(req);
+
     Ok(UpgradeRequest {
         sid,
         last_seq_no,
         sec_key,
         tier2_bearer,
+        chosen_subprotocol,
     })
+}
+
+/// Pick the subprotocol value to echo in the 101 response (BRO-1228).
+///
+/// Browser WebSocket implementations reject the upgrade (close 1006)
+/// unless the response `Sec-WebSocket-Protocol` is one of the values
+/// the client offered in its request `Sec-WebSocket-Protocol` header.
+/// Before BRO-1228 the gateway hardcoded `life.v1.agent`, which a
+/// browser-only client (offering only `bearer.<jwt>`) would reject.
+///
+/// Selection (matches `UpgradeRequest::chosen_subprotocol` precedence):
+///
+/// 1. If the client offered `life.v1.agent`, echo `life.v1.agent`.
+///    Preserves the pre-BRO-1228 wire shape Rust integration tests +
+///    non-browser clients depend on; matches Spec C₃ §6.1.
+/// 2. Else if the client offered a `bearer.<jwt>` entry, echo that
+///    entry verbatim — the browser must see one of its own offered
+///    values back, so we surface the bearer entry (which is also the
+///    only offered one for the canonical `LifedWsAgentSessionClient`
+///    case).
+/// 3. Else return `None` — the response omits the header. RFC 6455
+///    §4.2.2 makes the subprotocol response optional, and the browser
+///    only enforces equality when the header is present.
+fn choose_response_subprotocol<B>(req: &Request<B>) -> Option<String> {
+    let header = req.headers().get("sec-websocket-protocol")?.to_str().ok()?;
+    let mut bearer_choice: Option<String> = None;
+    for raw in header.split(',') {
+        let part = raw.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if part == "life.v1.agent" {
+            return Some("life.v1.agent".to_string());
+        }
+        if bearer_choice.is_none()
+            && let Some(token) = part.strip_prefix("bearer.")
+            && !token.is_empty()
+            && token
+                .chars()
+                .all(|c| !c.is_whitespace() && !c.is_control() && c != ',')
+        {
+            // Echo the FULL entry the client sent (`bearer.<jwt>`),
+            // not just the bare token — the browser compares the
+            // response value against its offered list verbatim.
+            bearer_choice = Some(part.to_string());
+        }
+    }
+    bearer_choice
 }
 
 /// Extract `Bearer <token>` from the `Authorization` header. Returns
@@ -425,7 +496,15 @@ fn query_param(query: &str, key: &str) -> Option<String> {
 }
 
 /// Build the 101 Switching Protocols response body.
-fn upgrade_response(sec_key: &str) -> Response<Body> {
+///
+/// `chosen_subprotocol` carries the negotiated subprotocol value
+/// (see `choose_response_subprotocol` for the precedence rule). When
+/// `None` we omit the header entirely — RFC 6455 §4.2.2 makes it
+/// optional, and the browser only enforces equality when present.
+/// When set, the value must already be one of the entries the client
+/// offered in its request `Sec-WebSocket-Protocol` header (otherwise
+/// the browser will reject the upgrade with close code 1006).
+fn upgrade_response(sec_key: &str, chosen_subprotocol: Option<&str>) -> Response<Body> {
     let accept_key = derive_accept_key(sec_key.as_bytes());
     let mut resp = Response::new(Body::empty());
     *resp.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
@@ -435,12 +514,21 @@ fn upgrade_response(sec_key: &str) -> Response<Body> {
     if let Ok(v) = HeaderValue::from_str(&accept_key) {
         h.insert("sec-websocket-accept", v);
     }
-    // Subprotocol negotiation per Spec C₃ §6.1: only `life.v1.agent`
-    // accepted.
-    h.insert(
-        "sec-websocket-protocol",
-        HeaderValue::from_static("life.v1.agent"),
-    );
+    // Subprotocol negotiation per Spec C₃ §6.1 + BRO-1228:
+    //   - Pre-BRO-1228 we hardcoded `life.v1.agent`. That broke
+    //     browser-only clients (canonical `LifedWsAgentSessionClient`
+    //     offers only `bearer.<jwt>`) because the response value MUST
+    //     be one of the offered values per the browser handshake.
+    //   - Post-BRO-1228 we echo whatever `choose_response_subprotocol`
+    //     picked — `life.v1.agent` if offered, else the `bearer.<jwt>`
+    //     entry if offered, else nothing. Rust integration tests that
+    //     offer `life.v1.agent` see no behaviour change; browser
+    //     clients that offer only `bearer.<jwt>` now succeed.
+    if let Some(value) = chosen_subprotocol
+        && let Ok(v) = HeaderValue::from_str(value)
+    {
+        h.insert("sec-websocket-protocol", v);
+    }
     resp
 }
 
@@ -518,7 +606,7 @@ pub fn handle_upgrade(
         }
     };
 
-    let response = upgrade_response(&parsed.sec_key);
+    let response = upgrade_response(&parsed.sec_key, parsed.chosen_subprotocol.as_deref());
 
     let on_upgrade = hyper::upgrade::on(&mut req);
     let connection = WsConnection {
@@ -1522,6 +1610,137 @@ mod tests {
         );
         let parsed = parse_upgrade_request(&req).expect("parse");
         assert!(parsed.tier2_bearer.is_none());
+    }
+
+    // ─── BRO-1228: chosen_subprotocol + upgrade_response 101 echo ──
+    //
+    // The browser rejects the WS upgrade (close 1006) unless the 101
+    // response's `Sec-WebSocket-Protocol` value is one of the entries
+    // the client offered. Before BRO-1228 we hardcoded `life.v1.agent`,
+    // which the canonical browser-side `LifedWsAgentSessionClient`
+    // (which offers ONLY `bearer.<jwt>`) would reject.
+
+    fn ws_req_for_subproto(subproto: &str) -> Request<Body> {
+        ws_req(
+            &[
+                ("upgrade", "websocket"),
+                ("connection", "Upgrade"),
+                ("sec-websocket-version", "13"),
+                ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+                ("x-life-sid", "s"),
+                ("sec-websocket-protocol", subproto),
+            ],
+            WS_UPGRADE_PATH,
+        )
+    }
+
+    #[test]
+    fn chosen_subprotocol_prefers_life_v1_agent_when_offered() {
+        // Pre-BRO-1228 wire shape: clients that offer the named
+        // subprotocol get the same negotiated value back — zero
+        // behaviour change for the Rust + non-browser path.
+        let req = ws_req_for_subproto("life.v1.agent");
+        let parsed = parse_upgrade_request(&req).expect("parse");
+        assert_eq!(parsed.chosen_subprotocol.as_deref(), Some("life.v1.agent"));
+    }
+
+    #[test]
+    fn chosen_subprotocol_falls_back_to_bearer_entry_when_only_bearer_offered() {
+        // Canonical broken-prod case BRO-1228 fixes: the browser
+        // `LifedWsAgentSessionClient` only offers `bearer.<jwt>`. The
+        // server MUST echo that exact entry so the browser accepts
+        // the upgrade.
+        let req = ws_req_for_subproto("bearer.eyJabc.def.ghi");
+        let parsed = parse_upgrade_request(&req).expect("parse");
+        assert_eq!(
+            parsed.chosen_subprotocol.as_deref(),
+            Some("bearer.eyJabc.def.ghi"),
+        );
+    }
+
+    #[test]
+    fn chosen_subprotocol_picks_life_v1_agent_when_both_offered() {
+        // When the client offers both we prefer `life.v1.agent` so the
+        // wire shape stays uniform with pre-BRO-1228 traffic. The
+        // bearer entry is still consumed by `bearer_from_subprotocol`
+        // (for AuthLayer's Tier-1 verify); the negotiated subprotocol
+        // is a separate concern (browser ack).
+        for header in [
+            "life.v1.agent, bearer.eyJabc.def.ghi",
+            "bearer.eyJabc.def.ghi, life.v1.agent",
+        ] {
+            let req = ws_req_for_subproto(header);
+            let parsed = parse_upgrade_request(&req).expect("parse");
+            assert_eq!(
+                parsed.chosen_subprotocol.as_deref(),
+                Some("life.v1.agent"),
+                "header {header:?} must echo life.v1.agent",
+            );
+        }
+    }
+
+    #[test]
+    fn chosen_subprotocol_returns_none_when_no_subprotocol_header() {
+        // No `Sec-WebSocket-Protocol` header → we suppress the echo.
+        // RFC 6455 §4.2.2 makes the response optional; the browser
+        // only enforces equality when present.
+        let req = ws_req(
+            &[
+                ("upgrade", "websocket"),
+                ("connection", "Upgrade"),
+                ("sec-websocket-version", "13"),
+                ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+                ("x-life-sid", "s"),
+            ],
+            WS_UPGRADE_PATH,
+        );
+        let parsed = parse_upgrade_request(&req).expect("parse");
+        assert!(parsed.chosen_subprotocol.is_none());
+    }
+
+    #[test]
+    fn chosen_subprotocol_skips_malformed_bearer_entries() {
+        // A `bearer.<malformed>` entry must NOT be echoed (browser
+        // would still accept since it's one of the offered values,
+        // but echoing malformed material is a leaking-bug). When the
+        // only entries are malformed we surface None.
+        let req = ws_req_for_subproto("bearer.,bearer.has space");
+        let parsed = parse_upgrade_request(&req).expect("parse");
+        assert!(parsed.chosen_subprotocol.is_none());
+    }
+
+    #[test]
+    fn upgrade_response_echoes_chosen_subprotocol() {
+        // The end-to-end behaviour: when we pick a subprotocol value
+        // the 101 response carries it in `Sec-WebSocket-Protocol`.
+        let resp = upgrade_response("dGhlIHNhbXBsZSBub25jZQ==", Some("bearer.eyJabc.def.ghi"));
+        assert_eq!(resp.status(), StatusCode::SWITCHING_PROTOCOLS);
+        let header = resp
+            .headers()
+            .get("sec-websocket-protocol")
+            .expect("subprotocol header set");
+        assert_eq!(header.to_str().expect("ascii"), "bearer.eyJabc.def.ghi");
+        // Upgrade + Connection still set so hyper performs the upgrade.
+        assert_eq!(
+            resp.headers().get("upgrade").map(|v| v.to_str().unwrap()),
+            Some("websocket"),
+        );
+        assert_eq!(
+            resp.headers()
+                .get("connection")
+                .map(|v| v.to_str().unwrap()),
+            Some("Upgrade"),
+        );
+    }
+
+    #[test]
+    fn upgrade_response_omits_subprotocol_when_none_chosen() {
+        // No chosen subprotocol → the header is absent. The browser
+        // accepts the upgrade unconditionally in that case (per
+        // RFC 6455 §4.2.2).
+        let resp = upgrade_response("dGhlIHNhbXBsZSBub25jZQ==", None);
+        assert_eq!(resp.status(), StatusCode::SWITCHING_PROTOCOLS);
+        assert!(resp.headers().get("sec-websocket-protocol").is_none());
     }
 
     #[test]

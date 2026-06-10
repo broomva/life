@@ -69,6 +69,7 @@ async fn jwks_round_trip_suite() {
             label: "real-jwks-roundtrip".to_string(),
             resume_sid: None,
             inherit_policy: None,
+            model: None,
         });
         req.metadata_mut().insert(
             "authorization",
@@ -100,6 +101,7 @@ async fn jwks_round_trip_suite() {
             label: "alg-none".to_string(),
             resume_sid: None,
             inherit_policy: None,
+            model: None,
         });
         req.metadata_mut().insert(
             "authorization",
@@ -139,6 +141,7 @@ async fn jwks_round_trip_suite() {
             label: "rotation".to_string(),
             resume_sid: None,
             inherit_policy: None,
+            model: None,
         });
         req.metadata_mut().insert(
             "authorization",

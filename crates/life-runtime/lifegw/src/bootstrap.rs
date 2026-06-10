@@ -499,14 +499,66 @@ pub async fn serve_with_listener_and_signer(
     };
     let agent_http_router = crate::services::agent_http::router(agent_http_state);
 
-    // Compose: top-level axum router that nests `/anima/custody/*`,
-    // merges the `/v1/agent/create_session` route, and falls back to
-    // the tonic-stack adapter for everything else (including
-    // `/v1/agent/stream` which the WS layer handles inside the tonic
-    // stack).
+    // Spec J J-Sub-B: Anthropic Messages `POST /v1/messages` SSE route.
+    // Verifies Tier-1, mints Tier-2, synthesizes a deterministic sid
+    // from the caller's anima DID + first user message (codec L10-D2),
+    // and pipes lifed.Agent.{CreateSession, SendMessage, StreamSession}
+    // through the lifegw-anthropic-codec encoder to produce Anthropic-
+    // shape SSE frames. The same `jwks` + `minter` handles wire the rest
+    // of the auth pipeline so token verification + minting are uniform
+    // across `/v1/agent/*` and `/v1/messages`.
+    //
+    // C-1 fix-round 1: share the same `TokenBucketLimiter` instance the
+    // AuthLayer uses for the tonic stack — `/v1/messages` is a 600 s
+    // streaming endpoint, so being outside the AuthLayer's rate-limit
+    // path was strictly worse than the `agent_http` precedent. Passing
+    // the limiter to the route makes the budget uniform across
+    // `/v1/agent/*` and `/v1/messages`.
+    // Spec J J-Sub-E: stub haima client until the haimad gRPC surface
+    // ships. Vigil span emission still records `gen_ai.usage.*` +
+    // `life.haima.cost_usd_micros` regardless; the gate is no-op so
+    // requests are not actually charged in production yet.
+    // Warn loudly: the stub returns `Ok(_)` unconditionally. If
+    // `cfg.billing.enforce=true` is later flipped without wiring a real
+    // client, every request will pass the gate silently (the operator
+    // dissonance Strata B P20 r1 named for PR #1335).
+    tracing::warn!(
+        "lifegw: instantiating StubHaimaClient — credit gate is a no-op until a real haima client is wired (BRO-1144 follow-up); cfg.billing.enforce defaults to false"
+    );
+    let haima: std::sync::Arc<dyn crate::services::anthropic_messages::HaimaClient> =
+        std::sync::Arc::new(crate::services::anthropic_messages::StubHaimaClient);
+    let anthropic_state = crate::services::anthropic_messages::AnthropicMessagesState {
+        jwks: Arc::clone(&jwks),
+        minter: Arc::clone(&minter),
+        upstream: upstream_channel.clone(),
+        rate_limiter: Some(rate_limiter.clone()),
+        haima,
+        billing_enforce: cfg.billing.enforce,
+    };
+    let anthropic_router = crate::services::anthropic_messages::router(anthropic_state);
+
+    // BRO-1354: bespoke `POST /haima/x402/pay` JSON route. Verifies
+    // Tier-1, enforces `x402:pay` scope, mints Tier-2, and dials lifed's
+    // life.v1.Wallet.X402Pay over the same upstream channel. The
+    // broomva.tech edge proxy (slice P2) mirrors the `/anima/custody/*`
+    // JSON pattern against this surface. base-sepolia only in P1.
+    let haima_x402_state = crate::services::haima_x402::HaimaX402State {
+        jwks: Arc::clone(&jwks),
+        minter: Arc::clone(&minter),
+        upstream: upstream_channel.clone(),
+    };
+    let haima_x402_router = crate::services::haima_x402::router(haima_x402_state);
+
+    // Compose: top-level axum router that nests `/anima/custody/*` +
+    // `/haima/x402/*`, merges the `/v1/agent/create_session` +
+    // `/v1/messages` routes, and falls back to the tonic-stack adapter
+    // for everything else (including `/v1/agent/stream` which the WS
+    // layer handles inside the tonic stack).
     let app: axum::Router<()> = axum::Router::new()
         .nest("/anima/custody", anima_router)
+        .nest("/haima/x402", haima_x402_router)
         .merge(agent_http_router)
+        .merge(anthropic_router)
         .fallback_service(tonic_stack_adapted);
 
     // Convert the axum router's response body to tonic::body::Body so

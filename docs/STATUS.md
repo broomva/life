@@ -1483,6 +1483,149 @@ routes return 501 with helpful message — lifegw still starts cleanly.
 
 PR #1082 + #1083 + #1084 merged 2026-05-02.
 
+### 2026-05-18 — Spec J Phase 1: lifegw Anthropic Messages edge route (5/6 sub-phases on `main`; E2E smoke prep ready)
+
+**Spec J = Phase 1 (5/6) shipped 2026-05-18; live E2E operator smoke
+prep ready (BRO-1146).** Six PRs merged across J-Sub-A..F land the
+full Claude Code interoperability surface at lifegw's edge. Phase 1
+is now complete from a code-on-main perspective; the remaining
+deliverable is the operator-driven live smoke against a real
+Railway-deployed lifegw (BRO-1146 prep PR ships the in-process E2E
+test scaffold + runbook + deploy script — the live deploy + Claude
+Code session + Loom recording are human-only steps the operator
+executes).
+
+**Phase 1 components on `main`:**
+
+- `crates/life-runtime/lifegw-anthropic-codec/` — edge-only,
+  substrate-free Anthropic Messages SSE codec (encoder, block_policy,
+  request, sid, state, thinking, tools, contracts, errors).
+  Workspace-internal per L10-D4; not published.
+- `crates/life-runtime/lifegw/src/services/anthropic_messages.rs`
+  (~2,036 LOC) — the production router. Three routes: POST
+  `/v1/messages`, GET `/v1/models`, POST `/v1/messages/count_tokens`.
+  Real auth + rate-limit + haima check + vigil span + tonic-upstream
+  wire-up.
+- `crates/life-runtime/lifegw/tests/anthropic_messages_integration.rs`
+  (~1,718 LOC) — full unit + integration coverage of every public-facing
+  surface: SSE order, auth posture, rate-limit, x402 challenge,
+  tool-use round-trip via codec, count_tokens estimator, vigil span
+  emission. 4 `#[ignore]` placeholders flag the test-mock vs unfold
+  race the live J-Sub-G smoke certifies (settle-on-Finish + drop+resume
+  `from_sequence` replay).
+
+**Sub-phase summary:**
+
+| Sub-phase | Owner | Surface | Status |
+|---|---|---|---|
+| J-Sub-A | codec scaffold | encoder, sid, block_policy, errors | Shipped |
+| J-Sub-B | lifegw route | POST `/v1/messages` + auth + tonic dial | Shipped |
+| J-Sub-C | sid module | folded into J-Sub-A's `sid.rs` | Shipped |
+| J-Sub-D | tool-use bridge | encoder tool_use blocks + HTTP semantics | Shipped |
+| J-Sub-E | vigil + haima | spans + per-call billing + x402 (BRO-1144 PR #1335 commit `f4963feb`) | Shipped |
+| J-Sub-F | models + count_tokens | static catalogue + edge estimator | Shipped |
+| **J-Sub-G** | **E2E smoke (BRO-1146)** | **in-process test + operator runbook + deploy script** | **PREP READY (this PR); live operator smoke pending** |
+
+**In-process E2E test (this PR's deliverable):**
+
+`crates/life-runtime/lifegw/tests/spec_j_e2e_smoke.rs` — five
+scenario tests against a mock lifed + real codec + real route + real
+auth + recording haima:
+
+1. `e2e_simple_chat` — full happy-path SSE shape + saga firing + sid
+   stability + haima check (settle assertion deferred to live smoke
+   per the documented test-mock vs unfold race).
+2. `e2e_tool_use_round_trip` — first turn emits `tool_use` content
+   block, second turn re-injects `tool_result` with deterministic sid
+   reuse.
+3. `e2e_models_endpoint` — `/v1/models` returns Anthropic-pinned
+   static catalogue with ≥ 5 required IDs.
+4. `e2e_count_tokens` — `/v1/messages/count_tokens` returns plausible
+   count + `X-Life-Cost-Estimate-Usd-Micros` header.
+5. `e2e_drop_sid_stability` — drop response body mid-stream,
+   re-request, sid is deterministic via codec synthesis
+   (`from_sequence` replay is the live smoke's lago-side
+   responsibility; the rename from `e2e_drop_resume` was an honesty
+   fix in the P20 fix-round 1 — the test does not exercise replay).
+
+All 5 pass green. Joined with the existing
+`anthropic_messages_integration.rs` tests, the lifegw test surface
+now covers Phase 1 end-to-end at the in-process level.
+
+**Three test paths for Phase 1:**
+
+- **Path 1 — in-process E2E** (`cargo test -p lifegw --test
+  spec_j_e2e_smoke`): the 5 scenarios above. Automated regression gate.
+- **Path 2 — Railway staging deploy**
+  (`docs/conformance/2026-05-18-claude-code-smoke-runbook.md`): live
+  Claude Code session against a Railway-hosted lifegw+lifed stack.
+  Produces the Phase 1 conformance evidence (Loom + Vigil traces + lago
+  replay + haima ledger).
+- **Path 3 — local interactive smoke** (`cargo run -p lifegw --example
+  local_smoke`, BRO-1165): boots the real lifegw router against an
+  in-process mock lifed UDS on a kernel-picked `127.0.0.1` port. Prints
+  the URL + dev bearer and serves until SIGINT. Same code paths as
+  production (codec, auth, rate-limit, Vigil) — only the substrate is
+  mocked. Used for iterating on the Anthropic Messages route, validating
+  Vigil span emission, and verifying the wire over a real TCP socket
+  without burning a Railway slot. See
+  `crates/life-runtime/lifegw/examples/README.md` for the full curl
+  recipes.
+
+A fourth iteration-only surface (`cargo run -p lifegw --example
+local_smoke_anthropic`, [BRO-1185]) lands as a follow-up: same shape
+as Path 3, but the in-process Agent service forwards to
+`arcan_proxy::AnthropicArcan` so every `/v1/messages` call hits
+`api.anthropic.com` for real (requires `ANTHROPIC_API_KEY`; defaults
+to Sonnet 4.5 — switch to `claude-haiku-4-5-20251001` for cheap
+iteration). Daily dogfooding loop; does NOT validate the lifed saga
+(use Path 2 for full conformance evidence). See the runbook §"Path 4"
+callout and `crates/life-runtime/lifegw/examples/README.md` for full
+recipes and the honest divergence notes.
+
+**Operator runbook + deploy script (this PR's other deliverables):**
+
+- `docs/conformance/2026-05-18-claude-code-smoke-runbook.md` — seven
+  sections covering prereqs, Railway staging deploy, Claude Code
+  config, smoke session checklist, evidence capture, acceptance
+  criteria (with the BRO-1144 carry-over known-limitations log), and
+  filing the results. Uses the `lifegw-stack` multi-process
+  Dockerfile (Option A, single-container Topology A with lifed running
+  alongside lifegw under tini); §6.1 records mock-substrate gaps as
+  expected limitations.
+- `scripts/deploy_lifegw_staging.sh` — idempotent Railway deploy
+  wrapper. Pre-flight (CLI installed, logged in, project linked,
+  service exists via `railway service link`, branch sanity), then
+  edits the baked `deploy/railway/lifegw-stack/lifegw.toml` in place
+  to set `dev_signer_enabled = true` (lifegw reads TOML only, not
+  env vars — see runbook §2.2a). Sets a small set of Railway-level
+  env vars Railway *does* consume (`RAILWAY_DOCKERFILE_PATH`,
+  `LIFEGW_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`,
+  `LIFED_ALLOW_MOCK_FALLBACK`). Triggers `railway up --detach`, polls
+  `/healthz` for 5 minutes, and **bails on health-probe failure**
+  (no warn-and-exit-0 silent successes). Prints next-step exports
+  and reminds the operator to revert the TOML edit before
+  committing.
+
+**Known limitations carried from BRO-1144 PR #1335 (documented in
+the runbook §6.1 known-limitations log):**
+
+- `traceparent` not yet propagated to lifed (W3C tracecontext is
+  emitted in lifegw's spans; lifed-side spans appear as a separate
+  trace until the Phase 2 follow-up wires propagation).
+- `StubHaimaClient` is wired — billing is unwired at the code level
+  (no `cfg.billing.enforce` field exists in the baked TOML). Ledger
+  is empty across the smoke. Live haima client lands post-Phase-1
+  under BRO-1147+.
+- `lago replay --tree` evidence is mock-substrate-empty under
+  Option A's `LIFED_ALLOW_MOCK_FALLBACK=true` posture. Real lago
+  replay rides Option B (Topology B production-faithful deploy) and
+  is exercised by post-Phase-1 work.
+
+**Critical path next:** operator executes BRO-1146 live smoke per
+the runbook → Phase 1 SHIPPED; then queue Phase 2 (J-Sub-H/I/J)
+gated on Spec E E-Sub-F conformance completion.
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
