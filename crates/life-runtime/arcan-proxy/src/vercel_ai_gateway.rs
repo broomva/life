@@ -89,7 +89,8 @@ impl VercelAiGatewayConfig {
     /// - `OPENAI_API_KEY` (required)
     /// - `OPENAI_BASE_URL` (default [`DEFAULT_BASE_URL`])
     /// - `OPENAI_MODEL` (default [`DEFAULT_MODEL`])
-    /// - `LIFED_ARCAN_SYSTEM_PROMPT` (optional)
+    /// - `LIFED_ARCAN_SYSTEM_PROMPT` (optional override; defaults to the
+    ///   grounded [`crate::grounding::DEFAULT_CHAT_SYSTEM_PROMPT`])
     /// - `LIFED_ARCAN_REQUEST_TIMEOUT_SECS` (optional, default 120)
     pub fn from_env() -> ArcanProxyResult<Self> {
         let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
@@ -106,7 +107,10 @@ impl VercelAiGatewayConfig {
             .ok()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_MODEL.to_string());
-        let system_prompt = std::env::var("LIFED_ARCAN_SYSTEM_PROMPT").ok();
+        // Defaults to the grounded persona when the env var is unset/blank
+        // so the live agent answers project FAQs factually instead of
+        // "I don't have enough context"; an explicit override still wins.
+        let system_prompt = crate::grounding::resolve_system_prompt();
         let request_timeout = std::env::var("LIFED_ARCAN_REQUEST_TIMEOUT_SECS")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
@@ -733,6 +737,26 @@ mod tests {
         assert_eq!(messages[0]["role"], "system");
         assert_eq!(messages[0]["content"], "be helpful");
         assert_eq!(messages[1]["role"], "user");
+    }
+
+    /// The grounded default (used when `LIFED_ARCAN_SYSTEM_PROMPT` is
+    /// unset) must reach the outbound request body as the system message —
+    /// otherwise the live agent stays ungrounded. Uses the pure resolver
+    /// (`resolve_system_prompt_from(None)`) so the test never touches the
+    /// process environment.
+    #[test]
+    fn default_grounding_flows_into_request_body() {
+        let mut c = cfg("http://localhost:8080".to_string());
+        c.system_prompt = crate::grounding::resolve_system_prompt_from(None);
+        let arc = VercelAiGatewayArcan::new(c).expect("build");
+        let body = arc.build_request_body("Who is Carlos Escobar-Valbuena?", None);
+        let messages = body["messages"].as_array().expect("messages");
+        assert_eq!(messages.len(), 2, "system + user");
+        assert_eq!(messages[0]["role"], "system");
+        let system = messages[0]["content"].as_str().expect("system content");
+        assert!(system.contains("broomva.tech"));
+        assert!(system.contains("Carlos"));
+        assert!(system.contains("Life Agent OS"));
     }
 
     /// BRO-1206: per-call model override wins over `cfg.model`.

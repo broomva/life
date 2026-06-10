@@ -74,7 +74,10 @@ impl AnthropicArcanConfig {
                 .and_then(|s| s.parse().ok())
                 .map(Duration::from_secs)
                 .unwrap_or(DEFAULT_REQUEST_TIMEOUT),
-            system_prompt: std::env::var("LIFED_ARCAN_SYSTEM_PROMPT").ok(),
+            // Defaults to the grounded persona when the env var is
+            // unset/blank (see `crate::grounding`); an explicit override
+            // still wins wholesale.
+            system_prompt: crate::grounding::resolve_system_prompt(),
         })
     }
 }
@@ -164,7 +167,17 @@ impl AnthropicArcan {
         if let Some(system) = &self.cfg.system_prompt
             && !system.trim().is_empty()
         {
-            body["system"] = serde_json::json!(system);
+            // Emit `system` as a cacheable content block so Anthropic
+            // prompt caching amortizes the (now always-present) grounding
+            // persona across a multi-turn conversation instead of
+            // re-billing it on every turn. The Messages API accepts both
+            // the bare-string and block-array forms for `system`; only the
+            // array form can carry `cache_control`.
+            body["system"] = serde_json::json!([{
+                "type": "text",
+                "text": system,
+                "cache_control": { "type": "ephemeral" },
+            }]);
         }
         body
     }
@@ -650,6 +663,36 @@ mod tests {
         // None falls back.
         let body = arc.request_body("sid", "hi", None);
         assert_eq!(body["model"], "claude-sonnet-4-5-default");
+    }
+
+    /// The grounded default (used when `LIFED_ARCAN_SYSTEM_PROMPT` is
+    /// unset) must reach the Anthropic request body as a cacheable system
+    /// block. The Anthropic path serializes `system` differently from the
+    /// Vercel path, so it needs its own end-to-end grounding assertion.
+    /// Uses the pure resolver so the test never touches the process env.
+    #[test]
+    fn default_grounding_flows_into_anthropic_system_block() {
+        let cfg = AnthropicArcanConfig {
+            api_key: "k".to_string(),
+            base_url: DEFAULT_BASE_URL.to_string(),
+            model: DEFAULT_MODEL.to_string(),
+            max_tokens: DEFAULT_MAX_TOKENS,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            system_prompt: crate::grounding::resolve_system_prompt_from(None),
+        };
+        let arc = AnthropicArcan::new(cfg).expect("build");
+        let body = arc.request_body("sid", "Who is Carlos Escobar-Valbuena?", None);
+        let system = body["system"].as_array().expect("system is a block array");
+        assert_eq!(system.len(), 1, "single grounding system block");
+        assert_eq!(system[0]["type"], "text");
+        assert_eq!(
+            system[0]["cache_control"]["type"], "ephemeral",
+            "system block must be marked cacheable",
+        );
+        let text = system[0]["text"].as_str().expect("system text");
+        assert!(text.contains("broomva.tech"));
+        assert!(text.contains("Carlos"));
+        assert!(text.contains("Life Agent OS"));
     }
 
     #[tokio::test]
