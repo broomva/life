@@ -343,24 +343,33 @@ Topology B is now production-deployable for real agent traffic; see
 `research/entities/concept/topology-b-substrate-stub-gap.md` for the
 audit record + closure note.
 
-⚠️ **Three small wiring gaps remain — all localized to Workflow tick path:**
+✅ **Workflow tick path gaps CLOSED (2026-06-10, harness Phase-2 arc):**
 
-1. **`ergon-life-sinks` has zero consumers** —
-   `crates/arcan/arcan-ergon/src/runner.rs:157` uses `BufferSink::new()`.
-   Workflow stream events never reach lago; `lago replay --tree`
-   cannot see them. ~30 LOC fix.
-2. **3 of 4 ergon auto-hook adapters are Noop** —
-   `crates/arcan/arcan-ergon/src/runner.rs:146-150` wires
-   `NoopBudgetGate` / `NoopResponseScorer` / `NoopSoulAttester`
-   (only `PraxisCapabilityHook` is real). Workflow ticks bypass
-   budget/score/attest. ~50 LOC each + real impls.
-3. **`arcan agent test` is `--dry-run` only** (CLI) — no live-LLM mode
-   for Python consumers. BRO-1008 follow-up.
+1. ~~`ergon-life-sinks` has zero consumers~~ — **CLOSED**: the runner
+   composes `FanoutSink([BufferSink, factory(session, branch)])` per
+   invocation; `arcan serve` wires `ergon_life_sinks::LagoSink` over
+   the kernel's own lago journal via
+   `WorkflowRunInputs::with_stream_sink_factory`
+   (`crates/arcan/arcan/src/ergon_wiring.rs`). Workflow stream events
+   now reach lago.
+2. ~~3 of 4 ergon auto-hook adapters are Noop~~ — **CLOSED**: real
+   adapters shipped + wired — `EconomicBudgetGate` (Autonomic:
+   Hibernate denies, Hustle clamps tokens), `NousAdapter` (evaluator
+   fan-out, fail-open per evaluator), `AgentAttestationAdapter`
+   (custody-signed JWS session boundaries; implemented + tested,
+   arcan serve wiring awaits a custody identity config — noop
+   fallback warns at boot). Noops remain only as explicit fallbacks
+   for unwired hosts.
 
-**Direct tick path (Topology A) is unaffected by gaps 1 & 2** —
-autonomic + nous + lago all wired through `PolicyGatePort` +
-`ToolHarnessPort` + turn middleware. Gap 3 is small / utility. Total
-remaining: ~1 weekend of cleanup.
+Also closed 2026-06-10: **substrate tool lifecycle (harness Phase 2)**
+— `arcand DispatchMessage` emits `TOOL_CALL_PENDING` / `TOOL_RESULT`
+with structured payloads (64KB wire cap, kernel sequence carried);
+`arcan-proxy` translates them into `life.v1.AgentEvent` records and no
+longer drops TOKEN text on the real-arcand path (PR #1686, merge
+`14e39f3c`).
+
+⚠️ **One small gap remains:** `arcan agent test` is `--dry-run` only
+(CLI) — no live-LLM mode for Python consumers. BRO-1008 follow-up.
 
 ### Spec progress
 
