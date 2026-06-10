@@ -173,12 +173,24 @@ impl ArcanProxy {
     /// Dispatch a message and stream the substrate's events back as
     /// `life.v1.AgentEvent`s. BRO-1016 wires this to
     /// `arcan.v1.AgentSubstrate.DispatchMessage` and translates the
-    /// substrate-plane events into the public-plane shape (Phase 1
-    /// maps TOKEN/FINISH/ERROR; tool kinds remain Phase 2 work).
+    /// substrate-plane events into the public-plane shape. Phase 2
+    /// (harness arc): TOKEN/FINISH/ERROR plus the tool lifecycle —
+    /// TOOL_CALL_PENDING / TOOL_RESULT pass through with their
+    /// structured payloads as `EventRecord`s (see
+    /// [`crate::conversions::SubstrateEventTranslator`]).
+    ///
+    /// BRO-1206: `model` is accepted at the trait boundary so callers
+    /// (lifed) can plumb a per-session override end-to-end without a
+    /// trait signature change downstream. The arcan substrate wire
+    /// (`arcan.v1.AgentSubstrate.DispatchMessage`) does NOT yet carry a
+    /// `model` field — this proxy ignores the override when forwarding
+    /// to a real arcand. Override-or-env-fallback is honored by the
+    /// `VercelAiGatewayArcan` and `AnthropicArcan` HTTP-backed impls.
     pub async fn dispatch_message(
         &self,
         sid: &str,
         content: &str,
+        _model: Option<&str>,
     ) -> ArcanProxyResult<
         Pin<
             Box<
@@ -209,34 +221,15 @@ impl ArcanProxy {
         };
 
         // Map arcan.v1.AgentEvent → life.v1.AgentEvent at the wire
-        // boundary. Phase 1 emits the kind mapping; structured
-        // EventRecords stay None until the Phase 2 wire is shipped.
+        // boundary. Phase 2 (harness arc): the translator builds a
+        // structured `EventRecord` per event (session id, sequence,
+        // kind tag, JSON payload) so token text and tool payloads
+        // survive the hop — see `conversions::SubstrateEventTranslator`.
         use futures::StreamExt;
-        let mapped = upstream.map(|res| res.map(translate_event));
+        let mut translator = crate::conversions::SubstrateEventTranslator::new(sid);
+        let mapped = upstream.map(move |res| res.map(|evt| translator.translate(evt)));
         let inner = Box::pin(mapped);
         Ok(Box::pin(PoolGuardedStream::new(inner, guard)))
-    }
-}
-
-/// Translate a substrate-plane `arcan.v1.AgentEvent` into the
-/// public-plane `life.v1.AgentEvent` shape that lifed's fan-out
-/// expects. Phase 1 maps three kinds; everything else falls back to
-/// `Token` with the inner text (preserves payload, avoids data loss).
-fn translate_event(evt: arcan_pb::AgentEvent) -> life_runtime_proto::life::v1::AgentEvent {
-    use arcan_pb::AgentEventKind as Sub;
-    use life_runtime_proto::life::v1::AgentEventKind as Pub;
-    // Phase 1 only emits TOKEN/FINISH/ERROR substrate-side; any other
-    // kind we receive in the future maps to TOKEN so downstream
-    // streams don't drop the payload silently.
-    let kind = match Sub::try_from(evt.kind).unwrap_or(Sub::Unspecified) {
-        Sub::Token => Pub::Token,
-        Sub::Finish => Pub::Finish,
-        Sub::Error => Pub::Error,
-        Sub::Unspecified => Pub::Unspecified,
-    };
-    life_runtime_proto::life::v1::AgentEvent {
-        record: None,
-        kind: kind as i32,
     }
 }
 
@@ -258,6 +251,14 @@ fn record_outcome(guard: Option<PoolGuard>, success_or_permanent: bool) {
 /// Object-safe trait covering the lifed-relevant subset of arcan operations.
 /// Used in `lifed::services::agent` so the integration tests can swap the
 /// real proxy for a mock under test.
+///
+/// BRO-1206: `dispatch_message` takes an optional `model` override that
+/// flows from `POST /v1/agent/create_session`'s `model` field through
+/// lifed's routing cache. `None` means "use the backend's env default"
+/// (`OPENAI_MODEL` / `ANTHROPIC_MODEL`). Mocks accept and ignore it; the
+/// substrate-gRPC `ArcanProxy` accepts and ignores it (the arcan
+/// substrate wire doesn't carry a model field yet); HTTP-backed impls
+/// (`VercelAiGatewayArcan`, `AnthropicArcan`) honour the override.
 #[async_trait]
 pub trait ArcanCall: Send + Sync {
     async fn create_agent(&self, sid: &str) -> ArcanProxyResult<String>;
@@ -266,6 +267,7 @@ pub trait ArcanCall: Send + Sync {
         &self,
         sid: &str,
         content: &str,
+        model: Option<&str>,
     ) -> ArcanProxyResult<
         Pin<
             Box<
@@ -288,6 +290,7 @@ impl ArcanCall for ArcanProxy {
         &self,
         sid: &str,
         content: &str,
+        model: Option<&str>,
     ) -> ArcanProxyResult<
         Pin<
             Box<
@@ -296,7 +299,7 @@ impl ArcanCall for ArcanProxy {
             >,
         >,
     > {
-        ArcanProxy::dispatch_message(self, sid, content).await
+        ArcanProxy::dispatch_message(self, sid, content, model).await
     }
 }
 
@@ -362,6 +365,7 @@ impl<C: ArcanCall> ArcanCall for Pooled<C> {
         &self,
         sid: &str,
         content: &str,
+        model: Option<&str>,
     ) -> ArcanProxyResult<
         Pin<
             Box<
@@ -372,7 +376,7 @@ impl<C: ArcanCall> ArcanCall for Pooled<C> {
     > {
         // Streams hold the guard until the inner stream terminates.
         let guard = self.pool.acquire().await.map_err(ArcanProxyError::from)?;
-        match self.inner.dispatch_message(sid, content).await {
+        match self.inner.dispatch_message(sid, content, model).await {
             Ok(stream) => Ok(Box::pin(PoolGuardedStream::new(stream, Some(guard)))),
             Err(e) => {
                 if e.is_retryable() {
@@ -498,6 +502,7 @@ mod tests {
                 &self,
                 _sid: &str,
                 _content: &str,
+                _model: Option<&str>,
             ) -> ArcanProxyResult<
                 Pin<
                     Box<
@@ -546,6 +551,7 @@ mod tests {
                 &self,
                 _sid: &str,
                 _content: &str,
+                _model: Option<&str>,
             ) -> ArcanProxyResult<
                 Pin<
                     Box<

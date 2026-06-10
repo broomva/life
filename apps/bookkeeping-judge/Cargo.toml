@@ -1,0 +1,47 @@
+[package]
+name        = "bookkeeping-judge"
+description = "Ergon-Workflow port of bellows-example-bookkeeping-judge — scores raw research extracts against the Nous gate (novelty + specificity + relevance) and decides L2 → L3 promotion."
+version.workspace     = true
+edition.workspace     = true
+rust-version.workspace = true
+license.workspace     = true
+authors.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+keywords.workspace    = true
+categories.workspace  = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "bookkeeping-judge"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Ergon harness primitive — Workflow + Agent + StepCtx + FsAgentRegistry.
+ergon.workspace = true
+
+# Standard async + serde toolkit.
+async-trait.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "fs"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# CLI provider chain — Anthropic-via-arcan-ergon, same path as the
+# arcan-ergon live-Anthropic smoke test (BRO-1013).
+arcan-ergon         = { workspace = true }
+arcan-provider      = { path = "../../crates/arcan/arcan-provider", version = "0.3.0" }
+arcan-aios-adapters = { path = "../../crates/arcan/arcan-aios-adapters", version = "0.3.0" }
+arcan-core          = { workspace = true }
+aios-protocol.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }

@@ -98,6 +98,153 @@ async fn stream_session_returns_canned_events() {
     env.shutdown().await;
 }
 
+/// BRO-1206: end-to-end model-override plumbing through lifed.
+///
+/// 1. `Agent.CreateSession` with `model: Some("anthropic/claude-opus-4-7")`
+///    persists the override on the routing-cache entry.
+/// 2. `Agent.SendMessage` looks it up and passes it to
+///    `MockArcan::dispatch_message`.
+/// 3. The mock records `(sid, Some("anthropic/claude-opus-4-7"))` on
+///    `dispatch_models`, proving the wire path is closed.
+#[tokio::test]
+async fn send_message_passes_per_session_model_override_to_arcan() {
+    let env = TestEnv::start_with_mocks().await;
+    let session = env
+        .create_session_dev_with_model(
+            "alice",
+            "project-demo",
+            "model-override",
+            Some("anthropic/claude-opus-4-7"),
+        )
+        .await
+        .expect("create_session");
+    let sid = session.sid.expect("sid");
+
+    let mut client = env.agent_client().await;
+    let mut req = tonic::Request::new(SendMessageReq {
+        sid: Some(sid.clone()),
+        content: "hi".to_string(),
+        attachment_blob_ref: vec![],
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    let mut stream = client
+        .send_message(req)
+        .await
+        .expect("send_message")
+        .into_inner();
+    // Drain a few events so the pump task has run dispatch_message.
+    for _ in 0..2 {
+        if stream.next().await.is_none() {
+            break;
+        }
+    }
+    // Give the spawned pump a moment to record the dispatch.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let models = env.mocks.arcan.dispatch_models.lock().clone();
+    assert!(
+        !models.is_empty(),
+        "expected at least one dispatch_message call recorded"
+    );
+    assert_eq!(models[0].0, sid.value);
+    assert_eq!(
+        models[0].1.as_deref(),
+        Some("anthropic/claude-opus-4-7"),
+        "model override should travel from CreateSession through routing cache to dispatch_message"
+    );
+
+    env.shutdown().await;
+}
+
+/// BRO-1206: no `model` field on `Agent.CreateSession` → backends see
+/// `None` on `dispatch_message` → env fallback applies.
+#[tokio::test]
+async fn send_message_passes_none_when_no_model_override() {
+    let env = TestEnv::start_with_mocks().await;
+    let session = env
+        .create_session_dev("alice", "project-demo", "no-override")
+        .await
+        .expect("create_session");
+    let sid = session.sid.expect("sid");
+
+    let mut client = env.agent_client().await;
+    let mut req = tonic::Request::new(SendMessageReq {
+        sid: Some(sid.clone()),
+        content: "hi".to_string(),
+        attachment_blob_ref: vec![],
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    let mut stream = client
+        .send_message(req)
+        .await
+        .expect("send_message")
+        .into_inner();
+    for _ in 0..2 {
+        if stream.next().await.is_none() {
+            break;
+        }
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let models = env.mocks.arcan.dispatch_models.lock().clone();
+    assert!(!models.is_empty());
+    assert!(
+        models[0].1.is_none(),
+        "no model on CreateSession → None on dispatch_message (env fallback)"
+    );
+
+    env.shutdown().await;
+}
+
+/// BRO-1206: empty / whitespace `model` is normalised to None at the
+/// routing-cache layer so backends see a single "not set" representation.
+#[tokio::test]
+async fn empty_model_field_normalises_to_none() {
+    let env = TestEnv::start_with_mocks().await;
+    let session = env
+        .create_session_dev_with_model("alice", "project-demo", "empty-model", Some("   "))
+        .await
+        .expect("create_session");
+    let sid = session.sid.expect("sid");
+
+    let mut client = env.agent_client().await;
+    let mut req = tonic::Request::new(SendMessageReq {
+        sid: Some(sid.clone()),
+        content: "hi".to_string(),
+        attachment_blob_ref: vec![],
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    let mut stream = client
+        .send_message(req)
+        .await
+        .expect("send_message")
+        .into_inner();
+    for _ in 0..2 {
+        if stream.next().await.is_none() {
+            break;
+        }
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let models = env.mocks.arcan.dispatch_models.lock().clone();
+    assert!(!models.is_empty());
+    assert!(
+        models[0].1.is_none(),
+        "whitespace-only model should normalise to None at the routing-cache boundary"
+    );
+
+    env.shutdown().await;
+}
+
 /// M5 sub-phase B Task B12 acceptance — Spec C₂ §6.4.
 ///
 /// Multi-tab fanout: two clients attach to `stream_session` and a single

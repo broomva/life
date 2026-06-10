@@ -1,0 +1,104 @@
+# lifegw production config — M9-E (BRO-1215).
+#
+# Scope: drop-in production TOML for lifegw with anima_custody enabled.
+# The proxy at `/anima/custody/*` now forwards to soma's admin
+# custody-oracle UDS at /run/life/soma-admin.sock (Spec D D-Sub-E). Soma
+# itself is what holds (or proxies to Vault) the per-user wallet keys —
+# lifegw is the TLS-terminated edge-side proxy only. See the companion
+# `deploy/soma/production.toml` for the matching backend config.
+#
+# **Differences from `deploy/railway/lifegw-stack/lifegw.toml`:**
+# - `[anima_custody]` section is now populated (was absent in the Railway
+#   single-container Stage-2 deploy that didn't ship soma alongside).
+# - Comments call out the env-var / mounted-file expectations for the
+#   Vault sidecar — the actual VAULT_TOKEN never lives in this file or
+#   any committed file; it arrives via `/run/secrets/vault_token`
+#   (Docker secret) which the entrypoint reads at boot.
+#
+# Mainnet is out of scope for this deploy. Chain selection is per-request
+# (`eip155:84532` for Base Sepolia) and resolved by `haima-wallet`'s
+# `usdc_domain_for_chain` — no chain table in this config.
+
+[tls]
+cert_path = "/etc/lifegw/tls/fullchain.pem"
+key_path  = "/etc/lifegw/tls/privkey.pem"
+acme_enabled = false
+
+[listen]
+# Production lifegw fronts public HTTPS on :443 (systemd socket activation
+# binds the fd before lifegw runs as a non-root user). The redirect on :80
+# stays default.
+https_addr = "[::]:443"
+
+[upstream]
+# lifed public-plane UDS (Spec C₂ §3).
+lifed_uds_path = "/run/life/life.sock"
+
+[admin_plane]
+# lifegw's own admin plane — separate from soma's admin plane. life-runtime
+# group owns this; SO_PEERCRED + group membership gates writes.
+unix_socket       = "/run/life/lifegw-admin.sock"
+unix_socket_group = "life-runtime"
+unix_socket_mode  = 0o660
+
+# ── Spec D D-Sub-C: anima custody proxy wiring ────────────────────────────
+# When this section is populated, lifegw's `/anima/custody/*` routes
+# forward to soma's admin custody-oracle UDS. With this absent, the
+# routes degrade to 501 Not Implemented and the rest of the daemon stays
+# functional. M9-E flips production deploys to populated.
+#
+# soma_uds_path is soma's *admin* UDS (NOT its public kernel UDS).
+# soma's admin plane is the only surface that exposes CustodyOracle —
+# see crates/life-kernel/soma/src/admin.rs.
+[anima_custody]
+soma_uds_path = "/run/life/soma-admin.sock"
+
+[auth]
+# Production posture: dev shortcuts disabled, Tier-1 verifies against
+# broomva.tech's published JWKS, Tier-2 mint goes through Vault Transit
+# (P-256 — Vault community supports this natively).
+#
+# For Tier-2 specifically, Vault Transit's P-256 path is the production
+# primary. The wallet-signing path (secp256k1) lives in soma and
+# delegates to `VaultTransitAnima` via the soma `[custody]` Vault
+# backend (see `deploy/soma/production.toml`). The wire shape there
+# requires a secp256k1-capable Vault — see the vault-sidecar README for
+# the architectural reality + upgrade path.
+jwks_url            = "https://broomva.tech/api/auth/jwks.json"
+tier1_audience      = "lifegw"
+tier1_issuer        = "https://broomva.tech"
+kms_provider        = "vault"
+dev_signer_enabled  = false
+publish_jwks_path   = "/run/life/lifegw-jwks.json"
+tier2_audience      = "lifed"
+tier2_issuer        = "lifegw"
+tier2_ttl           = "900s"
+tier_user_ttl       = "900s"
+
+# Tier-2 Vault Transit (P-256) — Vault community supports this natively.
+# `addr` is the in-cluster Vault address (vault-sidecar network); `token`
+# is the resolved Vault token *value*, not an env reference. Production
+# entrypoint reads /run/secrets/vault_token (Docker secret) and substitutes
+# at boot via envsubst before lifegw reads this file. The committed file
+# carries `${VAULT_TOKEN}` as the literal placeholder — entrypoint expands.
+[auth.vault]
+addr     = "http://vault:8200"
+token    = "${VAULT_TOKEN}"
+key_name = "lifegw-tier2"
+kid      = "lifegw-tier2"
+# Renew the token at half its TTL. 12h here = 24h token TTL.
+renew_interval = "43200s"
+
+[rate_limit]
+per_user_capacity        = 60
+per_user_refill_per_sec  = 60
+per_ip_capacity          = 60
+per_ip_refill_per_min    = 60
+concurrent_ws_per_user   = 10
+
+[observability]
+# OTLP endpoint left empty here; production deploys override via env
+# (`LIFEGW_CONFIG_OVERRIDE_OBSERVABILITY_OTLP_ENDPOINT=`) or by
+# generating a config bundle from a Helm chart / templating layer.
+trace_sample_ratio = 0.05
+metric_interval    = "60s"

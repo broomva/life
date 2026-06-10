@@ -44,6 +44,11 @@ life-runtime-proto.workspace = true
 # routes. Pulled in as a client-only dep — lifegw never serves the
 # CustodyOracle service, only proxies to it.
 life-kernel-proto.workspace = true
+# Spec J J-Sub-B: Anthropic Messages SSE codec — edge-only codec crate
+# that translates lifed `pb::AgentEvent` streams into Anthropic Messages
+# SSE chunks and validates Anthropic Messages request bodies. Workspace-
+# internal, substrate-free (Spec J L10-D1). Powers `services/anthropic_messages.rs`.
+lifegw-anthropic-codec.workspace = true
 
 # transport — tonic 0.14 + tonic-web for browser-compatible Connect protocol.
 tonic = "0.14"
@@ -101,6 +106,11 @@ reqwest = { workspace = true }
 # concurrency / state
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "signal", "fs", "sync", "time", "io-util"] }
 tokio-stream = { workspace = true }
+# Spec J J-Sub-B fix-round 1 (I-5): `CancellationToken` ties the
+# upstream `SendMessage` drain task to the SSE response body lifecycle
+# — when the client disconnects, the drain stops cleanly instead of
+# burning a connection-pool slot for up to `HARD_STREAM_TIMEOUT`.
+tokio-util = { workspace = true }
 arc-swap = "1"
 async-trait.workspace = true
 futures.workspace = true
@@ -190,12 +200,23 @@ async-trait.workspace = true
 # verification). p256 + ciborium are already lifegw main deps and so
 # accessible from tests.
 k256.workspace = true
+# BRO-1215 M9-E PR-1: dev-only sha2 for the RFC 6979 §A.2.5
+# test-vector verifier (tests/secp256k1_test_vector.rs). sha2 is
+# already an opt-in main dep under the kms-gcp feature; the dev-dep
+# entry makes it unconditionally available to tests without forcing
+# kms-gcp on the production build.
+sha2 = { workspace = true }
 # Sub-phase A integration test stands up a real lifed instance with mock
 # substrates and proxies through lifegw. Allowed as a *dev*-dep only; the
 # production crate graph never pulls lifed (Spec C₃ §11.2 dependency rules
 # apply to the production graph, not test rigs — verify_dependencies_lifegw.sh
 # checks `cargo tree`, which excludes dev-deps).
 lifed = { path = "../lifed" }
+# Spec J real-Anthropic local smoke example (`examples/local_smoke_anthropic.rs`).
+# Dev-only: the production graph never pulls arcan-proxy (Spec C₃ §11.2
+# LOCKED L4-D13). Same carve-out as the `lifed` dev-dep above — dev tooling
+# needs a real upstream; the production graph does not.
+arcan-proxy = { path = "../arcan-proxy" }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }

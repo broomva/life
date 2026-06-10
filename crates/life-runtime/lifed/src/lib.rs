@@ -19,6 +19,7 @@ pub mod error;
 pub mod idempotency;
 pub mod listener;
 pub mod observability;
+pub mod route;
 pub mod routing;
 pub mod saga;
 pub mod services;

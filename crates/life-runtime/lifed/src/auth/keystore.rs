@@ -27,13 +27,37 @@ pub struct Keystore {
 impl Keystore {
     /// Generate a deterministic dev keypair. NOT for production.
     ///
-    /// Embeds the committed `auth/dev_keys/lifed-dev-key.{pem,pub.pem}`
-    /// generated via openssl. The keys are intentionally not secret —
-    /// they exist only to make the dev / CI substrate-token round-trip
-    /// reproducible.
+    /// Inline-embeds the canonical dev ES256 keypair (the same content
+    /// originally generated via `openssl` and committed to
+    /// `auth/dev_keys/lifed-dev-key.{pem,pub.pem}`). The keys are
+    /// intentionally NOT secret — they exist only to make the dev / CI
+    /// substrate-token round-trip reproducible.
+    ///
+    /// **BRO-1208**: inlined as string literals instead of `include_str!`
+    /// to remove the file-system dependency at compile time. Railway's
+    /// Docker build context was repeatedly omitting the `.pem` files
+    /// from the build (4 consecutive FAILED builds at commit
+    /// `d3569bbd`+ with `include_str!` error: "couldn't read … No such
+    /// file or directory"). Earlier builds at commit `ad4dc85f` worked
+    /// with the same files on disk — the omission is environment-
+    /// sensitive (BuildKit caching, secret-shape filtering, or
+    /// context-upload race; not pinned down). Inlining makes the binary
+    /// self-contained and immune to whatever upload path Railway chooses.
+    ///
+    /// The on-disk `.pem` files are kept for parity / regeneration
+    /// reference but are no longer consumed at compile time.
     pub fn generate_dev() -> Self {
-        const DEV_PRIV_PEM: &str = include_str!("dev_keys/lifed-dev-key.pem");
-        const DEV_PUB_PEM: &str = include_str!("dev_keys/lifed-dev-key.pub.pem");
+        const DEV_PRIV_PEM: &str = "\
+-----BEGIN PRIVATE KEY-----\n\
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgR13Ec+bww984GGn/\n\
+wqqi0BtBgAHMSyXgBzvl+ptrXHShRANCAAReifOTgJ8lUHdUfirjSAfFfZv3/tU8\n\
+4KQl1BTsqIGAoLum1Bvs0GVeQvWGKUESa6rlY6pAax/zTQZfJKRe2of0\n\
+-----END PRIVATE KEY-----\n";
+        const DEV_PUB_PEM: &str = "\
+-----BEGIN PUBLIC KEY-----\n\
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEXonzk4CfJVB3VH4q40gHxX2b9/7V\n\
+POCkJdQU7KiBgKC7ptQb7NBlXkL1hilBEmuq5WOqQGsf800GXySkXtqH9A==\n\
+-----END PUBLIC KEY-----\n";
         let encoding = EncodingKey::from_ec_pem(DEV_PRIV_PEM.as_bytes()).expect("dev key");
         let decoding = DecodingKey::from_ec_pem(DEV_PUB_PEM.as_bytes()).expect("dev pub");
         Self {

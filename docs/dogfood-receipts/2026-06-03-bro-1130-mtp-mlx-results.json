@@ -1,0 +1,45 @@
+{
+  "target": "mlx-community/gemma-4-e4b-it-4bit",
+  "drafter": "mlx-community/gemma-4-E4B-it-assistant-bf16",
+  "target_class": "Model",
+  "drafter_class": "Model",
+  "num_draft_tokens": 1,
+  "max_tokens": 120,
+  "avg_baseline_tps": 61.706416286807006,
+  "avg_mtp_tps": 68.39267297206102,
+  "avg_speedup": 1.1083559391000244,
+  "avg_accept_rate": 0.30277777777777776,
+  "bit_equivalent_all": false,
+  "per_prompt": [
+    {
+      "prompt": "Explain how speculative decoding works in two short paragraphs.",
+      "baseline_tps": 58.408628927396244,
+      "mtp_tps": 65.01390780783257,
+      "speedup": 1.11308738112389,
+      "bit_equivalent": false,
+      "accept_rate": 0.26666666666666666,
+      "n_tokens": 120,
+      "sample_text": "<|channel>thought\nHere's a plan to structure the explanation:\n1.  **Identify the core concept:** Speculative decoding is about speeding up large language models (LLMs) during inference by using a smaller, faster model to predict tokens for a larger, slower model to verify.\n2.  **Determine the target audience/goal:** The explanation needs to be clear, concise, and fit into two short paragraphs.\n3. "
+    },
+    {
+      "prompt": "Write a Python function that returns the n-th Fibonacci number iteratively.",
+      "baseline_tps": 63.28679718500916,
+      "mtp_tps": 73.56966397291615,
+      "speedup": 1.1624804421346622,
+      "bit_equivalent": true,
+      "accept_rate": 0.35833333333333334,
+      "n_tokens": 120,
+      "sample_text": "<|channel>thought\nHere's a thinking process that leads to the suggested solution:\n\n1.  **Understand the Goal:** The request is to write a Python function that calculates the $n$-th Fibonacci number using an *iterative* approach.\n\n2.  **Define the Fibonacci Sequence:**\n    *   $F(0) = 0$ (Often defined this way, depending on the starting point)\n    *   $F(1) = 1$\n    *   $F(n) = F(n-1) + F(n-2"
+    },
+    {
+      "prompt": "Summarize the difference between dense and mixture-of-experts transformers.",
+      "baseline_tps": 63.42382274801561,
+      "mtp_tps": 66.59444713543436,
+      "speedup": 1.0499910640835342,
+      "bit_equivalent": false,
+      "accept_rate": 0.2833333333333333,
+      "n_tokens": 120,
+      "sample_text": "<|channel>thought\nHere's a thinking process to construct the comparison:\n\n1.  **Deconstruct the Request:** The core task is to differentiate between \"Dense Transformers\" and \"Mixture-of-Experts (MoE) Transformers.\"\n\n2.  **Analyze Dense Transformers (The Baseline):**\n    *   *What are they?* Standard, vanilla Transformers (like the original BERT/GPT models).\n    *   *How do they work?* Every single"
+    }
+  ]
+}

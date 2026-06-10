@@ -88,6 +88,13 @@ anima-proxy.workspace = true
 # Sub-phase E: shared per-substrate pool + circuit-breaker primitives.
 life-runtime-pool.workspace = true
 
+# Ergon harness vocabulary — used by `route::ergon` for the `StreamEvent`
+# enum and `StopReason`. `ergon` itself has zero substrate-runtime deps
+# (only `aios-protocol` + std async crates), so it stays inside the
+# Spec C₂ §11 lifed dependency budget verified by
+# `scripts/verify_dependencies_lifed.sh`.
+ergon.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }

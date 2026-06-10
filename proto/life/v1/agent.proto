@@ -46,6 +46,16 @@ message CreateSessionReq {
   string label = 3;
   aios.v1.SessionId resume_sid = 4;
   ChildPolicy inherit_policy = 5;
+  // BRO-1206: optional per-request LLM model override. When set, lifed
+  // stores the value on the routing-cache entry and passes it to
+  // `ArcanCall::dispatch_message` on every subsequent `SendMessage` for
+  // this sid. When unset (None / empty), backends fall back to their
+  // env-bound default (`OPENAI_MODEL` / `ANTHROPIC_MODEL`).
+  //
+  // `optional` keeps the wire shape backwards-compatible: pre-1206
+  // clients and servers don't carry the field; new clients can send it
+  // safely against legacy servers (they'll ignore it).
+  optional string model = 6;
 }
 
 message Session {

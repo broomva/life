@@ -62,6 +62,12 @@ members = [
     "crates/autonomic/autonomic-core",
     "crates/autonomic/autonomic-lago",
     "crates/autonomic/autonomicd",
+    # Chronos — temporality (M0 scaffold + M1 agenda/HTTP; see docs/superpowers/plans/2026-05-13-chronos-temporal-primitive.md)
+    "crates/chronos/chronos-core",
+    "crates/chronos/chronos-triggers",
+    "crates/chronos/chronos-lago",
+    "crates/chronos/chronos-api",
+    "crates/chronos/chronosd",
     # Praxis — tool execution
     "crates/praxis/praxis-core",
     "crates/praxis/praxis-mcp-bridge",
@@ -69,8 +75,10 @@ members = [
     "crates/praxis/praxis-tools",
     # Ergon — agent harness primitive
     "crates/ergon/ergon",
+    "crates/ergon/ergon-anima-adapter",
     "crates/ergon/ergon-life-hooks",
     "crates/ergon/ergon-life-sinks",
+    "crates/ergon/ergon-nous-adapter",
     # Haima — finance
     "crates/haima/haima-api-schema",
     "crates/haima/haima-api",
@@ -152,8 +160,14 @@ members = [
     "crates/life-runtime/life-runtime-proto",
     # M7 — lifegw edge gateway (see Spec C₃ at docs/superpowers/specs/2026-04-27-spec-c3-lifegw-design.md)
     "crates/life-runtime/lifegw",
+    # Spec J Phase 1 — Anthropic Messages SSE codec for lifegw (BRO-1141, J-Sub-A).
+    # Edge-only, substrate-free (L10-D1). See docs/superpowers/specs/2026-05-18-spec-j-claude-code-interop.md.
+    "crates/life-runtime/lifegw-anthropic-codec",
     # life-perturb — controlled perturbation injection for RCS λ̂ validation (BRO-947)
     "crates/life-perturb",
+    # Apps — leaf binaries that compose substrate crates into deliverables.
+    # bookkeeping-judge (BRO-1003): ergon-Workflow port of bellows-example-bookkeeping-judge.
+    "apps/bookkeeping-judge",
 ]
 exclude = ["crates/spaces/life-spaces/spacetimedb"]
 
@@ -196,6 +210,11 @@ autonomic-api = { path = "crates/autonomic/autonomic-api", version = "0.3.0" }
 autonomic-controller = { path = "crates/autonomic/autonomic-controller", version = "0.3.0" }
 autonomic-core = { path = "crates/autonomic/autonomic-core", version = "0.3.0" }
 autonomic-lago = { path = "crates/autonomic/autonomic-lago", version = "0.3.0" }
+# Chronos — temporality
+chronos-core = { path = "crates/chronos/chronos-core", version = "0.3.0" }
+chronos-triggers = { path = "crates/chronos/chronos-triggers", version = "0.3.0" }
+chronos-lago = { path = "crates/chronos/chronos-lago", version = "0.3.0" }
+chronos-api = { path = "crates/chronos/chronos-api", version = "0.3.0" }
 haima-api = { path = "crates/haima/haima-api", version = "0.3.0" }
 haima-core = { path = "crates/haima/haima-core", version = "0.3.0" }
 haima-insurance = { path = "crates/haima/haima-insurance", version = "0.3.0" }
@@ -240,8 +259,10 @@ praxis-skills = { path = "crates/praxis/praxis-skills", version = "0.3.0" }
 praxis-tools = { path = "crates/praxis/praxis-tools", version = "0.3.0" }
 # Ergon — agent harness primitive
 ergon = { path = "crates/ergon/ergon", version = "0.3.0" }
+ergon-anima-adapter = { path = "crates/ergon/ergon-anima-adapter", version = "0.3.0" }
 ergon-life-hooks = { path = "crates/ergon/ergon-life-hooks", version = "0.3.0" }
 ergon-life-sinks = { path = "crates/ergon/ergon-life-sinks", version = "0.3.0" }
+ergon-nous-adapter = { path = "crates/ergon/ergon-nous-adapter", version = "0.3.0" }
 # Facade crates
 life-aios = { path = "crates/aios/life-aios", version = "0.3.0" }
 life-arcan = { path = "crates/arcan/life-arcan", version = "0.3.0", default-features = false }
@@ -277,6 +298,7 @@ anima-proxy        = { path = "crates/life-runtime/anima-proxy",        version 
 life-runtime-pool  = { path = "crates/life-runtime/life-runtime-pool",  version = "0.3.0" }
 life-runtime-proto = { path = "crates/life-runtime/life-runtime-proto", version = "0.3.0" }
 lifed-conformance  = { path = "crates/life-runtime/lifed-conformance",  version = "0.3.0" }
+lifegw-anthropic-codec = { path = "crates/life-runtime/lifegw-anthropic-codec", version = "0.3.0" }
 # Workspace-level tooling for lifed (used only by the lifed crate behind a feature)
 failsafe = { version = "1", default-features = false }
 

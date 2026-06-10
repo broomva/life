@@ -150,11 +150,17 @@ impl Drop for PumpGuard {
 /// a `PoolGuardedStream` that records the breaker outcome on terminal
 /// poll. The `PumpGuard` retained here only governs the
 /// one-pump-per-session invariant. Drop is panic-safe (RAII).
+///
+/// BRO-1206: `model` carries the per-session LLM model override (looked
+/// up from the routing-cache entry's `model` field by the caller). Mocks
+/// + the substrate gRPC proxy accept and ignore it; the HTTP-backed
+///   `VercelAiGatewayArcan` / `AnthropicArcan` impls honour it.
 fn spawn_or_attach_fanout_pump(
     fanout: &Arc<FanoutRegistry>,
     arcan: Arc<dyn ArcanCall>,
     sid: String,
     content: String,
+    model: Option<String>,
 ) {
     let Some(pump_guard) = PumpGuard::try_claim(Arc::clone(fanout), sid.clone()) else {
         // A pump is already running for this session — the new
@@ -170,13 +176,38 @@ fn spawn_or_attach_fanout_pump(
         // lifetime. If the spawned future panics, Drop releases the
         // slot — Spec C₂ §6.4 invariant preserved.
         let _pump_guard = pump_guard;
-        match arcan.dispatch_message(&sid, &content).await {
+        match arcan
+            .dispatch_message(&sid, &content, model.as_deref())
+            .await
+        {
             Ok(mut up) => {
                 use futures::StreamExt;
                 while let Some(evt) = up.next().await {
                     match evt {
                         Ok(e) => fanout.broadcast(e),
-                        Err(_) => break,
+                        Err(status) => {
+                            // The upstream arcan stream errored mid-turn
+                            // (e.g. the provider dropped the connection
+                            // after some tokens). Previously we just
+                            // `break`'d, leaving attached tabs to stall
+                            // until the client-side frame deadline (~30s)
+                            // fired with a generic timeout. Surface a
+                            // structured ERROR + terminal FINISH so the UI
+                            // shows the failure immediately and closes the
+                            // stream cleanly.
+                            tracing::warn!(
+                                sid = %sid,
+                                error = ?status,
+                                "arcan upstream stream errored mid-turn; surfacing error event"
+                            );
+                            fanout.broadcast(make_error_event(
+                                &sid,
+                                "lifed.arcan.stream_error",
+                                &status.to_string(),
+                            ));
+                            fanout.broadcast(make_finish_event(&sid, "error"));
+                            break;
+                        }
                     }
                 }
                 // PoolGuardedStream records the breaker outcome on
@@ -184,11 +215,75 @@ fn spawn_or_attach_fanout_pump(
                 // for the pump to do.
             }
             Err(e) => {
-                tracing::warn!(sid = %sid, error = ?e, "fanout pump failed to dial arcan");
+                // `dispatch_message` failed before yielding any event.
+                // The most common production cause is the arcan provider
+                // rejecting the turn outright (e.g. AI-gateway 403
+                // "model not accessible" or 429 rate-limit). Previously
+                // this path only logged, so attached tabs received ZERO
+                // frames and hung until the client-side 30s frame
+                // deadline fired with an opaque timeout. Surface a
+                // structured ERROR + terminal FINISH so the failure is
+                // visible immediately and the stream closes cleanly.
+                tracing::warn!(
+                    sid = %sid,
+                    error = ?e,
+                    "fanout pump failed to dial arcan; surfacing error event to attached tabs"
+                );
+                fanout.broadcast(make_error_event(
+                    &sid,
+                    "lifed.arcan.dispatch_failed",
+                    &e.to_string(),
+                ));
+                fanout.broadcast(make_finish_event(&sid, "error"));
             }
         }
         // _pump_guard drops here, releasing the per-session slot.
     });
+}
+
+/// Build a terminal `ERROR` agent event for the fan-out broadcast.
+///
+/// The `EventRecord.payload` carries `{code, message}` JSON — the shape
+/// the browser-side `decodeAgentEvent` reads for `AGENT_EVENT_KIND_ERROR`
+/// frames (`payload.code` / `payload.message`). lifegw forwards it
+/// verbatim over the WS as an `agent_kind: "ERROR"` frame.
+fn make_error_event(sid: &str, code: &str, message: &str) -> pb::AgentEvent {
+    pb::AgentEvent {
+        record: Some(pb::EventRecord {
+            session_id: Some(aios_v1::SessionId {
+                value: sid.to_string(),
+            }),
+            sequence: 0,
+            at: Some(prost_types::Timestamp::from(std::time::SystemTime::now())),
+            kind: "ERROR".to_string(),
+            payload: serde_json::to_vec(&serde_json::json!({
+                "code": code,
+                "message": message,
+            }))
+            .unwrap_or_default(),
+        }),
+        kind: pb::AgentEventKind::Error as i32,
+    }
+}
+
+/// Build a terminal `FINISH` agent event so the downstream stream closes
+/// cleanly instead of waiting for the client-side frame deadline. The
+/// `reason` lands in `payload.reason`, mirroring the arcan proxy's own
+/// FINISH events (`{"reason": "stop"}`).
+fn make_finish_event(sid: &str, reason: &str) -> pb::AgentEvent {
+    pb::AgentEvent {
+        record: Some(pb::EventRecord {
+            session_id: Some(aios_v1::SessionId {
+                value: sid.to_string(),
+            }),
+            sequence: 0,
+            at: Some(prost_types::Timestamp::from(std::time::SystemTime::now())),
+            kind: "FINISH".to_string(),
+            payload: serde_json::to_vec(&serde_json::json!({ "reason": reason }))
+                .unwrap_or_default(),
+        }),
+        kind: pb::AgentEventKind::Finish as i32,
+    }
 }
 
 /// `Agent` service implementation. Holds typed substrate proxies, the
@@ -309,8 +404,13 @@ impl pb::agent_server::Agent for AgentService {
             .run(ctx, steps)
             .await
             .map_err(|e| e.into_status())?;
+        // BRO-1206: persist optional per-request model override on the
+        // routing-cache entry. Empty / whitespace is normalised to None
+        // inside `insert_with_model`. The override flows out via
+        // `send_message` → `spawn_or_attach_fanout_pump` →
+        // `ArcanCall::dispatch_message`.
         self.routing
-            .insert_minimal(&sid, &body.user_id, &body.project_id);
+            .insert_with_model(&sid, &body.user_id, &body.project_id, body.model.clone());
         Ok(Response::new(pb::Session {
             sid: Some(sid),
             agent_id: Some(aios_v1::AgentId {
@@ -377,13 +477,21 @@ impl pb::agent_server::Agent for AgentService {
             .ok_or_else(|| Status::invalid_argument("missing sid"))?
             .value
             .clone();
+        let sid_proto = aios_v1::SessionId {
+            value: sid_value.clone(),
+        };
         let fanout = self
             .routing
-            .lookup_fanout(&aios_v1::SessionId {
-                value: sid_value.clone(),
-            })
+            .lookup_fanout(&sid_proto)
             .ok_or_else(|| Status::not_found("session not found"))?;
         let stream = fanout.attach(64);
+        // BRO-1206: lift the per-session model override from the
+        // routing-cache entry (None when `Agent.CreateSession` carried no
+        // `model` field — backends apply env fallback). Cached lookup is
+        // a single DashMap read + RwLock read; cheap enough on the
+        // hot path that an explicit per-`SendMessage` model field is
+        // unnecessary.
+        let model = self.routing.lookup_model(&sid_proto);
         // Sub-phase E: pool bracketing is inside the arcan-proxy `Pooled`
         // adapter; the pump only manages the one-pump-per-session slot
         // via `PumpGuard` (RAII).
@@ -392,6 +500,7 @@ impl pb::agent_server::Agent for AgentService {
             Arc::clone(&self.arcan_call),
             sid_value,
             body.content,
+            model,
         );
         Ok(Response::new(Box::pin(stream)))
     }
@@ -526,5 +635,57 @@ impl pb::agent_server::Agent for AgentService {
             "Agent.SpawnChild ships in Spec C₇ (recursive embedding, post-MVS). \
              Tracking ticket: BRO-926.",
         ))
+    }
+}
+
+#[cfg(test)]
+mod fanout_pump_error_tests {
+    use super::*;
+    use crate::dev_mocks::MockArcan;
+    use futures::StreamExt;
+
+    /// Regression: when `dispatch_message` fails outright (the production
+    /// AI-gateway 403/429 class), the pump must broadcast a structured
+    /// ERROR followed by a terminal FINISH — not just log and leave
+    /// attached tabs to hang until the client-side 30s frame deadline.
+    #[tokio::test]
+    async fn dispatch_failure_broadcasts_error_then_finish() {
+        let arcan = MockArcan::new();
+        arcan.set_force_fail(true); // dispatch_message returns Err
+
+        let fanout = Arc::new(FanoutRegistry::new());
+        let mut stream = fanout.attach(8);
+
+        spawn_or_attach_fanout_pump(
+            &fanout,
+            Arc::new(arcan) as Arc<dyn ArcanCall>,
+            "sid-test".to_string(),
+            "hi".to_string(),
+            None,
+        );
+
+        // First broadcast: a structured ERROR carrying {code, message}.
+        let first = stream
+            .next()
+            .await
+            .expect("error event present")
+            .expect("event ok");
+        assert_eq!(first.kind(), pb::AgentEventKind::Error);
+        let record = first.record.expect("error record present");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&record.payload).expect("error payload is JSON");
+        assert_eq!(payload["code"], "lifed.arcan.dispatch_failed");
+        assert!(
+            payload["message"].as_str().is_some_and(|m| !m.is_empty()),
+            "error message should be populated"
+        );
+
+        // Second broadcast: the terminal FINISH that ends the stream.
+        let second = stream
+            .next()
+            .await
+            .expect("finish event present")
+            .expect("event ok");
+        assert_eq!(second.kind(), pb::AgentEventKind::Finish);
     }
 }

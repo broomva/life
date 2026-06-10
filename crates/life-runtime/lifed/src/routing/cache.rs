@@ -36,6 +36,15 @@ pub struct RouteEntry {
     pub status: SessionStatus,
     /// Per-session multi-tab fan-out registry. Spec C₂ §6.4.
     pub fanout: Arc<FanoutRegistry>,
+    /// BRO-1206: per-request LLM model override carried from
+    /// `Agent.CreateSession`. When `Some(non_empty)`, every subsequent
+    /// `SendMessage` for this sid passes it to
+    /// `ArcanCall::dispatch_message`. When `None` or empty, the backend
+    /// falls back to its env-bound default (`OPENAI_MODEL` /
+    /// `ANTHROPIC_MODEL`). Stored on the routing-cache entry so the
+    /// override survives multi-tab fan-out without requiring it on
+    /// every `SendMessage` body.
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,7 +83,29 @@ impl RoutingCache {
     /// Insert a minimal entry. Each entry owns a fresh `FanoutRegistry`
     /// so SendMessage and StreamSession can broadcast to all attached
     /// tabs.
+    ///
+    /// BRO-1206: defaults `model: None` — backend env fallback applies.
+    /// Use [`Self::insert_with_model`] when `Agent.CreateSession` carries
+    /// a per-request override.
     pub fn insert_minimal(&self, sid: &aios_v1::SessionId, user_id: &str, project_id: &str) {
+        self.insert_with_model(sid, user_id, project_id, None);
+    }
+
+    /// BRO-1206: insert a routing entry with an optional per-session
+    /// LLM model override. The override is carried on subsequent
+    /// `Agent.SendMessage` dispatches via `ArcanCall::dispatch_message`.
+    pub fn insert_with_model(
+        &self,
+        sid: &aios_v1::SessionId,
+        user_id: &str,
+        project_id: &str,
+        model: Option<String>,
+    ) {
+        // Normalize empty / whitespace to None so downstream backends
+        // see a single "not set" representation.
+        let model = model
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         let entry = RouteEntry {
             sid: sid.clone(),
             user_id: user_id.to_string(),
@@ -86,6 +117,7 @@ impl RoutingCache {
             last_touched: Instant::now(),
             status: SessionStatus::Active,
             fanout: Arc::new(FanoutRegistry::new()),
+            model,
         };
         self.by_sid
             .insert(sid.value.clone(), Arc::new(RwLock::new(entry)));
@@ -97,6 +129,15 @@ impl RoutingCache {
         crate::observability::metrics::record_session_created("Tier-2");
         crate::observability::metrics::set_cache_size(self.by_sid.len() as i64);
         crate::observability::metrics::set_session_active(self.by_sid.len() as i64, "Tier-2");
+    }
+
+    /// BRO-1206: read the per-session model override (if any). Returns
+    /// `None` when the session was created without a `model` field on
+    /// `Agent.CreateSession` (or with an empty override).
+    pub fn lookup_model(&self, sid: &aios_v1::SessionId) -> Option<String> {
+        self.by_sid
+            .get(&sid.value)
+            .and_then(|e| e.read().model.clone())
     }
 
     /// Return the per-session fan-out registry. Sub-phase B's

@@ -21,7 +21,9 @@ use anima_proxy::{
     Account, AnimaCall, AnimaProxyError, AnimaProxyResult, Profile, SessionDescriptor,
 };
 use arcan_proxy::{ArcanCall, ArcanProxyError, ArcanProxyResult};
-use haima_proxy::{HaimaCall, HaimaProxyError, HaimaProxyResult, LedgerEntry, WalletBalance};
+use haima_proxy::{
+    HaimaCall, HaimaProxyError, HaimaProxyResult, LedgerEntry, WalletBalance, X402PayOutcome,
+};
 use lago_proxy::{LagoCall, LagoProxyError, LagoProxyResult};
 use life_runtime_proto::life::v1 as pb;
 
@@ -31,6 +33,13 @@ pub struct MockArcan {
     pub create_agent_calls: Arc<Mutex<Vec<String>>>,
     pub destroy_agent_calls: Arc<Mutex<Vec<String>>>,
     pub dispatch_calls: Arc<Mutex<Vec<(String, String)>>>,
+    /// BRO-1206: captures the per-call `model` override passed to
+    /// `dispatch_message`. Tests assert this to prove the override
+    /// travels end-to-end from `Agent.CreateSession` (stored on the
+    /// routing-cache entry) through `Agent.SendMessage` to the
+    /// substrate-call boundary.
+    #[allow(clippy::type_complexity)]
+    pub dispatch_models: Arc<Mutex<Vec<(String, Option<String>)>>>,
     /// When set, the next `create_agent` returns an error (then resets).
     pub fail_next: Arc<AtomicBool>,
     /// Sub-phase D: sustained failure mode for chaos tests.
@@ -115,11 +124,19 @@ impl ArcanCall for MockArcan {
         &self,
         sid: &str,
         content: &str,
+        model: Option<&str>,
     ) -> ArcanProxyResult<Pin<Box<dyn Stream<Item = Result<pb::AgentEvent, tonic::Status>> + Send>>>
     {
+        // BRO-1206: mock records the dispatch (sid, content) — model
+        // override is captured separately on `dispatch_models` so
+        // tests can assert plumbing without changing existing
+        // `dispatch_calls` semantics.
         self.dispatch_calls
             .lock()
             .push((sid.to_string(), content.to_string()));
+        self.dispatch_models
+            .lock()
+            .push((sid.to_string(), model.map(str::to_string)));
         if let Some(s) = self.force_fail_status() {
             return Err(ArcanProxyError::Substrate(s));
         }
@@ -301,6 +318,7 @@ pub struct MockHaima {
     pub unbind_wallet_calls: Arc<Mutex<Vec<String>>>,
     pub debit_calls: Arc<Mutex<Vec<(String, String, u64)>>>,
     pub transfer_calls: Arc<Mutex<Vec<(String, String, String, String, u64)>>>,
+    pub x402_pay_calls: Arc<Mutex<Vec<(String, String, String)>>>,
     pub balances: Arc<Mutex<HashMap<String, u64>>>,
     pub fail_next: Arc<AtomicBool>,
     pub force_fail: Arc<AtomicBool>,
@@ -429,6 +447,35 @@ impl HaimaCall for MockHaima {
                 currency: "USDC".to_string(),
             },
         ))
+    }
+    async fn x402_pay(
+        &self,
+        user_id: &str,
+        project_id: &str,
+        resource_url: &str,
+        _network: &str,
+        _max_amount_micros: Option<i64>,
+    ) -> HaimaProxyResult<X402PayOutcome> {
+        self.x402_pay_calls.lock().push((
+            user_id.to_string(),
+            project_id.to_string(),
+            resource_url.to_string(),
+        ));
+        if let Some(s) = self.force_fail_status() {
+            return Err(HaimaProxyError::Substrate(s));
+        }
+        // Canned "settled" outcome on base-sepolia for handler tests.
+        Ok(X402PayOutcome {
+            status: "settled".to_string(),
+            tx_hash: "0xmocktx".to_string(),
+            network: "eip155:84532".to_string(),
+            recipient: "0x036CbD53842c5426634e7929541eC2318f3dCF7e".to_string(),
+            micro_credits: 50,
+            declined_reason: String::new(),
+            settled: true,
+            resource_body: b"{\"ok\":true}".to_vec(),
+            resource_status: 200,
+        })
     }
 }
 

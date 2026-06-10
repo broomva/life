@@ -99,7 +99,18 @@ Per Spec C₂ §11.2:
 - `lifed` MUST NOT depend on: any substrate runtime crate (`arcand`, `arcan-core`, `arcan-harness`, `arcan-aios-adapters`, `lago-runtime` family, `haima-runtime` family, `anima-runtime` family, `life-kernel-core`, `life-kernel-gate`, `life-kernel-facade`, `arcan-provider-*`).
 - The four `*-proxy` crates depend ONLY on: `aios-protocol`, `aios-proto`, the substrate's wire crate (e.g. `life-kernel-proto` for soma), `tonic`, light utility crates. They MUST NOT pull substrate runtime crates either.
 
-Enforced by `core/life/scripts/verify_dependencies_lifed.sh` and the `Verify lifed dependency rules` CI lane.
+Per Spec C₃ §11.2 (lifegw extension, ratified 2026-05-18 [BRO-1164]):
+
+- `lifegw` MAY depend on: `aios-protocol`, `aios-proto`, `life-runtime-proto`, `life-kernel-proto` (wire types ONLY — for the Spec D D-Sub-C anima custody routes that proxy to soma's `life.admin.kernel.v1.CustodyOracle` service via `services/anima_custody.rs`), `life-vigil`, transport/TLS/WS/JWT crates, standard utility crates.
+- `lifegw` MUST NOT depend on: substrate runtime crates (`arcand`, `arcan-core`, `arcan-harness`, `arcan-aios-adapters`, `arcan-provider-*`, `arcan-sandbox`, lago/haima/anima runtime families), `life-kernel-{core,gate,facade}` (runtime/facade internals — proto is allowed per the carve-out above, the rest is not), the four `*-proxy` crates (lifed's south side), `lifed` itself (the gateway dials via `life-runtime-proto`'s tonic client).
+
+The `life-kernel-proto` carve-out for lifegw is symmetric with lifed's allowance: both daemons consume the typed wire types to talk to soma's admin custody-oracle service, and neither links the runtime/facade crates. The carve-out is a precondition for Spec D D-Sub-C — the WebCryptoAnima / RemoteAnima browser path requires the gateway to issue `CustodyOracle` calls.
+
+Enforced by `core/life/scripts/verify_dependencies_lifed.sh` and `verify_dependencies_lifegw.sh`, and the `Verify lifed dependency rules` + `Verify lifegw dependency rules` CI lanes.
+
+### SIGPIPE bug history [BRO-1164]
+
+From the original lifegw script's first deploy (2026-04-19) until 2026-05-18, the verify-deps scripts under `scripts/verify_dependencies_*.sh` carried a silent-FAIL bug: the check pattern `echo "$tree" | grep -qE "..."` ran under `set -o pipefail`. When `grep -q` matched early and closed the read end of the pipe, `echo` received SIGPIPE on the next write and the pipeline exited non-zero (signal 13). The `if echo ... | grep ...; then ...` shape interpreted the non-zero pipeline exit as **no match**, silently masking real violations on the CI Linux runners. The lifegw lane reported "all lifegw dependency rules pass" even though `life-kernel-proto` was already in the transitive tree from D-Sub-C anima custody routes. Local macOS runs hit the FAIL because timing/buffering differs, but CI ran green for ~1 month. Fix replaced `echo | grep` with `<<<` here-strings (no pipe → no SIGPIPE), and every script now ships a `--self-test` mode that injects a synthetic forbidden dep and asserts the FAIL path fires.
 
 ## Sub-phase A surface (preserved as historical record)
 

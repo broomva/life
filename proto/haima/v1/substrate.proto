@@ -54,6 +54,23 @@ service WalletSubstrate {
   // was made idempotent in M5 Sub-phase D follow-up #3); the
   // substrate accepts every Transfer as a fresh ledger event.
   rpc Transfer(TransferReq) returns (TransferReceipt);
+
+  // Initiate an x402 payment from the user's wallet to an external
+  // x402-protected resource (BRO-1354, slice 2 of the BRO-1341 x402
+  // epic). Drives the full client round-trip: GET -> 402 -> optional
+  // pre-sign max_amount cap -> PaymentPolicy gate -> sign (EIP-3009
+  // transferWithAuthorization via the user's Anima-custodied secp256k1
+  // wallet) -> retry with the payment-signature header -> facilitator
+  // settle -> resource + receipt.
+  //
+  // Settlement is SYNCHRONOUS for P1 (design decision #1). The signing
+  // wallet is the user's Anima wallet, wrapped in a CustodyWalletAdapter
+  // -- one identity end to end (design section "Custody binding").
+  //
+  // base-sepolia ONLY in P1. A request with network "base" (mainnet) is
+  // rejected with failed_precondition: the slice-3 financial control
+  // gate (BRO-1341) owns mainnet enablement.
+  rpc X402Pay(X402PayReq) returns (X402PayResp);
 }
 
 message BindWalletReq {
@@ -139,4 +156,54 @@ message TransferReceipt {
   string entry_id = 1;
   Balance from_balance = 2;
   Balance to_balance = 3;
+}
+
+// Request to initiate an x402 payment on behalf of a (user_id,
+// project_id). BRO-1354.
+message X402PayReq {
+  string user_id = 1;
+  string project_id = 2;
+  // The x402-protected resource URL to fetch and pay for.
+  string resource_url = 3;
+  // Payment network label. "base-sepolia" (default / only value
+  // accepted in P1) or "base" (mainnet, rejected until slice 3). An
+  // empty string is treated as "base-sepolia".
+  string network = 4;
+  // Optional per-call ceiling in micro-credits, enforced BEFORE
+  // signing. When set and the 402 asks for more, the payment is
+  // declined without contacting the payee a second time. Absent =
+  // rely on the server-side PaymentPolicy alone.
+  optional int64 max_amount_micros = 5;
+}
+
+// Result of an X402Pay round-trip. Mirrors haima-x402's
+// `X402PayResult` (NotRequired / Paid / Declined) flattened onto the
+// wire. `status` is the discriminant; the other fields are populated
+// per-variant.
+message X402PayResp {
+  // One of: "settled" (paid), "not_required" (resource was not
+  // paywalled), "declined" (policy / cap / approval blocked it).
+  string status = 1;
+  // Settlement transaction hash. Populated for "settled" when the
+  // post-payment 200 carried a payment-response header.
+  string tx_hash = 2;
+  // CAIP-2 network the payment was authorized on (e.g. "eip155:84532"
+  // for base-sepolia). Populated for "settled".
+  string network = 3;
+  // Recipient address that was paid. Populated for "settled".
+  string recipient = 4;
+  // Cost in micro-credits. Populated for "settled" and "declined"
+  // (the amount that would have been charged).
+  int64 micro_credits = 5;
+  // Human-readable decline reason. Populated for "declined".
+  string declined_reason = 6;
+  // Whether the facilitator reported the settlement as settled.
+  // Populated for "settled".
+  bool settled = 7;
+  // The fetched resource bytes — the paid resource for "settled", the
+  // unpaywalled body for "not_required".
+  bytes resource_body = 8;
+  // HTTP status of the underlying resource fetch. Populated for
+  // "not_required" (settled implies 200).
+  uint32 resource_status = 9;
 }

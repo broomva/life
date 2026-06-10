@@ -14,6 +14,14 @@ service Wallet {
   rpc Statement(StatementReq) returns (stream LedgerEntry);
   rpc Debit(DebitReq) returns (DebitReceipt);
   rpc Transfer(TransferReq) returns (TransferReceipt);
+
+  // Initiate an x402 payment from the user's Anima-custodied wallet to
+  // an external x402-protected resource. Public-plane mirror of
+  // haima.v1.WalletSubstrate.X402Pay; lifed forwards to haima-proxy.
+  // Scope `x402:pay` (a WalletWrite-class scope). base-sepolia only in
+  // P1 — `network = "base"` is rejected behind the slice-3 financial
+  // gate. BRO-1354 / BRO-1341.
+  rpc X402Pay(X402PayReq) returns (X402PayResp);
 }
 
 message WalletRef {
@@ -68,4 +76,34 @@ message TransferReceipt {
   string entry_id = 1;
   Balance from_balance = 2;
   Balance to_balance = 3;
+}
+
+// Request to initiate an x402 payment. Public-plane mirror of
+// haima.v1.X402PayReq. BRO-1354.
+message X402PayReq {
+  string user_id = 1;
+  string project_id = 2;
+  // The x402-protected resource URL to fetch and pay for.
+  string resource_url = 3;
+  // Payment network: "base-sepolia" (default / only value in P1) or
+  // "base" (mainnet, rejected until slice 3). Empty = "base-sepolia".
+  string network = 4;
+  // Optional per-call ceiling in micro-credits, enforced before
+  // signing.
+  optional int64 max_amount_micros = 5;
+}
+
+// Result of an X402Pay round-trip. Mirror of haima.v1.X402PayResp.
+// `status` is the discriminant; other fields are populated per-variant.
+message X402PayResp {
+  // "settled" | "not_required" | "declined".
+  string status = 1;
+  string tx_hash = 2;
+  string network = 3;
+  string recipient = 4;
+  int64 micro_credits = 5;
+  string declined_reason = 6;
+  bool settled = 7;
+  bytes resource_body = 8;
+  uint32 resource_status = 9;
 }

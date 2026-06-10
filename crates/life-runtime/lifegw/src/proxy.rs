@@ -284,6 +284,16 @@ impl pb::wallet_server::Wallet for WalletForwarder {
             .transfer(forwarded.into_request_with(body))
             .await
     }
+
+    async fn x402_pay(
+        &self,
+        req: Request<pb::X402PayReq>,
+    ) -> Result<Response<pb::X402PayResp>, Status> {
+        let (forwarded, body) = forward_request(req);
+        self.client()
+            .x402_pay(forwarded.into_request_with(body))
+            .await
+    }
 }
 
 /// Forwarder for `life.v1.Identity`.

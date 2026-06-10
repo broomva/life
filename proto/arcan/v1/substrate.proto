@@ -53,15 +53,36 @@ message DispatchMessageReq {
 }
 
 // Mirrors life.v1.AgentEvent shape but lives in the substrate-plane
-// package. EventRecord is omitted from Phase 1 (will be lifted in
-// Phase 2 when we wire structured events). Phase 1 emits text +
-// terminal events.
+// package. Phase 1 emitted text + terminal events only; Phase 2
+// (harness arc) adds the tool lifecycle kinds with a JSON payload.
+// A full structured EventRecord remains future work — the payload
+// field carries the structured data until a cross-substrate event
+// vocabulary is published (Spec C₂ §10.3).
 message AgentEvent {
   AgentEventKind kind = 1;
   // Text content for TOKEN events. Empty for FINISH/ERROR.
   string text = 2;
   // Error message for ERROR events. Empty otherwise.
   string error = 3;
+  // Structured JSON payload for tool lifecycle events.
+  //
+  // TOOL_CALL_PENDING: {"call_id", "tool_name", "arguments", "category"?}
+  // TOOL_RESULT:       {"call_id"?, "tool_name", "result", "duration_ms",
+  //                     "status", "result_truncated"?} on success, or
+  //                     {"call_id", "tool_name", "error", "status":"error"}
+  //                     on failure. Results larger than the wire cap are
+  //                     truncated ("result_truncated": true); the full
+  //                     value stays in the durable kernel journal.
+  //
+  // Empty for TOKEN/FINISH/ERROR. arcan-proxy forwards these bytes as
+  // the life.v1.EventRecord payload, which the browser decodes as a
+  // structured object (lifegw ws.rs `event_to_outbound_frame`).
+  string payload_json = 4;
+  // Kernel-assigned durable per-session sequence number of the source
+  // EventRecord. 0 for frames synthesized on the wire (e.g. the
+  // fallback FINISH) — consumers needing monotonicity fall back to a
+  // stream-local counter for those.
+  uint64 sequence = 5;
 }
 
 enum AgentEventKind {
@@ -69,4 +90,10 @@ enum AgentEventKind {
   AGENT_EVENT_KIND_TOKEN = 1;
   AGENT_EVENT_KIND_FINISH = 2;
   AGENT_EVENT_KIND_ERROR = 3;
+  // Phase 2 (harness arc): a tool call was requested by the model and
+  // is about to execute (or awaits approval).
+  AGENT_EVENT_KIND_TOOL_CALL_PENDING = 4;
+  // Phase 2 (harness arc): a tool call completed (ok or error) — the
+  // payload carries the result or failure.
+  AGENT_EVENT_KIND_TOOL_RESULT = 5;
 }

@@ -401,6 +401,10 @@ dependencies = [
  "autonomic-core",
  "axum 0.8.8",
  "chrono",
+ "chronos-api",
+ "chronos-core",
+ "chronos-lago",
+ "chronos-triggers",
  "clap",
  "crossterm",
  "dirs 6.0.0",
@@ -2069,6 +2073,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bookkeeping-judge"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "arcan-aios-adapters",
+ "arcan-core",
+ "arcan-ergon",
+ "arcan-provider",
+ "async-trait",
+ "ergon",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2214,6 +2237,80 @@ checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
 dependencies = [
  "chrono",
  "phf 0.12.1",
+]
+
+[[package]]
+name = "chronos-api"
+version = "0.3.0"
+dependencies = [
+ "axum 0.8.8",
+ "chronos-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower 0.5.3",
+ "tracing",
+]
+
+[[package]]
+name = "chronos-core"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
+name = "chronos-lago"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "async-trait",
+ "chronos-core",
+ "lago-core",
+ "lago-journal",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "chronos-triggers"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "chronos-core",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "chronosd"
+version = "0.3.0"
+dependencies = [
+ "aios-protocol",
+ "anyhow",
+ "chronos-api",
+ "chronos-core",
+ "chronos-lago",
+ "chronos-triggers",
+ "clap",
+ "lago-core",
+ "lago-journal",
+ "serde",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3485,6 +3582,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ergon-anima-adapter"
+version = "0.3.0"
+dependencies = [
+ "anima-identity",
+ "async-trait",
+ "ergon",
+ "ergon-life-hooks",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "ergon-life-hooks"
 version = "0.3.0"
 dependencies = [
@@ -3509,6 +3618,18 @@ dependencies = [
  "tokio",
  "tracing",
  "ulid",
+]
+
+[[package]]
+name = "ergon-nous-adapter"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "ergon",
+ "ergon-life-hooks",
+ "nous-core",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -4286,10 +4407,12 @@ dependencies = [
  "haima-core",
  "haima-wallet",
  "hex",
+ "k256",
  "rand 0.8.6",
  "reqwest",
  "serde",
  "serde_json",
+ "sha3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -4303,6 +4426,7 @@ version = "0.3.0"
 dependencies = [
  "aios-proto",
  "aios-protocol",
+ "anima-identity",
  "anyhow",
  "async-trait",
  "axum 0.8.8",
@@ -4321,8 +4445,10 @@ dependencies = [
  "life-vigil",
  "prost 0.14.3",
  "prost-types 0.14.3",
+ "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -4333,6 +4459,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+ "wiremock",
 ]
 
 [[package]]
@@ -6450,6 +6577,7 @@ dependencies = [
  "chrono",
  "clap",
  "dashmap",
+ "ergon",
  "futures",
  "haima-proxy",
  "http 1.4.0",
@@ -6505,6 +6633,7 @@ dependencies = [
  "aios-protocol",
  "anyhow",
  "arc-swap",
+ "arcan-proxy",
  "async-trait",
  "aws-config",
  "aws-sdk-kms",
@@ -6530,6 +6659,7 @@ dependencies = [
  "life-runtime-proto",
  "life-vigil",
  "lifed",
+ "lifegw-anthropic-codec",
  "nix 0.31.2",
  "p256",
  "parking_lot",
@@ -6549,6 +6679,7 @@ dependencies = [
  "tokio-rustls 0.26.4",
  "tokio-stream",
  "tokio-tungstenite 0.26.2",
+ "tokio-util",
  "toml",
  "tonic 0.14.5",
  "tonic-prost",
@@ -6559,6 +6690,20 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wiremock",
+]
+
+[[package]]
+name = "lifegw-anthropic-codec"
+version = "0.3.0"
+dependencies = [
+ "hex",
+ "life-runtime-proto",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -9771,6 +9916,7 @@ version = "0.3.0"
 dependencies = [
  "aios-protocol",
  "anima-core",
+ "anima-identity",
  "anima-proxy",
  "anima-substrate-proto",
  "anyhow",

@@ -202,12 +202,42 @@ where
                 return Ok(health::handle(upstream_path).await);
             }
 
-            let bearer = req
-                .headers()
-                .get("authorization")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|h| h.strip_prefix("Bearer "))
-                .map(|t| t.to_string());
+            // Tier-1 bearer extraction.
+            //
+            // Order of precedence:
+            //   1. `Authorization: Bearer <jwt>` (canonical header form;
+            //      used by Rust gRPC clients and the L7 proxies that
+            //      forward in canonical shape).
+            //   2. `Sec-WebSocket-Protocol: ..., bearer.<jwt>, ...`
+            //      (browser-style WS upgrade — the WebSocket spec
+            //      disallows setting `Authorization` on the upgrade
+            //      request, so the bearer must ride a different header.
+            //      Every WS auth pattern uses this carrier per
+            //      RFC 6455 §1.9 + §11.3.4).
+            //
+            // Authorization wins when both are present so a forwarded
+            // chain that copies the bearer twice always trusts the
+            // canonical header form.
+            //
+            // BRO-1228 defense-in-depth (PR #1435): debug-level trace of
+            // what auth carriers actually arrived. Browser-WS upgrades
+            // ride `Sec-WebSocket-Protocol: bearer.<jwt>`; if any L7 in
+            // front strips that header (Caddy mis-config, Railway edge,
+            // Vercel rewrite), the only diagnostic was a generic
+            // "missing Tier-1 bearer token" grpc message. With this
+            // trace, `RUST_LOG=lifegw::auth=debug` surfaces the exact
+            // header state per request so future regressions are
+            // grepable in Railway logs without re-deploying instrumented
+            // builds.
+            tracing::debug!(
+                has_authorization = req.headers().contains_key("authorization"),
+                has_subprotocol = req.headers().contains_key("sec-websocket-protocol"),
+                subprotocol_value = ?req.headers().get("sec-websocket-protocol").and_then(|v| v.to_str().ok()),
+                path = req.uri().path(),
+                method = %req.method(),
+                "tier1 bearer extraction"
+            );
+            let bearer = bearer_from_authorization(&req).or_else(|| bearer_from_subprotocol(&req));
 
             // `dev_signer_enabled` is informational here — both code
             // paths route through the JWKS cache. Whether the cache
@@ -289,6 +319,62 @@ where
             inner.call(req).await
         })
     }
+}
+
+/// Extract the bearer from `Authorization: Bearer <token>` and return
+/// the bare `<token>` (without the `Bearer ` prefix). Returns `None`
+/// when the header is absent, malformed, or doesn't carry the `Bearer `
+/// scheme.
+fn bearer_from_authorization<B>(req: &Request<B>) -> Option<String> {
+    req.headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .map(|t| t.to_string())
+}
+
+/// Extract the Tier-1 bearer from `Sec-WebSocket-Protocol`
+/// (BRO-1228 — closes the browser-WS auth gap that PR-3 of BRO-1208
+/// triggered in production).
+///
+/// **Why this fallback exists.** Browser-style WebSocket clients
+/// (`new WebSocket(url, protocols)`) cannot set arbitrary request
+/// headers — the WHATWG WebSockets spec forbids touching
+/// `Authorization` on the upgrade request. Every WS auth pattern
+/// documents `Sec-WebSocket-Protocol: bearer.<token>` as the carrier:
+/// the subprotocol list is the one header the constructor exposes to
+/// JS, and it survives untouched through proxies (RFC 6455 §1.9 +
+/// §11.3.4).
+///
+/// **Parse semantics.** The header value is an RFC 7230 #token list
+/// (comma-separated, OWS allowed). We split on `,`, trim each entry,
+/// and look for one that starts with `bearer.`. Other subprotocol
+/// entries (e.g. `life.v1.agent`) are tolerated alongside.
+///
+/// **Token shape gate.** A JWS only contains URL-safe-base64 alphabet
+/// (`A-Z`, `a-z`, `0-9`, `-`, `_`, `=`) plus two `.` separators. A
+/// token containing whitespace, control chars, or commas is
+/// malformed (likely a buggy proxy or attacker-crafted entry) and is
+/// rejected before flowing into the JWKS verifier. This mirrors the
+/// classifier in `services::ws::bearer_from_subprotocol`.
+///
+/// Returns the bare token (without the `Bearer ` prefix) so the
+/// downstream `verify_with_handle` call receives the same shape both
+/// fallback paths produce.
+fn bearer_from_subprotocol<B>(req: &Request<B>) -> Option<String> {
+    let header = req.headers().get("sec-websocket-protocol")?.to_str().ok()?;
+    for raw in header.split(',') {
+        let part = raw.trim();
+        if let Some(token) = part.strip_prefix("bearer.")
+            && !token.is_empty()
+            && token
+                .chars()
+                .all(|c| !c.is_whitespace() && !c.is_control() && c != ',')
+        {
+            return Some(token.to_string());
+        }
+    }
+    None
 }
 
 /// Verify a Tier-1 bearer through the per-service handle when set,
@@ -525,5 +611,148 @@ mod tests {
     fn parse_ip_or_socket_rejects_garbage() {
         assert!(parse_ip_or_socket("definitely not an ip").is_none());
         assert!(parse_ip_or_socket("").is_none());
+    }
+
+    // ─── BRO-1228: Sec-WebSocket-Protocol bearer extraction ────────
+    //
+    // Browser-style WebSocket clients cannot set `Authorization` on the
+    // upgrade request (WHATWG WebSockets spec disallows it), so the
+    // Tier-1 bearer rides as a `bearer.<jwt>` entry in
+    // `Sec-WebSocket-Protocol` (RFC 6455 §1.9, §11.3.4). The cases
+    // below mirror the failure-mode acceptance criteria from BRO-1228
+    // and lock the canonical-vs-subprotocol precedence so a future
+    // refactor doesn't silently flip auth's trust hierarchy.
+
+    fn req_with_headers(headers: &[(&str, &str)]) -> http::Request<()> {
+        let mut b = http::Request::builder().uri("/v1/agent/stream?sid=s");
+        for (k, v) in headers {
+            b = b.header(*k, *v);
+        }
+        b.body(()).expect("build req")
+    }
+
+    #[test]
+    fn bearer_extraction_prefers_authorization_when_only_authorization_present() {
+        let req = req_with_headers(&[("authorization", "Bearer my-tier1-token")]);
+        let bearer = bearer_from_authorization(&req).or_else(|| bearer_from_subprotocol(&req));
+        assert_eq!(bearer.as_deref(), Some("my-tier1-token"));
+    }
+
+    #[test]
+    fn bearer_extraction_falls_back_to_subprotocol_when_authorization_absent() {
+        // Browser WS upgrade: only `Sec-WebSocket-Protocol: bearer.<jwt>`.
+        // This is the canonical broken-prod case BRO-1228 fixes.
+        let req = req_with_headers(&[("sec-websocket-protocol", "bearer.eyJabc.def.ghi")]);
+        let bearer = bearer_from_authorization(&req).or_else(|| bearer_from_subprotocol(&req));
+        assert_eq!(bearer.as_deref(), Some("eyJabc.def.ghi"));
+    }
+
+    #[test]
+    fn bearer_extraction_falls_back_through_mixed_subprotocol_list() {
+        // Some clients offer multiple subprotocols — `life.v1.agent`
+        // alongside `bearer.<jwt>`. We must find the bearer entry and
+        // skip the rest. Order-insensitive: bearer can be first OR last.
+        for header in [
+            "life.v1.agent, bearer.eyJabc.def.ghi",
+            "bearer.eyJabc.def.ghi, life.v1.agent",
+            "life.v1.agent,bearer.eyJabc.def.ghi", // no inner whitespace
+        ] {
+            let req = req_with_headers(&[("sec-websocket-protocol", header)]);
+            let bearer = bearer_from_authorization(&req).or_else(|| bearer_from_subprotocol(&req));
+            assert_eq!(
+                bearer.as_deref(),
+                Some("eyJabc.def.ghi"),
+                "header {header:?} must yield the bearer entry",
+            );
+        }
+    }
+
+    #[test]
+    fn bearer_extraction_authorization_wins_when_both_present() {
+        // A forwarded chain that copies the bearer twice (canonical
+        // header AND subprotocol) must trust the canonical form. This
+        // ensures a stale subprotocol entry from an upstream proxy
+        // cannot override the value the gateway's own L7 stack set.
+        let req = req_with_headers(&[
+            ("authorization", "Bearer canonical-wins"),
+            ("sec-websocket-protocol", "bearer.subproto-loses"),
+        ]);
+        let bearer = bearer_from_authorization(&req).or_else(|| bearer_from_subprotocol(&req));
+        assert_eq!(bearer.as_deref(), Some("canonical-wins"));
+    }
+
+    #[test]
+    fn bearer_extraction_subprotocol_without_bearer_entry_yields_none() {
+        // Spec C₃ §6.1 has clients negotiate `life.v1.agent` only —
+        // no `bearer.` entry. Without the canonical Authorization
+        // header either, the request must surface as missing-bearer.
+        let req = req_with_headers(&[("sec-websocket-protocol", "life.v1.agent")]);
+        let bearer = bearer_from_authorization(&req).or_else(|| bearer_from_subprotocol(&req));
+        assert!(bearer.is_none());
+    }
+
+    #[test]
+    fn bearer_extraction_no_headers_at_all_yields_none() {
+        // Sanity: with neither Authorization nor Sec-WebSocket-Protocol
+        // we must return None so the AuthLayer emits the canonical
+        // "missing Tier-1 bearer token" message (monitoring/log greps
+        // depend on it).
+        let req = req_with_headers(&[]);
+        let bearer = bearer_from_authorization(&req).or_else(|| bearer_from_subprotocol(&req));
+        assert!(bearer.is_none());
+    }
+
+    #[test]
+    fn bearer_extraction_malformed_subprotocol_yields_none() {
+        // A `bearer.<garbage>` entry that contains whitespace, control
+        // chars, or commas inside the token is malformed (JWS only
+        // contains URL-safe-base64 alphabet) and must not flow into
+        // the auth pipeline. AuthLayer will then surface the
+        // missing-bearer error — the malformed entry counts as no
+        // bearer at all.
+        for malformed in [
+            "bearer.",          // empty after prefix
+            "bearer.has space", // SP inside token
+            "bearer.has\ttab",  // HT inside token
+        ] {
+            let header = format!("life.v1.agent, {malformed}");
+            let req = req_with_headers(&[("sec-websocket-protocol", header.as_str())]);
+            let bearer = bearer_from_authorization(&req).or_else(|| bearer_from_subprotocol(&req));
+            assert!(
+                bearer.is_none(),
+                "malformed entry {malformed:?} must yield None",
+            );
+        }
+    }
+
+    #[test]
+    fn bearer_extraction_subprotocol_handles_dev_token_shape() {
+        // The dev signer accepts `dev-token-for-<user_id>` as a
+        // Bearer value. The same value, when delivered via
+        // `Sec-WebSocket-Protocol: bearer.dev-token-for-<user_id>`,
+        // must pass extraction unchanged so the dev rig keeps
+        // working over the WS browser path.
+        let req = req_with_headers(&[("sec-websocket-protocol", "bearer.dev-token-for-alice")]);
+        let bearer = bearer_from_authorization(&req).or_else(|| bearer_from_subprotocol(&req));
+        assert_eq!(bearer.as_deref(), Some("dev-token-for-alice"));
+    }
+
+    #[test]
+    fn bearer_extraction_subprotocol_dev_token_verifies_via_jwks() {
+        // End-to-end: the bearer extracted from Sec-WebSocket-Protocol
+        // must round-trip through `verify_with_handle` to a real
+        // Tier1Claims. This is the contract the AuthLayer relies on —
+        // without it, the fallback would be cosmetic.
+        let cache = Arc::new(JwksCache::dev_only());
+        let req = req_with_headers(&[(
+            "sec-websocket-protocol",
+            "life.v1.agent, bearer.dev-token-for-bob",
+        )]);
+        let bearer = bearer_from_authorization(&req)
+            .or_else(|| bearer_from_subprotocol(&req))
+            .expect("bearer extracted from subprotocol");
+        let claims =
+            verify_with_handle(Some(&cache), &bearer).expect("dev cache verifies dev token");
+        assert_eq!(claims.user_id, "bob");
     }
 }

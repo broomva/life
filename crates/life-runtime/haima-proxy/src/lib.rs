@@ -5,5 +5,7 @@
 pub mod client;
 pub mod error;
 
-pub use client::{HaimaCall, HaimaProxy, LedgerEntry, LedgerGuardedStream, Pooled, WalletBalance};
+pub use client::{
+    HaimaCall, HaimaProxy, LedgerEntry, LedgerGuardedStream, Pooled, WalletBalance, X402PayOutcome,
+};
 pub use error::{HaimaProxyError, HaimaProxyResult, RetryClass};
