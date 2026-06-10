@@ -24,6 +24,7 @@ async fn send_message_streams_at_least_one_event() {
         sid: Some(sid.clone()),
         content: "Hello, lifed".to_string(),
         attachment_blob_ref: vec![],
+        tool_definitions: vec![],
     });
     req.metadata_mut().insert(
         "authorization",
@@ -83,6 +84,7 @@ async fn stream_session_returns_canned_events() {
         sid: Some(sid),
         content: "drive".to_string(),
         attachment_blob_ref: vec![],
+        tool_definitions: vec![],
     });
     send_req.metadata_mut().insert(
         "authorization",
@@ -125,6 +127,7 @@ async fn send_message_passes_per_session_model_override_to_arcan() {
         sid: Some(sid.clone()),
         content: "hi".to_string(),
         attachment_blob_ref: vec![],
+        tool_definitions: vec![],
     });
     req.metadata_mut().insert(
         "authorization",
@@ -159,6 +162,74 @@ async fn send_message_passes_per_session_model_override_to_arcan() {
     env.shutdown().await;
 }
 
+/// Client tool definitions travel from `Agent.SendMessage`
+/// (`tool_definitions` JSON bytes) through lifed's fanout pump to
+/// `ArcanCall::dispatch_message`:
+///
+/// 1. `SendMessageReq.tool_definitions` carries one JSON-bytes entry
+///    per tool (AI-SDK / OpenAI function shape).
+/// 2. lifed decodes them and passes `&[serde_json::Value]` to the
+///    substrate-call boundary.
+/// 3. `MockArcan` records `(sid, tools)` on `dispatch_tools`, proving
+///    the wire path is closed. Malformed entries are skipped.
+#[tokio::test]
+async fn send_message_passes_tool_definitions_to_arcan() {
+    let env = TestEnv::start_with_mocks().await;
+    let session = env
+        .create_session_dev("alice", "project-demo", "tools")
+        .await
+        .expect("create_session");
+    let sid = session.sid.expect("sid");
+
+    let tool = serde_json::json!({
+        "name": "get_weather",
+        "description": "Look up the weather",
+        "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+    });
+    let mut client = env.agent_client().await;
+    let mut req = tonic::Request::new(SendMessageReq {
+        sid: Some(sid.clone()),
+        content: "what's the weather in Nicosia?".to_string(),
+        attachment_blob_ref: vec![],
+        tool_definitions: vec![
+            serde_json::to_vec(&tool).expect("serialize tool"),
+            // Malformed entry — must be skipped, not fail the dispatch.
+            b"not-json".to_vec(),
+        ],
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        "Bearer test-token-for-alice".parse().unwrap(),
+    );
+    let mut stream = client
+        .send_message(req)
+        .await
+        .expect("send_message")
+        .into_inner();
+    for _ in 0..2 {
+        if stream.next().await.is_none() {
+            break;
+        }
+    }
+    // Give the spawned pump a moment to record the dispatch.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let recorded = env.mocks.arcan.dispatch_tools.lock().clone();
+    assert!(
+        !recorded.is_empty(),
+        "expected at least one dispatch_message call recorded"
+    );
+    assert_eq!(recorded[0].0, sid.value);
+    assert_eq!(
+        recorded[0].1,
+        vec![tool],
+        "tool definitions should travel from SendMessage through the pump \
+         to dispatch_message; malformed entries are dropped"
+    );
+
+    env.shutdown().await;
+}
+
 /// BRO-1206: no `model` field on `Agent.CreateSession` → backends see
 /// `None` on `dispatch_message` → env fallback applies.
 #[tokio::test]
@@ -175,6 +246,7 @@ async fn send_message_passes_none_when_no_model_override() {
         sid: Some(sid.clone()),
         content: "hi".to_string(),
         attachment_blob_ref: vec![],
+        tool_definitions: vec![],
     });
     req.metadata_mut().insert(
         "authorization",
@@ -218,6 +290,7 @@ async fn empty_model_field_normalises_to_none() {
         sid: Some(sid.clone()),
         content: "hi".to_string(),
         attachment_blob_ref: vec![],
+        tool_definitions: vec![],
     });
     req.metadata_mut().insert(
         "authorization",
@@ -289,6 +362,7 @@ async fn multi_tab_fanout_emits_to_all_attached_streams() {
         sid: Some(sid),
         content: "fanout driver".to_string(),
         attachment_blob_ref: vec![],
+        tool_definitions: vec![],
     });
     send_req.metadata_mut().insert(
         "authorization",

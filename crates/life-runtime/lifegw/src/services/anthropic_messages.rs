@@ -839,6 +839,7 @@ async fn send_message(
         }),
         content: content.to_string(),
         attachment_blob_ref: Vec::new(),
+        tool_definitions: Vec::new(),
     });
     attach_tier2(&mut req, tier2)?;
 

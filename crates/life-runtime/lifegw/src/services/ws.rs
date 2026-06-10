@@ -240,6 +240,15 @@ pub enum InboundFrame {
         /// payloads.
         #[serde(default)]
         attachment_blob_ref: Option<String>,
+        /// Client tool definitions for this dispatch (AI-SDK / OpenAI
+        /// function shape: `{"name", "description", "parameters"}`).
+        /// Forwarded to lifed as `SendMessageReq.tool_definitions`
+        /// (one JSON-bytes entry per definition) so the chat surface's
+        /// tools reach the model provider. Absent / empty means "no
+        /// client tools". Bounded by the WS 64 KiB inbound message cap
+        /// like every other inbound field.
+        #[serde(default)]
+        tools: Option<Vec<serde_json::Value>>,
     },
     /// Approve a pending dispatch.
     ApproveDispatch { dispatch_id: String },
@@ -1066,6 +1075,9 @@ enum DispatcherCommand {
     SendMessage {
         content: String,
         attachment_blob_ref: Option<String>,
+        /// Client tool definitions, JSON-serialized into
+        /// `SendMessageReq.tool_definitions` at request-build time.
+        tools: Vec<serde_json::Value>,
     },
 }
 
@@ -1095,6 +1107,7 @@ async fn run_send_message_dispatcher(
             DispatcherCommand::SendMessage {
                 content,
                 attachment_blob_ref,
+                tools,
             } => {
                 let mut req = tonic::Request::new(pb::SendMessageReq {
                     sid: Some(aios_pb::SessionId { value: sid.clone() }),
@@ -1102,6 +1115,13 @@ async fn run_send_message_dispatcher(
                     attachment_blob_ref: attachment_blob_ref
                         .map(|s| s.into_bytes())
                         .unwrap_or_default(),
+                    // One JSON-bytes entry per client tool definition.
+                    // `serde_json::Value` serialization is effectively
+                    // infallible; the filter keeps the path total.
+                    tool_definitions: tools
+                        .iter()
+                        .filter_map(|t| serde_json::to_vec(t).ok())
+                        .collect(),
                 });
                 if let Some(b) = bearer.as_deref()
                     && let Ok(mv) =
@@ -1189,6 +1209,7 @@ async fn handle_inbound_frame(
         InboundFrame::SendMessage {
             content,
             attachment_blob_ref,
+            tools,
         } => {
             // Sub-phase D (D9): hand off to the dispatcher. If the
             // bounded channel is full (>=64 queued commands), apply
@@ -1204,6 +1225,7 @@ async fn handle_inbound_frame(
                 .send(DispatcherCommand::SendMessage {
                     content,
                     attachment_blob_ref,
+                    tools: tools.unwrap_or_default(),
                 })
                 .await
                 .is_err()
@@ -1934,9 +1956,31 @@ mod tests {
             InboundFrame::SendMessage {
                 content,
                 attachment_blob_ref,
+                tools,
             } => {
                 assert_eq!(content, "Hello");
                 assert!(attachment_blob_ref.is_none());
+                assert!(tools.is_none(), "no tools field → None");
+            }
+            other => panic!("expected SendMessage, got {other:?}"),
+        }
+    }
+
+    /// Client tool definitions ride on the `send_message` frame and
+    /// decode as structured JSON values (forwarded to lifed as
+    /// `SendMessageReq.tool_definitions`).
+    #[test]
+    fn inbound_frame_decodes_send_message_with_tools() {
+        let raw = r#"{"kind":"send_message","content":"Hello","tools":[{"name":"get_weather","description":"d","parameters":{"type":"object"}}]}"#;
+        let m = Message::Text(raw.into());
+        let parsed = decode_inbound(&m).expect("decode");
+        match parsed {
+            InboundFrame::SendMessage { content, tools, .. } => {
+                assert_eq!(content, "Hello");
+                let tools = tools.expect("tools present");
+                assert_eq!(tools.len(), 1);
+                assert_eq!(tools[0]["name"], "get_weather");
+                assert_eq!(tools[0]["parameters"]["type"], "object");
             }
             other => panic!("expected SendMessage, got {other:?}"),
         }
