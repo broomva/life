@@ -773,7 +773,7 @@ mod tests {
 
     // ─── test --live plumbing (offline — no network, no real provider) ──
 
-    use ergon::{ContentBlock, Message, MessageRole, StopReason, Usage};
+    use ergon::{ContentBlock, StopReason, Usage};
 
     fn hook_ctx<'a>(span: &'a tracing::Span) -> HookCtx<'a> {
         HookCtx::new(
