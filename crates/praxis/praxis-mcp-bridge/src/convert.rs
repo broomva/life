@@ -8,7 +8,6 @@ use aios_protocol::tool::{
 };
 use rmcp::model::{CallToolResult, Content, Tool as McpToolDef, ToolAnnotations as McpAnnotations};
 use serde_json::Value;
-use std::borrow::Cow;
 use std::sync::Arc;
 
 /// Convert a canonical [`ToolDefinition`] to an rmcp [`McpToolDef`].
@@ -31,28 +30,23 @@ pub fn definition_to_mcp_tool(def: &ToolDefinition) -> McpToolDef {
 
     let annotations = def.annotations.as_ref().map(canonical_to_mcp_annotations);
 
-    McpToolDef {
-        name: Cow::Owned(def.name.clone()),
-        title: def.title.clone(),
-        description: Some(Cow::Owned(def.description.clone())),
-        input_schema,
-        output_schema,
-        annotations,
-        execution: None,
-        icons: None,
-        meta: None,
-    }
+    // rmcp 1.x: model types are #[non_exhaustive] — construct via
+    // Tool::new and set the optional fields by mutation.
+    let mut tool = McpToolDef::new(def.name.clone(), def.description.clone(), input_schema);
+    tool.title = def.title.clone();
+    tool.output_schema = output_schema;
+    tool.annotations = annotations;
+    tool
 }
 
 /// Convert canonical [`ToolAnnotations`] to rmcp [`McpAnnotations`].
 fn canonical_to_mcp_annotations(ann: &CanonicalAnnotations) -> McpAnnotations {
-    McpAnnotations {
-        title: None,
-        read_only_hint: Some(ann.read_only),
-        destructive_hint: Some(ann.destructive),
-        idempotent_hint: Some(ann.idempotent),
-        open_world_hint: Some(ann.open_world),
-    }
+    let mut out = McpAnnotations::new();
+    out.read_only_hint = Some(ann.read_only);
+    out.destructive_hint = Some(ann.destructive);
+    out.idempotent_hint = Some(ann.idempotent);
+    out.open_world_hint = Some(ann.open_world);
+    out
 }
 
 /// Convert a canonical [`ToolResult`] to an rmcp [`CallToolResult`].
@@ -75,12 +69,13 @@ pub fn tool_result_to_call_result(result: &ToolResult) -> CallToolResult {
         _ => None,
     };
 
-    CallToolResult {
-        content,
-        structured_content,
-        is_error: Some(result.is_error),
-        meta: None,
-    }
+    let mut call_result = if result.is_error {
+        CallToolResult::error(content)
+    } else {
+        CallToolResult::success(content)
+    };
+    call_result.structured_content = structured_content;
+    call_result
 }
 
 /// Convert a single canonical [`ToolContent`] block to an rmcp [`Content`].
