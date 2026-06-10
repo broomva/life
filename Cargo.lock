@@ -409,6 +409,9 @@ dependencies = [
  "crossterm",
  "dirs 6.0.0",
  "ergon",
+ "ergon-life-hooks",
+ "ergon-life-sinks",
+ "ergon-nous-adapter",
  "fastrand",
  "filetime",
  "futures-util",
@@ -3587,9 +3590,11 @@ version = "0.3.0"
 dependencies = [
  "anima-identity",
  "async-trait",
+ "base64 0.22.1",
  "ergon",
  "ergon-life-hooks",
  "serde_json",
+ "tokio",
  "tracing",
 ]
 
@@ -3629,6 +3634,7 @@ dependencies = [
  "ergon-life-hooks",
  "nous-core",
  "serde_json",
+ "tokio",
  "tracing",
 ]
 
