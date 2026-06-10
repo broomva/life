@@ -31,6 +31,10 @@ RUN useradd --create-home --shell /bin/bash arcan
 
 COPY --from=builder /build/target/release/arcan /usr/local/bin/arcan
 
+# Blessed authored agents (agents/*.md) — FsAgentRegistry loads ./agents
+# relative to the workdir; without them spawn_agent returns unknown_agent.
+COPY --chown=arcan:arcan agents/ /home/arcan/agents/
+
 USER arcan
 WORKDIR /home/arcan
 
