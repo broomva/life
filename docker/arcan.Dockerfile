@@ -1,7 +1,7 @@
 # Multi-stage build for arcan agent runtime daemon
 # Build context: repository root (life/)
 
-FROM rust:latest AS builder
+FROM rust:1.93-bookworm AS builder
 
 RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
 
@@ -10,8 +10,12 @@ WORKDIR /build
 # Copy workspace manifest and lockfile first (Docker layer caching)
 COPY Cargo.toml Cargo.lock ./
 
-# Copy all crate Cargo.toml files (for dependency resolution)
+# All workspace members (crates/ + apps/) must be present for cargo to
+# resolve the workspace manifest; proto/ is read by *-substrate-proto,
+# aios-proto, and life-*-proto build scripts relative to the repo root.
 COPY crates/ crates/
+COPY apps/ apps/
+COPY proto/ proto/
 
 # Build release binary
 RUN cargo build --release -p arcan
