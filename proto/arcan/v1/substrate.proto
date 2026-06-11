@@ -59,6 +59,17 @@ message DispatchMessageReq {
   // tool set. Additive field — pre-existing clients/servers stay
   // wire-compatible.
   repeated bytes tool_definitions = 3;
+  // Target branch for this dispatch's ticks. Empty ⇒ "main"
+  // (backward-compatible: pre-BRO-1479 clients never set this, so the
+  // substrate dispatches on main exactly as before). A non-empty value
+  // keys every tick of this dispatch onto that branch — its event
+  // stream and filesystem manifest fork from main. arcand validates the
+  // name (`[a-zA-Z0-9_-]{1,64}`) at this trust boundary because it is
+  // UNTRUSTED remote input that flows directly into redb compound keys
+  // (session + branch + seq) and lago-fs manifest keys; an invalid name
+  // is rejected with INVALID_ARGUMENT, never silently sanitized.
+  // Additive field — pre-existing clients/servers stay wire-compatible.
+  string branch = 4;
 }
 
 // Mirrors life.v1.AgentEvent shape but lives in the substrate-plane
