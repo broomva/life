@@ -33,7 +33,7 @@ use crate::auth::keystore::Keystore;
 use crate::auth::middleware::AuthLayer;
 use crate::auth::peercred;
 use crate::config::LifedConfig;
-use crate::dev_mocks::MockSubstrates;
+use crate::dev_mocks::{MockArcan, MockSubstrates};
 use crate::error::{LifedError, LifedResult};
 use crate::idempotency::{IdempotencyStore, boxed_in_memory};
 use crate::listener::admin as admin_listener;
@@ -143,35 +143,8 @@ pub async fn run_with_mocks_handles(
     //
     // Other substrates (lago / haima / anima) stay on mocks — their
     // tonic-substrate equivalents are the canonical Spec C₂ §11.4 path.
-    let arcan: Arc<dyn ArcanCall> = match arcan_backend_from_env() {
-        ArcanBackendChoice::Mock => Arc::new(arcan_proxy::Pooled::new(
-            mocks.arcan.clone(),
-            pools_for_handlers.arcan.load_full(),
-        )),
-        ArcanBackendChoice::VercelAiGateway => {
-            match arcan_proxy::VercelAiGatewayArcan::from_env() {
-                Ok(real) => {
-                    tracing::info!(
-                        "lifed: arcan substrate using VercelAiGatewayArcan (real LLM streaming)"
-                    );
-                    Arc::new(arcan_proxy::Pooled::new(
-                        real,
-                        pools_for_handlers.arcan.load_full(),
-                    ))
-                }
-                Err(e) => {
-                    // Operator selected the real backend but the env is
-                    // missing the API key. Fail fast at boot — silent
-                    // fallback to the mock would mislead operators expecting
-                    // real LLM output.
-                    return Err(crate::error::LifedError::Substrate(format!(
-                        "LIFED_ARCAN_BACKEND=vercel_ai_gateway requires OPENAI_API_KEY \
-                     (and optionally OPENAI_BASE_URL / OPENAI_MODEL): {e}"
-                    )));
-                }
-            }
-        }
-    };
+    let arcan: Arc<dyn ArcanCall> =
+        build_arcan_fallback_slot(&mocks.arcan, pools_for_handlers.arcan.load_full())?;
     let lago: Arc<dyn LagoCall> = Arc::new(lago_proxy::Pooled::new(
         mocks.lago.clone(),
         pools_for_handlers.lago.load_full(),
@@ -237,7 +210,7 @@ pub async fn run_with_mocks_handles(
     serve_planes(cfg, auth, services, shutdown_rx).await
 }
 
-/// Sub-phase B daemon entrypoint. Tries the real-substrate path first.
+/// Sub-phase B daemon entrypoint.
 ///
 /// Sub-phase D follow-up #8: the silent mock-fallback that sub-phase B
 /// shipped is now gated behind `allow_mock_fallback`. Production
@@ -247,27 +220,165 @@ pub async fn run_with_mocks_handles(
 /// re-launch a daemon whose dependencies aren't ready. Dev and CI
 /// boxes pass `--allow-mock-fallback` (or `LIFED_ALLOW_MOCK_FALLBACK=1`)
 /// when they want the documented mock-substrate path.
+///
+/// Stage 5 (June 2026): substrate selection is now PER-SUBSTRATE
+/// instead of all-or-nothing. Each of the four substrates whose UDS
+/// socket is present at boot dials the real `*-proxy` client; the
+/// absent ones fall back to the in-process mock (still gated by
+/// `allow_mock_fallback`). The boot log names exactly which substrates
+/// run real vs mock, so a container that ships only arcand serves real
+/// agent traffic while lago/haima/anima honestly report as mocked.
 pub async fn run_daemon(config_path: Option<&Path>, allow_mock_fallback: bool) -> LifedResult<()> {
     let cfg = LifedConfig::load(config_path)?;
     let _vigil_guard = crate::observability::init(&cfg.vigil)?;
     let shutdown_rx = crate::shutdown::install_signal_handler();
-    if all_substrate_sockets_present(&cfg) {
-        run_with_real_substrates(&cfg, shutdown_rx).await
-    } else if allow_mock_fallback {
-        tracing::warn!(
-            "one or more substrate UDS sockets missing — booting with MockSubstrates \
-             (dev mode, --allow-mock-fallback)"
-        );
-        let mocks = Arc::new(MockSubstrates::new());
-        run_with_mocks(&cfg, mocks, shutdown_rx).await
-    } else {
+    let presence = SocketPresence::from_config(&cfg);
+    let selection = select_substrates(presence, allow_mock_fallback).map_err(|_missing| {
         let missing = list_missing_substrate_sockets(&cfg);
-        Err(LifedError::Substrate(format!(
+        LifedError::Substrate(format!(
             "substrate UDS socket(s) missing — refusing to boot with MockSubstrates by default. \
              Pass --allow-mock-fallback (or LIFED_ALLOW_MOCK_FALLBACK=1) to opt into the dev path. \
              Missing sockets: {missing:?}"
-        )))
+        ))
+    })?;
+    run_with_substrate_selection(&cfg, selection, shutdown_rx).await
+}
+
+/// Per-substrate backend decision (Stage 5, June 2026). `Real` means
+/// the substrate's UDS socket was present at boot and lifed dials the
+/// real `*-proxy` client; `Mock` means the in-process mock stands in
+/// (only ever chosen when `--allow-mock-fallback` is set).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubstrateBackend {
+    Real,
+    Mock,
+}
+
+impl SubstrateBackend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Real => "real",
+            Self::Mock => "mock",
+        }
     }
+}
+
+/// Which backend each of the four substrates boots with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubstrateSelection {
+    pub arcan: SubstrateBackend,
+    pub lago: SubstrateBackend,
+    pub haima: SubstrateBackend,
+    pub anima: SubstrateBackend,
+}
+
+impl SubstrateSelection {
+    pub fn all_real() -> Self {
+        Self {
+            arcan: SubstrateBackend::Real,
+            lago: SubstrateBackend::Real,
+            haima: SubstrateBackend::Real,
+            anima: SubstrateBackend::Real,
+        }
+    }
+
+    pub fn all_mock() -> Self {
+        Self {
+            arcan: SubstrateBackend::Mock,
+            lago: SubstrateBackend::Mock,
+            haima: SubstrateBackend::Mock,
+            anima: SubstrateBackend::Mock,
+        }
+    }
+
+    fn slots(&self) -> [(&'static str, SubstrateBackend); 4] {
+        [
+            ("arcan", self.arcan),
+            ("lago", self.lago),
+            ("haima", self.haima),
+            ("anima", self.anima),
+        ]
+    }
+
+    pub fn any_mock(&self) -> bool {
+        self.slots()
+            .iter()
+            .any(|(_, b)| *b == SubstrateBackend::Mock)
+    }
+
+    pub fn any_real(&self) -> bool {
+        self.slots()
+            .iter()
+            .any(|(_, b)| *b == SubstrateBackend::Real)
+    }
+
+    /// Names of the substrates running on in-process mocks.
+    pub fn mock_names(&self) -> Vec<&'static str> {
+        self.slots()
+            .iter()
+            .filter(|(_, b)| *b == SubstrateBackend::Mock)
+            .map(|(name, _)| *name)
+            .collect()
+    }
+
+    /// Boot-summary line, e.g. `arcan=real lago=mock haima=mock anima=mock`.
+    pub fn summary(&self) -> String {
+        self.slots()
+            .iter()
+            .map(|(name, b)| format!("{name}={}", b.as_str()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+/// Socket-presence snapshot for the four substrate UDS paths. Sampled
+/// once at boot — substrates that come up after lifed boots are not
+/// picked up until a restart (matching the pre-Stage-5 behavior).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SocketPresence {
+    pub arcan: bool,
+    pub lago: bool,
+    pub haima: bool,
+    pub anima: bool,
+}
+
+impl SocketPresence {
+    pub fn from_config(cfg: &LifedConfig) -> Self {
+        Self {
+            arcan: cfg.substrates.arcan.unix_socket.exists(),
+            lago: cfg.substrates.lago.unix_socket.exists(),
+            haima: cfg.substrates.haima.unix_socket.exists(),
+            anima: cfg.substrates.anima.unix_socket.exists(),
+        }
+    }
+}
+
+/// Pure per-substrate selection logic (Stage 5). A present socket
+/// always selects the real proxy; an absent socket selects the mock
+/// when `allow_mock_fallback` is set, otherwise the substrate's name
+/// lands in the `Err` list so the caller can fail fast naming exactly
+/// what is missing.
+pub fn select_substrates(
+    presence: SocketPresence,
+    allow_mock_fallback: bool,
+) -> Result<SubstrateSelection, Vec<&'static str>> {
+    let pick = |present: bool| {
+        if present {
+            SubstrateBackend::Real
+        } else {
+            SubstrateBackend::Mock
+        }
+    };
+    let selection = SubstrateSelection {
+        arcan: pick(presence.arcan),
+        lago: pick(presence.lago),
+        haima: pick(presence.haima),
+        anima: pick(presence.anima),
+    };
+    if !allow_mock_fallback && selection.any_mock() {
+        return Err(selection.mock_names());
+    }
+    Ok(selection)
 }
 
 fn list_missing_substrate_sockets(cfg: &LifedConfig) -> Vec<String> {
@@ -329,42 +440,146 @@ fn arcan_backend_from_env() -> ArcanBackendChoice {
     }
 }
 
-fn all_substrate_sockets_present(cfg: &LifedConfig) -> bool {
-    cfg.substrates.arcan.unix_socket.exists()
-        && cfg.substrates.lago.unix_socket.exists()
-        && cfg.substrates.haima.unix_socket.exists()
-        && cfg.substrates.anima.unix_socket.exists()
+/// Build the arcan slot when its UDS socket is ABSENT: either the
+/// transitional `VercelAiGatewayArcan` (Stage 3b,
+/// `LIFED_ARCAN_BACKEND=vercel_ai_gateway`) or the in-process
+/// `MockArcan`. Shared by [`run_with_mocks_handles`] and the
+/// per-substrate daemon path so the env-knob semantics stay identical.
+fn build_arcan_fallback_slot(mock: &MockArcan, pool: Arc<Pool>) -> LifedResult<Arc<dyn ArcanCall>> {
+    match arcan_backend_from_env() {
+        ArcanBackendChoice::Mock => Ok(Arc::new(arcan_proxy::Pooled::new(mock.clone(), pool))),
+        ArcanBackendChoice::VercelAiGateway => {
+            match arcan_proxy::VercelAiGatewayArcan::from_env() {
+                Ok(real) => {
+                    tracing::info!(
+                        "lifed: arcan substrate using VercelAiGatewayArcan (real LLM streaming)"
+                    );
+                    Ok(Arc::new(arcan_proxy::Pooled::new(real, pool)))
+                }
+                Err(e) => {
+                    // Operator selected the real backend but the env is
+                    // missing the API key. Fail fast at boot — silent
+                    // fallback to the mock would mislead operators expecting
+                    // real LLM output.
+                    Err(LifedError::Substrate(format!(
+                        "LIFED_ARCAN_BACKEND=vercel_ai_gateway requires OPENAI_API_KEY \
+                     (and optionally OPENAI_BASE_URL / OPENAI_MODEL): {e}"
+                    )))
+                }
+            }
+        }
+    }
 }
 
-/// Sub-phase B real-substrate entrypoint per Spec C₂ §12.B. Dials the
-/// four substrate UDS sockets, mints + publishes the substrate-token JWKS,
-/// builds the public-plane router, and serves until the shutdown channel
-/// fires.
+/// Sub-phase B real-substrate entrypoint per Spec C₂ §12.B. Stage 5
+/// turned this into a thin wrapper over the per-substrate path with an
+/// all-real selection: dials the four substrate UDS sockets, mints +
+/// publishes the substrate-token JWKS, builds the public-plane router,
+/// and serves until the shutdown channel fires.
 pub async fn run_with_real_substrates(
     cfg: &LifedConfig,
+    shutdown_rx: oneshot::Receiver<()>,
+) -> LifedResult<()> {
+    run_with_substrate_selection(cfg, SubstrateSelection::all_real(), shutdown_rx).await
+}
+
+/// Stage 5 (June 2026): per-substrate daemon path. Each of the four
+/// substrates independently boots `Real` (UDS socket present at boot →
+/// real `*-proxy` dial) or `Mock` (in-process mock). This replaces the
+/// all-or-nothing real-vs-mock split: a container that ships only
+/// arcand serves real agent traffic while lago/haima/anima stay
+/// mocked, with the boot summary naming exactly which substrates are
+/// which. The saga/pool/breaker wiring is identical across backends —
+/// every slot brackets through its `SubstratePools` pool, either via
+/// the proxy's `with_pool` (real) or the `Pooled<C>` adapter (mock).
+pub async fn run_with_substrate_selection(
+    cfg: &LifedConfig,
+    selection: SubstrateSelection,
     shutdown_rx: oneshot::Receiver<()>,
 ) -> LifedResult<()> {
     let _vigil_guard = crate::observability::init(&cfg.vigil)?;
     tracing::info!(
         public_socket = %cfg.public_plane.unix_socket.display(),
         admin_socket  = %cfg.admin_plane.unix_socket.display(),
-        "lifed starting (sub-phase C — real substrates)",
+        substrates    = %selection.summary(),
+        "lifed starting (stage 5 — per-substrate selection)",
     );
+    if selection.any_mock() {
+        tracing::warn!(
+            substrates = %selection.summary(),
+            mock = ?selection.mock_names(),
+            "substrate UDS socket(s) missing — per-substrate mock fallback active; \
+             traffic to the mocked substrates is canned, NOT real",
+        );
+    }
 
-    let arcan_proxy_real = ArcanProxy::connect(cfg.substrates.arcan.unix_socket.clone())
-        .await
-        .map_err(|e| LifedError::Substrate(format!("arcan dial: {e}")))?;
-    let lago_proxy_real = LagoProxy::connect(cfg.substrates.lago.unix_socket.clone())
-        .await
-        .map_err(|e| LifedError::Substrate(format!("lago dial: {e}")))?;
-    let haima_proxy_real = HaimaProxy::connect(cfg.substrates.haima.unix_socket.clone())
-        .await
-        .map_err(|e| LifedError::Substrate(format!("haima dial: {e}")))?;
-    let anima_proxy_real = AnimaProxy::connect(cfg.substrates.anima.unix_socket.clone())
-        .await
-        .map_err(|e| LifedError::Substrate(format!("anima dial: {e}")))?;
+    // Sub-phase E: pool ownership pushed inside each `*Proxy` via
+    // `with_pool`. Handlers no longer bracket — every call through the
+    // trait object brackets internally per Spec C₂ §7. Mock slots wrap
+    // in the proxy crate's `Pooled<C>` adapter so the breaker exercises
+    // identical paths.
+    let mocks = MockSubstrates::new();
+    let skel = build_handles_skeleton(cfg);
 
-    // Substrate-token signing keystore + JWKS publish.
+    let arcan: Arc<dyn ArcanCall> = match selection.arcan {
+        SubstrateBackend::Real => {
+            if arcan_backend_from_env() != ArcanBackendChoice::Mock {
+                tracing::warn!(
+                    "arcan UDS socket present — ignoring LIFED_ARCAN_BACKEND override; \
+                     the real arcand substrate wins"
+                );
+            }
+            let proxy = ArcanProxy::connect(cfg.substrates.arcan.unix_socket.clone())
+                .await
+                .map_err(|e| LifedError::Substrate(format!("arcan dial: {e}")))?;
+            Arc::new(proxy.with_pool(skel.pools.arcan.load_full()))
+        }
+        SubstrateBackend::Mock => {
+            build_arcan_fallback_slot(&mocks.arcan, skel.pools.arcan.load_full())?
+        }
+    };
+    let lago: Arc<dyn LagoCall> = match selection.lago {
+        SubstrateBackend::Real => {
+            let proxy = LagoProxy::connect(cfg.substrates.lago.unix_socket.clone())
+                .await
+                .map_err(|e| LifedError::Substrate(format!("lago dial: {e}")))?;
+            Arc::new(proxy.with_pool(skel.pools.lago.load_full()))
+        }
+        SubstrateBackend::Mock => Arc::new(lago_proxy::Pooled::new(
+            mocks.lago.clone(),
+            skel.pools.lago.load_full(),
+        )),
+    };
+    let haima: Arc<dyn HaimaCall> = match selection.haima {
+        SubstrateBackend::Real => {
+            let proxy = HaimaProxy::connect(cfg.substrates.haima.unix_socket.clone())
+                .await
+                .map_err(|e| LifedError::Substrate(format!("haima dial: {e}")))?;
+            Arc::new(proxy.with_pool(skel.pools.haima.load_full()))
+        }
+        SubstrateBackend::Mock => Arc::new(haima_proxy::Pooled::new(
+            mocks.haima.clone(),
+            skel.pools.haima.load_full(),
+        )),
+    };
+    let anima: Arc<dyn AnimaCall> = match selection.anima {
+        SubstrateBackend::Real => {
+            let proxy = AnimaProxy::connect(cfg.substrates.anima.unix_socket.clone())
+                .await
+                .map_err(|e| LifedError::Substrate(format!("anima dial: {e}")))?;
+            Arc::new(proxy.with_pool(skel.pools.anima.load_full()))
+        }
+        SubstrateBackend::Mock => Arc::new(anima_proxy::Pooled::new(
+            mocks.anima.clone(),
+            skel.pools.anima.load_full(),
+        )),
+    };
+
+    // Substrate-token signing keystore + JWKS publish. Real substrates
+    // verify lifed's Tier-3 tokens against the published JWKS, so any
+    // real substrate ⇒ publish. The all-mock boot keeps the historical
+    // behavior (no publish — mocks never verify tokens, and dev boxes
+    // may not have write access to the publish path).
     let ks = Arc::new(if cfg.auth.substrate_signing_key_path.exists() {
         let pub_path = cfg
             .auth
@@ -374,19 +589,9 @@ pub async fn run_with_real_substrates(
     } else {
         Keystore::generate_dev()
     });
-    publish_jwks(&ks, &cfg.auth.substrate_jwks_publish_path)?;
-
-    // Sub-phase E: pool ownership pushed inside each `*Proxy` via
-    // `with_pool`. Handlers no longer bracket — every call through the
-    // trait object brackets internally per Spec C₂ §7.
-    let skel = build_handles_skeleton(cfg);
-    let arcan: Arc<dyn ArcanCall> =
-        Arc::new(arcan_proxy_real.with_pool(skel.pools.arcan.load_full()));
-    let lago: Arc<dyn LagoCall> = Arc::new(lago_proxy_real.with_pool(skel.pools.lago.load_full()));
-    let haima: Arc<dyn HaimaCall> =
-        Arc::new(haima_proxy_real.with_pool(skel.pools.haima.load_full()));
-    let anima: Arc<dyn AnimaCall> =
-        Arc::new(anima_proxy_real.with_pool(skel.pools.anima.load_full()));
+    if selection.any_real() {
+        publish_jwks(&ks, &cfg.auth.substrate_jwks_publish_path)?;
+    }
 
     let idem: Arc<dyn IdempotencyStore> = match cfg.idempotency.backend {
         crate::config::IdempotencyBackend::Lago => {
@@ -428,19 +633,33 @@ pub async fn run_with_real_substrates(
         saga,
     );
 
-    let jwks = if cfg.auth.jwks_path.exists() {
-        Arc::new(JwksCache::load_from_path(&cfg.auth.jwks_path)?)
+    // Stage 2 (May 2026): lazy file-backed JWKS — no boot-order race
+    // with lifegw (see the matching comment in `run_with_mocks_handles`).
+    // Stage 5 unifies the daemon paths on the lazy cache; the previous
+    // eager `load_from_path`-or-`dev_only` branch silently accepted dev
+    // tokens in production whenever lifegw published a few ms late.
+    let jwks = if cfg.auth.dev_signer_enabled {
+        Arc::new(JwksCache::new_lazy_file_with_dev_shortcut(
+            &cfg.auth.jwks_path,
+        ))
     } else {
-        tracing::warn!(
-            path = %cfg.auth.jwks_path.display(),
-            "lifegw JWKS missing — using built-in dev keystore"
-        );
-        Arc::new(JwksCache::dev_only())
+        Arc::new(JwksCache::new_lazy_file(&cfg.auth.jwks_path))
     };
+    tracing::info!(
+        path = %cfg.auth.jwks_path.display(),
+        dev_shortcut = cfg.auth.dev_signer_enabled,
+        "jwks cache initialised (lazy file-backed)"
+    );
     let auth = AuthLayer::new(jwks);
 
-    // Spec C₂ §5.4 + §6.3 sweepers: revocation snapshot + routing-cache eviction.
-    spawn_revoked_snapshot_sweeper(Arc::clone(&revoked), cfg.auth.revoked_sids_path.clone());
+    // Spec C₂ §5.4 + §6.3 sweepers: revocation snapshot + routing-cache
+    // eviction. The snapshot sweeper writes to disk every 30s, so it
+    // only runs when at least one substrate is real (all-mock dev boxes
+    // historically ran sweeper-free and may not have the path writable);
+    // the eviction sweeper is in-memory and always safe to run.
+    if selection.any_real() {
+        spawn_revoked_snapshot_sweeper(Arc::clone(&revoked), cfg.auth.revoked_sids_path.clone());
+    }
     spawn_routing_eviction_sweeper(
         Arc::clone(&routing),
         std::time::Duration::from_secs(cfg.routing.idle_threshold_secs),
@@ -719,4 +938,132 @@ fn spawn_routing_eviction_sweeper(
             routing.evict_to_cap(hard_cap);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn presence(arcan: bool, lago: bool, haima: bool, anima: bool) -> SocketPresence {
+        SocketPresence {
+            arcan,
+            lago,
+            haima,
+            anima,
+        }
+    }
+
+    #[test]
+    fn all_sockets_present_selects_all_real_regardless_of_fallback_flag() {
+        for allow in [false, true] {
+            let sel = select_substrates(presence(true, true, true, true), allow)
+                .expect("all-present must select");
+            assert_eq!(sel, SubstrateSelection::all_real());
+            assert!(!sel.any_mock());
+            assert!(sel.any_real());
+        }
+    }
+
+    #[test]
+    fn no_sockets_with_fallback_selects_all_mock() {
+        let sel = select_substrates(presence(false, false, false, false), true)
+            .expect("fallback allows all-mock");
+        assert_eq!(sel, SubstrateSelection::all_mock());
+        assert!(sel.any_mock());
+        assert!(!sel.any_real());
+        assert_eq!(sel.mock_names(), vec!["arcan", "lago", "haima", "anima"]);
+    }
+
+    #[test]
+    fn arcan_only_with_fallback_selects_mixed() {
+        // The production rollout shape: lifegw-stack ships arcand but
+        // not lagod/haimad/animad.
+        let sel = select_substrates(presence(true, false, false, false), true)
+            .expect("fallback allows mixed");
+        assert_eq!(sel.arcan, SubstrateBackend::Real);
+        assert_eq!(sel.lago, SubstrateBackend::Mock);
+        assert_eq!(sel.haima, SubstrateBackend::Mock);
+        assert_eq!(sel.anima, SubstrateBackend::Mock);
+        assert!(sel.any_mock());
+        assert!(sel.any_real());
+        assert_eq!(sel.mock_names(), vec!["lago", "haima", "anima"]);
+    }
+
+    #[test]
+    fn each_single_present_socket_maps_to_its_own_slot() {
+        let cases = [
+            (presence(true, false, false, false), "arcan"),
+            (presence(false, true, false, false), "lago"),
+            (presence(false, false, true, false), "haima"),
+            (presence(false, false, false, true), "anima"),
+        ];
+        for (p, real_name) in cases {
+            let sel = select_substrates(p, true).expect("fallback allows mixed");
+            for (name, backend) in sel.slots() {
+                if name == real_name {
+                    assert_eq!(backend, SubstrateBackend::Real, "{name} should be real");
+                } else {
+                    assert_eq!(backend, SubstrateBackend::Mock, "{name} should be mock");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn missing_sockets_without_fallback_fail_naming_exactly_the_missing() {
+        let err = select_substrates(presence(true, false, false, false), false)
+            .expect_err("no fallback ⇒ refuse");
+        assert_eq!(err, vec!["lago", "haima", "anima"]);
+
+        let err = select_substrates(presence(false, false, false, false), false)
+            .expect_err("no fallback ⇒ refuse");
+        assert_eq!(err, vec!["arcan", "lago", "haima", "anima"]);
+
+        let err = select_substrates(presence(true, true, true, false), false)
+            .expect_err("no fallback ⇒ refuse");
+        assert_eq!(err, vec!["anima"]);
+    }
+
+    #[test]
+    fn summary_names_every_substrate_backend() {
+        let sel = select_substrates(presence(true, false, false, false), true).expect("mixed");
+        assert_eq!(sel.summary(), "arcan=real lago=mock haima=mock anima=mock");
+        assert_eq!(
+            SubstrateSelection::all_real().summary(),
+            "arcan=real lago=real haima=real anima=real"
+        );
+        assert_eq!(
+            SubstrateSelection::all_mock().summary(),
+            "arcan=mock lago=mock haima=mock anima=mock"
+        );
+    }
+
+    #[test]
+    fn socket_presence_from_config_reflects_filesystem() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let mut cfg = LifedConfig::default();
+        cfg.substrates.arcan.unix_socket = tmp.path().join("arcan.sock");
+        cfg.substrates.lago.unix_socket = tmp.path().join("lago.sock");
+        cfg.substrates.haima.unix_socket = tmp.path().join("haima.sock");
+        cfg.substrates.anima.unix_socket = tmp.path().join("anima.sock");
+
+        assert_eq!(
+            SocketPresence::from_config(&cfg),
+            presence(false, false, false, false)
+        );
+
+        // Touch only the arcan socket path — `exists()` is the boot
+        // probe, so a plain file stands in for the UDS here.
+        std::fs::write(&cfg.substrates.arcan.unix_socket, b"").expect("touch arcan.sock");
+        assert_eq!(
+            SocketPresence::from_config(&cfg),
+            presence(true, false, false, false)
+        );
+
+        std::fs::write(&cfg.substrates.haima.unix_socket, b"").expect("touch haima.sock");
+        assert_eq!(
+            SocketPresence::from_config(&cfg),
+            presence(true, false, true, false)
+        );
+    }
 }

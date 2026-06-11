@@ -1,21 +1,25 @@
-# lifed config — Railway lifegw-stack deploy (Stage 3b, May 2026).
+# lifed config — Railway lifegw-stack deploy (Stage 5, June 2026).
 #
 # JwksCache is lazy + file-backed (Stage 2 notes preserved): no
 # boot-order race with lifegw.
 #
-# Stage 3b: lifed's per-substrate backend selection lets the `arcan`
-# slot use real LLM streaming via Vercel AI Gateway (or any
-# OpenAI-compatible endpoint) without waiting for the canonical
-# arcan-proto / arcand UDS substrate. Set
-# `LIFED_ARCAN_BACKEND=vercel_ai_gateway` on the Railway service env
-# along with `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`. The
-# other substrates (lago / haima / anima) stay on mocks via
-# `LIFED_ALLOW_MOCK_FALLBACK=true`.
+# Stage 5: per-substrate real/mock selection. The container ships the
+# real arcan daemon; entrypoint.sh binds /run/life/arcan.sock BEFORE
+# lifed boots, so lifed's bootstrap selects the real arcan substrate
+# and mocks only lago / haima / anima (still gated by
+# `LIFED_ALLOW_MOCK_FALLBACK=true`). Boot log prints the selection:
+# "arcan=real lago=mock haima=mock anima=mock".
 #
-# Production swap-in (Stage 4+): publish arcan-proto, ship arcand /
-# lagod / haimad / animad / soma into the same container (or
-# multi-container), drop `LIFED_ALLOW_MOCK_FALLBACK`, and let lifed
-# fail-fast on missing UDS sockets.
+# Stage 3b knob retained for socket-less deploys: when the arcan
+# socket is ABSENT, `LIFED_ARCAN_BACKEND=vercel_ai_gateway` (plus
+# `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`) streams real
+# LLM tokens through the gateway slot instead of MockArcan. A present
+# arcan socket always wins.
+#
+# Production swap-in (Stage 6+): ship lagod / haimad / animad / soma
+# into the same container (or multi-container), drop
+# `LIFED_ALLOW_MOCK_FALLBACK`, and let lifed fail-fast on missing UDS
+# sockets.
 
 [public_plane]
 unix_socket       = "/run/life/life.sock"

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# lifegw-stack entrypoint — fan out lifed + lifegw + caddy in one container.
+# lifegw-stack entrypoint — fan out arcan + lifed + lifegw + caddy in
+# one container.
 #
 # Stage-2 ordering (May 2026 — addresses the lifegw/lifed boot-race
-# described in `HANDOFF.md` §6/§7):
+# described in `HANDOFF.md` §6/§7), extended by Stage 5 (June 2026 —
+# real arcan substrate inside the stack):
 #
 #   1. Self-signed TLS cert for the lifegw → Caddy hop. Regenerated each
 #      boot — Caddy proxies upstream with `tls_insecure_skip_verify` so
@@ -15,14 +17,19 @@
 #      Operator can also pre-supply the key via the
 #      `LIFEGW_TIER2_SIGNING_KEY_PEM` env (e.g. injected by Railway
 #      secrets) — entrypoint skips generation in that case.
-#   3. Start `lifed`. Its `JwksCache` is lazy + file-backed (Stage 2
+#   3. Start `arcan serve --uds-socket /run/life/arcan.sock` and probe
+#      until it accepts UDS connections. MUST precede lifed: lifed's
+#      per-substrate bootstrap samples socket presence once at boot —
+#      arcan socket present ⇒ real arcan substrate; lago/haima/anima
+#      absent ⇒ in-process mocks (LIFED_ALLOW_MOCK_FALLBACK=true).
+#   4. Start `lifed`. Its `JwksCache` is lazy + file-backed (Stage 2
 #      change in `lifed::auth::jwks`): the first `validate()` call
 #      reads `/run/life/lifegw-jwks.json`, and subsequent calls watch
 #      mtime so a rotation is picked up without coordination.
-#   4. Start `lifegw` with `kms_provider = "static_pem"` reading the
+#   5. Start `lifegw` with `kms_provider = "static_pem"` reading the
 #      env-bound key. lifegw publishes its JWKS atomically to
 #      `/run/life/lifegw-jwks.json`; lifed picks it up on first verify.
-#   5. Caddy in foreground as PID 1 (via tini).
+#   6. Caddy in foreground as PID 1 (via tini).
 
 set -euo pipefail
 
@@ -90,11 +97,86 @@ fi
 LIFEGW_TIER2_SIGNING_KEY_PEM="$(cat "${TIER2_PEM_PATH}")"
 export LIFEGW_TIER2_SIGNING_KEY_PEM
 
-# ── 3. Start lifed ──────────────────────────────────────────────────────────
-# Stage 3b: announce which arcan substrate backend lifed will pick.
-# `LIFED_ARCAN_BACKEND=vercel_ai_gateway` requires `OPENAI_API_KEY`
-# (and optionally `OPENAI_BASE_URL`, `OPENAI_MODEL`); failures surface
-# as `LifedError::Substrate` at boot rather than silent fallback.
+# ── 3. Start arcan (real arcan substrate) ───────────────────────────────────
+# Stage 5 (June 2026): lifed's bootstrap samples substrate UDS presence
+# ONCE at boot (per-substrate selection — see lifed::bootstrap). arcan
+# must therefore bind /run/life/arcan.sock and be ACCEPTING connections
+# BEFORE lifed starts, or lifed honestly falls back to MockArcan for
+# the container's lifetime. lago/haima/anima remain mocked via
+# LIFED_ALLOW_MOCK_FALLBACK=true until their daemons ship.
+#
+# The flag is `--uds-socket` (env ARCAN_UDS_SOCKET) — binds the
+# substrate-plane gRPC server (arcan.v1.AgentSubstrate, BRO-1016)
+# alongside arcan's HTTP :3000 server (container-internal only).
+# Provider preflight: arcan's build_provider runs BEFORE the UDS server
+# binds (main.rs), so a fresh container without provider credentials
+# would exit at boot and crash-loop the whole gateway. Degrade honestly
+# instead: skip arcan so lifed selects MockArcan, and say exactly which
+# env unlocks the real substrate.
+ARCAN_ENABLED=1
+if [[ -z "${ARCAN_PROVIDER:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  ARCAN_ENABLED=0
+  echo "[entrypoint] WARN: skipping arcan substrate — no provider env." >&2
+  echo "[entrypoint]   set ANTHROPIC_API_KEY (default provider) or ARCAN_PROVIDER=openai + OPENAI_BASE_URL/OPENAI_API_KEY" >&2
+  echo "[entrypoint]   lifed will select MockArcan for this container lifetime." >&2
+fi
+
+if [[ "${ARCAN_ENABLED}" == "1" ]]; then
+ARCAN_DATA_DIR="${ARCAN_DATA_DIR:-/var/lib/arcan}"
+mkdir -p "${ARCAN_DATA_DIR}"
+chown -R life:life-runtime "${ARCAN_DATA_DIR}"
+echo "[entrypoint] starting arcan substrate (uds=${LIFE_RUNTIME_DIR}/arcan.sock data=${ARCAN_DATA_DIR})"
+# `env -u`: the Tier-2 token-minting key is lifegw's secret. arcan
+# executes tool calls (incl. shell) for remote chat users — that key
+# must never be readable from the agent process environment.
+# Base-URL scoping: lifed's vercel_ai_gateway client wants
+# OPENAI_BASE_URL **with** /v1; arcan-provider appends /v1 itself
+# (openai.rs: format!("{base}/v1/chat/completions")). Same container,
+# same var — so arcan gets a stripped copy, overridable via
+# ARCAN_OPENAI_BASE_URL.
+ARCAN_BASE_URL_EFFECTIVE="${ARCAN_OPENAI_BASE_URL:-${OPENAI_BASE_URL%/v1}}"
+runuser --preserve-environment -u life -g life-runtime -- \
+  env -u LIFEGW_TIER2_SIGNING_KEY_PEM \
+      OPENAI_BASE_URL="${ARCAN_BASE_URL_EFFECTIVE}" \
+  /usr/local/bin/arcan serve \
+    --uds-socket "${LIFE_RUNTIME_DIR}/arcan.sock" \
+    --data-dir "${ARCAN_DATA_DIR}" \
+    --agents-dir /opt/life/agents \
+  &
+ARCAN_PID=$!
+
+# Same probe discipline as the lifed probe below (BRO-1193): `nc -zU`
+# proves the listen backlog is up, not merely that bind() created the
+# socket file. A half-bound socket here would make lifed dial a dead
+# arcan at boot and fail the whole stack.
+echo "[entrypoint] waiting for arcan UDS at ${LIFE_RUNTIME_DIR}/arcan.sock"
+for i in $(seq 1 60); do
+  if [[ -S "${LIFE_RUNTIME_DIR}/arcan.sock" ]] \
+     && nc -zU "${LIFE_RUNTIME_DIR}/arcan.sock" 2>/dev/null; then
+    echo "[entrypoint] arcan UDS accepting connections (after ${i} half-seconds)"
+    break
+  fi
+  if ! kill -0 "${ARCAN_PID}" 2>/dev/null; then
+    echo "[entrypoint] FATAL: arcan exited before binding UDS" >&2
+    wait "${ARCAN_PID}" || true
+    exit 1
+  fi
+  sleep 0.5
+done
+if ! nc -zU "${LIFE_RUNTIME_DIR}/arcan.sock" 2>/dev/null; then
+  echo "[entrypoint] FATAL: arcan did not accept UDS connections within 30s" >&2
+  exit 1
+fi
+fi # ARCAN_ENABLED
+
+# ── 4. Start lifed ──────────────────────────────────────────────────────────
+# Stage 5: lifed's per-substrate bootstrap sees /run/life/arcan.sock
+# (bound above) and dials the REAL arcan substrate; lago/haima/anima
+# sockets are absent so they fall back to mocks under
+# LIFED_ALLOW_MOCK_FALLBACK=true. Boot log prints the selection, e.g.
+# "arcan=real lago=mock haima=mock anima=mock".
+# Stage 3b knob retained: `LIFED_ARCAN_BACKEND=vercel_ai_gateway` only
+# applies when the arcan socket is ABSENT (the real substrate wins).
 echo "[entrypoint] starting lifed (mock-fallback=${LIFED_ALLOW_MOCK_FALLBACK:-false}, arcan-backend=${LIFED_ARCAN_BACKEND:-mock})"
 runuser --preserve-environment -u life -g life-runtime -- \
   /usr/local/bin/lifed daemon \
@@ -134,7 +216,7 @@ if ! nc -zU "${LIFE_RUNTIME_DIR}/life.sock" 2>/dev/null; then
   exit 1
 fi
 
-# ── 4. Start lifegw ─────────────────────────────────────────────────────────
+# ── 5. Start lifegw ─────────────────────────────────────────────────────────
 # lifegw publishes /run/life/lifegw-jwks.json atomically (write-tmp +
 # rename) inside its bootstrap. lifed's lazy JwksCache reads it on the
 # first verify — no coordination needed because the file mtime always
@@ -160,11 +242,12 @@ for i in $(seq 1 60); do
   sleep 0.5
 done
 
-# ── 5. Caddy as PID 1's foreground process ─────────────────────────────────
+# ── 6. Caddy as PID 1's foreground process ─────────────────────────────────
 shutdown() {
   echo "[entrypoint] SIGTERM received — draining"
   if kill -0 "${LIFEGW_PID}" 2>/dev/null; then kill -TERM "${LIFEGW_PID}" || true; fi
   if kill -0 "${LIFED_PID}"  2>/dev/null; then kill -TERM "${LIFED_PID}"  || true; fi
+  if [[ -n "${ARCAN_PID:-}" ]] && kill -0 "${ARCAN_PID}" 2>/dev/null; then kill -TERM "${ARCAN_PID}" || true; fi
 }
 trap shutdown TERM INT
 
