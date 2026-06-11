@@ -139,8 +139,13 @@ echo "[entrypoint] starting arcan substrate (uds=${LIFE_RUNTIME_DIR}/arcan.sock 
 # OPENAI_BASE_URL **with** /v1; arcan-provider appends /v1 itself
 # (openai.rs: format!("{base}/v1/chat/completions")). Same container,
 # same var — so arcan gets a stripped copy, overridable via
-# ARCAN_OPENAI_BASE_URL.
-ARCAN_BASE_URL_EFFECTIVE="${ARCAN_OPENAI_BASE_URL:-${OPENAI_BASE_URL%/v1}}"
+# ARCAN_OPENAI_BASE_URL. The `:-` default matters under `set -u`: an
+# ANTHROPIC_API_KEY-only config (the README smoke example) leaves
+# OPENAI_BASE_URL unset, and a bare ${OPENAI_BASE_URL%/v1} would abort
+# the whole entrypoint with 'unbound variable' here in §3 — before
+# lagod or lifed ever start.
+OPENAI_BASE_URL_RAW="${OPENAI_BASE_URL:-}"
+ARCAN_BASE_URL_EFFECTIVE="${ARCAN_OPENAI_BASE_URL:-${OPENAI_BASE_URL_RAW%/v1}}"
 runuser --preserve-environment -u life -g life-runtime -- \
   env -u LIFEGW_TIER2_SIGNING_KEY_PEM \
       OPENAI_BASE_URL="${ARCAN_BASE_URL_EFFECTIVE}" \
@@ -324,9 +329,17 @@ for i in $(seq 1 60); do
   sleep 0.5
 done
 
-# ── 6. Caddy as PID 1's foreground process ─────────────────────────────────
+# ── 6. Caddy under a live trap ──────────────────────────────────────────────
+# Caddy must NOT be exec'd: `exec` replaces this shell and erases the
+# trap below, so SIGTERM would only ever reach caddy while lagod /
+# arcan / lifed / lifegw get orphan-SIGKILLed at namespace teardown —
+# no graceful drain, no UDS socket-file cleanup. Backgrounding caddy
+# and `wait`ing keeps the trap live: tini (PID 1) forwards TERM to this
+# shell, the trap TERMs every child (caddy included), and the trailing
+# `wait` reaps them before the script exits.
 shutdown() {
   echo "[entrypoint] SIGTERM received — draining"
+  if [[ -n "${CADDY_PID:-}" ]] && kill -0 "${CADDY_PID}" 2>/dev/null; then kill -TERM "${CADDY_PID}" || true; fi
   if kill -0 "${LIFEGW_PID}" 2>/dev/null; then kill -TERM "${LIFEGW_PID}" || true; fi
   if kill -0 "${LIFED_PID}"  2>/dev/null; then kill -TERM "${LIFED_PID}"  || true; fi
   if [[ -n "${LAGOD_PID:-}" ]] && kill -0 "${LAGOD_PID}" 2>/dev/null; then kill -TERM "${LAGOD_PID}" || true; fi
@@ -335,4 +348,13 @@ shutdown() {
 trap shutdown TERM INT
 
 echo "[entrypoint] starting caddy on :${PORT}"
-exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+caddy run --config /etc/caddy/Caddyfile --adapter caddyfile &
+CADDY_PID=$!
+
+# `wait` returns early (>128) when the trapped signal arrives; by then
+# the trap has TERMed every child. The second wait reaps stragglers so
+# tini observes a clean, drained exit.
+CADDY_EXIT=0
+wait "${CADDY_PID}" || CADDY_EXIT=$?
+wait || true
+exit "${CADDY_EXIT}"

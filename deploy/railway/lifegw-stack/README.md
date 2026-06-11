@@ -92,12 +92,16 @@ the railway service variables for `RAILWAY_DOCKERFILE_PATH`.
 ## Local smoke test
 
 ```bash
+# ANTHROPIC_API_KEY unlocks the REAL arcan substrate (else MockArcan);
+# the life-state volume persists lagod's journal + the Tier-2 key.
+# (Comments cannot ride backslash continuations — `\  #` is an escaped
+# space, which would terminate the command mid-line.)
 docker run --rm -p 8080:8080 \
   -e PORT=8080 \
   -e LIFED_ALLOW_MOCK_FALLBACK=1 \
-  -e ANTHROPIC_API_KEY=...  \  # unlocks the REAL arcan substrate (else MockArcan)
-  -e RUST_LOG=info,lifegw=debug,lifed=debug,arcan=info,lagod=info,lago=info \
-  -v life-state:/var/life-state \  # persists lagod's journal + the Tier-2 key
+  -e ANTHROPIC_API_KEY=... \
+  -e RUST_LOG=info,lifegw=debug,lifed=debug,arcan=info,lagod=info \
+  -v life-state:/var/life-state \
   lifegw-stack
 
 # In another shell:

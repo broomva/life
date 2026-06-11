@@ -123,11 +123,12 @@ ENV PORT=8080 \
     LIFEGW_CONFIG=/etc/lifegw/config.toml \
     LIFED_CONFIG=/etc/lifed/config.toml \
     LIFED_ALLOW_MOCK_FALLBACK=true \
-    RUST_LOG=info,lifegw=info,lifed=info,arcan=info,arcand=info,lagod=info,lago=info \
+    RUST_LOG=info,lifegw=info,lifed=info,arcan=info,arcand=info,lagod=info,lago_journal=info,lago_api=info \
     RUST_BACKTRACE=1
 
 EXPOSE 8080
 
-# tini guards against caddy → lifegw → lifed orphan reaping; entrypoint.sh
-# fans out the three processes and execs caddy in fg so SIGTERM propagates.
+# tini guards orphan reaping; entrypoint.sh fans out the five processes
+# (arcan, lagod, lifed, lifegw, caddy) and waits on caddy under a live
+# trap so SIGTERM drains every child (see entrypoint §6).
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]

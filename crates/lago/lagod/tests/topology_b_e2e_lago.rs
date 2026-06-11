@@ -414,3 +414,56 @@ async fn serve_substrate_uds_binds_dials_and_cleans_up() {
         "socket file cleaned up on graceful shutdown"
     );
 }
+
+#[tokio::test]
+async fn serve_substrate_uds_rebinds_over_stale_socket() {
+    // A crashed predecessor (SIGKILL, OOM) leaves the socket FILE
+    // behind with no listener — the exact state a container restart
+    // inherits. `bind_substrate_uds` must unlink it and bind fresh
+    // instead of failing AddrInUse and (via the eager-bind contract)
+    // taking the daemon down.
+    let tempdir = TempDir::new().expect("tempdir");
+    let socket = tempdir.path().join("lagod.sock");
+    let db_path = tempdir.path().join("journal.redb");
+    let journal = Arc::new(RedbJournal::open(&db_path).expect("open journal"));
+
+    // Fabricate the stale state: bind a real UDS at the path, then
+    // drop the listener WITHOUT removing the file (a kill leaves
+    // exactly this — `exists()` true, `connect()` refused).
+    {
+        let stale = tokio::net::UnixListener::bind(&socket).expect("bind stale socket");
+        drop(stale);
+    }
+    assert!(socket.exists(), "stale socket file is present pre-rebind");
+
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let serve_journal = Arc::clone(&journal) as Arc<dyn Journal>;
+    // `Box<dyn Error>` is not Send — collapse to String inside the
+    // task, same shape as the bind→dial→cleanup test above.
+    let serve_socket = socket.clone();
+    let server = tokio::spawn(async move {
+        lagod::serve_substrate_uds(serve_socket, serve_journal, async move {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .map_err(|e| e.to_string())
+    });
+
+    // The rebind must yield a CONNECTABLE listener (not merely a file).
+    let mut connected = false;
+    for _ in 0..100 {
+        if tokio::net::UnixStream::connect(&socket).await.is_ok() {
+            connected = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(connected, "rebound socket accepts connections");
+
+    let _ = shutdown_tx.send(());
+    let served = tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .expect("serve task drained within 5s")
+        .expect("serve task joined");
+    served.expect("serve_substrate_uds returned Ok after shutdown");
+}

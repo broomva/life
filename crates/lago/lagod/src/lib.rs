@@ -38,8 +38,22 @@ pub async fn serve_substrate_uds<S>(
 where
     S: Future<Output = ()> + Send + 'static,
 {
-    use lago_substrate_proto::lago::v1::lago_substrate_server::LagoSubstrateServer;
+    let listener = bind_substrate_uds(&socket_path)?;
+    serve_substrate_uds_on(socket_path, listener, journal, shutdown).await
+}
 
+/// Bind the substrate-plane Unix socket: ensure the parent dir exists,
+/// unlink any stale socket file (a crashed predecessor leaves one
+/// behind and a fresh `bind()` would fail with AddrInUse), then bind.
+///
+/// Split from the serve future so `run()` can bind EAGERLY: a failed
+/// `--uds-socket` is an explicitly requested plane and must fail the
+/// daemon fast — not log-and-continue inside a spawned task while the
+/// TCP/HTTP planes keep serving with the substrate plane silently dead.
+#[doc(hidden)]
+pub fn bind_substrate_uds(
+    socket_path: &std::path::Path,
+) -> Result<tokio::net::UnixListener, Box<dyn std::error::Error>> {
     if let Some(parent) = socket_path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -47,17 +61,33 @@ where
             .map_err(|e| format!("create parent dir {}: {e}", parent.display()))?;
     }
     if socket_path.exists() {
-        std::fs::remove_file(&socket_path)
+        std::fs::remove_file(socket_path)
             .map_err(|e| format!("unlink stale socket {}: {e}", socket_path.display()))?;
     }
 
-    let listener = tokio::net::UnixListener::bind(&socket_path)
+    let listener = tokio::net::UnixListener::bind(socket_path)
         .map_err(|e| format!("bind {}: {e}", socket_path.display()))?;
 
     info!(
         socket = %socket_path.display(),
         "lago substrate-plane gRPC listening (lago.v1.LagoSubstrate over UDS)"
     );
+    Ok(listener)
+}
+
+/// Serve `lago.v1.LagoSubstrate` on an already-bound listener until
+/// `shutdown` resolves, then best-effort remove the socket file.
+#[doc(hidden)]
+pub async fn serve_substrate_uds_on<S>(
+    socket_path: PathBuf,
+    listener: tokio::net::UnixListener,
+    journal: Arc<dyn lago_core::Journal>,
+    shutdown: S,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    S: Future<Output = ()> + Send + 'static,
+{
+    use lago_substrate_proto::lago::v1::lago_substrate_server::LagoSubstrateServer;
 
     let service = substrate::SubstrateService::new(journal);
     let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
@@ -160,16 +190,30 @@ pub async fn run(
     // is set, bind that service on the socket using the SAME journal as
     // the TCP gRPC + HTTP planes. Additive — the standalone TCP/HTTP
     // daemon is unchanged when the socket is absent.
-    let uds_handle = uds_socket.map(|socket_path| {
-        let uds_journal = journal.clone() as Arc<dyn lago_core::Journal>;
-        tokio::spawn(async move {
-            if let Err(e) =
-                serve_substrate_uds(socket_path, uds_journal, shutdown::shutdown_signal()).await
-            {
-                tracing::error!(error = %e, "substrate-plane UDS server exited with error");
-            }
-        })
-    });
+    let uds_handle = match uds_socket {
+        Some(socket_path) => {
+            // Bind eagerly (cross-review finding): the UDS is the only
+            // plane Topology B consumes — a bind failure must fail the
+            // daemon NOW with the real error, not surface 30 seconds
+            // later as the stack entrypoint's generic probe timeout
+            // while TCP/HTTP keep serving a substrate-dead lagod.
+            let listener = bind_substrate_uds(&socket_path)?;
+            let uds_journal = journal.clone() as Arc<dyn lago_core::Journal>;
+            Some(tokio::spawn(async move {
+                if let Err(e) = serve_substrate_uds_on(
+                    socket_path,
+                    listener,
+                    uds_journal,
+                    shutdown::shutdown_signal(),
+                )
+                .await
+                {
+                    tracing::error!(error = %e, "substrate-plane UDS server exited with error");
+                }
+            }))
+        }
+        None => None,
+    };
 
     // --- Configure auth layer (optional)
     let jwt_secret = config
