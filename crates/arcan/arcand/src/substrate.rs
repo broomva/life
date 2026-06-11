@@ -27,7 +27,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use aios_protocol::{
-    BranchId, EventKind, EventRecord, ModelRouting, OperatingMode, PolicySet, SessionId,
+    BranchId, ClientToolDefinition, EventKind, EventRecord, ModelRouting, OperatingMode, PolicySet,
+    SessionId,
 };
 use aios_runtime::{KernelRuntime, TickInput, TickKind};
 use arcan_substrate_proto::arcan::v1::{
@@ -150,21 +151,43 @@ impl AgentSubstrate for SubstrateService {
         let content = body.content;
         // Client tool definitions arrive as JSON bytes on
         // `tool_definitions` (additive field — lifed forwards the chat
-        // surface's tools). The kernel's tick path executes tools from
-        // its own governed registry; merging client-declared tools into
-        // the per-session tool surface is a follow-up (the HTTP-backed
-        // `ArcanCall` impls in arcan-proxy honour them today). Log so
-        // operators can see when a client declared tools that the
-        // kernel path does not yet surface to the model.
-        if !body.tool_definitions.is_empty() {
-            tracing::debug!(
+        // surface's tools, each entry one JSON object in the OpenAI
+        // function shape `{"name","description","parameters"}`). Parse
+        // them at this trust boundary: a malformed entry is warned and
+        // skipped, never aborting an otherwise-valid turn. The parsed
+        // set is surfaced to the model on every tick of this dispatch;
+        // the kernel enforces registry-wins on name collisions and, when
+        // the model proposes a client tool, hands the call back to the
+        // caller as TOOL_CALL_PENDING (category "client") instead of
+        // executing it through the harness.
+        let client_tools: Vec<ClientToolDefinition> = if body.tool_definitions.is_empty() {
+            Vec::new()
+        } else {
+            let total = body.tool_definitions.len();
+            let parsed: Vec<ClientToolDefinition> = body
+                .tool_definitions
+                .iter()
+                .filter_map(|bytes| match ClientToolDefinition::from_wire_bytes(bytes) {
+                    Ok(def) => Some(def),
+                    Err(err) => {
+                        tracing::warn!(
+                            sid = %sid_proto.value,
+                            error = %err,
+                            "dispatch_message: skipping malformed client tool definition"
+                        );
+                        None
+                    }
+                })
+                .collect();
+            tracing::info!(
                 sid = %sid_proto.value,
-                tool_count = body.tool_definitions.len(),
-                "dispatch_message: client tool definitions received; kernel \
-                 tick uses the registry-driven tool set (client-tool merge \
-                 is a follow-up)"
+                accepted = parsed.len(),
+                skipped = total - parsed.len(),
+                "dispatch_message: client tool definitions parsed; surfacing to model \
+                 (registry tools win on collision; client tools are client-executed)"
             );
-        }
+            parsed
+        };
 
         let (tx, rx) = mpsc::channel::<Result<AgentEvent, Status>>(DISPATCH_CHANNEL_CAPACITY);
 
@@ -243,6 +266,11 @@ impl AgentSubstrate for SubstrateService {
                     proposed_tool: None,
                     system_prompt: None,
                     allowed_tools: None,
+                    // Surfaced on every tick of this dispatch so the model
+                    // keeps seeing the client tools across the multi-tick
+                    // loop (e.g. a registry tool runs, then the model
+                    // proposes a client tool on the follow-up call).
+                    client_tools: client_tools.clone(),
                     kind: TickKind::Direct,
                 };
                 match runtime
