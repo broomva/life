@@ -1626,6 +1626,19 @@ the runbook §6.1 known-limitations log):**
 the runbook → Phase 1 SHIPPED; then queue Phase 2 (J-Sub-H/I/J)
 gated on Spec E E-Sub-F conformance completion.
 
+**2026-06-11 — lifegw-stack Stage 6: real lago substrate (BRO-1464).**
+lagod gains a substrate-plane UDS server (`--uds-socket` / env
+`LAGO_UDS_SOCKET`, mirroring arcand's serve shape) — BRO-1017 had left
+`lago.v1.LagoSubstrate` TCP-only while lifed's lago-proxy dials a Unix
+socket, so real lago was unselectable. The lifegw-stack container now
+builds + ships `lagod`, starts it before lifed (socket presence is
+sampled once at lifed boot), persists its journal/blobs under the
+volume-backed `${LIFE_STATE_DIR}/lago`, and pins lagod's TCP planes
+clear of Caddy's `$PORT` (HTTP default was 8080 — a boot-order
+collision hazard). Expected prod boot line:
+`substrates: arcan=real lago=real haima=mock anima=mock`. haima/anima
+stay mocked pending their daemons (incremental rollout per #1695).
+
 **2026-06-11 — kernel dispatch path surfaces client tool definitions
 (BRO-1463, completes the #1697 arc).** Stage-5's real-arcand activation
 had regressed chat client tools: the gateway (mock) path attached
@@ -1645,6 +1658,7 @@ AskHuman preservation), and a topology-B e2e (defs → provider request
 one provider call) — net +12 tests on the arc. Gap closed:
 "kernel dispatch drops client tool_definitions" (BRO-1463).
 
+## Health Summary
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |

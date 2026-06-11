@@ -60,17 +60,46 @@ jobs:
       - run: cargo clippy --workspace -- -D warnings -A clippy::too_many_arguments
 
   # ── Gate 3: Tests (Linux) ─────────────────────────────────────────
+  #
+  # Runner-death hardening (2026-06-11): this lane died on three
+  # consecutive main pushes (and twice on PR #1693) with the
+  # `cargo test --workspace` step ending in a NULL conclusion — the
+  # runner agent itself was killed, not the tests. That is the
+  # disk-exhaustion signature: a 125-crate workspace debug+test build
+  # plus a multi-GB restored cache overruns the ~14 GB usable disk on
+  # ubuntu-latest. Three mitigations, in order of leverage:
+  #   1. CARGO_PROFILE_*_DEBUG=0 — debuginfo dominates target/ size
+  #      (typically 50-70% of it); tests don't need DWARF on CI.
+  #      debug-assertions are a separate knob and stay on.
+  #   2. Shed ~10 GB of preinstalled runner bloat we never use.
+  #   3. Bump the rust-cache lineage (v0 grew past usefulness; a fresh
+  #      lineage caches the slimmer no-debuginfo artifacts).
+  # macOS keeps full debuginfo — its runners have ~100 GB disk.
   test-linux:
     name: Test (Linux)
     needs: [format, lint]
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
+      - name: Free runner disk (unused preinstalled toolchains)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/.ghcup /opt/hostedtoolcache/CodeQL \
+                      /usr/share/swift || true
+          df -h /
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust
       - run: cargo test --workspace
+      - name: Disk headroom after tests
+        if: always()
+        run: df -h /
 
   # ── Gate 4: Tests (macOS) — post-merge only ──────────────────────
   #
