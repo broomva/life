@@ -1668,12 +1668,26 @@ at lagod's lago-api plane, so arcan boots `RemoteLagoJournal`: every
 public session's FileWrite/ToolCall/message events land in the durable
 lago store and survive redeploys (`ARCAN_LAGO_URL=embedded` escapes to
 the local journal). arcan's data dir also moved to the volume
-(`${LIFE_STATE_DIR}/arcan`). Remaining FS-substrate gaps tracked:
-blob *content* still local until a remote blob backend (BRO-1478);
-exec-path (shell) writes still bypass the manifest until a post-exec
-diff (BRO-1477); branching still pinned to `main` (BRO-1479).
+(`${LIFE_STATE_DIR}/arcan`). Verified in prod: boot log
+`Starting arcan (remote Lago journal)`.
 
-## Health Summary
+**2026-06-11 — remote blob backend: blob content flows to lagod
+(BRO-1478).** Stage 6b moved arcan's event journal to lagod, but blob
+*content* (the actual file bytes behind every FileWrite) still wrote
+to arcan's local disk. A new `BlobBackend` trait (lago-store) abstracts
+content-addressed storage; `LocalBlobBackend` wraps the existing
+`BlobStore` byte-identically, `RemoteBlobBackend` (arcan-lago) talks to
+lagod's `/v1/blobs/{hash}` HTTP routes. `FsTracker` now holds
+`Arc<dyn BlobBackend>`; `arcan serve` selects remote when `LAGO_URL` is
+set, local otherwise — so a remote-journal deployment is now durable
+end-to-end (events AND content survive redeploys). The remote backend
+bridges its sync trait surface over async HTTP via a dedicated worker
+thread (NOT `block_on` on the caller — the tool harness runs the sync
+tool chain on a Tokio worker, where a naive in-place `block_on` would
+panic "Cannot start a runtime from within a runtime"); a round-trip
+test drives it from inside a multi-thread runtime to pin that. Closes
+the "blobs stay local even in remote-journal mode" FS-substrate gap.
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
