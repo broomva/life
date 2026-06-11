@@ -3,12 +3,13 @@ pub mod shutdown;
 pub mod substrate;
 
 use config::DaemonConfig;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
 
 /// Bind lagod's substrate-plane gRPC server (`lago.v1.LagoSubstrate`) on
-/// a Unix-domain socket and serve it until the shutdown signal fires.
+/// a Unix-domain socket and serve it until `shutdown` resolves.
 ///
 /// Stage 6 (June 2026): this is the entry point lifed's `lago-proxy`
 /// reaches in Topology B. lago-proxy dials a UDS (`LagoProxy::connect`
@@ -19,10 +20,24 @@ use tracing::info;
 /// arcand's `serve_substrate_uds` (`crates/arcan/arcan/src/main.rs`):
 /// ensure the parent dir exists, unlink any stale socket, bind, then
 /// serve via `serve_with_incoming_shutdown`.
-async fn serve_substrate_uds(
+///
+/// The shutdown trigger is injected rather than hard-wired to
+/// `shutdown::shutdown_signal()` so the bind→serve→cleanup path can be
+/// exercised by an integration test with a `oneshot` (the daemon passes
+/// the real signal future at its single call site below).
+///
+/// `#[doc(hidden)] pub` purely so `tests/topology_b_e2e_lago.rs` can
+/// drive lagod's OWN serve path (rather than a hand-rolled copy of it);
+/// not part of the supported API surface.
+#[doc(hidden)]
+pub async fn serve_substrate_uds<S>(
     socket_path: PathBuf,
     journal: Arc<dyn lago_core::Journal>,
-) -> Result<(), Box<dyn std::error::Error>> {
+    shutdown: S,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    S: Future<Output = ()> + Send + 'static,
+{
     use lago_substrate_proto::lago::v1::lago_substrate_server::LagoSubstrateServer;
 
     if let Some(parent) = socket_path.parent()
@@ -49,7 +64,7 @@ async fn serve_substrate_uds(
 
     tonic::transport::Server::builder()
         .add_service(LagoSubstrateServer::new(service))
-        .serve_with_incoming_shutdown(incoming, shutdown::shutdown_signal())
+        .serve_with_incoming_shutdown(incoming, shutdown)
         .await
         .map_err(|e| format!("substrate UDS serve: {e}"))?;
 
@@ -148,7 +163,9 @@ pub async fn run(
     let uds_handle = uds_socket.map(|socket_path| {
         let uds_journal = journal.clone() as Arc<dyn lago_core::Journal>;
         tokio::spawn(async move {
-            if let Err(e) = serve_substrate_uds(socket_path, uds_journal).await {
+            if let Err(e) =
+                serve_substrate_uds(socket_path, uds_journal, shutdown::shutdown_signal()).await
+            {
                 tracing::error!(error = %e, "substrate-plane UDS server exited with error");
             }
         })
