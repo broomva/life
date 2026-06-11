@@ -230,6 +230,12 @@ impl ArcanCall for AnthropicArcan {
         sid: &str,
         content: &str,
         model: Option<&str>,
+        // BRO-1479: branching is a substrate (event-journal) concept;
+        // the raw Anthropic Messages API wire has no notion of it, so
+        // this HTTP-backed impl accepts the field and ignores it. Branch
+        // forking takes effect only on the substrate-gRPC `ArcanProxy`
+        // path (real arcand).
+        _branch: &str,
         tools: &[serde_json::Value],
     ) -> ArcanProxyResult<Pin<Box<dyn Stream<Item = Result<AgentEvent, tonic::Status>> + Send>>>
     {

@@ -192,11 +192,22 @@ impl ArcanProxy {
     /// payload_json wire pattern) so the chat surface's tools reach the
     /// substrate. Entries that fail to serialize are skipped — a
     /// malformed definition must not poison the whole dispatch.
+    ///
+    /// BRO-1479: `branch` is forwarded verbatim onto
+    /// `DispatchMessageReq.branch`. Empty ⇒ the substrate dispatches on
+    /// `main` (backward-compatible). A non-empty value forks the
+    /// session's event stream + filesystem manifest on that branch; the
+    /// arcand substrate validates the name (`[a-zA-Z0-9_-]{1,64}`) at
+    /// its trust boundary and rejects an invalid name with
+    /// `INVALID_ARGUMENT`. This proxy passes the bytes through unaltered
+    /// — validation is the substrate's responsibility (defence in depth:
+    /// the public lifegw edge also pre-validates).
     pub async fn dispatch_message(
         &self,
         sid: &str,
         content: &str,
         _model: Option<&str>,
+        branch: &str,
         tools: &[serde_json::Value],
     ) -> ArcanProxyResult<
         Pin<
@@ -217,6 +228,7 @@ impl ArcanProxy {
             }),
             content: content.to_owned(),
             tool_definitions: serialize_tool_definitions(tools),
+            branch: branch.to_owned(),
         });
         self.attach_token(&mut req);
         let upstream = match client.dispatch_message(req).await {
@@ -287,6 +299,14 @@ fn record_outcome(guard: Option<PoolGuard>, success_or_permanent: bool) {
 /// `ArcanProxy` forwards them as `DispatchMessageReq.tool_definitions`
 /// bytes; HTTP-backed impls inject them into the outbound provider
 /// request body (`tools` array).
+///
+/// BRO-1479: `branch` selects the target branch for this dispatch's
+/// ticks. Empty ⇒ `main` (backward-compatible — pre-BRO-1479 callers
+/// never set it). The substrate-gRPC `ArcanProxy` forwards it onto
+/// `DispatchMessageReq.branch`, where arcand validates + keys it into
+/// the event journal and filesystem manifest. HTTP-backed impls
+/// (`VercelAiGatewayArcan`, `AnthropicArcan`) have no branch concept on
+/// the raw provider wire and ignore it; mocks accept and ignore it.
 #[async_trait]
 pub trait ArcanCall: Send + Sync {
     async fn create_agent(&self, sid: &str) -> ArcanProxyResult<String>;
@@ -296,6 +316,7 @@ pub trait ArcanCall: Send + Sync {
         sid: &str,
         content: &str,
         model: Option<&str>,
+        branch: &str,
         tools: &[serde_json::Value],
     ) -> ArcanProxyResult<
         Pin<
@@ -320,6 +341,7 @@ impl ArcanCall for ArcanProxy {
         sid: &str,
         content: &str,
         model: Option<&str>,
+        branch: &str,
         tools: &[serde_json::Value],
     ) -> ArcanProxyResult<
         Pin<
@@ -329,7 +351,7 @@ impl ArcanCall for ArcanProxy {
             >,
         >,
     > {
-        ArcanProxy::dispatch_message(self, sid, content, model, tools).await
+        ArcanProxy::dispatch_message(self, sid, content, model, branch, tools).await
     }
 }
 
@@ -396,6 +418,7 @@ impl<C: ArcanCall> ArcanCall for Pooled<C> {
         sid: &str,
         content: &str,
         model: Option<&str>,
+        branch: &str,
         tools: &[serde_json::Value],
     ) -> ArcanProxyResult<
         Pin<
@@ -409,7 +432,7 @@ impl<C: ArcanCall> ArcanCall for Pooled<C> {
         let guard = self.pool.acquire().await.map_err(ArcanProxyError::from)?;
         match self
             .inner
-            .dispatch_message(sid, content, model, tools)
+            .dispatch_message(sid, content, model, branch, tools)
             .await
         {
             Ok(stream) => Ok(Box::pin(PoolGuardedStream::new(stream, Some(guard)))),
@@ -538,6 +561,7 @@ mod tests {
                 _sid: &str,
                 _content: &str,
                 _model: Option<&str>,
+                _branch: &str,
                 _tools: &[serde_json::Value],
             ) -> ArcanProxyResult<
                 Pin<
@@ -588,6 +612,7 @@ mod tests {
                 _sid: &str,
                 _content: &str,
                 _model: Option<&str>,
+                _branch: &str,
                 _tools: &[serde_json::Value],
             ) -> ArcanProxyResult<
                 Pin<
@@ -659,6 +684,7 @@ mod tests {
             }),
             content: "hello".to_string(),
             tool_definitions: serialize_tool_definitions(&tools),
+            branch: String::new(),
         };
         let bytes = req.encode_to_vec();
         let decoded = arcan_pb::DispatchMessageReq::decode(bytes.as_slice()).expect("decode");
@@ -667,6 +693,40 @@ mod tests {
         let tool: serde_json::Value =
             serde_json::from_slice(&decoded.tool_definitions[0]).expect("JSON");
         assert_eq!(tool["name"], "get_weather");
+    }
+
+    /// Wire-shape guard: `DispatchMessageReq.branch` survives a prost
+    /// encode/decode round trip unchanged (additive field 4 on the
+    /// substrate dispatch request, BRO-1479). An empty branch round-trips
+    /// to empty — the substrate reads that as `main`, preserving
+    /// pre-BRO-1479 wire compatibility.
+    #[test]
+    fn dispatch_message_req_proto_roundtrip_preserves_branch() {
+        use prost::Message;
+        // Non-empty branch survives the hop.
+        let req = arcan_pb::DispatchMessageReq {
+            sid: Some(aios_v1::SessionId {
+                value: "sid-1".to_string(),
+            }),
+            content: "hello".to_string(),
+            tool_definitions: Vec::new(),
+            branch: "exp-1".to_string(),
+        };
+        let bytes = req.encode_to_vec();
+        let decoded = arcan_pb::DispatchMessageReq::decode(bytes.as_slice()).expect("decode");
+        assert_eq!(decoded.branch, "exp-1");
+
+        // Empty branch round-trips to empty (⇒ main at the substrate).
+        let req_default = arcan_pb::DispatchMessageReq {
+            sid: None,
+            content: String::new(),
+            tool_definitions: Vec::new(),
+            branch: String::new(),
+        };
+        let decoded_default =
+            arcan_pb::DispatchMessageReq::decode(req_default.encode_to_vec().as_slice())
+                .expect("decode default");
+        assert!(decoded_default.branch.is_empty());
     }
 
     #[tokio::test]

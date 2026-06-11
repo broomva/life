@@ -274,6 +274,12 @@ impl ArcanCall for VercelAiGatewayArcan {
         sid: &str,
         content: &str,
         model: Option<&str>,
+        // BRO-1479: branching is a substrate (event-journal) concept;
+        // the raw OpenAI-compatible gateway wire has no notion of it, so
+        // this HTTP-backed impl accepts the field and ignores it. Branch
+        // forking takes effect only on the substrate-gRPC `ArcanProxy`
+        // path (real arcand).
+        _branch: &str,
         tools: &[serde_json::Value],
     ) -> ArcanProxyResult<Pin<Box<dyn Stream<Item = Result<AgentEvent, tonic::Status>> + Send>>>
     {
@@ -1092,7 +1098,7 @@ mod tests {
             "parameters": {"type": "object", "properties": {}},
         })];
         let stream = arc
-            .dispatch_message("sess_x", "hi", None, &tools)
+            .dispatch_message("sess_x", "hi", None, "", &tools)
             .await
             .expect("tools reach body");
         let mut s = Box::pin(stream);
@@ -1269,7 +1275,7 @@ mod tests {
 
         let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
         let stream = arc
-            .dispatch_message("sess_x", "hello?", None, &[])
+            .dispatch_message("sess_x", "hello?", None, "", &[])
             .await
             .expect("dispatch");
         let mut tokens = Vec::new();
@@ -1319,7 +1325,7 @@ mod tests {
         let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
         // Override should win over `cfg.model = "test-model"`.
         let stream = arc
-            .dispatch_message("sess_x", "hi", Some("openai/gpt-4o-mini"), &[])
+            .dispatch_message("sess_x", "hi", Some("openai/gpt-4o-mini"), "", &[])
             .await
             .expect("override reaches body");
         let mut s = Box::pin(stream);
@@ -1352,7 +1358,7 @@ mod tests {
         let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
         // No override → cfg.model is "test-model" (from `cfg(...)` helper).
         let stream = arc
-            .dispatch_message("sess_x", "hi", None, &[])
+            .dispatch_message("sess_x", "hi", None, "", &[])
             .await
             .expect("env fallback reaches body");
         let mut s = Box::pin(stream);
@@ -1370,7 +1376,7 @@ mod tests {
             .await;
 
         let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
-        match arc.dispatch_message("sess_x", "hi", None, &[]).await {
+        match arc.dispatch_message("sess_x", "hi", None, "", &[]).await {
             Ok(_) => panic!("must surface 401"),
             Err(ArcanProxyError::Transport(m)) => {
                 assert!(m.contains("401"), "msg: {m}");
