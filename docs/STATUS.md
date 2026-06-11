@@ -1626,6 +1626,22 @@ the runbook §6.1 known-limitations log):**
 the runbook → Phase 1 SHIPPED; then queue Phase 2 (J-Sub-H/I/J)
 gated on Spec E E-Sub-F conformance completion.
 
+**2026-06-11 — kernel dispatch path surfaces client tool definitions
+(BRO-1463, completes the #1697 arc).** Stage-5's real-arcand activation
+had regressed chat client tools: the gateway (mock) path attached
+`tool_definitions` since #1697, but arcand's kernel/UDS dispatch
+received and dropped them (the documented substrate.rs follow-up).
+Now: `ClientToolDefinition` (aios-protocol, strict wire parse —
+malformed entries warn+skip) rides `TickInput.client_tools` into the
+provider request on every tick of a dispatch; registry tools win name
+collisions; a model proposal of a client tool emits
+`ToolCallRequested(category="client")` → wire `TOOL_CALL_PENDING` and
+ends the turn cleanly (no kernel policy/harness involvement — the chat
+surface executes the tool and continues via replayed history).
+Covered by aios-protocol parse tests, aios-runtime tick tests, and a
+topology-B e2e (defs → provider request → TOOL_CALL_PENDING(category
+=client) → FINISH, no TOOL_RESULT, exactly one provider call).
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |
