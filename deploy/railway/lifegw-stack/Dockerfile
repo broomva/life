@@ -2,8 +2,10 @@
 #
 # What runs inside:
 #   - arcan          (substrate-plane gRPC UDS at /run/life/arcan.sock —
-#                     Stage 5: lifed picks it up as the REAL arcan substrate;
-#                     lago/haima/anima stay mocked via LIFED_ALLOW_MOCK_FALLBACK)
+#                     Stage 5: lifed picks it up as the REAL arcan substrate)
+#   - lagod          (substrate-plane gRPC UDS at /run/life/lago.sock —
+#                     Stage 6: lifed picks it up as the REAL lago substrate;
+#                     haima/anima stay mocked via LIFED_ALLOW_MOCK_FALLBACK)
 #   - lifed          (UDS at /run/life/life.sock + /run/life/life-admin.sock)
 #   - lifegw         (HTTPS on 127.0.0.1:8443, self-signed cert, dev signer)
 #   - caddy          (binds :$PORT cleartext, reverse-proxies to https://127.0.0.1:8443
@@ -49,12 +51,16 @@ COPY . .
 # Stage 5: `-p arcan` ships the real arcan substrate daemon — its
 # `serve --uds-socket /run/life/arcan.sock` binds the substrate-plane
 # gRPC server that lifed's per-substrate bootstrap dials.
+# Stage 6: `-p lagod` ships the real lago substrate daemon — its
+# `--uds-socket /run/life/lago.sock` binds `lago.v1.LagoSubstrate` over
+# the same socket lifed's lago-proxy dials.
 RUN cargo build --release \
         --manifest-path Cargo.toml \
         -p lifegw \
         -p lifed \
         -p arcan \
- && strip ./.target/release/lifegw ./.target/release/lifed ./.target/release/arcan
+        -p lagod \
+ && strip ./.target/release/lifegw ./.target/release/lifed ./.target/release/arcan ./.target/release/lagod
 
 # ── Stage 2 — runtime image ─────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
@@ -80,9 +86,12 @@ RUN apt-get update \
  && apt-get purge -y --auto-remove curl gnupg \
  && rm -rf /var/lib/apt/lists/*
 
-# Runtime layout — every UDS lifegw + lifed + arcan touches lives under
-# /run/life/. /var/lib/arcan holds arcan's journal + blob storage (mount
-# a Railway volume there to persist sessions across redeploys).
+# Runtime layout — every UDS lifegw + lifed + arcan + lagod touches
+# lives under /run/life/. /var/lib/arcan holds arcan's journal + blob
+# storage. lagod's journal + blobs live under the mounted volume at
+# ${LIFE_STATE_DIR}/lago (entrypoint.sh creates it) so events survive
+# redeploys — the dir is NOT pre-created here because LIFE_STATE_DIR is
+# a runtime mount point.
 RUN groupadd --system life-runtime \
  && useradd  --system --gid life-runtime --home-dir /var/lib/life --create-home life \
  && mkdir -p /run/life /etc/lifegw/tls /etc/lifegw /etc/lifed /var/lib/arcan \
@@ -93,6 +102,7 @@ WORKDIR /opt/life
 COPY --from=builder /build/.target/release/lifegw /usr/local/bin/lifegw
 COPY --from=builder /build/.target/release/lifed  /usr/local/bin/lifed
 COPY --from=builder /build/.target/release/arcan  /usr/local/bin/arcan
+COPY --from=builder /build/.target/release/lagod  /usr/local/bin/lagod
 
 # Blessed authored agents for arcan's FsAgentRegistry (spawn_agent
 # fails-closed with unknown_agent when the registry is empty).
@@ -105,18 +115,20 @@ COPY deploy/railway/lifegw-stack/entrypoint.sh  /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Railway sets PORT at runtime; default for local docker run.
-# LIFED_ALLOW_MOCK_FALLBACK stays true: Stage 5's per-substrate
-# selection picks up the REAL arcand (its UDS is bound before lifed
-# starts — see entrypoint.sh) and mocks only lago/haima/anima.
+# LIFED_ALLOW_MOCK_FALLBACK stays true: Stage 6's per-substrate
+# selection picks up the REAL arcand AND lagod (their UDS sockets are
+# bound before lifed starts — see entrypoint.sh) and mocks only
+# haima/anima until their daemons ship.
 ENV PORT=8080 \
     LIFEGW_CONFIG=/etc/lifegw/config.toml \
     LIFED_CONFIG=/etc/lifed/config.toml \
     LIFED_ALLOW_MOCK_FALLBACK=true \
-    RUST_LOG=info,lifegw=info,lifed=info,arcan=info,arcand=info \
+    RUST_LOG=info,lifegw=info,lifed=info,arcan=info,arcand=info,lagod=info,lago_journal=info,lago_api=info \
     RUST_BACKTRACE=1
 
 EXPOSE 8080
 
-# tini guards against caddy → lifegw → lifed orphan reaping; entrypoint.sh
-# fans out the three processes and execs caddy in fg so SIGTERM propagates.
+# tini guards orphan reaping; entrypoint.sh fans out the five processes
+# (arcan, lagod, lifed, lifegw, caddy) and waits on caddy under a live
+# trap so SIGTERM drains every child (see entrypoint §6).
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
