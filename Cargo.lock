@@ -376,6 +376,7 @@ version = "0.3.0"
 dependencies = [
  "aios-protocol",
  "aios-runtime",
+ "anima-identity",
  "anyhow",
  "arcan-aios-adapters",
  "arcan-commands",
@@ -409,6 +410,7 @@ dependencies = [
  "crossterm",
  "dirs 6.0.0",
  "ergon",
+ "ergon-anima-adapter",
  "ergon-life-hooks",
  "ergon-life-sinks",
  "ergon-nous-adapter",
