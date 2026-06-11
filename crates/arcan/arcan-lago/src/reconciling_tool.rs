@@ -17,7 +17,15 @@
 //! Reconciliation is best-effort observability layered *on top of* the tool.
 //! It never changes exec semantics:
 //! - the inner tool's result (and any error) is returned verbatim;
-//! - reconciliation only runs after a successful, non-error result;
+//! - reconciliation runs after the inner tool returns an `Ok` result whose
+//!   `is_error` flag is unset. In practice this means it reconciles after
+//!   *every* shell command — the canonical `BashTool` reports a non-zero exit
+//!   as a normal `Ok { is_error: false }` result (the command ran; its exit
+//!   code is data, not a tool failure), so a failed-but-executed command still
+//!   has its workspace side effects tracked, which is correct. The `is_error`
+//!   guard is defensive cover for a hypothetical inner tool that *does* set the
+//!   flag to signal an aborted exec; only a hard `Err` (the tool itself failed
+//!   to run) skips reconciliation.
 //! - a reconciliation failure (diff/blob-put error, or a full/closed channel)
 //!   is logged and swallowed — the exec already happened.
 //!
@@ -115,10 +123,13 @@ impl<T: Tool> Tool for ReconcilingTool<T> {
         // verbatim regardless of what reconciliation does.
         let result = self.inner.execute(call, ctx)?;
 
-        // Only reconcile after a successful, non-error result. An is_error
-        // result means the command itself signalled failure; we still skip
-        // tracking to avoid attributing partial/aborted side effects, matching
-        // the "exec happened cleanly" contract.
+        // Reconcile after the tool returns an Ok result with `is_error` unset.
+        // The canonical BashTool always reports `is_error: false` (a non-zero
+        // exit is normal data, not a tool failure), so this reconciles after
+        // every executed command — including ones that exited non-zero, whose
+        // workspace side effects we still want tracked. The guard only suppresses
+        // reconciliation for a hypothetical inner tool that sets `is_error` to
+        // signal an aborted exec; a hard `Err` already returned above.
         if !result.is_error {
             self.reconcile_and_emit();
         }

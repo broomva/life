@@ -47,7 +47,7 @@ use clap::{Parser, Subcommand};
 use config::ResolvedConfig;
 use lago_aios_eventstore_adapter::LagoAiosEventStoreAdapter;
 use lago_core::{BranchId, SessionId};
-use lago_fs::{FsTracker, Manifest};
+use lago_fs::{FsTracker, SnapshotLimits};
 use lago_journal::RedbJournal;
 use life_vigil::VigConfig;
 use nous_observer::NousToolObserver;
@@ -690,7 +690,19 @@ fn run_serve(
     // --- Lago-tracked filesystem (O(1) write tracking via FsTracker) ---
     let fs_policy = FsPolicy::new(workspace_root.clone());
     let local_fs = LocalFs::new(fs_policy);
-    let tracker = Arc::new(FsTracker::new(Manifest::new(), blob_store.clone()));
+    // Baseline the tracker against the live, already-populated workspace at
+    // boot. Seeding with an empty manifest would make the first exec-path
+    // reconcile diff the whole workspace against nothing — emitting a spurious
+    // FileWrite for EVERY pre-existing file. `with_baseline` records that prior
+    // state up front (no events), so reconcile only reports genuine post-boot
+    // changes. The baseline limits MUST match the exec-path reconciler's limits
+    // (ReconcilingTool uses SnapshotLimits::default()) so both see the same file
+    // set — a mismatch would resurface as phantom diffs on the first reconcile.
+    let tracker = Arc::new(FsTracker::with_baseline(
+        &workspace_root,
+        blob_store.clone(),
+        SnapshotLimits::default(),
+    )?);
     let (fs_event_tx, fs_event_rx) = tokio::sync::mpsc::channel(1000);
     // Share the tracker + event channel with the exec-path reconciler below so
     // shell-tool writes land in the same manifest/blob-store/journal that the

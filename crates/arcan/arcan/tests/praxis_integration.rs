@@ -926,3 +926,129 @@ async fn exec_path_bounded_walk_skips_git_and_oversized_file() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// Like [`build_exec_path`] but baselines the tracker against the
+/// already-populated `workspace_root` (via `FsTracker::with_baseline`),
+/// mirroring how `main.rs` seeds the tracker at boot. Used to prove the
+/// first shell exec does NOT emit spurious writes for pre-existing files.
+#[allow(clippy::type_complexity)]
+fn build_exec_path_baselined(
+    root: &Path,
+    workspace_root: &Path,
+    limits: SnapshotLimits,
+) -> (
+    ReconcilingTool<BashTool>,
+    Arc<dyn lago_core::Journal>,
+    Arc<FsTracker>,
+    Arc<BlobStore>,
+    lago_core::EventQuery,
+) {
+    let journal_path = root.join("journal.redb");
+    let blobs_path = root.join("blobs");
+    std::fs::create_dir_all(&blobs_path).unwrap();
+
+    let journal = RedbJournal::open(&journal_path).expect("open journal");
+    let blob_store = Arc::new(BlobStore::open(&blobs_path).expect("open blob store"));
+    let journal: Arc<dyn lago_core::Journal> = Arc::new(journal);
+
+    // Baseline against the populated workspace using the SAME limits the
+    // reconciler will use — exactly the main.rs wiring under test.
+    let tracker = Arc::new(
+        FsTracker::with_baseline(workspace_root, blob_store.clone(), limits)
+            .expect("baseline snapshot"),
+    );
+    let (fs_event_tx, fs_event_rx) = tokio::sync::mpsc::channel(1000);
+
+    let session_id = SessionId::from_string("exec-path-baseline");
+    let branch_id = BranchId::from_string("main");
+    tokio::spawn(run_event_writer(
+        fs_event_rx,
+        journal.clone(),
+        session_id.clone(),
+        branch_id.clone(),
+    ));
+
+    let sandbox_policy = SandboxPolicy {
+        workspace_root: workspace_root.to_path_buf(),
+        shell_enabled: true,
+        network: NetworkPolicy::AllowAll,
+        allowed_env: BTreeSet::new(),
+        max_execution_ms: 10_000,
+        max_stdout_bytes: 1024 * 1024,
+        max_stderr_bytes: 1024 * 1024,
+    };
+    let runner = Box::new(LocalCommandRunner);
+    let tool = ReconcilingTool::new(
+        BashTool::new(sandbox_policy, runner),
+        tracker.clone(),
+        fs_event_tx,
+        workspace_root.to_path_buf(),
+    )
+    .with_limits(limits);
+
+    let query = lago_core::EventQuery::new()
+        .session(session_id)
+        .branch(branch_id);
+
+    (tool, journal, tracker, blob_store, query)
+}
+
+#[tokio::test]
+async fn exec_path_baseline_suppresses_spurious_preexisting_writes() {
+    // Must-fix #1 (end-to-end, real wiring): a tracker baselined against a
+    // populated workspace must NOT emit a FileWrite for pre-existing files on
+    // the first shell exec. Only the file the command actually created should
+    // reach the journal.
+    let root = unique_root("exec-baseline");
+    let workspace = root.join("workspace");
+    std::fs::create_dir_all(workspace.join("sub")).unwrap();
+
+    // Pre-populate BEFORE building the tracker — these are the "live CWD" files
+    // that the buggy empty-manifest seed would have diffed into existence.
+    std::fs::write(workspace.join("preexisting.txt"), "i was here first").unwrap();
+    std::fs::write(workspace.join("sub/nested.txt"), "me too").unwrap();
+
+    let (tool, journal, tracker, _blob, query) =
+        build_exec_path_baselined(&root, &workspace, SnapshotLimits::default());
+
+    // Baseline already recorded the pre-existing files (no events emitted).
+    assert!(tracker.manifest().exists("/preexisting.txt"));
+    assert!(tracker.manifest().exists("/sub/nested.txt"));
+
+    // A shell command creates ONE genuinely new file, touching nothing else.
+    let result = tool
+        .execute(&exec_call("printf 'brand new' > fresh.txt"), &exec_ctx())
+        .unwrap();
+    assert_eq!(result.output["exit_code"], 0);
+
+    // The new file's FileWrite reaches the journal (proves the reconcile ran).
+    await_event(
+        &journal,
+        &query,
+        |p| matches!(p, lago_core::event::EventPayload::FileWrite { path, .. } if path == "/fresh.txt"),
+        "FileWrite for /fresh.txt",
+    )
+    .await;
+
+    // Now the negative assertion is deterministic: the reconcile that emitted
+    // /fresh.txt is the SAME pass that would have emitted the pre-existing files
+    // had the baseline been broken. None must appear in the journal.
+    let events = journal.read(query.clone()).await.expect("read journal");
+    let spurious: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            lago_core::event::EventPayload::FileWrite { path, .. }
+                if path == "/preexisting.txt" || path == "/sub/nested.txt" =>
+            {
+                Some(path.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        spurious.is_empty(),
+        "baseline must suppress writes for pre-existing files; got spurious: {spurious:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
