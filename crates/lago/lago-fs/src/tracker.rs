@@ -16,6 +16,21 @@ use crate::diff::{self, DiffEntry};
 use crate::manifest::Manifest;
 use crate::snapshot::{self, SnapshotLimits};
 
+/// `content_type` marker for implicit parent-directory sentinel entries.
+///
+/// `Manifest::apply_write` materializes a zero-size sentinel for every parent
+/// directory of a written path. The snapshot walk only ever yields regular
+/// files, so these sentinels can only appear in a diff as orphans (e.g. the
+/// last file in a subdir is deleted, leaving the dir sentinel `Removed`).
+/// They must never be mapped to `FileWrite`/`FileDelete` payloads — a path
+/// that was never a file must not produce a file event.
+const DIRECTORY_SENTINEL: &str = "inode/directory";
+
+/// True if a manifest entry is an implicit directory sentinel (not a real file).
+fn is_directory_sentinel(entry: &lago_core::ManifestEntry) -> bool {
+    entry.content_type.as_deref() == Some(DIRECTORY_SENTINEL)
+}
+
 /// Inline filesystem tracker producing event payloads on writes/deletes.
 ///
 /// Thread-safe: the internal manifest is behind a `Mutex`.
@@ -31,6 +46,37 @@ impl FsTracker {
             manifest: Mutex::new(manifest),
             blob_store,
         }
+    }
+
+    /// Create a tracker whose initial manifest is a *baseline snapshot* of
+    /// `workspace_root`, taken WITHOUT emitting any events.
+    ///
+    /// This is the correct constructor when the tracker is attached to a live,
+    /// already-populated workspace (e.g. `arcan serve` over the current
+    /// directory). Seeding with an empty [`Manifest::new`] instead would make
+    /// the first [`reconcile_bounded`](Self::reconcile_bounded) diff the entire
+    /// workspace against nothing — emitting a spurious `FileWrite` for every
+    /// pre-existing file. Baselining records that prior state up front, so
+    /// reconcile only ever reports genuine post-baseline changes.
+    ///
+    /// The baseline uses the SAME bounded walk + prune rules as reconcile (via
+    /// `snapshot_bounded` with the supplied `limits`). This is load-bearing:
+    /// if the baseline saw a different file set than reconcile (e.g. a smaller
+    /// `max_files`, or different pruning), the first reconcile would re-discover
+    /// the divergence as phantom adds/removes. Pass the same `limits` the
+    /// exec-path reconciler will use (see
+    /// [`ReconcilingTool`](../../arcan_lago/struct.ReconcilingTool.html)).
+    pub fn with_baseline(
+        workspace_root: &Path,
+        blob_store: Arc<BlobStore>,
+        limits: SnapshotLimits,
+    ) -> LagoResult<Self> {
+        let baseline =
+            snapshot::snapshot_bounded(workspace_root, &Manifest::new(), &blob_store, limits)?;
+        Ok(Self {
+            manifest: Mutex::new(baseline),
+            blob_store,
+        })
     }
 
     /// O(1) track a file write. Stores the content in the blob store,
@@ -80,6 +126,22 @@ impl FsTracker {
     ///
     /// Uses unbounded snapshot limits. The exec-path uses
     /// [`reconcile_bounded`](Self::reconcile_bounded) to cap the walk.
+    ///
+    /// ## Known limitations (tracked for follow-up)
+    ///
+    /// Reconciliation is best-effort observability. A few edge cases are
+    /// knowingly deferred (ticketed separately):
+    ///
+    /// - **Same-size + same-second content edits are missed.** The snapshot
+    ///   fast path (`snapshot.rs`) reuses a file's prior hash when its size and
+    ///   mtime-in-seconds both match. A modification that preserves byte length
+    ///   and lands within the same wall-clock second is treated as unchanged.
+    /// - **Channel back-pressure on bursts.** Emitted payloads go through a
+    ///   bounded mpsc; a single reconcile of a huge tree could in principle fill
+    ///   it. In practice — with the workspace baselined at boot (see
+    ///   [`with_baseline`](Self::with_baseline)) — a normal reconcile only
+    ///   carries the handful of paths a single shell command touched, so the
+    ///   channel is never stressed.
     pub fn reconcile(&self, workspace_root: &Path) -> LagoResult<Vec<EventPayload>> {
         self.reconcile_bounded(workspace_root, SnapshotLimits::unbounded())
     }
@@ -89,24 +151,65 @@ impl FsTracker {
     ///
     /// This is the exec-path safety net — after a shell command runs, the
     /// workspace is re-scanned (subject to `limits`), diffed against the tracked
-    /// manifest, and every created/modified/deleted path is turned into a
+    /// manifest, and every created/modified/deleted *file* is turned into a
     /// `FileWrite`/`FileDelete` payload, identical in shape to the inline
     /// `track_write`/`track_delete` events. The manifest is updated in place.
+    ///
+    /// ## Directory sentinels are never emitted
+    ///
+    /// `Manifest::apply_write` materializes `inode/directory` sentinel entries
+    /// for parent dirs. The snapshot walk yields only regular files, so when a
+    /// command deletes the last file under a previously-tracked subdir, the
+    /// orphaned sentinel diffs as `Removed`. Those sentinel diffs are filtered
+    /// out here so a directory never becomes a phantom `FileDelete` (and an
+    /// added/modified sentinel never becomes a phantom `FileWrite`).
+    ///
+    /// ## Locking
+    ///
+    /// The O(n) walk + blob puts run WITHOUT holding the manifest lock (the
+    /// snapshot is built against a cheap clone of the current manifest, used
+    /// only as a hash-reuse hint). The lock is taken only to diff + swap.
+    ///
+    /// Race window: a concurrent FsPort `track_write` that lands after the walk
+    /// observed that path's prior state but before the swap will be clobbered by
+    /// the swap-to-disk-truth. Because the FsPort write path writes through to
+    /// disk, the swapped-in snapshot still reflects on-disk truth; the only
+    /// consequence is that the racing write's event may be re-emitted by the
+    /// next reconcile (a duplicate observability event, never a lost on-disk
+    /// write). Exec-path reconciles run serially after a single shell command,
+    /// so this window is small and benign.
     pub fn reconcile_bounded(
         &self,
         workspace_root: &Path,
         limits: SnapshotLimits,
     ) -> LagoResult<Vec<EventPayload>> {
-        let mut manifest = self.manifest.lock().unwrap();
+        // Snapshot the workspace WITHOUT holding the lock. Clone the current
+        // manifest only as a hash-reuse hint for the walk; correctness of the
+        // resulting snapshot does not depend on it (it is a full disk scan).
+        let base = {
+            let guard = self.manifest.lock().unwrap();
+            guard.clone()
+        };
         let new_manifest =
-            snapshot::snapshot_bounded(workspace_root, &manifest, &self.blob_store, limits)?;
-        let diffs = diff::diff(&manifest, &new_manifest);
+            snapshot::snapshot_bounded(workspace_root, &base, &self.blob_store, limits)?;
 
-        // Replace manifest with the fresh snapshot.
-        *manifest = new_manifest;
+        // Re-take the lock only to diff + swap.
+        let diffs = {
+            let mut manifest = self.manifest.lock().unwrap();
+            let diffs = diff::diff(&manifest, &new_manifest);
+            *manifest = new_manifest;
+            diffs
+        };
 
         let payloads = diffs
             .into_iter()
+            // Drop directory-sentinel diffs: a sentinel is never a real file,
+            // so it must not become a FileWrite/FileDelete payload.
+            .filter(|d| match d {
+                DiffEntry::Added { entry, .. }
+                | DiffEntry::Removed { entry, .. }
+                | DiffEntry::Modified { new: entry, .. } => !is_directory_sentinel(entry),
+            })
             .map(|d| match d {
                 DiffEntry::Added { path, entry }
                 | DiffEntry::Modified {
@@ -306,6 +409,76 @@ mod tests {
         )));
         assert!(tracker.manifest().exists("/small.txt"));
         assert!(!tracker.manifest().exists("/huge.bin"));
+    }
+
+    #[test]
+    fn with_baseline_then_unchanged_reconcile_emits_zero_events() {
+        // Must-fix #1: a tracker baselined against a populated dir must NOT
+        // emit a spurious FileWrite for every pre-existing file on the first
+        // reconcile. With no on-disk changes, reconcile emits nothing.
+        let tmp = tempfile::tempdir().unwrap();
+        let blob_store = Arc::new(BlobStore::open(tmp.path().join("blobs")).unwrap());
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(ws.join("sub")).unwrap();
+        fs::write(ws.join("a.txt"), "alpha").unwrap();
+        fs::write(ws.join("sub/b.txt"), "beta").unwrap();
+
+        let tracker = FsTracker::with_baseline(&ws, blob_store, SnapshotLimits::default()).unwrap();
+
+        // Baseline already recorded both files — no events.
+        assert!(tracker.manifest().exists("/a.txt"));
+        assert!(tracker.manifest().exists("/sub/b.txt"));
+
+        // First reconcile with nothing changed on disk → ZERO events.
+        let payloads = tracker.reconcile(&ws).unwrap();
+        assert!(
+            payloads.is_empty(),
+            "baselined tracker must emit no events when disk is unchanged, got {payloads:?}"
+        );
+    }
+
+    #[test]
+    fn deleting_last_file_in_subdir_emits_no_directory_delete() {
+        // Must-fix #2: a directory sentinel orphaned by deleting the last file
+        // under it must NOT become a phantom FileDelete.
+        let tmp = tempfile::tempdir().unwrap();
+        let blob_store = Arc::new(BlobStore::open(tmp.path().join("blobs")).unwrap());
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(ws.join("sub")).unwrap();
+        fs::write(ws.join("sub/a.txt"), "data").unwrap();
+
+        // Baseline records /sub/a.txt (and the /sub sentinel via apply_write).
+        let tracker = FsTracker::with_baseline(&ws, blob_store, SnapshotLimits::default()).unwrap();
+        assert!(tracker.manifest().exists("/sub/a.txt"));
+        assert!(
+            tracker.manifest().exists("/sub"),
+            "baseline should carry the /sub directory sentinel"
+        );
+
+        // Delete the only file, leaving /sub empty on disk.
+        fs::remove_file(ws.join("sub/a.txt")).unwrap();
+
+        let payloads = tracker.reconcile(&ws).unwrap();
+
+        // Exactly ONE FileDelete, for the file — never for the /sub sentinel.
+        let deletes: Vec<&String> = payloads
+            .iter()
+            .filter_map(|p| match p {
+                EventPayload::FileDelete { path } => Some(path),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            deletes,
+            vec![&"/sub/a.txt".to_string()],
+            "expected exactly one FileDelete for the file, none for /sub, got {payloads:?}"
+        );
+        assert!(
+            !payloads
+                .iter()
+                .any(|p| matches!(p, EventPayload::FileDelete { path } if path == "/sub")),
+            "the /sub directory sentinel must not produce a FileDelete"
+        );
     }
 
     #[test]

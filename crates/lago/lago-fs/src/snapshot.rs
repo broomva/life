@@ -89,27 +89,44 @@ pub fn snapshot_bounded(
 
     // Prune entire directory trees early so WalkDir never descends into them.
     // This also keeps the journal/blob dirs out of the manifest.
-    let walker = WalkDir::new(root).into_iter().filter_entry(|entry| {
-        let name = entry.file_name().to_string_lossy();
-        !matches!(
-            name.as_ref(),
-            ".git"
-                | ".lago"
-                | ".lake"
-                | ".arcan"
-                | ".target"
-                | "target"
-                | "node_modules"
-                | ".DS_Store"
-        )
-    });
+    //
+    // `sort_by_file_name` makes the walk order (and therefore which files the
+    // `max_files` cap truncates) deterministic — otherwise the truncated set
+    // varies run-to-run with the OS directory-iteration order.
+    let walker = WalkDir::new(root)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            !matches!(
+                name.as_ref(),
+                ".git"
+                    | ".lago"
+                    | ".lake"
+                    | ".arcan"
+                    | ".target"
+                    | "target"
+                    | "node_modules"
+                    | ".DS_Store"
+            )
+        });
 
     let mut scanned: usize = 0;
 
     for entry in walker.filter_map(Result::ok) {
         let path = entry.path();
 
-        // Ignore symlinks and directories in this pass
+        // Skip symlinks explicitly (security): `is_file()` below calls
+        // `metadata()`, which FOLLOWS symlinks. A workspace symlink pointing
+        // outside the boundary (e.g. → /etc/passwd) would otherwise be read,
+        // blob-stored, and emitted as a workspace write. `path_is_symlink()`
+        // inspects the entry without dereferencing, matching the FsPort path's
+        // `FsPolicy` boundary enforcement.
+        if entry.path_is_symlink() {
+            continue;
+        }
+
+        // Ignore directories in this pass (only regular files are tracked).
         if !path.is_file() {
             continue;
         }
@@ -303,6 +320,50 @@ mod tests {
         assert!(!manifest.exists("/.git"));
         assert!(!manifest.exists("/.git/config"));
         assert!(!manifest.exists("/.git/objects/blob"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_skips_symlinks_escaping_workspace() {
+        // Should-fix #3: a symlink in the workspace pointing OUTSIDE must not be
+        // followed, read, blob-stored, or tracked. `is_file()` follows symlinks;
+        // the walk must skip them via `path_is_symlink()`.
+        let temp = tempfile::tempdir().unwrap();
+        let blob_store = BlobStore::open(temp.path().join("blobs")).unwrap();
+        let workspace = temp.path().join("ws");
+        fs::create_dir_all(&workspace).unwrap();
+
+        // A real file inside the workspace (must still be tracked).
+        fs::write(workspace.join("inside.txt"), "ok").unwrap();
+
+        // A secret file outside the workspace, and a symlink to it inside.
+        let outside = temp.path().join("secret.txt");
+        fs::write(&outside, "TOP SECRET").unwrap();
+        std::os::unix::fs::symlink(&outside, workspace.join("escape.txt")).unwrap();
+
+        let manifest = snapshot_bounded(
+            &workspace,
+            &Manifest::new(),
+            &blob_store,
+            SnapshotLimits::default(),
+        )
+        .unwrap();
+
+        // The real file is tracked; the escaping symlink is not.
+        assert!(manifest.exists("/inside.txt"));
+        assert!(
+            !manifest.exists("/escape.txt"),
+            "symlink escaping the workspace must not be tracked"
+        );
+
+        // And the secret content must never have been blob-stored. Compute the
+        // hash with the same function BlobStore uses (SHA-256) so the negative
+        // assertion is meaningful regardless of the digest algorithm.
+        let secret_hash = lago_store::hash_bytes(b"TOP SECRET");
+        assert!(
+            !blob_store.exists(&secret_hash),
+            "escaping symlink content must not be blobbed"
+        );
     }
 
     #[test]
