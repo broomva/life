@@ -142,7 +142,7 @@ impl<T: Tool> Tool for ReconcilingTool<T> {
 mod tests {
     use super::*;
     use lago_fs::Manifest;
-    use lago_store::BlobStore;
+    use lago_store::{BlobStore, LocalBlobBackend};
     use serde_json::json;
     use std::path::Path;
 
@@ -219,7 +219,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ws = tmp.path().join("ws");
         std::fs::create_dir_all(&ws).unwrap();
-        let blob_store = Arc::new(BlobStore::open(tmp.path().join("blobs")).unwrap());
+        let blob_store: Arc<dyn lago_store::BlobBackend> = Arc::new(LocalBlobBackend::new(
+            Arc::new(BlobStore::open(tmp.path().join("blobs")).unwrap()),
+        ));
         let tracker = Arc::new(FsTracker::new(Manifest::new(), blob_store));
         let (tx, rx) = mpsc::channel(100);
         (tmp, ws, tracker, tx, rx)

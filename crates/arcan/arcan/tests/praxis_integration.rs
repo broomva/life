@@ -33,7 +33,7 @@ use lago_core::{BranchId, SessionId};
 use lago_fs::SnapshotLimits;
 use lago_fs::{FsTracker, Manifest};
 use lago_journal::RedbJournal;
-use lago_store::BlobStore;
+use lago_store::{BlobBackend, BlobStore, LocalBlobBackend};
 use praxis_tools::edit::EditFileTool;
 use praxis_tools::fs::{GlobTool, GrepTool, ListDirTool, ReadFileTool, WriteFileTool};
 use praxis_tools::shell::BashTool;
@@ -68,13 +68,15 @@ fn build_praxis_runtime(
 
     // --- Lago persistence ---
     let journal = RedbJournal::open(&journal_path).expect("open journal");
-    let blob_store = Arc::new(BlobStore::open(&blobs_path).expect("open blob store"));
+    let blob_store: Arc<dyn lago_store::BlobBackend> = Arc::new(LocalBlobBackend::new(Arc::new(
+        BlobStore::open(&blobs_path).expect("open blob store"),
+    )));
     let journal: Arc<dyn lago_core::Journal> = Arc::new(journal);
 
     // --- Lago-tracked filesystem (O(1) write tracking) ---
     let fs_policy = FsPolicy::new(workspace_root.clone());
     let local_fs = LocalFs::new(fs_policy);
-    let tracker = Arc::new(FsTracker::new(Manifest::new(), blob_store));
+    let tracker = Arc::new(FsTracker::new(Manifest::new(), blob_store.clone()));
     let (fs_event_tx, fs_event_rx) = tokio::sync::mpsc::channel(1000);
     let tracked_fs: Arc<dyn FsPort> = Arc::new(LagoTrackedFs::new(local_fs, tracker, fs_event_tx));
 
@@ -535,13 +537,15 @@ async fn lago_events_track_writes() {
 
     // Open journal directly to verify events later
     let journal = RedbJournal::open(&journal_path).expect("open journal");
-    let blob_store = Arc::new(BlobStore::open(&blobs_path).expect("open blob store"));
+    let blob_store: Arc<dyn lago_store::BlobBackend> = Arc::new(LocalBlobBackend::new(Arc::new(
+        BlobStore::open(&blobs_path).expect("open blob store"),
+    )));
     let journal: Arc<dyn lago_core::Journal> = Arc::new(journal);
 
     // Set up tracked filesystem
     let fs_policy = FsPolicy::new(workspace_root.clone());
     let local_fs = LocalFs::new(fs_policy);
-    let tracker = Arc::new(FsTracker::new(Manifest::new(), blob_store));
+    let tracker = Arc::new(FsTracker::new(Manifest::new(), blob_store.clone()));
     let (fs_event_tx, fs_event_rx) = tokio::sync::mpsc::channel(1000);
     let tracked_fs: Arc<dyn FsPort> = Arc::new(LagoTrackedFs::new(local_fs, tracker, fs_event_tx));
 
@@ -614,12 +618,14 @@ async fn multiple_writes_produce_journal_events() {
     std::fs::create_dir_all(&blobs_path).unwrap();
 
     let journal = RedbJournal::open(&journal_path).unwrap();
-    let blob_store = Arc::new(BlobStore::open(&blobs_path).unwrap());
+    let blob_store: Arc<dyn BlobBackend> = Arc::new(LocalBlobBackend::new(Arc::new(
+        BlobStore::open(&blobs_path).unwrap(),
+    )));
     let journal: Arc<dyn lago_core::Journal> = Arc::new(journal);
 
     let fs_policy = FsPolicy::new(workspace_root.clone());
     let local_fs = LocalFs::new(fs_policy);
-    let tracker = Arc::new(FsTracker::new(Manifest::new(), blob_store));
+    let tracker = Arc::new(FsTracker::new(Manifest::new(), blob_store.clone()));
     let (fs_event_tx, fs_event_rx) = tokio::sync::mpsc::channel(1000);
     let tracked_fs: Arc<dyn FsPort> = Arc::new(LagoTrackedFs::new(local_fs, tracker, fs_event_tx));
 
@@ -687,7 +693,7 @@ fn build_exec_path(
     ReconcilingTool<BashTool>,
     Arc<dyn lago_core::Journal>,
     Arc<FsTracker>,
-    Arc<BlobStore>,
+    Arc<dyn BlobBackend>,
     lago_core::EventQuery,
 ) {
     let journal_path = root.join("journal.redb");
@@ -695,7 +701,9 @@ fn build_exec_path(
     std::fs::create_dir_all(&blobs_path).unwrap();
 
     let journal = RedbJournal::open(&journal_path).expect("open journal");
-    let blob_store = Arc::new(BlobStore::open(&blobs_path).expect("open blob store"));
+    let blob_store: Arc<dyn lago_store::BlobBackend> = Arc::new(LocalBlobBackend::new(Arc::new(
+        BlobStore::open(&blobs_path).expect("open blob store"),
+    )));
     let journal: Arc<dyn lago_core::Journal> = Arc::new(journal);
 
     let tracker = Arc::new(FsTracker::new(Manifest::new(), blob_store.clone()));
@@ -940,7 +948,7 @@ fn build_exec_path_baselined(
     ReconcilingTool<BashTool>,
     Arc<dyn lago_core::Journal>,
     Arc<FsTracker>,
-    Arc<BlobStore>,
+    Arc<dyn BlobBackend>,
     lago_core::EventQuery,
 ) {
     let journal_path = root.join("journal.redb");
@@ -948,7 +956,9 @@ fn build_exec_path_baselined(
     std::fs::create_dir_all(&blobs_path).unwrap();
 
     let journal = RedbJournal::open(&journal_path).expect("open journal");
-    let blob_store = Arc::new(BlobStore::open(&blobs_path).expect("open blob store"));
+    let blob_store: Arc<dyn lago_store::BlobBackend> = Arc::new(LocalBlobBackend::new(Arc::new(
+        BlobStore::open(&blobs_path).expect("open blob store"),
+    )));
     let journal: Arc<dyn lago_core::Journal> = Arc::new(journal);
 
     // Baseline against the populated workspace using the SAME limits the

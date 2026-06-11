@@ -5,7 +5,7 @@ use walkdir::WalkDir;
 
 use crate::manifest::Manifest;
 use lago_core::LagoResult;
-use lago_store::BlobStore;
+use lago_store::BlobBackend;
 
 /// Default ceiling on the number of files a bounded snapshot will scan.
 pub const DEFAULT_MAX_FILES: usize = 10_000;
@@ -58,10 +58,14 @@ impl SnapshotLimits {
 /// This is the unbounded variant, kept for callers (snapshots, diffs) that
 /// already operate over trusted, fixed inputs. The exec-path reconciliation
 /// uses [`snapshot_bounded`] instead.
+///
+/// New/modified file content is persisted through the [`BlobBackend`], so the
+/// O(n) reconciliation safety-net honours whichever backend (local or remote)
+/// the tracker was built with.
 pub fn snapshot(
     root: &Path,
     previous_manifest: &Manifest,
-    blob_store: &BlobStore,
+    blob_store: &dyn BlobBackend,
 ) -> LagoResult<Manifest> {
     snapshot_bounded(
         root,
@@ -82,7 +86,7 @@ pub fn snapshot(
 pub fn snapshot_bounded(
     root: &Path,
     previous_manifest: &Manifest,
-    blob_store: &BlobStore,
+    blob_store: &dyn BlobBackend,
     limits: SnapshotLimits,
 ) -> LagoResult<Manifest> {
     let mut new_manifest = Manifest::new();
@@ -204,12 +208,18 @@ pub fn snapshot_bounded(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lago_store::{BlobStore, LocalBlobBackend};
     use std::io::Write;
+    use std::sync::Arc;
+
+    fn local_backend(root: &Path) -> LocalBlobBackend {
+        LocalBlobBackend::new(Arc::new(BlobStore::open(root).unwrap()))
+    }
 
     #[test]
     fn snapshot_creates_new_manifest() {
         let temp = tempfile::tempdir().unwrap();
-        let blob_store = BlobStore::open(temp.path().join("blobs")).unwrap();
+        let blob_store = local_backend(&temp.path().join("blobs"));
         let workspace = temp.path().join("ws");
         fs::create_dir_all(&workspace).unwrap();
 
@@ -231,7 +241,7 @@ mod tests {
     #[test]
     fn snapshot_reuses_unchanged_files() {
         let temp = tempfile::tempdir().unwrap();
-        let blob_store = BlobStore::open(temp.path().join("blobs")).unwrap();
+        let blob_store = local_backend(&temp.path().join("blobs"));
         let workspace = temp.path().join("ws");
         fs::create_dir_all(&workspace).unwrap();
 
@@ -253,7 +263,7 @@ mod tests {
     #[test]
     fn bounded_snapshot_skips_oversized_file() {
         let temp = tempfile::tempdir().unwrap();
-        let blob_store = BlobStore::open(temp.path().join("blobs")).unwrap();
+        let blob_store = local_backend(&temp.path().join("blobs"));
         let workspace = temp.path().join("ws");
         fs::create_dir_all(&workspace).unwrap();
 
@@ -274,7 +284,7 @@ mod tests {
     #[test]
     fn bounded_snapshot_honors_file_count_cap() {
         let temp = tempfile::tempdir().unwrap();
-        let blob_store = BlobStore::open(temp.path().join("blobs")).unwrap();
+        let blob_store = local_backend(&temp.path().join("blobs"));
         let workspace = temp.path().join("ws");
         fs::create_dir_all(&workspace).unwrap();
 
@@ -301,7 +311,7 @@ mod tests {
     #[test]
     fn bounded_snapshot_skips_git_dir() {
         let temp = tempfile::tempdir().unwrap();
-        let blob_store = BlobStore::open(temp.path().join("blobs")).unwrap();
+        let blob_store = local_backend(&temp.path().join("blobs"));
         let workspace = temp.path().join("ws");
         fs::create_dir_all(workspace.join(".git/objects")).unwrap();
         fs::write(workspace.join(".git/config"), "[core]").unwrap();
@@ -329,7 +339,7 @@ mod tests {
         // followed, read, blob-stored, or tracked. `is_file()` follows symlinks;
         // the walk must skip them via `path_is_symlink()`.
         let temp = tempfile::tempdir().unwrap();
-        let blob_store = BlobStore::open(temp.path().join("blobs")).unwrap();
+        let blob_store = local_backend(&temp.path().join("blobs"));
         let workspace = temp.path().join("ws");
         fs::create_dir_all(&workspace).unwrap();
 
@@ -369,7 +379,7 @@ mod tests {
     #[test]
     fn unbounded_limits_track_everything() {
         let temp = tempfile::tempdir().unwrap();
-        let blob_store = BlobStore::open(temp.path().join("blobs")).unwrap();
+        let blob_store = local_backend(&temp.path().join("blobs"));
         let workspace = temp.path().join("ws");
         fs::create_dir_all(&workspace).unwrap();
         fs::write(workspace.join("a.txt"), vec![1u8; 100_000]).unwrap();

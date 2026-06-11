@@ -39,7 +39,7 @@ use arcan_harness::{FsPolicy, FsPort, LocalFs, SandboxPolicy};
 use arcan_lago::{
     EventSearchTool, FreeTierJournal, KnowledgeEventMiddleware, LagoPolicyConfig, LagoTrackedFs,
     MemoryCommitTool, MemoryProjection, MemoryProposeTool, MemoryQueryTool, ReconcilingTool,
-    RemoteLagoJournal, SessionJournalSelector, run_event_writer,
+    RemoteBlobBackend, RemoteLagoJournal, SessionJournalSelector, run_event_writer,
 };
 use arcan_provider::anthropic::{AnthropicConfig, AnthropicProvider};
 use arcand::mock::MockProvider;
@@ -49,6 +49,7 @@ use lago_aios_eventstore_adapter::LagoAiosEventStoreAdapter;
 use lago_core::{BranchId, SessionId};
 use lago_fs::{FsTracker, SnapshotLimits};
 use lago_journal::RedbJournal;
+use lago_store::{BlobBackend, LocalBlobBackend};
 use life_vigil::VigConfig;
 use nous_observer::NousToolObserver;
 use praxis_tools::edit::EditFileTool;
@@ -648,7 +649,13 @@ fn run_serve(
     let blobs_path = data_dir.join("blobs");
     std::fs::create_dir_all(&blobs_path)?;
 
-    let journal: Arc<dyn lago_core::Journal> = if let Ok(lago_url) = std::env::var("LAGO_URL") {
+    // Capture LAGO_URL once: it selects BOTH the event journal (above) and the
+    // blob backend (below), so a remote-journal deployment also stores blob
+    // *content* remotely — otherwise events would go to lagod while the bytes
+    // stayed on ephemeral local disk (BRO-1478).
+    let lago_url_opt = std::env::var("LAGO_URL").ok();
+
+    let journal: Arc<dyn lago_core::Journal> = if let Some(lago_url) = &lago_url_opt {
         tracing::info!(
             workspace = %workspace_root.display(),
             lago_url = %lago_url,
@@ -657,7 +664,7 @@ fn run_serve(
             port = resolved.port,
             "Starting arcan (remote Lago journal)"
         );
-        Arc::new(RemoteLagoJournal::new(lago_url))
+        Arc::new(RemoteLagoJournal::new(lago_url.clone()))
     } else {
         let journal_path = data_dir.join("journal.redb");
         tracing::info!(
@@ -672,7 +679,17 @@ fn run_serve(
         Arc::new(RedbJournal::open(&journal_path)?)
     };
 
-    let blob_store = Arc::new(lago_store::BlobStore::open(&blobs_path)?);
+    // Blob backend tracks the journal's locality: remote lagod over HTTP when
+    // LAGO_URL is set, local content-addressed store otherwise. The local
+    // store is only opened in the local case (it's the tracker's sole
+    // consumer), so a remote deployment doesn't create an unused blobs dir.
+    let blob_backend: Arc<dyn BlobBackend> = if let Some(lago_url) = &lago_url_opt {
+        tracing::info!(lago_url = %lago_url, "arcan blob content: remote lago blob store");
+        Arc::new(RemoteBlobBackend::new(lago_url.clone()))
+    } else {
+        let blob_store = Arc::new(lago_store::BlobStore::open(&blobs_path)?);
+        Arc::new(LocalBlobBackend::new(blob_store))
+    };
 
     // BRO-217: Wrap in SessionJournalSelector — routes memory events for anonymous
     // sessions to EphemeralJournal (discard). The raw journal is retained for
@@ -698,9 +715,12 @@ fn run_serve(
     // changes. The baseline limits MUST match the exec-path reconciler's limits
     // (ReconcilingTool uses SnapshotLimits::default()) so both see the same file
     // set — a mismatch would resurface as phantom diffs on the first reconcile.
+    // Content is addressed through the selected `blob_backend` (local or remote
+    // lagod), so the baseline honours the same durability target as runtime
+    // writes.
     let tracker = Arc::new(FsTracker::with_baseline(
         &workspace_root,
-        blob_store.clone(),
+        blob_backend.clone(),
         SnapshotLimits::default(),
     )?);
     let (fs_event_tx, fs_event_rx) = tokio::sync::mpsc::channel(1000);

@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use lago_core::LagoResult;
 use lago_core::event::EventPayload;
-use lago_store::BlobStore;
+use lago_store::BlobBackend;
 
 use crate::diff::{self, DiffEntry};
 use crate::manifest::Manifest;
@@ -34,14 +34,19 @@ fn is_directory_sentinel(entry: &lago_core::ManifestEntry) -> bool {
 /// Inline filesystem tracker producing event payloads on writes/deletes.
 ///
 /// Thread-safe: the internal manifest is behind a `Mutex`.
+///
+/// Blob content is stored through a [`BlobBackend`] — `LocalBlobBackend` for
+/// on-disk storage, or a remote backend (e.g. `arcan_lago::RemoteBlobBackend`)
+/// when running against a remote Lago daemon — so file content stays durable
+/// wherever the journal lives.
 pub struct FsTracker {
     manifest: Mutex<Manifest>,
-    blob_store: Arc<BlobStore>,
+    blob_store: Arc<dyn BlobBackend>,
 }
 
 impl FsTracker {
     /// Create a new tracker seeded with an existing manifest state.
-    pub fn new(manifest: Manifest, blob_store: Arc<BlobStore>) -> Self {
+    pub fn new(manifest: Manifest, blob_store: Arc<dyn BlobBackend>) -> Self {
         Self {
             manifest: Mutex::new(manifest),
             blob_store,
@@ -68,11 +73,15 @@ impl FsTracker {
     /// [`ReconcilingTool`](../../arcan_lago/struct.ReconcilingTool.html)).
     pub fn with_baseline(
         workspace_root: &Path,
-        blob_store: Arc<BlobStore>,
+        blob_store: Arc<dyn BlobBackend>,
         limits: SnapshotLimits,
     ) -> LagoResult<Self> {
-        let baseline =
-            snapshot::snapshot_bounded(workspace_root, &Manifest::new(), &blob_store, limits)?;
+        let baseline = snapshot::snapshot_bounded(
+            workspace_root,
+            &Manifest::new(),
+            blob_store.as_ref(),
+            limits,
+        )?;
         Ok(Self {
             manifest: Mutex::new(baseline),
             blob_store,
@@ -191,7 +200,7 @@ impl FsTracker {
             guard.clone()
         };
         let new_manifest =
-            snapshot::snapshot_bounded(workspace_root, &base, &self.blob_store, limits)?;
+            snapshot::snapshot_bounded(workspace_root, &base, self.blob_store.as_ref(), limits)?;
 
         // Re-take the lock only to diff + swap.
         let diffs = {
@@ -244,11 +253,14 @@ fn now_micros() -> u64 {
 mod tests {
     use super::*;
     use lago_core::BlobHash;
+    use lago_store::{BlobStore, LocalBlobBackend};
     use std::fs;
 
-    fn setup() -> (tempfile::TempDir, Arc<BlobStore>, FsTracker) {
+    fn setup() -> (tempfile::TempDir, Arc<LocalBlobBackend>, FsTracker) {
         let tmp = tempfile::tempdir().unwrap();
-        let blob_store = Arc::new(BlobStore::open(tmp.path().join("blobs")).unwrap());
+        let blob_store = Arc::new(LocalBlobBackend::new(Arc::new(
+            BlobStore::open(tmp.path().join("blobs")).unwrap(),
+        )));
         let tracker = FsTracker::new(Manifest::new(), blob_store.clone());
         (tmp, blob_store, tracker)
     }
@@ -356,7 +368,8 @@ mod tests {
         // Write a file, snapshot it, then change it.
         // Use different-length content so the snapshot's size-based fast path doesn't skip the hash.
         fs::write(ws.join("mod.txt"), "original").unwrap();
-        let initial = crate::snapshot::snapshot(&ws, &Manifest::new(), &blob_store).unwrap();
+        let initial =
+            crate::snapshot::snapshot(&ws, &Manifest::new(), blob_store.as_ref()).unwrap();
 
         fs::write(
             ws.join("mod.txt"),
@@ -417,7 +430,9 @@ mod tests {
         // emit a spurious FileWrite for every pre-existing file on the first
         // reconcile. With no on-disk changes, reconcile emits nothing.
         let tmp = tempfile::tempdir().unwrap();
-        let blob_store = Arc::new(BlobStore::open(tmp.path().join("blobs")).unwrap());
+        let blob_store: Arc<dyn lago_store::BlobBackend> = Arc::new(LocalBlobBackend::new(
+            Arc::new(BlobStore::open(tmp.path().join("blobs")).unwrap()),
+        ));
         let ws = tmp.path().join("ws");
         fs::create_dir_all(ws.join("sub")).unwrap();
         fs::write(ws.join("a.txt"), "alpha").unwrap();
@@ -442,7 +457,9 @@ mod tests {
         // Must-fix #2: a directory sentinel orphaned by deleting the last file
         // under it must NOT become a phantom FileDelete.
         let tmp = tempfile::tempdir().unwrap();
-        let blob_store = Arc::new(BlobStore::open(tmp.path().join("blobs")).unwrap());
+        let blob_store: Arc<dyn lago_store::BlobBackend> = Arc::new(LocalBlobBackend::new(
+            Arc::new(BlobStore::open(tmp.path().join("blobs")).unwrap()),
+        ));
         let ws = tmp.path().join("ws");
         fs::create_dir_all(ws.join("sub")).unwrap();
         fs::write(ws.join("sub/a.txt"), "data").unwrap();
