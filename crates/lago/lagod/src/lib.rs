@@ -3,12 +3,74 @@ pub mod shutdown;
 pub mod substrate;
 
 use config::DaemonConfig;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
 
+/// Bind lagod's substrate-plane gRPC server (`lago.v1.LagoSubstrate`) on
+/// a Unix-domain socket and serve it until the shutdown signal fires.
+///
+/// Stage 6 (June 2026): this is the entry point lifed's `lago-proxy`
+/// reaches in Topology B. lago-proxy dials a UDS (`LagoProxy::connect`
+/// → `UnixStream::connect`), so the TCP `LagoSubstrate` mounted on the
+/// gRPC port (BRO-1017) is unreachable from lifed — lifed needs a
+/// *socket*. This binds the SAME service over a UDS, sharing the one
+/// `Arc<dyn Journal>` the TCP gRPC + HTTP planes already drive. Mirrors
+/// arcand's `serve_substrate_uds` (`crates/arcan/arcan/src/main.rs`):
+/// ensure the parent dir exists, unlink any stale socket, bind, then
+/// serve via `serve_with_incoming_shutdown`.
+async fn serve_substrate_uds(
+    socket_path: PathBuf,
+    journal: Arc<dyn lago_core::Journal>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use lago_substrate_proto::lago::v1::lago_substrate_server::LagoSubstrateServer;
+
+    if let Some(parent) = socket_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create parent dir {}: {e}", parent.display()))?;
+    }
+    if socket_path.exists() {
+        std::fs::remove_file(&socket_path)
+            .map_err(|e| format!("unlink stale socket {}: {e}", socket_path.display()))?;
+    }
+
+    let listener = tokio::net::UnixListener::bind(&socket_path)
+        .map_err(|e| format!("bind {}: {e}", socket_path.display()))?;
+
+    info!(
+        socket = %socket_path.display(),
+        "lago substrate-plane gRPC listening (lago.v1.LagoSubstrate over UDS)"
+    );
+
+    let service = substrate::SubstrateService::new(journal);
+    let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
+
+    tonic::transport::Server::builder()
+        .add_service(LagoSubstrateServer::new(service))
+        .serve_with_incoming_shutdown(incoming, shutdown::shutdown_signal())
+        .await
+        .map_err(|e| format!("substrate UDS serve: {e}"))?;
+
+    // Best-effort cleanup of the socket file on graceful shutdown.
+    let _ = std::fs::remove_file(&socket_path);
+    Ok(())
+}
+
 /// Run the Lago daemon with the given configuration.
-pub async fn run(config: DaemonConfig) -> Result<(), Box<dyn std::error::Error>> {
-    info!(?config, "starting lagod");
+///
+/// When `uds_socket` is `Some(path)`, an additional substrate-plane
+/// gRPC server (`lago.v1.LagoSubstrate`) is bound on that Unix-domain
+/// socket alongside the TCP gRPC + HTTP servers — this is the surface
+/// lifed's `lago-proxy` dials under Topology B (Stage 6). When `None`,
+/// only the TCP gRPC + HTTP planes run (the standalone / `lago serve`
+/// behavior).
+pub async fn run(
+    config: DaemonConfig,
+    uds_socket: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!(?config, ?uds_socket, "starting lagod");
 
     // --- Ensure data directory exists
     std::fs::create_dir_all(&config.data_dir)?;
@@ -76,6 +138,22 @@ pub async fn run(config: DaemonConfig) -> Result<(), Box<dyn std::error::Error>>
             .map_err(|e| format!("gRPC server error: {e}"))
     });
 
+    // --- Optional substrate-plane UDS server (Topology B, Stage 6)
+    //
+    // lifed's `lago-proxy` dials `lago.v1.LagoSubstrate` over a Unix
+    // socket (not TCP). When `--uds-socket <PATH>` / `LAGO_UDS_SOCKET`
+    // is set, bind that service on the socket using the SAME journal as
+    // the TCP gRPC + HTTP planes. Additive — the standalone TCP/HTTP
+    // daemon is unchanged when the socket is absent.
+    let uds_handle = uds_socket.map(|socket_path| {
+        let uds_journal = journal.clone() as Arc<dyn lago_core::Journal>;
+        tokio::spawn(async move {
+            if let Err(e) = serve_substrate_uds(socket_path, uds_journal).await {
+                tracing::error!(error = %e, "substrate-plane UDS server exited with error");
+            }
+        })
+    });
+
     // --- Configure auth layer (optional)
     let jwt_secret = config
         .auth
@@ -141,13 +219,19 @@ pub async fn run(config: DaemonConfig) -> Result<(), Box<dyn std::error::Error>>
     shutdown::shutdown_signal().await;
     info!("shutdown signal received");
 
-    // Abort both servers
+    // Abort the servers. The UDS server (if running) drains itself via
+    // its own `serve_with_incoming_shutdown(shutdown_signal())`, so it
+    // observes the same SIGTERM/SIGINT and exits gracefully; we still
+    // await its handle so the socket-file cleanup runs before we return.
     grpc_handle.abort();
     http_handle.abort();
 
     // Wait for tasks to finish (they may have already been aborted)
     let _ = grpc_handle.await;
     let _ = http_handle.await;
+    if let Some(handle) = uds_handle {
+        let _ = handle.await;
+    }
 
     info!("lagod stopped");
     Ok(())
