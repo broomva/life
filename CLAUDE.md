@@ -368,8 +368,38 @@ with structured payloads (64KB wire cap, kernel sequence carried);
 longer drops TOKEN text on the real-arcand path (PR #1686, merge
 `14e39f3c`).
 
-⚠️ **One small gap remains:** `arcan agent test` is `--dry-run` only
-(CLI) — no live-LLM mode for Python consumers. BRO-1008 follow-up.
+✅ **Stage-3 prod restoration + tool wire (2026-06-10 evening):**
+
+1. ~~Railway substrate deploys broken 3 weeks~~ — **CLOSED** (#1691
+   `4c74edbc`, #1692 `f7d18172`): `docker/*.Dockerfile` build contexts
+   now carry `apps/` + `proto/` (workspace members + build.rs inputs)
+   and the arcan image ships the 9 blessed authored agents
+   (`loaded 9 authored agent(s)` verified in prod boot log). All four
+   substrate services redeployed green; stale `LAGO_URL` (:3001→:8080)
+   fixed on the arcan Railway service.
+2. ~~`arcan agent test` is `--dry-run` only (BRO-1008)~~ — **CLOSED**
+   (#1696 `0caa70bd`): `--live` executes authored agents through the
+   canonical `arcan_core::Provider → ArcanProviderAdapter →
+   ModelProviderAdapter → ergon::Provider` chain with a 50K-token
+   `TokenBudgetHook` cost cap; bare `agent test` still errors (no
+   accidental spend).
+3. ~~AgentAttestationAdapter awaits custody config~~ — **CLOSED**
+   (#1694 `a2ca1a7e`): `arcan serve` loads `.life/identity/`
+   (`--anima-identity-dir` / `ARCAN_ANIMA_IDENTITY_DIR`), constructs
+   the adapter, and hard-fails boot on corrupt identity; noop fallback
+   only when no identity exists.
+4. ~~Chat tools never reach the model~~ — **CLOSED** (#1697
+   `6b5c4c74`): `life.v1.SendMessageReq.tool_definitions` +
+   `arcan.v1.DispatchMessageReq.tool_definitions` (additive bytes
+   fields) thread client tool definitions lifegw → lifed →
+   arcan-proxy → provider (OpenAI `tools` shape on the gateway path,
+   TOOL_CALL event vocabulary on the response side).
+5. ~~lifed substrate fallback is all-or-nothing~~ — **CLOSED** (#1695
+   `d09257b0`): per-substrate real/mock selection with honest boot
+   summary (`substrates: arcan=real lago=mock …`); lifegw-stack ships
+   arcand on `/run/life/arcan.sock` (Tier-2 signing key scrubbed from
+   the agent env, provider preflight degrades to skip+WARN, scoped
+   `OPENAI_BASE_URL`).
 
 ### Spec progress
 
