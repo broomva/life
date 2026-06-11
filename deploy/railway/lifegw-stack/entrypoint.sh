@@ -129,8 +129,15 @@ echo "[entrypoint] starting arcan substrate (uds=${LIFE_RUNTIME_DIR}/arcan.sock 
 # `env -u`: the Tier-2 token-minting key is lifegw's secret. arcan
 # executes tool calls (incl. shell) for remote chat users — that key
 # must never be readable from the agent process environment.
+# Base-URL scoping: lifed's vercel_ai_gateway client wants
+# OPENAI_BASE_URL **with** /v1; arcan-provider appends /v1 itself
+# (openai.rs: format!("{base}/v1/chat/completions")). Same container,
+# same var — so arcan gets a stripped copy, overridable via
+# ARCAN_OPENAI_BASE_URL.
+ARCAN_BASE_URL_EFFECTIVE="${ARCAN_OPENAI_BASE_URL:-${OPENAI_BASE_URL%/v1}}"
 runuser --preserve-environment -u life -g life-runtime -- \
   env -u LIFEGW_TIER2_SIGNING_KEY_PEM \
+      OPENAI_BASE_URL="${ARCAN_BASE_URL_EFFECTIVE}" \
   /usr/local/bin/arcan serve \
     --uds-socket "${LIFE_RUNTIME_DIR}/arcan.sock" \
     --data-dir "${ARCAN_DATA_DIR}" \
