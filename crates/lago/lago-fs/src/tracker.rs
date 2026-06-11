@@ -14,7 +14,7 @@ use lago_store::BlobStore;
 
 use crate::diff::{self, DiffEntry};
 use crate::manifest::Manifest;
-use crate::snapshot;
+use crate::snapshot::{self, SnapshotLimits};
 
 /// Inline filesystem tracker producing event payloads on writes/deletes.
 ///
@@ -77,9 +77,29 @@ impl FsTracker {
     /// tracked manifest, update the manifest, and return event payloads
     /// for every detected change. This is the safety-net path for catching
     /// changes made outside of tracked writes.
+    ///
+    /// Uses unbounded snapshot limits. The exec-path uses
+    /// [`reconcile_bounded`](Self::reconcile_bounded) to cap the walk.
     pub fn reconcile(&self, workspace_root: &Path) -> LagoResult<Vec<EventPayload>> {
+        self.reconcile_bounded(workspace_root, SnapshotLimits::unbounded())
+    }
+
+    /// Bounded reconciliation: like [`reconcile`](Self::reconcile) but caps the
+    /// number of files scanned and the per-file size that is read + blob-stored.
+    ///
+    /// This is the exec-path safety net — after a shell command runs, the
+    /// workspace is re-scanned (subject to `limits`), diffed against the tracked
+    /// manifest, and every created/modified/deleted path is turned into a
+    /// `FileWrite`/`FileDelete` payload, identical in shape to the inline
+    /// `track_write`/`track_delete` events. The manifest is updated in place.
+    pub fn reconcile_bounded(
+        &self,
+        workspace_root: &Path,
+        limits: SnapshotLimits,
+    ) -> LagoResult<Vec<EventPayload>> {
         let mut manifest = self.manifest.lock().unwrap();
-        let new_manifest = snapshot::snapshot(workspace_root, &manifest, &self.blob_store)?;
+        let new_manifest =
+            snapshot::snapshot_bounded(workspace_root, &manifest, &self.blob_store, limits)?;
         let diffs = diff::diff(&manifest, &new_manifest);
 
         // Replace manifest with the fresh snapshot.
@@ -258,6 +278,34 @@ mod tests {
         let tracker = FsTracker::new(Manifest::new(), blob_store);
         let payloads = tracker.reconcile(&ws).unwrap();
         assert!(payloads.is_empty());
+    }
+
+    #[test]
+    fn reconcile_bounded_skips_oversized_file() {
+        let (tmp, blob_store, _) = setup();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        fs::write(ws.join("small.txt"), "ok").unwrap();
+        fs::write(ws.join("huge.bin"), vec![7u8; 8192]).unwrap();
+
+        let tracker = FsTracker::new(Manifest::new(), blob_store);
+        let limits = SnapshotLimits {
+            max_files: 10_000,
+            max_file_bytes: 1024,
+        };
+        let payloads = tracker.reconcile_bounded(&ws, limits).unwrap();
+
+        // small.txt is reconciled; huge.bin is skipped (over the size cap).
+        assert!(payloads.iter().any(|p| matches!(
+            p,
+            EventPayload::FileWrite { path, .. } if path == "/small.txt"
+        )));
+        assert!(!payloads.iter().any(|p| matches!(
+            p,
+            EventPayload::FileWrite { path, .. } if path == "/huge.bin"
+        )));
+        assert!(tracker.manifest().exists("/small.txt"));
+        assert!(!tracker.manifest().exists("/huge.bin"));
     }
 
     #[test]
