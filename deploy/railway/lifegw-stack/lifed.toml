@@ -1,14 +1,14 @@
-# lifed config — Railway lifegw-stack deploy (Stage 5, June 2026).
+# lifed config — Railway lifegw-stack deploy (Stage 6, June 2026).
 #
 # JwksCache is lazy + file-backed (Stage 2 notes preserved): no
 # boot-order race with lifegw.
 #
-# Stage 5: per-substrate real/mock selection. The container ships the
-# real arcan daemon; entrypoint.sh binds /run/life/arcan.sock BEFORE
-# lifed boots, so lifed's bootstrap selects the real arcan substrate
-# and mocks only lago / haima / anima (still gated by
-# `LIFED_ALLOW_MOCK_FALLBACK=true`). Boot log prints the selection:
-# "arcan=real lago=mock haima=mock anima=mock".
+# Stage 6: per-substrate real/mock selection. The container ships the
+# real arcan AND lagod daemons; entrypoint.sh binds /run/life/arcan.sock
+# and /run/life/lago.sock BEFORE lifed boots, so lifed's bootstrap
+# selects the real arcan + lago substrates and mocks only haima / anima
+# (still gated by `LIFED_ALLOW_MOCK_FALLBACK=true`). Boot log prints the
+# selection: "arcan=real lago=real haima=mock anima=mock".
 #
 # Stage 3b knob retained for socket-less deploys: when the arcan
 # socket is ABSENT, `LIFED_ARCAN_BACKEND=vercel_ai_gateway` (plus
@@ -16,10 +16,9 @@
 # LLM tokens through the gateway slot instead of MockArcan. A present
 # arcan socket always wins.
 #
-# Production swap-in (Stage 6+): ship lagod / haimad / animad / soma
-# into the same container (or multi-container), drop
-# `LIFED_ALLOW_MOCK_FALLBACK`, and let lifed fail-fast on missing UDS
-# sockets.
+# Production swap-in (next stages): ship haimad / animad / soma into the
+# same container (or multi-container), drop `LIFED_ALLOW_MOCK_FALLBACK`,
+# and let lifed fail-fast on missing UDS sockets.
 
 [public_plane]
 unix_socket       = "/run/life/life.sock"
