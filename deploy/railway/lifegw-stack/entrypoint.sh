@@ -108,14 +108,33 @@ export LIFEGW_TIER2_SIGNING_KEY_PEM
 # The flag is `--uds-socket` (env ARCAN_UDS_SOCKET) — binds the
 # substrate-plane gRPC server (arcan.v1.AgentSubstrate, BRO-1016)
 # alongside arcan's HTTP :3000 server (container-internal only).
+# Provider preflight: arcan's build_provider runs BEFORE the UDS server
+# binds (main.rs), so a fresh container without provider credentials
+# would exit at boot and crash-loop the whole gateway. Degrade honestly
+# instead: skip arcan so lifed selects MockArcan, and say exactly which
+# env unlocks the real substrate.
+ARCAN_ENABLED=1
+if [[ -z "${ARCAN_PROVIDER:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  ARCAN_ENABLED=0
+  echo "[entrypoint] WARN: skipping arcan substrate — no provider env." >&2
+  echo "[entrypoint]   set ANTHROPIC_API_KEY (default provider) or ARCAN_PROVIDER=openai + OPENAI_BASE_URL/OPENAI_API_KEY" >&2
+  echo "[entrypoint]   lifed will select MockArcan for this container lifetime." >&2
+fi
+
+if [[ "${ARCAN_ENABLED}" == "1" ]]; then
 ARCAN_DATA_DIR="${ARCAN_DATA_DIR:-/var/lib/arcan}"
 mkdir -p "${ARCAN_DATA_DIR}"
 chown -R life:life-runtime "${ARCAN_DATA_DIR}"
 echo "[entrypoint] starting arcan substrate (uds=${LIFE_RUNTIME_DIR}/arcan.sock data=${ARCAN_DATA_DIR})"
+# `env -u`: the Tier-2 token-minting key is lifegw's secret. arcan
+# executes tool calls (incl. shell) for remote chat users — that key
+# must never be readable from the agent process environment.
 runuser --preserve-environment -u life -g life-runtime -- \
+  env -u LIFEGW_TIER2_SIGNING_KEY_PEM \
   /usr/local/bin/arcan serve \
     --uds-socket "${LIFE_RUNTIME_DIR}/arcan.sock" \
     --data-dir "${ARCAN_DATA_DIR}" \
+    --agents-dir /opt/life/agents \
   &
 ARCAN_PID=$!
 
@@ -141,6 +160,7 @@ if ! nc -zU "${LIFE_RUNTIME_DIR}/arcan.sock" 2>/dev/null; then
   echo "[entrypoint] FATAL: arcan did not accept UDS connections within 30s" >&2
   exit 1
 fi
+fi # ARCAN_ENABLED
 
 # ── 4. Start lifed ──────────────────────────────────────────────────────────
 # Stage 5: lifed's per-substrate bootstrap sees /run/life/arcan.sock
@@ -220,7 +240,7 @@ shutdown() {
   echo "[entrypoint] SIGTERM received — draining"
   if kill -0 "${LIFEGW_PID}" 2>/dev/null; then kill -TERM "${LIFEGW_PID}" || true; fi
   if kill -0 "${LIFED_PID}"  2>/dev/null; then kill -TERM "${LIFED_PID}"  || true; fi
-  if kill -0 "${ARCAN_PID}"  2>/dev/null; then kill -TERM "${ARCAN_PID}"  || true; fi
+  if [[ -n "${ARCAN_PID:-}" ]] && kill -0 "${ARCAN_PID}" 2>/dev/null; then kill -TERM "${ARCAN_PID}" || true; fi
 }
 trap shutdown TERM INT
 

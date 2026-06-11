@@ -94,6 +94,10 @@ COPY --from=builder /build/.target/release/lifegw /usr/local/bin/lifegw
 COPY --from=builder /build/.target/release/lifed  /usr/local/bin/lifed
 COPY --from=builder /build/.target/release/arcan  /usr/local/bin/arcan
 
+# Blessed authored agents for arcan's FsAgentRegistry (spawn_agent
+# fails-closed with unknown_agent when the registry is empty).
+COPY agents/ /opt/life/agents/
+
 COPY deploy/railway/lifegw-stack/lifegw.toml    /etc/lifegw/config.toml
 COPY deploy/railway/lifegw-stack/lifed.toml     /etc/lifed/config.toml
 COPY deploy/railway/lifegw-stack/Caddyfile      /etc/caddy/Caddyfile
