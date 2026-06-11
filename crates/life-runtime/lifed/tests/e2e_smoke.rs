@@ -89,6 +89,7 @@ async fn smoke_test_full_daemon_lifecycle() {
             sid: Some(sid.clone()),
             content: "smoke message".to_string(),
             attachment_blob_ref: vec![],
+            tool_definitions: vec![],
         });
         req.metadata_mut().insert(
             "authorization",
@@ -145,6 +146,7 @@ async fn smoke_test_full_daemon_lifecycle() {
             sid: Some(sid.clone()),
             content: "stream_session driver".to_string(),
             attachment_blob_ref: vec![],
+            tool_definitions: vec![],
         });
         send_req.metadata_mut().insert(
             "authorization",

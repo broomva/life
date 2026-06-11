@@ -50,6 +50,15 @@ message DestroyAgentResp {}
 message DispatchMessageReq {
   aios.v1.SessionId sid = 1;
   string content = 2;
+  // Client-supplied tool definitions for this dispatch. Each entry is
+  // a JSON-serialized tool-definition object — the AI-SDK / OpenAI
+  // function shape ({"name", "description", "parameters"}) — carried
+  // as opaque bytes per the existing payload_json pattern so the wire
+  // stays codec-agnostic. Empty when the chat surface declares no
+  // tools; the substrate then falls back to its own registry-driven
+  // tool set. Additive field — pre-existing clients/servers stay
+  // wire-compatible.
+  repeated bytes tool_definitions = 3;
 }
 
 // Mirrors life.v1.AgentEvent shape but lives in the substrate-plane

@@ -155,12 +155,19 @@ impl Drop for PumpGuard {
 /// up from the routing-cache entry's `model` field by the caller). Mocks
 /// + the substrate gRPC proxy accept and ignore it; the HTTP-backed
 ///   `VercelAiGatewayArcan` / `AnthropicArcan` impls honour it.
+///
+/// `tools` carries the client-supplied tool definitions decoded from
+/// `SendMessageReq.tool_definitions` so the chat surface's tools reach
+/// the model provider (`ArcanCall::dispatch_message` → OpenAI/Anthropic
+/// `tools` array, or `DispatchMessageReq.tool_definitions` on the
+/// substrate wire).
 fn spawn_or_attach_fanout_pump(
     fanout: &Arc<FanoutRegistry>,
     arcan: Arc<dyn ArcanCall>,
     sid: String,
     content: String,
     model: Option<String>,
+    tools: Vec<serde_json::Value>,
 ) {
     let Some(pump_guard) = PumpGuard::try_claim(Arc::clone(fanout), sid.clone()) else {
         // A pump is already running for this session — the new
@@ -177,7 +184,7 @@ fn spawn_or_attach_fanout_pump(
         // slot — Spec C₂ §6.4 invariant preserved.
         let _pump_guard = pump_guard;
         match arcan
-            .dispatch_message(&sid, &content, model.as_deref())
+            .dispatch_message(&sid, &content, model.as_deref(), &tools)
             .await
         {
             Ok(mut up) => {
@@ -492,6 +499,26 @@ impl pb::agent_server::Agent for AgentService {
         // hot path that an explicit per-`SendMessage` model field is
         // unnecessary.
         let model = self.routing.lookup_model(&sid_proto);
+        // Decode client tool definitions (JSON bytes per entry — see
+        // `life.v1.SendMessageReq.tool_definitions`). Un-parseable
+        // entries are skipped with a warning rather than failing the
+        // dispatch — a single malformed definition must not take the
+        // whole turn down.
+        let tools: Vec<serde_json::Value> = body
+            .tool_definitions
+            .iter()
+            .filter_map(|raw| match serde_json::from_slice(raw) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!(
+                        sid = %sid_proto.value,
+                        error = %e,
+                        "send_message: skipping malformed tool definition"
+                    );
+                    None
+                }
+            })
+            .collect();
         // Sub-phase E: pool bracketing is inside the arcan-proxy `Pooled`
         // adapter; the pump only manages the one-pump-per-session slot
         // via `PumpGuard` (RAII).
@@ -501,6 +528,7 @@ impl pb::agent_server::Agent for AgentService {
             sid_value,
             body.content,
             model,
+            tools,
         );
         Ok(Response::new(Box::pin(stream)))
     }
@@ -662,6 +690,7 @@ mod fanout_pump_error_tests {
             "sid-test".to_string(),
             "hi".to_string(),
             None,
+            Vec::new(),
         );
 
         // First broadcast: a structured ERROR carrying {code, message}.

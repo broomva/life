@@ -186,11 +186,18 @@ impl ArcanProxy {
     /// `model` field — this proxy ignores the override when forwarding
     /// to a real arcand. Override-or-env-fallback is honored by the
     /// `VercelAiGatewayArcan` and `AnthropicArcan` HTTP-backed impls.
+    ///
+    /// Client tool definitions: each `tools` entry is JSON-serialized
+    /// into `DispatchMessageReq.tool_definitions` (opaque bytes per the
+    /// payload_json wire pattern) so the chat surface's tools reach the
+    /// substrate. Entries that fail to serialize are skipped — a
+    /// malformed definition must not poison the whole dispatch.
     pub async fn dispatch_message(
         &self,
         sid: &str,
         content: &str,
         _model: Option<&str>,
+        tools: &[serde_json::Value],
     ) -> ArcanProxyResult<
         Pin<
             Box<
@@ -209,6 +216,7 @@ impl ArcanProxy {
                 value: sid.to_owned(),
             }),
             content: content.to_owned(),
+            tool_definitions: serialize_tool_definitions(tools),
         });
         self.attach_token(&mut req);
         let upstream = match client.dispatch_message(req).await {
@@ -231,6 +239,18 @@ impl ArcanProxy {
         let inner = Box::pin(mapped);
         Ok(Box::pin(PoolGuardedStream::new(inner, guard)))
     }
+}
+
+/// Serialize client tool definitions for the substrate wire. Each
+/// definition becomes one `tool_definitions` entry (JSON bytes).
+/// Entries that fail to serialize are skipped so a single malformed
+/// value can't poison the dispatch — `serde_json::Value` serialization
+/// is effectively infallible, but the guard keeps the path total.
+pub fn serialize_tool_definitions(tools: &[serde_json::Value]) -> Vec<Vec<u8>> {
+    tools
+        .iter()
+        .filter_map(|t| serde_json::to_vec(t).ok())
+        .collect()
 }
 
 /// Record a `PoolGuard` outcome based on whether the call succeeded
@@ -259,6 +279,14 @@ fn record_outcome(guard: Option<PoolGuard>, success_or_permanent: bool) {
 /// substrate-gRPC `ArcanProxy` accepts and ignores it (the arcan
 /// substrate wire doesn't carry a model field yet); HTTP-backed impls
 /// (`VercelAiGatewayArcan`, `AnthropicArcan`) honour the override.
+///
+/// `tools` carries the client-supplied tool definitions for this
+/// dispatch (AI-SDK / OpenAI function shape: `{"name", "description",
+/// "parameters"}`). Empty means "no client tools" — backends fall back
+/// to their own tool registry (if any). The substrate-gRPC
+/// `ArcanProxy` forwards them as `DispatchMessageReq.tool_definitions`
+/// bytes; HTTP-backed impls inject them into the outbound provider
+/// request body (`tools` array).
 #[async_trait]
 pub trait ArcanCall: Send + Sync {
     async fn create_agent(&self, sid: &str) -> ArcanProxyResult<String>;
@@ -268,6 +296,7 @@ pub trait ArcanCall: Send + Sync {
         sid: &str,
         content: &str,
         model: Option<&str>,
+        tools: &[serde_json::Value],
     ) -> ArcanProxyResult<
         Pin<
             Box<
@@ -291,6 +320,7 @@ impl ArcanCall for ArcanProxy {
         sid: &str,
         content: &str,
         model: Option<&str>,
+        tools: &[serde_json::Value],
     ) -> ArcanProxyResult<
         Pin<
             Box<
@@ -299,7 +329,7 @@ impl ArcanCall for ArcanProxy {
             >,
         >,
     > {
-        ArcanProxy::dispatch_message(self, sid, content, model).await
+        ArcanProxy::dispatch_message(self, sid, content, model, tools).await
     }
 }
 
@@ -366,6 +396,7 @@ impl<C: ArcanCall> ArcanCall for Pooled<C> {
         sid: &str,
         content: &str,
         model: Option<&str>,
+        tools: &[serde_json::Value],
     ) -> ArcanProxyResult<
         Pin<
             Box<
@@ -376,7 +407,11 @@ impl<C: ArcanCall> ArcanCall for Pooled<C> {
     > {
         // Streams hold the guard until the inner stream terminates.
         let guard = self.pool.acquire().await.map_err(ArcanProxyError::from)?;
-        match self.inner.dispatch_message(sid, content, model).await {
+        match self
+            .inner
+            .dispatch_message(sid, content, model, tools)
+            .await
+        {
             Ok(stream) => Ok(Box::pin(PoolGuardedStream::new(stream, Some(guard)))),
             Err(e) => {
                 if e.is_retryable() {
@@ -503,6 +538,7 @@ mod tests {
                 _sid: &str,
                 _content: &str,
                 _model: Option<&str>,
+                _tools: &[serde_json::Value],
             ) -> ArcanProxyResult<
                 Pin<
                     Box<
@@ -552,6 +588,7 @@ mod tests {
                 _sid: &str,
                 _content: &str,
                 _model: Option<&str>,
+                _tools: &[serde_json::Value],
             ) -> ArcanProxyResult<
                 Pin<
                     Box<
@@ -578,6 +615,58 @@ mod tests {
             let _ = pooled.create_agent("sid-x").await;
         }
         assert_eq!(pool.breaker_state(), BreakerState::Open);
+    }
+
+    /// Tool definitions serialize to one JSON-bytes entry per value —
+    /// the exact shape `DispatchMessageReq.tool_definitions` carries.
+    #[test]
+    fn serialize_tool_definitions_one_entry_per_tool() {
+        let tools = vec![
+            serde_json::json!({
+                "name": "get_weather",
+                "description": "Look up the weather",
+                "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+            }),
+            serde_json::json!({"name": "noop"}),
+        ];
+        let wire = serialize_tool_definitions(&tools);
+        assert_eq!(wire.len(), 2);
+        for (raw, original) in wire.iter().zip(&tools) {
+            let decoded: serde_json::Value = serde_json::from_slice(raw).expect("valid JSON");
+            assert_eq!(&decoded, original, "bytes round-trip to the original value");
+        }
+    }
+
+    #[test]
+    fn serialize_tool_definitions_empty_is_empty() {
+        assert!(serialize_tool_definitions(&[]).is_empty());
+    }
+
+    /// Wire-shape guard: `DispatchMessageReq.tool_definitions` bytes
+    /// survive a prost encode/decode round trip unchanged (additive
+    /// field 3 on the substrate dispatch request).
+    #[test]
+    fn dispatch_message_req_proto_roundtrip_preserves_tool_definitions() {
+        use prost::Message;
+        let tools = vec![serde_json::json!({
+            "name": "get_weather",
+            "description": "Look up the weather",
+            "parameters": {"type": "object"},
+        })];
+        let req = arcan_pb::DispatchMessageReq {
+            sid: Some(aios_v1::SessionId {
+                value: "sid-1".to_string(),
+            }),
+            content: "hello".to_string(),
+            tool_definitions: serialize_tool_definitions(&tools),
+        };
+        let bytes = req.encode_to_vec();
+        let decoded = arcan_pb::DispatchMessageReq::decode(bytes.as_slice()).expect("decode");
+        assert_eq!(decoded.content, "hello");
+        assert_eq!(decoded.tool_definitions.len(), 1);
+        let tool: serde_json::Value =
+            serde_json::from_slice(&decoded.tool_definitions[0]).expect("JSON");
+        assert_eq!(tool["name"], "get_weather");
     }
 
     #[tokio::test]

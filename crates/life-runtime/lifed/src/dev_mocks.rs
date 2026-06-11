@@ -40,6 +40,13 @@ pub struct MockArcan {
     /// substrate-call boundary.
     #[allow(clippy::type_complexity)]
     pub dispatch_models: Arc<Mutex<Vec<(String, Option<String>)>>>,
+    /// Captures the client tool definitions passed to
+    /// `dispatch_message`. Tests assert this to prove the chat
+    /// surface's tools travel from `Agent.SendMessage`
+    /// (`tool_definitions` bytes) through lifed's fanout pump to the
+    /// substrate-call boundary.
+    #[allow(clippy::type_complexity)]
+    pub dispatch_tools: Arc<Mutex<Vec<(String, Vec<serde_json::Value>)>>>,
     /// When set, the next `create_agent` returns an error (then resets).
     pub fail_next: Arc<AtomicBool>,
     /// Sub-phase D: sustained failure mode for chaos tests.
@@ -125,18 +132,23 @@ impl ArcanCall for MockArcan {
         sid: &str,
         content: &str,
         model: Option<&str>,
+        tools: &[serde_json::Value],
     ) -> ArcanProxyResult<Pin<Box<dyn Stream<Item = Result<pb::AgentEvent, tonic::Status>> + Send>>>
     {
         // BRO-1206: mock records the dispatch (sid, content) — model
-        // override is captured separately on `dispatch_models` so
-        // tests can assert plumbing without changing existing
-        // `dispatch_calls` semantics.
+        // override is captured separately on `dispatch_models`, and
+        // client tool definitions on `dispatch_tools`, so tests can
+        // assert plumbing without changing existing `dispatch_calls`
+        // semantics.
         self.dispatch_calls
             .lock()
             .push((sid.to_string(), content.to_string()));
         self.dispatch_models
             .lock()
             .push((sid.to_string(), model.map(str::to_string)));
+        self.dispatch_tools
+            .lock()
+            .push((sid.to_string(), tools.to_vec()));
         if let Some(s) = self.force_fail_status() {
             return Err(ArcanProxyError::Substrate(s));
         }

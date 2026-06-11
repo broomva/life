@@ -181,10 +181,15 @@ impl VercelAiGatewayArcan {
     /// [`DEFAULT_MODEL`]). The override is per-call (per-session in
     /// practice) so a single backend can serve users on different
     /// models without rebuilding.
+    ///
+    /// `tools` carries client-supplied tool definitions. Non-empty
+    /// definitions are attached as the OpenAI-shape `tools` array:
+    /// `{"type": "function", "function": {name, description, parameters}}`.
     fn build_request_body(
         &self,
         user_message: &str,
         model_override: Option<&str>,
+        tools: &[serde_json::Value],
     ) -> serde_json::Value {
         let mut messages: Vec<serde_json::Value> = Vec::with_capacity(2);
         if let Some(sys) = &self.cfg.system_prompt
@@ -203,12 +208,50 @@ impl VercelAiGatewayArcan {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or(self.cfg.model.as_str());
-        serde_json::json!({
+        let mut body = serde_json::json!({
             "model": model,
             "messages": messages,
             "stream": true,
-        })
+        });
+        if !tools.is_empty() {
+            let tools_json: Vec<serde_json::Value> = tools.iter().map(openai_tool_shape).collect();
+            body["tools"] = serde_json::Value::Array(tools_json);
+        }
+        body
     }
+}
+
+/// Translate one client tool definition into the OpenAI chat-completions
+/// `tools` entry shape: `{"type": "function", "function": {name,
+/// description, parameters}}`.
+///
+/// Accepted inputs:
+/// - AI-SDK / bare shape: `{"name", "description"?, "parameters"?}` (wrapped)
+/// - OpenAI envelope: `{"type": "function", "function": {…}}` (passed through)
+/// - Anthropic-native: `{"name", "input_schema"}` (schema lifted into
+///   `parameters`)
+///
+/// Missing schemas default to an empty object schema so the gateway
+/// never sees a structurally-invalid tool entry.
+fn openai_tool_shape(tool: &serde_json::Value) -> serde_json::Value {
+    if tool.get("type").and_then(|t| t.as_str()) == Some("function")
+        && tool.get("function").is_some()
+    {
+        return tool.clone();
+    }
+    let parameters = tool
+        .get("parameters")
+        .or_else(|| tool.get("input_schema"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}}));
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": tool.get("name").cloned().unwrap_or_else(|| serde_json::json!("")),
+            "description": tool.get("description").cloned().unwrap_or_else(|| serde_json::json!("")),
+            "parameters": parameters,
+        },
+    })
 }
 
 #[async_trait]
@@ -231,12 +274,15 @@ impl ArcanCall for VercelAiGatewayArcan {
         sid: &str,
         content: &str,
         model: Option<&str>,
+        tools: &[serde_json::Value],
     ) -> ArcanProxyResult<Pin<Box<dyn Stream<Item = Result<AgentEvent, tonic::Status>> + Send>>>
     {
         let url = format!("{}/chat/completions", self.cfg.base_url);
         // BRO-1206: per-call model override → outbound request body.
         // `None` / empty falls back to `self.cfg.model` (env-bound).
-        let body = self.build_request_body(content, model);
+        // Client tool definitions ride along as the OpenAI-shape
+        // `tools` array.
+        let body = self.build_request_body(content, model, tools);
 
         // BRO-1234: trace the substrate boundary so a silent gateway
         // hang is distinguishable from a substrate-never-fires hang in
@@ -255,6 +301,7 @@ impl ArcanCall for VercelAiGatewayArcan {
             sid = sid,
             model = resolved_model,
             content_len = content.len(),
+            tool_count = tools.len(),
             url = %url,
             "arcan.dispatch_message: starting",
         );
@@ -332,6 +379,29 @@ struct ChatCompletionChoice {
 struct ChatCompletionDelta {
     #[serde(default)]
     content: Option<String>,
+    /// OpenAI streaming tool-call deltas. The first fragment for an
+    /// `index` carries `id` (+ usually `function.name`); subsequent
+    /// fragments stream `function.arguments` JSON pieces.
+    #[serde(default)]
+    tool_calls: Vec<ToolCallDelta>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ToolCallDelta {
+    #[serde(default)]
+    index: u64,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: ToolCallFunctionDelta,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ToolCallFunctionDelta {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
 }
 
 /// Per-stream observability state threaded through the unfold
@@ -384,6 +454,134 @@ impl ParserMetrics {
     }
 }
 
+/// Response-side tool-call bookkeeping for the OpenAI-compatible
+/// streaming wire.
+///
+/// Maps `delta.tool_calls` fragments onto the existing TOOL_CALL event
+/// vocabulary (the same payload shapes the Anthropic-backed path and
+/// the #1686 real-arcand path emit) so the client sees structured
+/// tool-call events instead of dropped frames:
+///
+/// - open:     `{"id", "name", "input": {}}`
+/// - fragment: `{"id", "name": "", "partial_json": "…"}`
+/// - close:    `{"id", "name": "", "done": true}` (on finish)
+///
+/// The unfold yields one item per poll, but a single upstream chunk
+/// can synthesize several events — they queue on `pending` and drain
+/// first on subsequent polls.
+struct ToolCallTracker {
+    pending: std::collections::VecDeque<AgentEvent>,
+    /// `tool_calls[].index` → tool-call id for every currently-open
+    /// call. BTreeMap so close-out order is deterministic.
+    open_by_index: std::collections::BTreeMap<u64, String>,
+}
+
+impl ToolCallTracker {
+    fn new() -> Self {
+        Self {
+            pending: std::collections::VecDeque::new(),
+            open_by_index: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// Ingest one `delta.tool_calls[]` entry, queueing the synthesized
+    /// TOOL_CALL_PENDING events. Returns the updated sequence counter.
+    fn ingest_delta(
+        &mut self,
+        tc: ToolCallDelta,
+        session_id: &aios_proto::aios::v1::SessionId,
+        mut sequence: u64,
+    ) -> u64 {
+        if let Some(id) = tc.id.filter(|s| !s.is_empty()) {
+            self.open_by_index.insert(tc.index, id.clone());
+            let name = tc.function.name.clone().unwrap_or_default();
+            sequence += 1;
+            self.pending.push_back(tool_pending_event(
+                session_id,
+                sequence,
+                serde_json::json!({"id": id, "name": name, "input": {}}),
+            ));
+        }
+        if let Some(args) = tc.function.arguments.filter(|s| !s.is_empty())
+            && let Some(id) = self.open_by_index.get(&tc.index)
+        {
+            sequence += 1;
+            self.pending.push_back(tool_pending_event(
+                session_id,
+                sequence,
+                serde_json::json!({"id": id, "name": "", "partial_json": args}),
+            ));
+        }
+        sequence
+    }
+
+    /// Close every open tool call (`{"id", "done": true}` events) then
+    /// queue the terminal FINISH carrying `reason`. Returns the updated
+    /// sequence counter.
+    fn queue_close_then_finish(
+        &mut self,
+        reason: &str,
+        session_id: &aios_proto::aios::v1::SessionId,
+        mut sequence: u64,
+    ) -> u64 {
+        for (_, id) in std::mem::take(&mut self.open_by_index) {
+            sequence += 1;
+            self.pending.push_back(tool_pending_event(
+                session_id,
+                sequence,
+                serde_json::json!({"id": id, "name": "", "done": true}),
+            ));
+        }
+        sequence += 1;
+        self.pending.push_back(AgentEvent {
+            record: Some(EventRecord {
+                session_id: Some(session_id.clone()),
+                sequence,
+                at: now_timestamp(),
+                kind: "FINISH".to_string(),
+                payload: serde_json::to_vec(&serde_json::json!({"reason": reason}))
+                    .unwrap_or_default(),
+            }),
+            kind: AgentEventKind::Finish as i32,
+        });
+        sequence
+    }
+}
+
+fn tool_pending_event(
+    session_id: &aios_proto::aios::v1::SessionId,
+    sequence: u64,
+    payload: serde_json::Value,
+) -> AgentEvent {
+    AgentEvent {
+        record: Some(EventRecord {
+            session_id: Some(session_id.clone()),
+            sequence,
+            at: now_timestamp(),
+            kind: "TOOL_CALL_PENDING".to_string(),
+            payload: serde_json::to_vec(&payload).unwrap_or_default(),
+        }),
+        kind: AgentEventKind::ToolCallPending as i32,
+    }
+}
+
+fn queued_token_event(
+    session_id: &aios_proto::aios::v1::SessionId,
+    sequence: u64,
+    text: &str,
+) -> AgentEvent {
+    AgentEvent {
+        record: Some(EventRecord {
+            session_id: Some(session_id.clone()),
+            sequence,
+            at: now_timestamp(),
+            kind: "TOKEN".to_string(),
+            payload: serde_json::to_vec(&serde_json::json!({"text": text})).unwrap_or_default(),
+        }),
+        kind: AgentEventKind::Token as i32,
+    }
+}
+
 /// Convert a streaming HTTP body into a stream of `AgentEvent`s.
 ///
 /// SSE framing: `\n\n`-delimited records, each line beginning with
@@ -402,16 +600,63 @@ where
     let sequence: u64 = 0;
     let done = false;
     let metrics = ParserMetrics::new(session_id.value.clone());
+    let tools_state = ToolCallTracker::new();
     let body: Pin<Box<dyn Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>> =
         Box::pin(body);
 
     Box::pin(stream::unfold(
-        (body, buffer, sequence, done, session_id, metrics),
-        move |(mut body, mut buffer, mut sequence, mut done, session_id, mut metrics)| async move {
+        (
+            body,
+            buffer,
+            sequence,
+            done,
+            session_id,
+            metrics,
+            tools_state,
+        ),
+        move |(
+            mut body,
+            mut buffer,
+            mut sequence,
+            mut done,
+            session_id,
+            mut metrics,
+            mut tools_state,
+        )| async move {
             if done {
                 return None;
             }
             loop {
+                // Drain queued tool-lifecycle / terminal events first —
+                // a single upstream chunk can synthesize several events
+                // but the unfold yields one item per poll.
+                if let Some(evt) = tools_state.pending.pop_front() {
+                    metrics.emit_count += 1;
+                    let is_finish = evt.kind == AgentEventKind::Finish as i32;
+                    tracing::info!(
+                        sid = %metrics.sid,
+                        emit_count = metrics.emit_count,
+                        kind = evt.kind,
+                        is_finish,
+                        elapsed_ms = metrics.ms_since_start(),
+                        "arcan.parse: emit queued event",
+                    );
+                    if is_finish {
+                        done = true;
+                    }
+                    return Some((
+                        Ok(evt),
+                        (
+                            body,
+                            buffer,
+                            sequence,
+                            done,
+                            session_id,
+                            metrics,
+                            tools_state,
+                        ),
+                    ));
+                }
                 // Try to extract a full SSE record from the buffer.
                 if let Some(record_end) = find_double_newline(&buffer) {
                     let record_bytes = buffer.drain(..record_end + 2).collect::<Vec<u8>>();
@@ -426,35 +671,20 @@ where
                             None => continue,
                         };
                         if payload == "[DONE]" {
-                            done = true;
-                            sequence += 1;
-                            metrics.emit_count += 1;
+                            // Close any open tool calls + queue the
+                            // terminal FINISH. The top-of-loop drain
+                            // yields them one per poll.
+                            sequence =
+                                tools_state.queue_close_then_finish("stop", &session_id, sequence);
                             tracing::info!(
                                 sid = %metrics.sid,
                                 seq = sequence,
-                                emit_count = metrics.emit_count,
                                 chunk_count = metrics.chunk_count,
                                 total_bytes = metrics.total_bytes,
                                 elapsed_ms = metrics.ms_since_start(),
-                                "arcan.parse: emit FINISH (reason=stop, [DONE] sentinel)",
+                                "arcan.parse: queue FINISH (reason=stop, [DONE] sentinel)",
                             );
-                            let finish_event = AgentEvent {
-                                record: Some(EventRecord {
-                                    session_id: Some(session_id.clone()),
-                                    sequence,
-                                    at: now_timestamp(),
-                                    kind: "FINISH".to_string(),
-                                    payload: serde_json::to_vec(&serde_json::json!({
-                                        "reason": "stop",
-                                    }))
-                                    .unwrap_or_default(),
-                                }),
-                                kind: AgentEventKind::Finish as i32,
-                            };
-                            return Some((
-                                Ok(finish_event),
-                                (body, buffer, sequence, done, session_id, metrics),
-                            ));
+                            continue;
                         }
                         if payload.is_empty() {
                             continue;
@@ -467,11 +697,18 @@ where
                                     if let Some(c) = choice.delta.content {
                                         delta_text.push_str(&c);
                                     }
+                                    // Tool-call deltas queue structured
+                                    // TOOL_CALL_PENDING events instead of
+                                    // being silently dropped.
+                                    for tc in choice.delta.tool_calls {
+                                        sequence =
+                                            tools_state.ingest_delta(tc, &session_id, sequence);
+                                    }
                                     if let Some(reason) = choice.finish_reason {
                                         finish_reason = Some(reason);
                                     }
                                 }
-                                if !delta_text.is_empty() {
+                                if !delta_text.is_empty() && tools_state.pending.is_empty() {
                                     sequence += 1;
                                     metrics.emit_count += 1;
                                     let delta_len = delta_text.len();
@@ -485,55 +722,51 @@ where
                                         elapsed_ms = metrics.ms_since_start(),
                                         "arcan.parse: emit TOKEN",
                                     );
-                                    let token_event = AgentEvent {
-                                        record: Some(EventRecord {
-                                            session_id: Some(session_id.clone()),
-                                            sequence,
-                                            at: now_timestamp(),
-                                            kind: "TOKEN".to_string(),
-                                            payload: serde_json::to_vec(&serde_json::json!({
-                                                "text": delta_text,
-                                            }))
-                                            .unwrap_or_default(),
-                                        }),
-                                        kind: AgentEventKind::Token as i32,
-                                    };
+                                    let token_event =
+                                        queued_token_event(&session_id, sequence, &delta_text);
                                     return Some((
                                         Ok(token_event),
-                                        (body, buffer, sequence, done, session_id, metrics),
+                                        (
+                                            body,
+                                            buffer,
+                                            sequence,
+                                            done,
+                                            session_id,
+                                            metrics,
+                                            tools_state,
+                                        ),
+                                    ));
+                                }
+                                if !delta_text.is_empty() {
+                                    // Mixed chunk (text + tool deltas —
+                                    // rare): keep emission order by
+                                    // queueing the TOKEN behind the tool
+                                    // events already pending.
+                                    sequence += 1;
+                                    tools_state.pending.push_back(queued_token_event(
+                                        &session_id,
+                                        sequence,
+                                        &delta_text,
                                     ));
                                 }
                                 if let Some(reason) = finish_reason {
-                                    done = true;
-                                    sequence += 1;
-                                    metrics.emit_count += 1;
+                                    // Close open tool calls + queue the
+                                    // terminal FINISH; the top-of-loop
+                                    // drain yields them in order.
+                                    sequence = tools_state.queue_close_then_finish(
+                                        &reason,
+                                        &session_id,
+                                        sequence,
+                                    );
                                     tracing::info!(
                                         sid = %metrics.sid,
                                         seq = sequence,
-                                        emit_count = metrics.emit_count,
                                         reason = %reason,
                                         chunk_count = metrics.chunk_count,
                                         total_bytes = metrics.total_bytes,
                                         elapsed_ms = metrics.ms_since_start(),
-                                        "arcan.parse: emit FINISH (finish_reason from delta)",
+                                        "arcan.parse: queue FINISH (finish_reason from delta)",
                                     );
-                                    let finish_event = AgentEvent {
-                                        record: Some(EventRecord {
-                                            session_id: Some(session_id.clone()),
-                                            sequence,
-                                            at: now_timestamp(),
-                                            kind: "FINISH".to_string(),
-                                            payload: serde_json::to_vec(&serde_json::json!({
-                                                "reason": reason,
-                                            }))
-                                            .unwrap_or_default(),
-                                        }),
-                                        kind: AgentEventKind::Finish as i32,
-                                    };
-                                    return Some((
-                                        Ok(finish_event),
-                                        (body, buffer, sequence, done, session_id, metrics),
-                                    ));
                                 }
                             }
                             Err(err) => {
@@ -597,12 +830,25 @@ where
                             Err(tonic::Status::internal(format!(
                                 "VercelAiGatewayArcan: stream read error: {err}"
                             ))),
-                            (body, buffer, sequence, true, session_id, metrics),
+                            (
+                                body,
+                                buffer,
+                                sequence,
+                                true,
+                                session_id,
+                                metrics,
+                                tools_state,
+                            ),
                         ));
                     }
                     None => {
-                        // Upstream closed without [DONE] — synthesize a finish so
-                        // the downstream pump exits cleanly.
+                        // Upstream closed without [DONE] — close any
+                        // open tool calls + synthesize a finish so the
+                        // downstream pump exits cleanly. The top-of-loop
+                        // drain yields the queued events; pending is
+                        // guaranteed non-empty here so the loop cannot
+                        // poll the (exhausted) body again before the
+                        // FINISH flips `done`.
                         tracing::info!(
                             sid = %metrics.sid,
                             chunk_count = metrics.chunk_count,
@@ -612,25 +858,12 @@ where
                             bytes_remaining = buffer.len(),
                             "arcan.parse: upstream closed (synthesising FINISH reason=upstream_closed)",
                         );
-                        sequence += 1;
-                        metrics.emit_count += 1;
-                        let finish = AgentEvent {
-                            record: Some(EventRecord {
-                                session_id: Some(session_id.clone()),
-                                sequence,
-                                at: now_timestamp(),
-                                kind: "FINISH".to_string(),
-                                payload: serde_json::to_vec(&serde_json::json!({
-                                    "reason": "upstream_closed",
-                                }))
-                                .unwrap_or_default(),
-                            }),
-                            kind: AgentEventKind::Finish as i32,
-                        };
-                        return Some((
-                            Ok(finish),
-                            (body, buffer, sequence, true, session_id, metrics),
-                        ));
+                        sequence = tools_state.queue_close_then_finish(
+                            "upstream_closed",
+                            &session_id,
+                            sequence,
+                        );
+                        continue;
                     }
                 }
             }
@@ -708,7 +941,7 @@ mod tests {
     fn build_request_body_contains_model_and_user_message() {
         let arc =
             VercelAiGatewayArcan::new(cfg("http://localhost:8080".to_string())).expect("build");
-        let body = arc.build_request_body("hello world", None);
+        let body = arc.build_request_body("hello world", None, &[]);
         assert_eq!(body["model"], "test-model");
         assert_eq!(body["stream"], true);
         let messages = body["messages"].as_array().expect("messages");
@@ -722,7 +955,7 @@ mod tests {
         let mut c = cfg("http://localhost:8080".to_string());
         c.system_prompt = Some("be helpful".to_string());
         let arc = VercelAiGatewayArcan::new(c).expect("build");
-        let body = arc.build_request_body("hello", None);
+        let body = arc.build_request_body("hello", None, &[]);
         let messages = body["messages"].as_array().expect("messages");
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0]["role"], "system");
@@ -740,7 +973,7 @@ mod tests {
         let mut c = cfg("http://localhost:8080".to_string());
         c.system_prompt = crate::grounding::resolve_system_prompt_from(None);
         let arc = VercelAiGatewayArcan::new(c).expect("build");
-        let body = arc.build_request_body("Who is Carlos Escobar-Valbuena?", None);
+        let body = arc.build_request_body("Who is Carlos Escobar-Valbuena?", None, &[]);
         let messages = body["messages"].as_array().expect("messages");
         assert_eq!(messages.len(), 2, "system + user");
         assert_eq!(messages[0]["role"], "system");
@@ -756,14 +989,160 @@ mod tests {
         let arc =
             VercelAiGatewayArcan::new(cfg("http://localhost:8080".to_string())).expect("build");
         // Override wins.
-        let body = arc.build_request_body("hi", Some("openai/gpt-4o-mini"));
+        let body = arc.build_request_body("hi", Some("openai/gpt-4o-mini"), &[]);
         assert_eq!(body["model"], "openai/gpt-4o-mini");
         // Empty override falls back to cfg.model.
-        let body = arc.build_request_body("hi", Some("   "));
+        let body = arc.build_request_body("hi", Some("   "), &[]);
         assert_eq!(body["model"], "test-model");
         // None falls back to cfg.model.
-        let body = arc.build_request_body("hi", None);
+        let body = arc.build_request_body("hi", None, &[]);
         assert_eq!(body["model"], "test-model");
+    }
+
+    /// Client tool definitions (AI-SDK bare shape) are wrapped into the
+    /// OpenAI `tools` array: `{"type":"function","function":{…}}`.
+    #[test]
+    fn build_request_body_emits_openai_tools_array() {
+        let arc =
+            VercelAiGatewayArcan::new(cfg("http://localhost:8080".to_string())).expect("build");
+        let tools = vec![serde_json::json!({
+            "name": "get_weather",
+            "description": "Look up the weather",
+            "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+        })];
+        let body = arc.build_request_body("hi", None, &tools);
+        let tools_json = body["tools"].as_array().expect("tools array");
+        assert_eq!(tools_json.len(), 1);
+        assert_eq!(tools_json[0]["type"], "function");
+        assert_eq!(tools_json[0]["function"]["name"], "get_weather");
+        assert_eq!(
+            tools_json[0]["function"]["description"],
+            "Look up the weather"
+        );
+        assert_eq!(
+            tools_json[0]["function"]["parameters"]["properties"]["city"]["type"],
+            "string"
+        );
+    }
+
+    /// Already-OpenAI-shaped definitions pass through unchanged; missing
+    /// schemas default to an empty object schema.
+    #[test]
+    fn build_request_body_tool_shape_passthrough_and_defaults() {
+        let arc =
+            VercelAiGatewayArcan::new(cfg("http://localhost:8080".to_string())).expect("build");
+        let envelope = serde_json::json!({
+            "type": "function",
+            "function": {"name": "wrapped", "description": "d", "parameters": {"type": "object"}},
+        });
+        let bare = serde_json::json!({"name": "schemaless"});
+        let body = arc.build_request_body("hi", None, &[envelope.clone(), bare]);
+        let tools_json = body["tools"].as_array().expect("tools array");
+        assert_eq!(tools_json[0], envelope, "OpenAI envelope passes through");
+        assert_eq!(tools_json[1]["function"]["name"], "schemaless");
+        assert_eq!(
+            tools_json[1]["function"]["parameters"],
+            serde_json::json!({"type": "object", "properties": {}}),
+            "missing schema defaults to empty object schema",
+        );
+    }
+
+    /// No client tools → no `tools` key at all (the gateway treats an
+    /// empty array differently from an absent field on some providers).
+    #[test]
+    fn build_request_body_omits_tools_when_empty() {
+        let arc =
+            VercelAiGatewayArcan::new(cfg("http://localhost:8080".to_string())).expect("build");
+        let body = arc.build_request_body("hi", None, &[]);
+        assert!(body.get("tools").is_none());
+    }
+
+    /// Tool definitions reach the outbound HTTP body. wiremock only
+    /// serves the mock when the wrapped `tools` array matches, proving
+    /// the wire shape end-to-end.
+    #[tokio::test]
+    async fn dispatch_message_tools_reach_outbound_body() {
+        let server = MockServer::start().await;
+        let sse_body = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n\
+                        data: [DONE]\n\n";
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_partial_json(serde_json::json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Look up the weather",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }],
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(sse_body),
+            )
+            .mount(&server)
+            .await;
+
+        let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
+        let tools = vec![serde_json::json!({
+            "name": "get_weather",
+            "description": "Look up the weather",
+            "parameters": {"type": "object", "properties": {}},
+        })];
+        let stream = arc
+            .dispatch_message("sess_x", "hi", None, &tools)
+            .await
+            .expect("tools reach body");
+        let mut s = Box::pin(stream);
+        let first = s.next().await.expect("event").expect("ok");
+        assert_eq!(first.kind(), AgentEventKind::Token);
+    }
+
+    /// Response side: `delta.tool_calls` fragments map onto the existing
+    /// TOOL_CALL event vocabulary — open `{"id","name","input":{}}`,
+    /// fragments `{"id","partial_json"}`, close `{"id","done":true}` —
+    /// then FINISH carries `reason: "tool_calls"`.
+    #[tokio::test]
+    async fn parse_sse_maps_tool_call_deltas_to_tool_events() {
+        let body = b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"\"}}]}}]}\n\n\
+                     data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"city\\\":\"}}]}}]}\n\n\
+                     data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"Nicosia\\\"}\"}}]}}]}\n\n\
+                     data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n\
+                     data: [DONE]\n\n";
+        let body_stream = stream::iter(vec![Ok::<_, reqwest::Error>(Bytes::from(body.to_vec()))]);
+        let session_id = aios_proto::aios::v1::SessionId {
+            value: "s".to_string(),
+        };
+        let mut events = Vec::new();
+        let mut s = parse_sse_token_stream(body_stream, session_id);
+        while let Some(evt) = s.next().await {
+            events.push(evt.expect("ok event"));
+        }
+        let payload = |i: usize| -> serde_json::Value {
+            serde_json::from_slice(&events[i].record.as_ref().unwrap().payload).unwrap()
+        };
+        // open + 2 fragments + close + FINISH(tool_calls).
+        assert_eq!(events.len(), 5, "events: {events:?}");
+        assert_eq!(events[0].kind(), AgentEventKind::ToolCallPending);
+        assert_eq!(payload(0)["id"], "call_1");
+        assert_eq!(payload(0)["name"], "get_weather");
+        assert_eq!(events[1].kind(), AgentEventKind::ToolCallPending);
+        assert_eq!(payload(1)["partial_json"], "{\"city\":");
+        assert_eq!(events[2].kind(), AgentEventKind::ToolCallPending);
+        assert_eq!(payload(2)["partial_json"], "\"Nicosia\"}");
+        assert_eq!(events[3].kind(), AgentEventKind::ToolCallPending);
+        assert_eq!(payload(3)["id"], "call_1");
+        assert_eq!(payload(3)["done"], true);
+        assert_eq!(events[4].kind(), AgentEventKind::Finish);
+        assert_eq!(payload(4)["reason"], "tool_calls");
+        // Sequences are strictly increasing across the synthesized events.
+        let seqs: Vec<u64> = events
+            .iter()
+            .map(|e| e.record.as_ref().unwrap().sequence)
+            .collect();
+        assert!(seqs.windows(2).all(|w| w[0] < w[1]), "seqs: {seqs:?}");
     }
 
     #[tokio::test]
@@ -890,7 +1269,7 @@ mod tests {
 
         let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
         let stream = arc
-            .dispatch_message("sess_x", "hello?", None)
+            .dispatch_message("sess_x", "hello?", None, &[])
             .await
             .expect("dispatch");
         let mut tokens = Vec::new();
@@ -940,7 +1319,7 @@ mod tests {
         let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
         // Override should win over `cfg.model = "test-model"`.
         let stream = arc
-            .dispatch_message("sess_x", "hi", Some("openai/gpt-4o-mini"))
+            .dispatch_message("sess_x", "hi", Some("openai/gpt-4o-mini"), &[])
             .await
             .expect("override reaches body");
         let mut s = Box::pin(stream);
@@ -973,7 +1352,7 @@ mod tests {
         let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
         // No override → cfg.model is "test-model" (from `cfg(...)` helper).
         let stream = arc
-            .dispatch_message("sess_x", "hi", None)
+            .dispatch_message("sess_x", "hi", None, &[])
             .await
             .expect("env fallback reaches body");
         let mut s = Box::pin(stream);
@@ -991,7 +1370,7 @@ mod tests {
             .await;
 
         let arc = VercelAiGatewayArcan::new(cfg(server.uri())).expect("build");
-        match arc.dispatch_message("sess_x", "hi", None).await {
+        match arc.dispatch_message("sess_x", "hi", None, &[]).await {
             Ok(_) => panic!("must surface 401"),
             Err(ArcanProxyError::Transport(m)) => {
                 assert!(m.contains("401"), "msg: {m}");

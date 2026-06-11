@@ -253,7 +253,7 @@ impl Agent for AnthropicProxyAgentService {
         // from its routing-cache entry.
         let stream = self
             .arcan
-            .dispatch_message(&sid, &content, None)
+            .dispatch_message(&sid, &content, None, &[])
             .await
             .map_err(|e| tonic::Status::internal(format!("AnthropicArcan dispatch failed: {e}")))?;
         Ok(tonic::Response::new(stream))
