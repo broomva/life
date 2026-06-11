@@ -1658,6 +1658,19 @@ AskHuman preservation), and a topology-B e2e (defs → provider request
 one provider call) — net +12 tests on the arc. Gap closed:
 "kernel dispatch drops client tool_definitions" (BRO-1463).
 
+**2026-06-11 — Stage 6b: arcan's event journal IS lago (BRO-1476).**
+The lifegw-stack agent loop previously journaled to an *embedded*
+RedbJournal on ephemeral disk while the durable volume-backed lagod
+(Stage 6) sat in the same container — two lago instances side by side.
+`entrypoint.sh` now starts lagod FIRST (§3, + an HTTP-plane readiness
+probe), then arcan (§3b) with `LAGO_URL=http://127.0.0.1:8077` pointed
+at lagod's lago-api plane, so arcan boots `RemoteLagoJournal`: every
+public session's FileWrite/ToolCall/message events land in the durable
+lago store and survive redeploys (`ARCAN_LAGO_URL=embedded` escapes to
+the local journal). arcan's data dir also moved to the volume
+(`${LIFE_STATE_DIR}/arcan`). Verified in prod: boot log
+`Starting arcan (remote Lago journal)`.
+
 **2026-06-11 — remote blob backend: blob content flows to lagod
 (BRO-1478).** Stage 6b moved arcan's event journal to lagod, but blob
 *content* (the actual file bytes behind every FileWrite) still wrote
@@ -1675,7 +1688,6 @@ panic "Cannot start a runtime from within a runtime"); a round-trip
 test drives it from inside a multi-thread runtime to pin that. Closes
 the "blobs stay local even in remote-journal mode" FS-substrate gap.
 
-## Health Summary
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |

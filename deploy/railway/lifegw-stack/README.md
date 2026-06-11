@@ -48,12 +48,23 @@ broomva.tech (Vercel)
 | `lagod` | REAL lago substrate — `lago.v1.LagoSubstrate` (event journal + blobs) | `/run/life/lago.sock` (UDS) + `:50051` gRPC / `:8077` HTTP (internal) |
 
 `lifed` boots with `LIFED_ALLOW_MOCK_FALLBACK=1` and per-substrate real/mock
-selection: it dials each substrate's UDS once at boot. `arcan.sock` and
-`lago.sock` are bound by `entrypoint.sh` **before** lifed starts, so lifed
-selects the **real** arcan + lago substrates; `haima.sock` / `anima.sock`
-are absent, so haima/anima degrade to in-process mocks (gated by the
-fallback flag). Boot log prints the selection:
-`substrates: arcan=real lago=real haima=mock anima=mock`.
+selection: it dials each substrate's UDS once at boot. `lago.sock` and
+`arcan.sock` are bound by `entrypoint.sh` **before** lifed starts (lagod §3
+first, then arcan §3b), so lifed selects the **real** arcan + lago
+substrates; `haima.sock` / `anima.sock` are absent, so haima/anima degrade
+to in-process mocks (gated by the fallback flag). Boot log prints the
+selection: `substrates: arcan=real lago=real haima=mock anima=mock`.
+
+**Stage 6b — arcan's event journal IS lago.** Beyond lifed routing reads
+through lagod's UDS, the arcan agent loop itself now writes its event
+journal to lagod over HTTP: `entrypoint.sh` sets `LAGO_URL=http://127.0.0.1:8077`
+(lagod's lago-api plane), so arcan boots `RemoteLagoJournal` instead of an
+embedded RedbJournal — file-write events, tool calls, and messages for every
+public session land in the durable, volume-backed lago store and survive
+redeploys. Boot log: `Starting arcan (remote Lago journal)`. Set
+`ARCAN_LAGO_URL=embedded` to fall back to the local RedbJournal. (Blob
+*content* still writes to arcan's local cache until the remote blob backend
+lands — BRO-1478.)
 
 > **Why real arcan + lago but mock haima/anima?** Stage 5/6 ship the two
 > substrates the core chat path exercises — the agent loop (arcan) and its

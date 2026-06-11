@@ -87,11 +87,14 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Runtime layout — every UDS lifegw + lifed + arcan + lagod touches
-# lives under /run/life/. /var/lib/arcan holds arcan's journal + blob
-# storage. lagod's journal + blobs live under the mounted volume at
-# ${LIFE_STATE_DIR}/lago (entrypoint.sh creates it) so events survive
-# redeploys — the dir is NOT pre-created here because LIFE_STATE_DIR is
-# a runtime mount point.
+# lives under /run/life/. Both daemons' durable state lives under the
+# mounted volume so it survives redeploys (entrypoint.sh creates the
+# subdirs; NOT pre-created here because LIFE_STATE_DIR is a runtime
+# mount point): lagod at ${LIFE_STATE_DIR}/lago (journal + blobs),
+# arcan at ${LIFE_STATE_DIR}/arcan (session workspaces + local blob
+# cache — Stage 6b moved arcan's event JOURNAL to lagod over HTTP, so
+# the RedbJournal there is unused unless ARCAN_LAGO_URL=embedded). The
+# legacy /var/lib/arcan default is kept as a writable fallback.
 RUN groupadd --system life-runtime \
  && useradd  --system --gid life-runtime --home-dir /var/lib/life --create-home life \
  && mkdir -p /run/life /etc/lifegw/tls /etc/lifegw /etc/lifed /var/lib/arcan \
