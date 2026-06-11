@@ -1701,7 +1701,11 @@ e2e pins both directions plus invalid-name rejection. Validation
 (INVALID_ARGUMENT); the dispatch event pump filters by session+branch
 so sibling-branch dispatches cannot interleave. Empty/absent ⇒ main
 (every pre-existing test unchanged). Deferred: Topology-A HTTP path,
-merge/fork-point wire params, client UI.
+merge/fork-point wire params, client UI. Test delta: arcand topology-B
+e2e 5→8 (+branch fork / default-main / invalid-name), lifegw ws
++3 (frame decode, validator, close-code), lifed integration extended —
+598 green across the four touched crates. Gap closed: "Branching not
+exposed" (root CLAUDE.md known-gaps + §Branching policy updated).
 
 ## Health Summary
 

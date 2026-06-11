@@ -134,6 +134,10 @@ pub enum CloseReason {
     /// reserved 4001 = rate-limit slot. Operators can correlate by
     /// the `policy_violation:token_expired` reason string.
     PolicyViolation,
+    /// `1008` — policy violation: invalid branch selector on
+    /// `send_message` (BRO-1479). Distinct from token expiry so client
+    /// protocol errors are not misclassified as auth problems.
+    InvalidBranch,
     /// `1011` — internal server error. Used for unexpected upstream
     /// failures AND heartbeat timeouts (Spec C₃ §6.4 + §6.5):
     /// Sub-phase D (D5) closes idle connections that don't pong
@@ -159,6 +163,7 @@ impl CloseReason {
             CloseReason::Normal => 1000,
             CloseReason::GoingAway => 1001,
             CloseReason::PolicyViolation => 1008,
+            CloseReason::InvalidBranch => 1008,
             CloseReason::InternalError => 1011,
             CloseReason::RateLimit => 4001,
             CloseReason::SlowConsumer => 4002,
@@ -173,6 +178,7 @@ impl CloseReason {
             CloseReason::Normal => "normal",
             CloseReason::GoingAway => "going_away",
             CloseReason::PolicyViolation => "policy_violation:token_expired",
+            CloseReason::InvalidBranch => "policy_violation:invalid_branch",
             CloseReason::InternalError => "internal_error",
             CloseReason::RateLimit => "rate_limit:per_user",
             CloseReason::SlowConsumer => "backpressure:slow_consumer",
@@ -1256,7 +1262,7 @@ async fn handle_inbound_frame(
                     branch = %name,
                     "ws: invalid branch name on send_message — closing"
                 );
-                return Some(CloseReason::PolicyViolation);
+                return Some(CloseReason::InvalidBranch);
             }
             // Sub-phase D (D9): hand off to the dispatcher. If the
             // bounded channel is full (>=64 queued commands), apply
@@ -1833,6 +1839,11 @@ mod tests {
         assert_eq!(CloseReason::Normal.code(), 1000);
         assert_eq!(CloseReason::GoingAway.code(), 1001);
         assert_eq!(CloseReason::PolicyViolation.code(), 1008);
+        assert_eq!(CloseReason::InvalidBranch.code(), 1008);
+        assert_eq!(
+            CloseReason::InvalidBranch.reason(),
+            "policy_violation:invalid_branch"
+        );
         assert_eq!(CloseReason::InternalError.code(), 1011);
         assert_eq!(CloseReason::RateLimit.code(), 4001);
         assert_eq!(CloseReason::SlowConsumer.code(), 4002);

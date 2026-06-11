@@ -210,17 +210,33 @@ impl AgentSubstrate for SubstrateService {
         // An existing branch is reused as-is; a merged (read-only) branch
         // fails inside the tick with the kernel's own clear error.
         if branch != BranchId::main() {
+            let branch_exists = |branches: Vec<aios_protocol::BranchInfo>| {
+                branches.iter().any(|info| info.branch_id == branch)
+            };
             let known = runtime
                 .list_branches(&session_id)
                 .await
-                .map_err(|e| Status::internal(format!("list_branches: {e}")))?
-                .iter()
-                .any(|info| info.branch_id == branch);
-            if !known {
-                runtime
+                .map(branch_exists)
+                .map_err(|e| Status::internal(format!("list_branches: {e}")))?;
+            if !known
+                && let Err(create_err) = runtime
                     .create_branch(&session_id, branch.clone(), None, None)
                     .await
-                    .map_err(|e| Status::internal(format!("create_branch: {e}")))?;
+            {
+                // Idempotent under concurrency: two dispatches naming the
+                // same new branch can both observe "unknown" and race the
+                // fork — the loser's create fails ("branch already
+                // exists") although the branch is now perfectly usable.
+                // Re-check existence instead of string-matching the error;
+                // only a still-missing branch is a real failure.
+                let now_known = runtime
+                    .list_branches(&session_id)
+                    .await
+                    .map(branch_exists)
+                    .unwrap_or(false);
+                if !now_known {
+                    return Err(Status::internal(format!("create_branch: {create_err}")));
+                }
             }
         }
 

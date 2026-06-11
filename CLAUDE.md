@@ -163,7 +163,8 @@ aiOS (kernel contract — types, traits, event taxonomy)
 
 **Known gaps** (blocks Phase 0 stabilization):
 
-- Branching not exposed (Lago supports it, Arcan defaults to "main")
+- Branching exposed on the dispatch path with auto-fork (BRO-1479);
+  Topology-A HTTP route + merge wire-params + client UI still pending
 - No OS-level sandbox isolation (soft sandbox only)
 - Network isolation declared but not enforced
 - Mount trait defined but unimplemented
