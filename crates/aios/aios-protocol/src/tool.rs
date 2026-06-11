@@ -145,8 +145,11 @@ impl ClientToolDefinition {
     /// OpenAI function shape `{"name", "description", "parameters"}`).
     ///
     /// Returns an error when the bytes are not valid JSON, are not a
-    /// JSON object, or carry an empty/missing `name`. Callers at the
-    /// trust boundary (the substrate dispatch handler) treat these
+    /// JSON object, carry an empty/missing `name`, carry a non-string
+    /// `description`, or carry a non-object `parameters`. Absent
+    /// `description`/`parameters` stay permissive (empty string / Null)
+    /// — absence is well-formed, a wrong TYPE is malformed. Callers at
+    /// the trust boundary (the substrate dispatch handler) treat these
     /// errors as "skip this entry" rather than failing the whole
     /// dispatch.
     pub fn from_wire_bytes(bytes: &[u8]) -> Result<Self, ClientToolDefinitionError> {
@@ -167,15 +170,18 @@ impl ClientToolDefinition {
             .map(str::to_owned)
             .filter(|n| !n.is_empty())
             .ok_or(ClientToolDefinitionError::MissingName)?;
-        let description = obj
-            .get("description")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_owned();
-        let parameters = obj
-            .get("parameters")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
+        let description = match obj.get("description") {
+            Some(v) => v
+                .as_str()
+                .map(str::to_owned)
+                .ok_or(ClientToolDefinitionError::InvalidDescriptionType)?,
+            None => String::new(),
+        };
+        let parameters = match obj.get("parameters") {
+            Some(v) if v.is_object() => v.clone(),
+            Some(_) => return Err(ClientToolDefinitionError::InvalidParametersType),
+            None => serde_json::Value::Null,
+        };
         Ok(Self {
             name,
             description,
@@ -197,6 +203,10 @@ pub enum ClientToolDefinitionError {
     NotAnObject,
     #[error("client tool definition is missing a non-empty `name`")]
     MissingName,
+    #[error("client tool definition has a non-string `description`")]
+    InvalidDescriptionType,
+    #[error("client tool definition has a non-object `parameters`")]
+    InvalidParametersType,
 }
 
 // ── Typed content blocks ──────────────────────────────────────────────
@@ -592,6 +602,26 @@ mod tests {
     fn client_tool_def_rejects_non_object() {
         let err = ClientToolDefinition::from_wire_bytes(b"[1, 2, 3]").unwrap_err();
         assert!(matches!(err, ClientToolDefinitionError::NotAnObject));
+    }
+
+    #[test]
+    fn client_tool_def_rejects_wrong_field_types() {
+        // Present-but-mistyped fields are malformed (warn+skip at the
+        // boundary); absence stays permissive — covered by
+        // client_tool_def_missing_description_and_parameters_defaults.
+        let desc = ClientToolDefinition::from_wire_bytes(br#"{"name": "t", "description": 7}"#)
+            .unwrap_err();
+        assert!(matches!(
+            desc,
+            ClientToolDefinitionError::InvalidDescriptionType
+        ));
+        let params =
+            ClientToolDefinition::from_wire_bytes(br#"{"name": "t", "parameters": "str"}"#)
+                .unwrap_err();
+        assert!(matches!(
+            params,
+            ClientToolDefinitionError::InvalidParametersType
+        ));
     }
 
     #[test]

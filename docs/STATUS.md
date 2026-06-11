@@ -1638,9 +1638,12 @@ collisions; a model proposal of a client tool emits
 `ToolCallRequested(category="client")` → wire `TOOL_CALL_PENDING` and
 ends the turn cleanly (no kernel policy/harness involvement — the chat
 surface executes the tool and continues via replayed history).
-Covered by aios-protocol parse tests, aios-runtime tick tests, and a
-topology-B e2e (defs → provider request → TOOL_CALL_PENDING(category
-=client) → FINISH, no TOOL_RESULT, exactly one provider call).
+Covered by aios-protocol parse tests (7, incl. strict field-type
+rejection), aios-runtime tick tests (4, incl. mixed-completion
+AskHuman preservation), and a topology-B e2e (defs → provider request
+→ TOOL_CALL_PENDING(category=client) → FINISH, no TOOL_RESULT, exactly
+one provider call) — net +12 tests on the arc. Gap closed:
+"kernel dispatch drops client tool_definitions" (BRO-1463).
 
 ## Health Summary
 
