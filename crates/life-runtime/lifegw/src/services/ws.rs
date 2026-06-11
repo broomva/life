@@ -249,6 +249,15 @@ pub enum InboundFrame {
         /// like every other inbound field.
         #[serde(default)]
         tools: Option<Vec<serde_json::Value>>,
+        /// BRO-1479: target branch for this dispatch. Absent / empty ⇒
+        /// `main` (backward-compatible — pre-BRO-1479 clients never send
+        /// it). This is UNTRUSTED public input that keys into redb
+        /// compound keys + lago-fs manifests downstream, so the edge
+        /// validates `[a-zA-Z0-9_-]{1,64}` in `handle_inbound_frame` and
+        /// rejects the frame (never sanitizes) before forwarding it to
+        /// lifed as `SendMessageReq.branch`.
+        #[serde(default)]
+        branch: Option<String>,
     },
     /// Approve a pending dispatch.
     ApproveDispatch { dispatch_id: String },
@@ -1078,6 +1087,10 @@ enum DispatcherCommand {
         /// Client tool definitions, JSON-serialized into
         /// `SendMessageReq.tool_definitions` at request-build time.
         tools: Vec<serde_json::Value>,
+        /// BRO-1479: target branch, already validated at the edge in
+        /// `handle_inbound_frame`. Empty ⇒ main. Forwarded verbatim onto
+        /// `SendMessageReq.branch` at request-build time.
+        branch: String,
     },
 }
 
@@ -1108,6 +1121,7 @@ async fn run_send_message_dispatcher(
                 content,
                 attachment_blob_ref,
                 tools,
+                branch,
             } => {
                 let mut req = tonic::Request::new(pb::SendMessageReq {
                     sid: Some(aios_pb::SessionId { value: sid.clone() }),
@@ -1122,6 +1136,9 @@ async fn run_send_message_dispatcher(
                         .iter()
                         .filter_map(|t| serde_json::to_vec(t).ok())
                         .collect(),
+                    // BRO-1479: already edge-validated at frame parse;
+                    // empty ⇒ the substrate dispatches on main.
+                    branch,
                 });
                 if let Some(b) = bearer.as_deref()
                     && let Ok(mv) =
@@ -1189,6 +1206,18 @@ async fn run_send_message_dispatcher(
     }
 }
 
+/// Branch-name check (`[a-zA-Z0-9_-]{1,64}`), mirroring the arcand
+/// substrate's rule — the same value is re-validated there (defense in
+/// depth), but the public edge rejects it first so garbage never rides
+/// the internal wire.
+fn valid_branch_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 /// Handle an inbound frame. Returns `Some(reason)` to close the WS
 /// with the given reason, `None` to continue.
 ///
@@ -1210,7 +1239,25 @@ async fn handle_inbound_frame(
             content,
             attachment_blob_ref,
             tools,
+            branch,
         } => {
+            // BRO-1479: edge-validate the branch BEFORE it crosses into
+            // lifed/arcand — it is untrusted public input that keys into
+            // redb compound keys + lago-fs manifests downstream. An
+            // invalid name is a protocol violation: close (the WS error
+            // surface, matching every other malformed-frame posture)
+            // rather than sanitize silently. The substrate re-validates
+            // at its own boundary (defense in depth).
+            if let Some(name) = branch.as_deref()
+                && !name.is_empty()
+                && !valid_branch_name(name)
+            {
+                tracing::warn!(
+                    branch = %name,
+                    "ws: invalid branch name on send_message — closing"
+                );
+                return Some(CloseReason::PolicyViolation);
+            }
             // Sub-phase D (D9): hand off to the dispatcher. If the
             // bounded channel is full (>=64 queued commands), apply
             // backpressure: when the dispatcher is processing a
@@ -1226,6 +1273,7 @@ async fn handle_inbound_frame(
                     content,
                     attachment_blob_ref,
                     tools: tools.unwrap_or_default(),
+                    branch: branch.unwrap_or_default(),
                 })
                 .await
                 .is_err()
@@ -1948,6 +1996,32 @@ mod tests {
     }
 
     #[test]
+    fn inbound_frame_decodes_send_message_with_branch() {
+        // BRO-1479: an explicit branch rides the frame; the edge
+        // validator accepts the charset and the dispatcher forwards it.
+        let raw = r#"{"kind":"send_message","content":"Hi","branch":"exp-1"}"#;
+        let m = Message::Text(raw.into());
+        let parsed = decode_inbound(&m).expect("decode");
+        match parsed {
+            InboundFrame::SendMessage { branch, .. } => {
+                assert_eq!(branch.as_deref(), Some("exp-1"));
+            }
+            other => panic!("expected SendMessage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn branch_name_validation_rules() {
+        assert!(valid_branch_name("main"));
+        assert!(valid_branch_name("exp-1"));
+        assert!(valid_branch_name("a_B-2"));
+        assert!(!valid_branch_name(""));
+        assert!(!valid_branch_name("../etc/passwd"));
+        assert!(!valid_branch_name("has space"));
+        assert!(!valid_branch_name(&"x".repeat(65)));
+    }
+
+    #[test]
     fn inbound_frame_decodes_send_message() {
         let raw = r#"{"kind":"send_message","content":"Hello"}"#;
         let m = Message::Text(raw.into());
@@ -1957,10 +2031,12 @@ mod tests {
                 content,
                 attachment_blob_ref,
                 tools,
+                branch,
             } => {
                 assert_eq!(content, "Hello");
                 assert!(attachment_blob_ref.is_none());
                 assert!(tools.is_none(), "no tools field → None");
+                assert!(branch.is_none(), "no branch field → None (main)");
             }
             other => panic!("expected SendMessage, got {other:?}"),
         }

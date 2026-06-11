@@ -47,6 +47,13 @@ pub struct MockArcan {
     /// substrate-call boundary.
     #[allow(clippy::type_complexity)]
     pub dispatch_tools: Arc<Mutex<Vec<(String, Vec<serde_json::Value>)>>>,
+    /// BRO-1479: captures the target `branch` passed to
+    /// `dispatch_message`. Tests assert this to prove the branch
+    /// selector travels from `Agent.SendMessage` (`SendMessageReq.branch`)
+    /// through lifed's fanout pump to the substrate-call boundary
+    /// (empty ⇒ main).
+    #[allow(clippy::type_complexity)]
+    pub dispatch_branches: Arc<Mutex<Vec<(String, String)>>>,
     /// When set, the next `create_agent` returns an error (then resets).
     pub fail_next: Arc<AtomicBool>,
     /// Sub-phase D: sustained failure mode for chaos tests.
@@ -132,14 +139,15 @@ impl ArcanCall for MockArcan {
         sid: &str,
         content: &str,
         model: Option<&str>,
+        branch: &str,
         tools: &[serde_json::Value],
     ) -> ArcanProxyResult<Pin<Box<dyn Stream<Item = Result<pb::AgentEvent, tonic::Status>> + Send>>>
     {
         // BRO-1206: mock records the dispatch (sid, content) — model
-        // override is captured separately on `dispatch_models`, and
-        // client tool definitions on `dispatch_tools`, so tests can
-        // assert plumbing without changing existing `dispatch_calls`
-        // semantics.
+        // override is captured separately on `dispatch_models`, client
+        // tool definitions on `dispatch_tools`, and the BRO-1479 branch
+        // selector on `dispatch_branches`, so tests can assert plumbing
+        // without changing existing `dispatch_calls` semantics.
         self.dispatch_calls
             .lock()
             .push((sid.to_string(), content.to_string()));
@@ -149,6 +157,9 @@ impl ArcanCall for MockArcan {
         self.dispatch_tools
             .lock()
             .push((sid.to_string(), tools.to_vec()));
+        self.dispatch_branches
+            .lock()
+            .push((sid.to_string(), branch.to_string()));
         if let Some(s) = self.force_fail_status() {
             return Err(ArcanProxyError::Substrate(s));
         }
