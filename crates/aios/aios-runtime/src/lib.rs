@@ -933,14 +933,29 @@ impl KernelRuntime {
                 // registry-wins collision rule applied: a name that is
                 // also a kernel registry tool is NOT a client handoff
                 // (the registry tool executes through the harness as
-                // usual). When `registry_tool_names` is empty (the
-                // default), collision pruning is assumed to have already
-                // happened upstream, so every declared name is eligible.
+                // usual). A collision is warned — the kernel keeps the
+                // governed registry tool and drops the client shadow, so
+                // operators can see a client tried to redeclare a name
+                // the kernel owns. When `registry_tool_names` is empty
+                // (the default), collision pruning is assumed to have
+                // already happened upstream, so every declared name is
+                // eligible.
                 let client_tool_names: std::collections::HashSet<&str> = input
                     .client_tools
                     .iter()
                     .map(|t| t.name.as_str())
-                    .filter(|name| !self.registry_tool_names.contains(*name))
+                    .filter(|name| {
+                        if self.registry_tool_names.contains(*name) {
+                            warn!(
+                                tool_name = %name,
+                                "client tool name collides with a kernel registry tool; \
+                                 registry wins — dropping the client shadow"
+                            );
+                            false
+                        } else {
+                            true
+                        }
+                    })
                     .collect();
                 // Set when the model proposed at least one client tool in
                 // this completion. Drives the end-of-turn handoff: the
