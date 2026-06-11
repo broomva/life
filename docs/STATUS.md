@@ -1658,6 +1658,21 @@ AskHuman preservation), and a topology-B e2e (defs → provider request
 one provider call) — net +12 tests on the arc. Gap closed:
 "kernel dispatch drops client tool_definitions" (BRO-1463).
 
+**2026-06-11 — Stage 6b: arcan's event journal IS lago (BRO-1476).**
+The lifegw-stack agent loop previously journaled to an *embedded*
+RedbJournal on ephemeral disk while the durable volume-backed lagod
+(Stage 6) sat in the same container — two lago instances side by side.
+`entrypoint.sh` now starts lagod FIRST (§3, + an HTTP-plane readiness
+probe), then arcan (§3b) with `LAGO_URL=http://127.0.0.1:8077` pointed
+at lagod's lago-api plane, so arcan boots `RemoteLagoJournal`: every
+public session's FileWrite/ToolCall/message events land in the durable
+lago store and survive redeploys (`ARCAN_LAGO_URL=embedded` escapes to
+the local journal). arcan's data dir also moved to the volume
+(`${LIFE_STATE_DIR}/arcan`). Remaining FS-substrate gaps tracked:
+blob *content* still local until a remote blob backend (BRO-1478);
+exec-path (shell) writes still bypass the manifest until a post-exec
+diff (BRO-1477); branching still pinned to `main` (BRO-1479).
+
 ## Health Summary
 ## Health Summary
 
