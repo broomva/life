@@ -148,7 +148,7 @@ mod tests {
     use super::*;
     use lago_core::event::EventPayload;
     use lago_fs::Manifest;
-    use lago_store::BlobStore;
+    use lago_store::{BlobStore, LocalBlobBackend};
     use praxis_core::workspace::FsPolicy;
 
     fn setup() -> (
@@ -159,7 +159,10 @@ mod tests {
     ) {
         let tmp = tempfile::tempdir().unwrap();
         let blob_store = Arc::new(BlobStore::open(tmp.path().join("blobs")).unwrap());
-        let tracker = Arc::new(FsTracker::new(Manifest::new(), blob_store));
+        let tracker = Arc::new(FsTracker::new(
+            Manifest::new(),
+            Arc::new(LocalBlobBackend::new(blob_store)),
+        ));
         let (tx, rx) = mpsc::channel(100);
         (tmp, tracker, tx, rx)
     }

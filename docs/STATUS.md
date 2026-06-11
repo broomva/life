@@ -1658,6 +1658,23 @@ AskHuman preservation), and a topology-B e2e (defs → provider request
 one provider call) — net +12 tests on the arc. Gap closed:
 "kernel dispatch drops client tool_definitions" (BRO-1463).
 
+**2026-06-11 — remote blob backend: blob content flows to lagod
+(BRO-1478).** Stage 6b moved arcan's event journal to lagod, but blob
+*content* (the actual file bytes behind every FileWrite) still wrote
+to arcan's local disk. A new `BlobBackend` trait (lago-store) abstracts
+content-addressed storage; `LocalBlobBackend` wraps the existing
+`BlobStore` byte-identically, `RemoteBlobBackend` (arcan-lago) talks to
+lagod's `/v1/blobs/{hash}` HTTP routes. `FsTracker` now holds
+`Arc<dyn BlobBackend>`; `arcan serve` selects remote when `LAGO_URL` is
+set, local otherwise — so a remote-journal deployment is now durable
+end-to-end (events AND content survive redeploys). The remote backend
+bridges its sync trait surface over async HTTP via a dedicated worker
+thread (NOT `block_on` on the caller — the tool harness runs the sync
+tool chain on a Tokio worker, where a naive in-place `block_on` would
+panic "Cannot start a runtime from within a runtime"); a round-trip
+test drives it from inside a multi-thread runtime to pin that. Closes
+the "blobs stay local even in remote-journal mode" FS-substrate gap.
+
 ## Health Summary
 ## Health Summary
 
