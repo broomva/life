@@ -226,7 +226,7 @@ mod tests {
     async fn daemon_starts_writes_a_heartbeat_and_shuts_down_on_signal() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let cfg = DaemonConfig {
-            heartbeat_interval: Duration::from_millis(40),
+            heartbeat_interval: Duration::from_millis(20),
             data_dir: tmp.path().to_path_buf(),
             journal_filename: "journal.redb".into(),
             router_buffer: 16,
@@ -237,8 +237,10 @@ mod tests {
         let cfg_for_task = cfg.clone();
         let daemon = tokio::spawn(async move { run(cfg_for_task, Some(rx)).await });
 
-        // Let the daemon emit a handful of heartbeats.
-        sleep(Duration::from_millis(200)).await;
+        // Let the daemon emit a handful of heartbeats. The window is 50x the
+        // interval: loaded CI runners (macOS especially) can stall the spawned
+        // task long enough that a tight window records zero beats.
+        sleep(Duration::from_millis(1000)).await;
         tx.send(()).expect("signal shutdown");
 
         let started_at = std::time::Instant::now();
