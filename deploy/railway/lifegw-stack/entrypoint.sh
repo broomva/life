@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# lifegw-stack entrypoint — fan out arcan + lifed + lifegw + caddy in
-# one container.
+# lifegw-stack entrypoint — fan out arcan + lagod + lifed + lifegw +
+# caddy in one container.
 #
 # Stage-2 ordering (May 2026 — addresses the lifegw/lifed boot-race
 # described in `HANDOFF.md` §6/§7), extended by Stage 5 (June 2026 —
-# real arcan substrate inside the stack):
+# real arcan substrate inside the stack) and Stage 6 (June 2026 — real
+# lago substrate alongside arcan):
 #
 #   1. Self-signed TLS cert for the lifegw → Caddy hop. Regenerated each
 #      boot — Caddy proxies upstream with `tls_insecure_skip_verify` so
@@ -20,8 +21,13 @@
 #   3. Start `arcan serve --uds-socket /run/life/arcan.sock` and probe
 #      until it accepts UDS connections. MUST precede lifed: lifed's
 #      per-substrate bootstrap samples socket presence once at boot —
-#      arcan socket present ⇒ real arcan substrate; lago/haima/anima
-#      absent ⇒ in-process mocks (LIFED_ALLOW_MOCK_FALLBACK=true).
+#      arcan socket present ⇒ real arcan substrate; haima/anima absent
+#      ⇒ in-process mocks (LIFED_ALLOW_MOCK_FALLBACK=true).
+#   3b. Start `lagod --uds-socket /run/life/lago.sock` and probe until
+#      it accepts UDS connections. ALSO MUST precede lifed (same
+#      single-sample-at-boot reason as arcan) ⇒ lago=real. Unlike
+#      arcan, lagod needs no provider credentials, so it ALWAYS starts
+#      (no env gate).
 #   4. Start `lifed`. Its `JwksCache` is lazy + file-backed (Stage 2
 #      change in `lifed::auth::jwks`): the first `validate()` call
 #      reads `/run/life/lifegw-jwks.json`, and subsequent calls watch
@@ -169,12 +175,88 @@ if ! nc -zU "${LIFE_RUNTIME_DIR}/arcan.sock" 2>/dev/null; then
 fi
 fi # ARCAN_ENABLED
 
+# ── 3b. Start lagod (real lago substrate) ───────────────────────────────────
+# Stage 6 (June 2026): lifed's bootstrap samples substrate UDS presence
+# ONCE at boot (per-substrate selection — see lifed::bootstrap). lagod
+# must therefore bind /run/life/lago.sock and be ACCEPTING connections
+# BEFORE lifed starts, or lifed honestly falls back to MockLago for the
+# container's lifetime. Same ordering rationale as the arcan block above.
+#
+# NO env gate — unlike arcan, lagod needs no provider credentials and
+# never preflights an LLM. It is the durable event journal + blob store,
+# so it ALWAYS starts. The flag is `--uds-socket` (env LAGO_UDS_SOCKET):
+# it binds `lago.v1.LagoSubstrate` over the UDS alongside lagod's TCP
+# gRPC + HTTP planes, sharing the one RedbJournal lifed's lago-proxy
+# dials.
+#
+# Persistence: journal + blobs live at ${LAGO_DATA_DIR} under the
+# volume-backed mount (${LIFE_STATE_DIR}/lago) so events survive
+# redeploys. The mount root is 0750 life:life-runtime (set in §0); the
+# data subdir is created here with the same owner so the `life` user can
+# write `journal.redb` + `blobs/`.
+LAGO_DATA_DIR="${LAGO_DATA_DIR:-${LIFE_STATE_DIR}/lago}"
+mkdir -p "${LAGO_DATA_DIR}"
+chown -R life:life-runtime "${LAGO_DATA_DIR}"
+chmod 0750 "${LAGO_DATA_DIR}"
+
+# Port hygiene: lagod ALWAYS binds a TCP gRPC plane AND a `0.0.0.0` HTTP
+# plane (lib.rs — both unconditional), and its HTTP default is **8080**,
+# which is exactly Caddy's default `$PORT`. Unmanaged, lagod would grab
+# 8080 first and Caddy's later bind would crash the public entrypoint.
+# Nothing in this container consumes lagod's TCP planes — lifed reaches
+# it purely over the UDS — so pin them to fixed internal ports clear of
+# the in-use set (Caddy `$PORT`, lifegw 8443, arcan HTTP 3000). Both are
+# env-overridable; guard each against an accidental `$PORT` collision by
+# bumping it once (covers a Railway-assigned `$PORT` that lands on the
+# default).
+LAGO_GRPC_PORT="${LAGO_GRPC_PORT:-50051}"
+LAGO_HTTP_PORT="${LAGO_HTTP_PORT:-8077}"
+if [[ "${LAGO_HTTP_PORT}" == "${PORT}" ]]; then LAGO_HTTP_PORT=$((PORT + 1)); fi
+if [[ "${LAGO_GRPC_PORT}" == "${PORT}" ]]; then LAGO_GRPC_PORT=$((PORT + 2)); fi
+
+echo "[entrypoint] starting lagod substrate (uds=${LIFE_RUNTIME_DIR}/lago.sock data=${LAGO_DATA_DIR} grpc=${LAGO_GRPC_PORT} http=${LAGO_HTTP_PORT})"
+# `env -u`: the Tier-2 token-minting key is lifegw's secret; scrub it
+# from lagod's environment for the same defense-in-depth reason as the
+# arcan block (lagod has no business holding the signing key).
+runuser --preserve-environment -u life -g life-runtime -- \
+  env -u LIFEGW_TIER2_SIGNING_KEY_PEM \
+  /usr/local/bin/lagod \
+    --uds-socket "${LIFE_RUNTIME_DIR}/lago.sock" \
+    --data-dir "${LAGO_DATA_DIR}" \
+    --grpc-port "${LAGO_GRPC_PORT}" \
+    --http-port "${LAGO_HTTP_PORT}" \
+  &
+LAGOD_PID=$!
+
+# Same probe discipline as the arcan + lifed probes (BRO-1193): `nc -zU`
+# proves the listen backlog is up, not merely that bind() created the
+# socket file. A half-bound socket here would make lifed dial a dead
+# lago at boot and fail the whole stack.
+echo "[entrypoint] waiting for lagod UDS at ${LIFE_RUNTIME_DIR}/lago.sock"
+for i in $(seq 1 60); do
+  if [[ -S "${LIFE_RUNTIME_DIR}/lago.sock" ]] \
+     && nc -zU "${LIFE_RUNTIME_DIR}/lago.sock" 2>/dev/null; then
+    echo "[entrypoint] lagod UDS accepting connections (after ${i} half-seconds)"
+    break
+  fi
+  if ! kill -0 "${LAGOD_PID}" 2>/dev/null; then
+    echo "[entrypoint] FATAL: lagod exited before binding UDS" >&2
+    wait "${LAGOD_PID}" || true
+    exit 1
+  fi
+  sleep 0.5
+done
+if ! nc -zU "${LIFE_RUNTIME_DIR}/lago.sock" 2>/dev/null; then
+  echo "[entrypoint] FATAL: lagod did not accept UDS connections within 30s" >&2
+  exit 1
+fi
+
 # ── 4. Start lifed ──────────────────────────────────────────────────────────
-# Stage 5: lifed's per-substrate bootstrap sees /run/life/arcan.sock
-# (bound above) and dials the REAL arcan substrate; lago/haima/anima
-# sockets are absent so they fall back to mocks under
-# LIFED_ALLOW_MOCK_FALLBACK=true. Boot log prints the selection, e.g.
-# "arcan=real lago=mock haima=mock anima=mock".
+# Stage 6: lifed's per-substrate bootstrap sees /run/life/arcan.sock AND
+# /run/life/lago.sock (both bound above) and dials the REAL arcan + lago
+# substrates; haima/anima sockets are absent so they fall back to mocks
+# under LIFED_ALLOW_MOCK_FALLBACK=true. Boot log prints the selection:
+# "arcan=real lago=real haima=mock anima=mock".
 # Stage 3b knob retained: `LIFED_ARCAN_BACKEND=vercel_ai_gateway` only
 # applies when the arcan socket is ABSENT (the real substrate wins).
 echo "[entrypoint] starting lifed (mock-fallback=${LIFED_ALLOW_MOCK_FALLBACK:-false}, arcan-backend=${LIFED_ARCAN_BACKEND:-mock})"
@@ -247,6 +329,7 @@ shutdown() {
   echo "[entrypoint] SIGTERM received — draining"
   if kill -0 "${LIFEGW_PID}" 2>/dev/null; then kill -TERM "${LIFEGW_PID}" || true; fi
   if kill -0 "${LIFED_PID}"  2>/dev/null; then kill -TERM "${LIFED_PID}"  || true; fi
+  if [[ -n "${LAGOD_PID:-}" ]] && kill -0 "${LAGOD_PID}" 2>/dev/null; then kill -TERM "${LAGOD_PID}" || true; fi
   if [[ -n "${ARCAN_PID:-}" ]] && kill -0 "${ARCAN_PID}" 2>/dev/null; then kill -TERM "${ARCAN_PID}" || true; fi
 }
 trap shutdown TERM INT
