@@ -179,7 +179,18 @@ fn worker_loop(base_url: String, rx: mpsc::Receiver<BlobOp>) {
             return;
         }
     };
-    let client = runtime.block_on(async { reqwest::Client::new() });
+    // Bounded timeouts are load-bearing here: every blob op funnels through
+    // this single worker, and each caller is a Tokio worker thread parked on
+    // the reply channel for the full round-trip. Without a timeout, a hung
+    // lagod would park callers — and transitively stall file writes across all
+    // sessions — unboundedly. Fail fast instead.
+    let client = runtime.block_on(async {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    });
 
     while let Ok(op) = rx.recv() {
         match op {
@@ -249,16 +260,26 @@ async fn do_get(client: &reqwest::Client, url: &str, hash: &BlobHash) -> LagoRes
 
 async fn do_exists(client: &reqwest::Client, url: &str) -> bool {
     // Probe with a 1-byte Range request so existence costs ~1 byte instead of
-    // downloading the whole blob. The server answers 206 for an existing blob,
-    // 404 for a missing one; any non-success (incl. transport error) is
-    // treated as "does not exist".
+    // downloading the whole blob. Status mapping:
+    //   * 2xx (206 Partial / 200) → present
+    //   * 416 Range Not Satisfiable → present-but-empty: a stored ZERO-byte
+    //     blob has no satisfiable `bytes=0-0` range, so the server returns 416.
+    //     Agents write empty files routinely (touch, empty __init__.py), so
+    //     treating 416 as absent would report stored empty blobs as missing.
+    //   * 404 → absent
+    //   * anything else / transport error → treat as "does not exist" (the
+    //     trait can't surface uncertainty; a re-PUT is a content-addressed
+    //     no-op, so a false "absent" is safe, a false "present" is not).
     match client
         .get(url)
         .header(reqwest::header::RANGE, "bytes=0-0")
         .send()
         .await
     {
-        Ok(resp) => resp.status().is_success(),
+        Ok(resp) => {
+            let status = resp.status();
+            status.is_success() || status == StatusCode::RANGE_NOT_SATISFIABLE
+        }
         Err(_) => false,
     }
 }

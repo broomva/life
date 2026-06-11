@@ -82,9 +82,20 @@ impl FsPort for LagoTrackedFs {
                 }
             }
             Err(e) => {
-                tracing::warn!(
+                // track_write stores the content in the blob backend before
+                // building the event. A failure here means the content was NOT
+                // durably stored — with a remote backend this is a real
+                // durability loss (network error, or the server rejecting the
+                // content), distinct from the benign full-channel event drop
+                // above. Surface it at error level so it is not lost in noise.
+                // The disk write already succeeded, so the tool still reports
+                // success; only lago's record of the content is incomplete.
+                tracing::error!(
                     path = %rel_path,
-                    "LagoTrackedFs: tracker.track_write failed: {e}"
+                    error = %e,
+                    "LagoTrackedFs: content NOT tracked in lago (blob store/manifest \
+                     write failed) — file is on local disk but its content may not be \
+                     durable"
                 );
             }
         }

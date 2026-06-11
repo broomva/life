@@ -100,6 +100,25 @@ async fn remote_blob_roundtrips_from_within_a_runtime() {
     );
 }
 
+/// A stored ZERO-byte blob must report `exists() == true` and `get()` must
+/// return empty bytes. The `Range: bytes=0-0` existence probe hits the
+/// server's 416 path for an empty resource (no satisfiable range); treating
+/// that as absent would make every agent-written empty file (touch, empty
+/// `__init__.py`, placeholders) look missing. Also pins the server-side
+/// `parse_range` `total == 0` guard against the `total - 1` u64 underflow.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_blob_handles_empty_blob() {
+    let (_dir, base_url) = serve_lago_api().await;
+    let backend = RemoteBlobBackend::new(base_url);
+
+    let hash = backend.put(b"").expect("PUT empty blob");
+    assert!(
+        backend.exists(&hash),
+        "a stored zero-byte blob must report as present (416 != absent)"
+    );
+    assert_eq!(backend.get(&hash).expect("GET empty blob"), b"");
+}
+
 /// The same backend instance, reused across many writes, must keep working —
 /// proving the lazily-spawned worker thread is durable (one thread services
 /// every request, not one-per-call).
