@@ -485,20 +485,33 @@ async fn dispatch_message_hands_off_client_tool_calls() {
     let approvals: Arc<dyn ApprovalPort> = Arc::new(ApprovalQueue::default());
     let registry = Arc::new(ToolRegistry::with_core_tools());
     let sandbox = Arc::new(LocalSandboxRunner::new(vec!["echo".to_owned()]));
-    let dispatcher = Arc::new(ToolDispatcher::new(registry, policy_engine, sandbox));
+    let dispatcher = Arc::new(ToolDispatcher::new(
+        Arc::clone(&registry),
+        policy_engine,
+        sandbox,
+    ));
     let tool_harness: Arc<dyn ToolHarnessPort> = dispatcher;
     let provider_calls = Arc::new(AtomicU32::new(0));
     let provider = ClientToolProvider {
         calls: Arc::clone(&provider_calls),
     };
-    let runtime = Arc::new(KernelRuntime::new(
-        RuntimeConfig::new(root),
-        event_store,
-        Arc::new(provider),
-        tool_harness,
-        approvals,
-        policy_gate,
-    ));
+    // Mirror `arcan serve`: declare the registry's tool names so the
+    // kernel can enforce registry-wins on client-tool collisions (the
+    // foot-gun the empty default would hide — see
+    // `KernelRuntime::with_registry_tool_names`).
+    let registry_tool_names: Vec<String> =
+        registry.definitions().map(|def| def.name.clone()).collect();
+    let runtime = Arc::new(
+        KernelRuntime::new(
+            RuntimeConfig::new(root),
+            event_store,
+            Arc::new(provider),
+            tool_harness,
+            approvals,
+            policy_gate,
+        )
+        .with_registry_tool_names(registry_tool_names),
+    );
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let service = SubstrateService::new(Arc::clone(&runtime));

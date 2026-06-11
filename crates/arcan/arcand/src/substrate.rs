@@ -49,6 +49,26 @@ const MAX_AGENT_ITERATIONS: u32 = 10;
 // terminal frames; 64 is sufficient headroom for the slowest reader.
 const DISPATCH_CHANNEL_CAPACITY: usize = 64;
 
+// Trust-boundary caps for client-supplied tool definitions. These are
+// UNTRUSTED remote input (the chat surface forwards whatever a client
+// declares) and are re-serialized into the provider request on every
+// tick of a dispatch — without caps a remote user can inflate every
+// model call (cost/context amplification) or smuggle a name the
+// provider rejects (turning every tick into a wire ERROR). Limits are
+// deliberately generous: real chat surfaces ship ~20 tools with ~1-4KB
+// schemas. OpenAI's function-name charset is `[a-zA-Z0-9_-]{1,64}`.
+const MAX_CLIENT_TOOL_DEFS: usize = 64;
+const MAX_CLIENT_TOOL_DEF_BYTES: usize = 16 * 1024;
+
+/// Provider-portable tool-name check (`[a-zA-Z0-9_-]{1,64}`).
+fn valid_client_tool_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 /// arcand's `arcan.v1.AgentSubstrate` impl. Holds a shared
 /// `KernelRuntime` handle so every RPC reuses the same in-memory
 /// session store, journal, and tick engine that the HTTP plane is
@@ -164,18 +184,46 @@ impl AgentSubstrate for SubstrateService {
             Vec::new()
         } else {
             let total = body.tool_definitions.len();
+            if total > MAX_CLIENT_TOOL_DEFS {
+                tracing::warn!(
+                    sid = %sid_proto.value,
+                    total,
+                    cap = MAX_CLIENT_TOOL_DEFS,
+                    "dispatch_message: client tool definitions exceed cap; truncating"
+                );
+            }
             let parsed: Vec<ClientToolDefinition> = body
                 .tool_definitions
                 .iter()
-                .filter_map(|bytes| match ClientToolDefinition::from_wire_bytes(bytes) {
-                    Ok(def) => Some(def),
-                    Err(err) => {
+                .take(MAX_CLIENT_TOOL_DEFS)
+                .filter_map(|bytes| {
+                    if bytes.len() > MAX_CLIENT_TOOL_DEF_BYTES {
                         tracing::warn!(
                             sid = %sid_proto.value,
-                            error = %err,
-                            "dispatch_message: skipping malformed client tool definition"
+                            bytes = bytes.len(),
+                            cap = MAX_CLIENT_TOOL_DEF_BYTES,
+                            "dispatch_message: skipping oversized client tool definition"
                         );
-                        None
+                        return None;
+                    }
+                    match ClientToolDefinition::from_wire_bytes(bytes) {
+                        Ok(def) if !valid_client_tool_name(&def.name) => {
+                            tracing::warn!(
+                                sid = %sid_proto.value,
+                                name = %def.name,
+                                "dispatch_message: skipping client tool with provider-unsafe name"
+                            );
+                            None
+                        }
+                        Ok(def) => Some(def),
+                        Err(err) => {
+                            tracing::warn!(
+                                sid = %sid_proto.value,
+                                error = %err,
+                                "dispatch_message: skipping malformed client tool definition"
+                            );
+                            None
+                        }
                     }
                 })
                 .collect();

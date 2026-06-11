@@ -454,17 +454,23 @@ impl KernelRuntime {
     /// Declare the names of the kernel's own governed tools so the
     /// runtime can enforce registry-wins for client-tool collisions.
     ///
-    /// Builder style (additive). When a `TickInput.client_tools` entry
-    /// names a tool that is also in this set, the kernel executes the
-    /// registry tool through the harness instead of handing the call
-    /// back to the client. Hosts that already prune collisions upstream
-    /// can skip this; it is a belt-and-suspenders second line of defence.
+    /// Builder style (additive across calls). When a
+    /// `TickInput.client_tools` entry names a tool that is also in this
+    /// set, the kernel executes the registry tool through the harness
+    /// instead of handing the call back to the client. Hosts that
+    /// surface `client_tools` MUST wire this (see `arcan serve`) — with
+    /// an empty set, every client-declared name becomes a handoff and a
+    /// malicious client could silently divert registry-tool calls to
+    /// itself (no kernel execution, but also no error). Upstream
+    /// collision pruning (the substrate dispatch handler) is the first
+    /// line of defence; this is the second.
     pub fn with_registry_tool_names<I, S>(mut self, names: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.registry_tool_names = names.into_iter().map(Into::into).collect();
+        self.registry_tool_names
+            .extend(names.into_iter().map(Into::into));
         self
     }
 
@@ -1255,10 +1261,16 @@ impl KernelRuntime {
                 // dispatch loop breaks (mode ≠ Execute) and it is not
                 // treated as an error (mode ≠ Recover). The run still
                 // finishes through the normal `RunFinished` path below, so
-                // the wire emits TOOL_CALL_PENDING then FINISH. A Recover
-                // set earlier in this turn (e.g. a registry tool failed)
-                // takes precedence and is left untouched.
-                if client_tool_proposed && !matches!(mode, OperatingMode::Recover) {
+                // the wire emits TOOL_CALL_PENDING then FINISH. Two modes
+                // set earlier in this turn take precedence and are left
+                // untouched: `Recover` (e.g. a registry tool failed) and
+                // `AskHuman` (a registry tool enqueued an approval — the
+                // host must see the pending-approval signal or the next
+                // dispatch would early-return AskHuman with no model call
+                // and the approval would stall silently).
+                if client_tool_proposed
+                    && !matches!(mode, OperatingMode::Recover | OperatingMode::AskHuman)
+                {
                     mode = OperatingMode::Sleep;
                 }
 

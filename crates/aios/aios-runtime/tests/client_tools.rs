@@ -108,6 +108,9 @@ impl EventStorePort for MemEventStore {
 struct ScriptedProvider {
     /// Tool name to propose on the first completion (`None` → just answer).
     propose_tool: Option<String>,
+    /// Registry tool to ALSO propose first (with a capability) — drives
+    /// the mixed registry+client completion path.
+    propose_registry_tool: Option<String>,
     /// `client_tools` seen on the most recent request.
     seen_client_tools: Mutex<Vec<ClientToolDefinition>>,
     /// Whether the first completion has already been served.
@@ -118,6 +121,16 @@ impl ScriptedProvider {
     fn proposing(tool_name: &str) -> Self {
         Self {
             propose_tool: Some(tool_name.to_owned()),
+            ..Default::default()
+        }
+    }
+
+    /// First completion proposes a capability-bearing registry tool AND
+    /// a client tool, in that order (mirrors a mixed model turn).
+    fn proposing_pair(registry_tool: &str, client_tool: &str) -> Self {
+        Self {
+            propose_tool: Some(client_tool.to_owned()),
+            propose_registry_tool: Some(registry_tool.to_owned()),
             ..Default::default()
         }
     }
@@ -132,18 +145,30 @@ impl ModelProviderPort for ScriptedProvider {
         // ticks (if any) answer normally so loops terminate.
         let first = !self.answered.swap(true, Ordering::SeqCst);
         if first && let Some(tool_name) = self.propose_tool.clone() {
+            let mut directives = Vec::new();
+            if let Some(registry_tool) = self.propose_registry_tool.clone() {
+                directives.push(ModelDirective::ToolCall {
+                    call: ToolCall {
+                        call_id: "call-0".to_owned(),
+                        tool_name: registry_tool,
+                        input: serde_json::json!({ "path": "artifacts/x" }),
+                        requested_capabilities: vec![Capability::fs_write("/session/artifacts/**")],
+                    },
+                });
+            }
+            directives.push(ModelDirective::ToolCall {
+                call: ToolCall {
+                    call_id: "call-1".to_owned(),
+                    tool_name,
+                    input: serde_json::json!({ "q": "berlin" }),
+                    requested_capabilities: Vec::new(),
+                },
+            });
             return Ok(ModelCompletion {
                 provider: "scripted".to_owned(),
                 model: "scripted-deterministic".to_owned(),
                 llm_call_record: None,
-                directives: vec![ModelDirective::ToolCall {
-                    call: ToolCall {
-                        call_id: "call-1".to_owned(),
-                        tool_name,
-                        input: serde_json::json!({ "q": "berlin" }),
-                        requested_capabilities: Vec::new(),
-                    },
-                }],
+                directives,
                 stop_reason: ModelStopReason::ToolCall,
                 usage: None,
                 final_answer: None,
@@ -202,6 +227,9 @@ impl ToolHarnessPort for RecordingHarness {
 #[derive(Default)]
 struct RecordingPolicy {
     evaluated: AtomicBool,
+    /// When set, every requested capability requires approval — drives
+    /// the AskHuman path for governed registry tools.
+    require_approval: bool,
 }
 
 #[async_trait]
@@ -212,6 +240,13 @@ impl PolicyGatePort for RecordingPolicy {
         requested: Vec<Capability>,
     ) -> KernelResult<PolicyGateDecision> {
         self.evaluated.store(true, Ordering::SeqCst);
+        if self.require_approval {
+            return Ok(PolicyGateDecision {
+                allowed: Vec::new(),
+                requires_approval: requested,
+                denied: Vec::new(),
+            });
+        }
         Ok(PolicyGateDecision {
             allowed: requested,
             requires_approval: Vec::new(),
@@ -271,6 +306,14 @@ fn build_runtime(
     provider: ScriptedProvider,
     registry_tool_names: Vec<&str>,
 ) -> (KernelRuntime, Ports) {
+    build_runtime_with_policy(provider, registry_tool_names, RecordingPolicy::default())
+}
+
+fn build_runtime_with_policy(
+    provider: ScriptedProvider,
+    registry_tool_names: Vec<&str>,
+    policy: RecordingPolicy,
+) -> (KernelRuntime, Ports) {
     let root = std::env::temp_dir().join(format!(
         "aios-runtime-client-tools-{}",
         uuid::Uuid::new_v4()
@@ -279,7 +322,7 @@ fn build_runtime(
 
     let provider = Arc::new(provider);
     let harness = Arc::new(RecordingHarness::default());
-    let policy = Arc::new(RecordingPolicy::default());
+    let policy = Arc::new(policy);
 
     let runtime = KernelRuntime::new(
         RuntimeConfig::new(root),
@@ -496,5 +539,31 @@ async fn registry_tool_wins_name_collision() {
         category.flatten().as_deref(),
         Some("client"),
         "a registry tool must not be tagged as a client handoff"
+    );
+}
+
+#[tokio::test]
+async fn mixed_completion_preserves_ask_human_over_client_handoff() {
+    // A mixed first completion: a governed registry tool whose
+    // capability requires approval, THEN a client tool. The client-tool
+    // handoff forces `Sleep` for plain turns — but it must NOT clobber
+    // `AskHuman`, or the host loses the only pending-approval signal
+    // and the approval stalls silently on the next dispatch.
+    let (runtime, _ports) = build_runtime_with_policy(
+        ScriptedProvider::proposing_pair("fs.write", "get_weather"),
+        vec!["fs.write"],
+        RecordingPolicy {
+            require_approval: true,
+            ..Default::default()
+        },
+    );
+    let session = new_session(&runtime).await;
+
+    let output = tick_with_client_tools(&runtime, &session, vec![client_tool("get_weather")]).await;
+
+    assert_eq!(
+        output.mode,
+        OperatingMode::AskHuman,
+        "pending approval must win over the client-tool Sleep forcing"
     );
 }
