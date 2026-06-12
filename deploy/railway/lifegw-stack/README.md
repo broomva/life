@@ -62,9 +62,18 @@ journal to lagod over HTTP: `entrypoint.sh` sets `LAGO_URL=http://127.0.0.1:8077
 embedded RedbJournal — file-write events, tool calls, and messages for every
 public session land in the durable, volume-backed lago store and survive
 redeploys. Boot log: `Starting arcan (remote Lago journal)`. Set
-`ARCAN_LAGO_URL=embedded` to fall back to the local RedbJournal. (Blob
-*content* still writes to arcan's local cache until the remote blob backend
-lands — BRO-1478.)
+`ARCAN_LAGO_URL=embedded` to fall back to the local RedbJournal. Blob
+*content* follows the journal's locality (BRO-1478): with `LAGO_URL` set,
+arcan stores file content through lagod's blob store too — boot log:
+`arcan blob content: remote lago blob store`.
+
+**Agent file-tool workspace (BRO-1490).** `entrypoint.sh` creates a
+writable, volume-backed workspace at `${ARCAN_DATA_DIR}/workspace`
+(override: `ARCAN_WORKSPACE_DIR`) and passes it via `arcan serve
+--workspace`. Without it, arcan's file tools anchor at the process CWD —
+the root-owned image `WORKDIR /opt/life` — and every `write_file` /
+`edit_file` / `bash` write fails before it can reach the lago manifest.
+arcan probes the workspace at boot and logs a WARN if it is not writable.
 
 > **Why real arcan + lago but mock haima/anima?** Stage 5/6 ship the two
 > substrates the core chat path exercises — the agent loop (arcan) and its
