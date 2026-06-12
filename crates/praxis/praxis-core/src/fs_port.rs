@@ -36,7 +36,9 @@ pub trait FsPort: Send + Sync {
     /// Resolve an existing path within the workspace.
     fn resolve(&self, path: &Path) -> PraxisResult<PathBuf>;
 
-    /// Resolve a path for writing (file may not exist yet).
+    /// Resolve a path for writing (neither the file nor its parent
+    /// directories need exist yet; the nearest existing ancestor is
+    /// boundary-checked).
     fn resolve_for_write(&self, path: &Path) -> PraxisResult<PathBuf>;
 
     /// Read a file as UTF-8 text.
