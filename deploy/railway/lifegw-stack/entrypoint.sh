@@ -226,7 +226,19 @@ if [[ "${ARCAN_ENABLED}" == "1" ]]; then
 ARCAN_DATA_DIR="${ARCAN_DATA_DIR:-${LIFE_STATE_DIR}/arcan}"
 mkdir -p "${ARCAN_DATA_DIR}"
 chown -R life:life-runtime "${ARCAN_DATA_DIR}"
-echo "[entrypoint] starting arcan substrate (uds=${LIFE_RUNTIME_DIR}/arcan.sock data=${ARCAN_DATA_DIR})"
+# BRO-1490: the agent's file-tool workspace. Without an explicit
+# --workspace, arcan falls back to its CWD — the image WORKDIR
+# /opt/life, which is created by root and shipped read-only to the
+# `life` runtime user, so every write_file/edit_file/bash write fails
+# ENOENT/EACCES before it can reach the lago manifest. Give the agent
+# a writable workspace under the volume-backed data dir instead
+# (survives redeploys when a Railway volume is mounted). Overridable
+# via ARCAN_WORKSPACE_DIR; chown explicitly because an override may
+# point outside ARCAN_DATA_DIR's recursive chown above.
+ARCAN_WORKSPACE_DIR="${ARCAN_WORKSPACE_DIR:-${ARCAN_DATA_DIR}/workspace}"
+mkdir -p "${ARCAN_WORKSPACE_DIR}"
+chown life:life-runtime "${ARCAN_WORKSPACE_DIR}"
+echo "[entrypoint] starting arcan substrate (uds=${LIFE_RUNTIME_DIR}/arcan.sock data=${ARCAN_DATA_DIR} workspace=${ARCAN_WORKSPACE_DIR})"
 # `env -u`: the Tier-2 token-minting key is lifegw's secret. arcan
 # executes tool calls (incl. shell) for remote chat users — that key
 # must never be readable from the agent process environment.
@@ -273,6 +285,7 @@ runuser --preserve-environment -u life -g life-runtime -- \
     --uds-socket "${LIFE_RUNTIME_DIR}/arcan.sock" \
     --data-dir "${ARCAN_DATA_DIR}" \
     --agents-dir /opt/life/agents \
+    --workspace "${ARCAN_WORKSPACE_DIR}" \
   &
 ARCAN_PID=$!
 
