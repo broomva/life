@@ -90,6 +90,7 @@ async fn smoke_test_full_daemon_lifecycle() {
             content: "smoke message".to_string(),
             attachment_blob_ref: vec![],
             tool_definitions: vec![],
+            branch: String::new(),
         });
         req.metadata_mut().insert(
             "authorization",
@@ -147,6 +148,7 @@ async fn smoke_test_full_daemon_lifecycle() {
             content: "stream_session driver".to_string(),
             attachment_blob_ref: vec![],
             tool_definitions: vec![],
+            branch: String::new(),
         });
         send_req.metadata_mut().insert(
             "authorization",

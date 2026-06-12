@@ -25,6 +25,7 @@ async fn send_message_streams_at_least_one_event() {
         content: "Hello, lifed".to_string(),
         attachment_blob_ref: vec![],
         tool_definitions: vec![],
+        branch: String::new(),
     });
     req.metadata_mut().insert(
         "authorization",
@@ -85,6 +86,7 @@ async fn stream_session_returns_canned_events() {
         content: "drive".to_string(),
         attachment_blob_ref: vec![],
         tool_definitions: vec![],
+        branch: String::new(),
     });
     send_req.metadata_mut().insert(
         "authorization",
@@ -128,6 +130,7 @@ async fn send_message_passes_per_session_model_override_to_arcan() {
         content: "hi".to_string(),
         attachment_blob_ref: vec![],
         tool_definitions: vec![],
+        branch: String::new(),
     });
     req.metadata_mut().insert(
         "authorization",
@@ -172,6 +175,10 @@ async fn send_message_passes_per_session_model_override_to_arcan() {
 ///    substrate-call boundary.
 /// 3. `MockArcan` records `(sid, tools)` on `dispatch_tools`, proving
 ///    the wire path is closed. Malformed entries are skipped.
+///
+/// BRO-1479: the same request carries a non-empty `branch`; the mock
+/// records it on `dispatch_branches`, pinning that the branch selector
+/// rides the identical pump → `dispatch_message` path as the tools.
 #[tokio::test]
 async fn send_message_passes_tool_definitions_to_arcan() {
     let env = TestEnv::start_with_mocks().await;
@@ -196,6 +203,8 @@ async fn send_message_passes_tool_definitions_to_arcan() {
             // Malformed entry — must be skipped, not fail the dispatch.
             b"not-json".to_vec(),
         ],
+        // BRO-1479: a non-empty branch rides the same pump path.
+        branch: "experiment-1".to_string(),
     });
     req.metadata_mut().insert(
         "authorization",
@@ -227,6 +236,19 @@ async fn send_message_passes_tool_definitions_to_arcan() {
          to dispatch_message; malformed entries are dropped"
     );
 
+    // BRO-1479: the branch selector rides the identical path.
+    let branches = env.mocks.arcan.dispatch_branches.lock().clone();
+    assert!(
+        !branches.is_empty(),
+        "expected the dispatch to record its branch selector"
+    );
+    assert_eq!(branches[0].0, sid.value);
+    assert_eq!(
+        branches[0].1, "experiment-1",
+        "SendMessageReq.branch should travel from SendMessage through the \
+         pump to dispatch_message verbatim (empty ⇒ main)"
+    );
+
     env.shutdown().await;
 }
 
@@ -247,6 +269,7 @@ async fn send_message_passes_none_when_no_model_override() {
         content: "hi".to_string(),
         attachment_blob_ref: vec![],
         tool_definitions: vec![],
+        branch: String::new(),
     });
     req.metadata_mut().insert(
         "authorization",
@@ -291,6 +314,7 @@ async fn empty_model_field_normalises_to_none() {
         content: "hi".to_string(),
         attachment_blob_ref: vec![],
         tool_definitions: vec![],
+        branch: String::new(),
     });
     req.metadata_mut().insert(
         "authorization",
@@ -363,6 +387,7 @@ async fn multi_tab_fanout_emits_to_all_attached_streams() {
         content: "fanout driver".to_string(),
         attachment_blob_ref: vec![],
         tool_definitions: vec![],
+        branch: String::new(),
     });
     send_req.metadata_mut().insert(
         "authorization",

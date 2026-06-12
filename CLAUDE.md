@@ -163,7 +163,8 @@ aiOS (kernel contract — types, traits, event taxonomy)
 
 **Known gaps** (blocks Phase 0 stabilization):
 
-- Branching not exposed (Lago supports it, Arcan defaults to "main")
+- Branching exposed on the dispatch path with auto-fork (BRO-1479);
+  Topology-A HTTP route + merge wire-params + client UI still pending
 - No OS-level sandbox isolation (soft sandbox only)
 - Network isolation declared but not enforced
 - Mount trait defined but unimplemented
@@ -417,11 +418,17 @@ longer drops TOKEN text on the real-arcand path (PR #1686, merge
 
 ### Branching policy (production)
 
-Lago supports branching (per `lago branch`); arcand currently
-hardcodes `BranchId::main()` at `crates/arcan/arcand/src/canonical.rs:1265`.
-Exposing branch as a route param is a small follow-up that unlocks
-parallel exploration workflows. Listed as "Phase 0 stabilization gap"
-above and in `MEMORY.md`.
+Branching is exposed through the production dispatch path (BRO-1479):
+`SendMessageReq.branch` threads lifegw ws → lifed → arcan-proxy →
+arcand substrate, which **auto-forks an unknown branch from `main` at
+the current head** via the kernel's `create_branch` (real fork
+semantics — parent, fork_sequence, head tracking; `BranchCreated` is
+the fork's first event). Empty/absent ⇒ `main` (fully backward
+compatible). Branch names are validated `[a-zA-Z0-9_-]{1,64}` at BOTH
+trust boundaries (lifegw edge closes the WS; arcand returns
+INVALID_ARGUMENT). Still deferred: the Topology-A HTTP path
+(`canonical.rs` still keys `BranchId::main()`), merge/fork-point
+params on the wire, and client UI for branch selection.
 
 ## Shared Conventions
 

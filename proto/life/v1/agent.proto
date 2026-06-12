@@ -93,6 +93,15 @@ message SendMessageReq {
   // tools" — backends fall back to their own tool registry (if any).
   // Additive field — pre-existing clients/servers stay wire-compatible.
   repeated bytes tool_definitions = 4;
+  // Target branch for this dispatch. Empty ⇒ "main" (backward-
+  // compatible: pre-BRO-1479 clients never set this). lifegw validates
+  // the name (`[a-zA-Z0-9_-]{1,64}`) at the public edge and lifed
+  // forwards it to `ArcanCall::dispatch_message`, which threads it onto
+  // the substrate's `arcan.v1.DispatchMessageReq.branch`. A non-empty
+  // value forks the session's event stream + filesystem manifest from
+  // main on that branch. Additive field — pre-existing clients/servers
+  // stay wire-compatible.
+  string branch = 5;
 }
 
 message AgentEvent {

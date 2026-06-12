@@ -161,12 +161,21 @@ impl Drop for PumpGuard {
 /// the model provider (`ArcanCall::dispatch_message` → OpenAI/Anthropic
 /// `tools` array, or `DispatchMessageReq.tool_definitions` on the
 /// substrate wire).
+///
+/// BRO-1479: `branch` carries the target branch decoded from
+/// `SendMessageReq.branch`. Empty ⇒ `main` (backward-compatible —
+/// pre-BRO-1479 clients never set it). lifed forwards it verbatim to
+/// `ArcanCall::dispatch_message`, which threads it onto the substrate's
+/// `DispatchMessageReq.branch`. The arcand substrate validates the name
+/// and forks the session's event stream + filesystem manifest from main
+/// on that branch (the public lifegw edge pre-validates too).
 fn spawn_or_attach_fanout_pump(
     fanout: &Arc<FanoutRegistry>,
     arcan: Arc<dyn ArcanCall>,
     sid: String,
     content: String,
     model: Option<String>,
+    branch: String,
     tools: Vec<serde_json::Value>,
 ) {
     let Some(pump_guard) = PumpGuard::try_claim(Arc::clone(fanout), sid.clone()) else {
@@ -184,7 +193,7 @@ fn spawn_or_attach_fanout_pump(
         // slot — Spec C₂ §6.4 invariant preserved.
         let _pump_guard = pump_guard;
         match arcan
-            .dispatch_message(&sid, &content, model.as_deref(), &tools)
+            .dispatch_message(&sid, &content, model.as_deref(), &branch, &tools)
             .await
         {
             Ok(mut up) => {
@@ -519,6 +528,13 @@ impl pb::agent_server::Agent for AgentService {
                 }
             })
             .collect();
+        // BRO-1479: the target branch (`SendMessageReq.branch`) travels
+        // verbatim to the substrate-call boundary alongside the tool
+        // definitions. Empty ⇒ main. lifed does not validate it here —
+        // the arcand substrate validates at its trust boundary and the
+        // public lifegw edge pre-validates (defence in depth); lifed is
+        // an internal forwarder, mirroring the `tool_definitions` posture.
+        let branch = body.branch;
         // Sub-phase E: pool bracketing is inside the arcan-proxy `Pooled`
         // adapter; the pump only manages the one-pump-per-session slot
         // via `PumpGuard` (RAII).
@@ -528,6 +544,7 @@ impl pb::agent_server::Agent for AgentService {
             sid_value,
             body.content,
             model,
+            branch,
             tools,
         );
         Ok(Response::new(Box::pin(stream)))
@@ -690,6 +707,7 @@ mod fanout_pump_error_tests {
             "sid-test".to_string(),
             "hi".to_string(),
             None,
+            String::new(),
             Vec::new(),
         );
 

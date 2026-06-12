@@ -1688,6 +1688,25 @@ panic "Cannot start a runtime from within a runtime"); a round-trip
 test drives it from inside a multi-thread runtime to pin that. Closes
 the "blobs stay local even in remote-journal mode" FS-substrate gap.
 
+**2026-06-11 — branching exposed through the dispatch path
+(BRO-1479).** `branch` rides additive proto fields
+(`life.v1.SendMessageReq` + `arcan.v1.DispatchMessageReq`) through
+lifegw ws → lifed → arcan-proxy → arcand. The substrate **auto-forks an
+unknown branch from main at the current head** using the kernel's
+existing `create_branch` (parent + fork_sequence + head tracking;
+`BranchCreated` is the new branch's first event) — dispatching to
+`exp-1` forks the session's event stream without touching main, the
+e2e pins both directions plus invalid-name rejection. Validation
+`[a-zA-Z0-9_-]{1,64}` at the public edge (WS close) AND the substrate
+(INVALID_ARGUMENT); the dispatch event pump filters by session+branch
+so sibling-branch dispatches cannot interleave. Empty/absent ⇒ main
+(every pre-existing test unchanged). Deferred: Topology-A HTTP path,
+merge/fork-point wire params, client UI. Test delta: arcand topology-B
+e2e 5→8 (+branch fork / default-main / invalid-name), lifegw ws
++3 (frame decode, validator, close-code), lifed integration extended —
+598 green across the four touched crates. Gap closed: "Branching not
+exposed" (root CLAUDE.md known-gaps + §Branching policy updated).
+
 ## Health Summary
 
 | Area | aiOS | Arcan | Lago | Autonomic | Praxis | Vigil | Spaces |

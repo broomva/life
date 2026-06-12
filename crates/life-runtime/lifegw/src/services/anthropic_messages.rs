@@ -840,6 +840,9 @@ async fn send_message(
         content: content.to_string(),
         attachment_blob_ref: Vec::new(),
         tool_definitions: Vec::new(),
+        // BRO-1479: the Anthropic Messages compat surface has no branch
+        // concept on its public contract — dispatch always lands on main.
+        branch: String::new(),
     });
     attach_tier2(&mut req, tier2)?;
 
