@@ -1914,10 +1914,14 @@ Current suite validates:
 ### Canonical Tool Execution Engine
 
 - Standalone tool execution and sandbox engine extracted from `arcan-harness`.
-- 4 crates: `praxis-core` (21 tests), `praxis-tools` (24 tests), `praxis-skills` (11 tests), `praxis-mcp` (34 tests).
-- **90 tests total** across all crates.
+- Crates: `praxis-core` (30 tests), `praxis-tools` (34 tests), `praxis-skills` (16 tests), `praxis-mcp-bridge` + `life-praxis` (34 tests).
+- **114 tests total** across all crates.
 - Depends only on `aios-protocol` — no dependency on Arcan, Lago, or Autonomic.
 - Implements canonical `Tool` trait from `aios-protocol::tool`.
+- `FsPolicy::resolve_for_write` resolves paths whose parent directories do
+  not exist yet (nearest-existing-ancestor boundary check; `..`/`.` rejected
+  in the not-yet-existing suffix) — BRO-1490 part 2, #1744. `LocalFs::write`
+  boundary-checks **before** creating parent directories.
 
 ### Components
 
