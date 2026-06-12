@@ -50,17 +50,14 @@ impl FsPort for LocalFs {
     }
 
     fn write(&self, path: &Path, content: &[u8]) -> PraxisResult<()> {
-        // Compute the target path within the workspace.
-        let joined = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            self.policy.workspace_root().join(path)
-        };
-        // Create parent directories first (resolve_for_write needs the parent to exist).
-        if let Some(parent) = joined.parent() {
+        // Resolve (and boundary-check) BEFORE creating anything on disk —
+        // resolve_for_write tolerates missing parents, so creating them
+        // first would only manufacture directories for a path that may
+        // then be rejected as outside the workspace.
+        let resolved = self.policy.resolve_for_write(path)?;
+        if let Some(parent) = resolved.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let resolved = self.policy.resolve_for_write(path)?;
         Ok(std::fs::write(resolved, content)?)
     }
 
@@ -131,6 +128,42 @@ mod tests {
         fs.write(&path, b"nested").unwrap();
         assert!(path.exists());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "nested");
+    }
+
+    #[test]
+    fn resolve_for_write_then_write_into_missing_relative_dir() {
+        // The exact WriteFileTool flow that hit BRO-1490 in prod: pre-flight
+        // resolve_for_write on a workspace-relative path whose parent does
+        // not exist yet, then write to the resolved path.
+        let (tmp, fs) = make_fs();
+
+        let resolved = fs
+            .resolve_for_write(Path::new("artifacts/receipt.txt"))
+            .expect("resolve_for_write must tolerate a missing parent dir");
+        fs.write(&resolved, b"BRO-1490").unwrap();
+
+        let on_disk = tmp.path().join("artifacts/receipt.txt");
+        assert!(on_disk.exists());
+        assert_eq!(std::fs::read_to_string(on_disk).unwrap(), "BRO-1490");
+    }
+
+    #[test]
+    fn write_outside_workspace_creates_nothing() {
+        // The boundary check must run BEFORE any directory creation: a
+        // rejected write must not leave stray directories behind.
+        let (_tmp, fs) = make_fs();
+        let outside = std::env::temp_dir().join("praxis-localfs-escape-check/sub/file.txt");
+
+        let err = fs.write(&outside, b"nope").unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::PraxisError::PathOutsideWorkspace { .. }
+        ));
+        assert!(
+            !std::env::temp_dir()
+                .join("praxis-localfs-escape-check")
+                .exists()
+        );
     }
 
     #[test]

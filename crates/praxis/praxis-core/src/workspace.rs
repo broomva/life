@@ -42,22 +42,52 @@ impl FsPolicy {
         Ok(canonical)
     }
 
-    /// Resolve a path for writing. The parent must exist and be within workspace,
-    /// but the file itself may not exist yet.
+    /// Resolve a path for writing. Neither the file nor its parent
+    /// directories need exist yet (BRO-1490: `write_file artifacts/x.txt`
+    /// into a fresh workspace must resolve, not ENOENT): the nearest
+    /// EXISTING ancestor is canonicalized and boundary-checked, then the
+    /// not-yet-existing components are re-appended. Those must be plain
+    /// segments — a `..` (or stray `.`) past the verified prefix cannot be
+    /// canonicalized (nothing to stat) and could escape the workspace once
+    /// the directories are created, so it is rejected.
     pub fn resolve_for_write(&self, candidate: &Path) -> PraxisResult<PathBuf> {
         let joined = if candidate.is_absolute() {
             candidate.to_path_buf()
         } else {
             self.workspace_root.join(candidate)
         };
-        let parent = joined
-            .parent()
-            .ok_or_else(|| PraxisError::PathOutsideWorkspace {
-                path: joined.display().to_string(),
-            })?;
-        let canonical_parent = parent.canonicalize()?;
-        self.ensure_within_root(&canonical_parent)?;
-        Ok(canonical_parent.join(joined.file_name().unwrap()))
+        let outside = || PraxisError::PathOutsideWorkspace {
+            path: joined.display().to_string(),
+        };
+        // `file_name()` is None for paths ending in `..` — reject those
+        // outright rather than guessing what the caller meant to write.
+        let file_name = joined.file_name().ok_or_else(outside)?.to_os_string();
+
+        // Walk up to the nearest existing ancestor, collecting the
+        // not-yet-existing directory components in between.
+        let mut missing: Vec<std::ffi::OsString> = Vec::new();
+        let mut ancestor = joined.parent().ok_or_else(outside)?;
+        while !ancestor.exists() {
+            // None ⇒ the ancestor ends in `..` (traversal through a
+            // non-existing directory) — nothing trustworthy to anchor on.
+            missing.push(ancestor.file_name().ok_or_else(outside)?.to_os_string());
+            ancestor = ancestor.parent().ok_or_else(outside)?;
+        }
+
+        // Canonicalize the existing prefix and enforce the boundary THERE —
+        // before any caller creates the missing directories under it.
+        let canonical = ancestor.canonicalize()?;
+        self.ensure_within_root(&canonical)?;
+
+        let mut resolved = canonical;
+        for component in missing.iter().rev() {
+            if component == ".." || component == "." {
+                return Err(outside());
+            }
+            resolved.push(component);
+        }
+        resolved.push(&file_name);
+        Ok(resolved)
     }
 
     /// Validate that a canonical path is within the workspace root.
@@ -197,5 +227,104 @@ mod tests {
         let policy = FsPolicy::new(dir.path());
         let rel = policy.relative(&file_path).unwrap();
         assert_eq!(rel, PathBuf::from("sub/test.txt"));
+    }
+
+    // ── resolve_for_write with missing parents (BRO-1490) ───────────────
+
+    #[test]
+    fn resolve_for_write_accepts_missing_parent() {
+        // The prod regression: `write_file artifacts/receipt.txt` into a
+        // fresh workspace whose `artifacts/` does not exist yet.
+        let dir = tempfile::tempdir().unwrap();
+        let policy = FsPolicy::new(dir.path());
+
+        let resolved = policy
+            .resolve_for_write(Path::new("artifacts/receipt.txt"))
+            .unwrap();
+
+        let root = dir.path().canonicalize().unwrap();
+        assert_eq!(resolved, root.join("artifacts/receipt.txt"));
+        // Resolution must not create anything — that's the writer's job.
+        assert!(!dir.path().join("artifacts").exists());
+    }
+
+    #[test]
+    fn resolve_for_write_accepts_nested_missing_parents() {
+        let dir = tempfile::tempdir().unwrap();
+        let policy = FsPolicy::new(dir.path());
+
+        let resolved = policy
+            .resolve_for_write(Path::new("a/b/c/receipt.txt"))
+            .unwrap();
+
+        let root = dir.path().canonicalize().unwrap();
+        assert_eq!(resolved, root.join("a/b/c/receipt.txt"));
+    }
+
+    #[test]
+    fn resolve_for_write_existing_parent_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("artifacts")).unwrap();
+        let policy = FsPolicy::new(dir.path());
+
+        let resolved = policy
+            .resolve_for_write(Path::new("artifacts/receipt.txt"))
+            .unwrap();
+
+        let root = dir.path().canonicalize().unwrap();
+        assert_eq!(resolved, root.join("artifacts/receipt.txt"));
+    }
+
+    #[test]
+    fn resolve_for_write_rejects_traversal_through_missing_dir() {
+        // `ghost/` does not exist, so the `..` segments after it cannot be
+        // canonicalized — allowing them could escape the workspace once the
+        // directories are created.
+        let dir = tempfile::tempdir().unwrap();
+        let policy = FsPolicy::new(dir.path());
+
+        let err = policy
+            .resolve_for_write(Path::new("ghost/../../escape.txt"))
+            .unwrap_err();
+        assert!(matches!(err, PraxisError::PathOutsideWorkspace { .. }));
+    }
+
+    #[test]
+    fn resolve_for_write_rejects_absolute_outside_with_missing_parents() {
+        let dir = tempfile::tempdir().unwrap();
+        let policy = FsPolicy::new(dir.path());
+
+        // Nearest existing ancestor is the system temp dir — outside the
+        // workspace — so the boundary check must reject it.
+        let outside = std::env::temp_dir().join("praxis-resolve-for-write-nope/sub/file.txt");
+        let err = policy.resolve_for_write(&outside).unwrap_err();
+        assert!(matches!(err, PraxisError::PathOutsideWorkspace { .. }));
+    }
+
+    #[test]
+    fn resolve_for_write_rejects_trailing_parent_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let policy = FsPolicy::new(dir.path());
+
+        let err = policy
+            .resolve_for_write(Path::new("artifacts/.."))
+            .unwrap_err();
+        assert!(matches!(err, PraxisError::PathOutsideWorkspace { .. }));
+    }
+
+    #[test]
+    fn resolve_for_write_traversal_within_existing_dirs_still_works() {
+        // `..` through EXISTING directories canonicalizes safely — the
+        // missing-suffix restriction must not break this.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+        let policy = FsPolicy::new(dir.path());
+
+        let resolved = policy
+            .resolve_for_write(Path::new("sub/../newdir/file.txt"))
+            .unwrap();
+
+        let root = dir.path().canonicalize().unwrap();
+        assert_eq!(resolved, root.join("newdir/file.txt"));
     }
 }

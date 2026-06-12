@@ -622,6 +622,32 @@ mod tests {
     }
 
     #[test]
+    fn write_file_into_missing_subdirectory() {
+        // BRO-1490 prod regression: the model writes
+        // `artifacts/receipt.txt` into a fresh workspace. The tool's
+        // pre-flight resolve_for_write used to ENOENT on the missing
+        // `artifacts/` parent before LocalFs::write could create it
+        // ("io error: No such file or directory" → mode=Recover).
+        let dir = TempDir::new().unwrap();
+        let fs = make_fs(&dir);
+        let tool = WriteFileTool::new(fs);
+        let ctx = make_ctx();
+
+        let call = make_call(
+            "write_file",
+            json!({"path": "artifacts/receipt.txt", "content": "BRO-1490 receipt"}),
+        );
+        let result = tool.execute(&call, &ctx).unwrap();
+        assert_eq!(result.output["success"], true);
+
+        let on_disk = dir.path().join("artifacts/receipt.txt");
+        assert_eq!(
+            std::fs::read_to_string(on_disk).unwrap(),
+            "BRO-1490 receipt"
+        );
+    }
+
+    #[test]
     fn list_dir_shows_entries() {
         let dir = TempDir::new().unwrap();
         std::fs::write(dir.path().join("a.txt"), "").unwrap();
