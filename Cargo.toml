@@ -362,7 +362,7 @@ redb = "2"
 regex = "1"
 reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
 reqwest-eventsource = "0.6"
-rig-core = "0.36"
+rig = { package = "rig-core", version = "0.38" }
 rmcp = { version = "1.7", features = ["client", "server", "macros", "transport-child-process", "transport-io", "transport-streamable-http-server"] }
 rstar = "0.12"
 schemars = { version = "0.8", features = ["chrono"] }
@@ -406,7 +406,7 @@ zstd = "0.13"
 # against the declared `output_schema`. Replaces the v0.1
 # hand-rolled validator. See
 # `docs/superpowers/specs/2026-05-09-bro-1006-authored-agents-architecture.md` §6.
-jsonschema = { version = "0.18", default-features = false }
+jsonschema = { version = "0.46", default-features = false }
 # YAML-frontmatter splitter for parsing `agents/<name>.md` files.
 # Body becomes `AgentSpec.instructions`; frontmatter becomes the
 # structured fields. See spec §4.

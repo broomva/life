@@ -744,22 +744,23 @@ fn compose_instructions(spec: &AgentSpec) -> String {
 /// "schema is malformed" message — this is rare since
 /// `AgentSpec::validate()` structurally checks the schema first.
 fn validate_against_schema(value: &Value, schema: &Value) -> std::result::Result<(), String> {
-    let compiled = match jsonschema::JSONSchema::options().compile(schema) {
+    let compiled = match jsonschema::compile(schema) {
         Ok(c) => c,
         Err(e) => return Err(format!("malformed output_schema (compile error): {e}")),
     };
-    if let Err(errors) = compiled.validate(value) {
-        let messages: Vec<String> = errors
-            .map(|e| {
-                let path = e.instance_path.to_string();
-                if path.is_empty() {
-                    format!("{e}")
-                } else {
-                    format!("{path}: {e}")
-                }
-            })
-            .collect();
-        return Err(messages.join("; "));
+    let error_messages: Vec<String> = compiled
+        .iter_errors(value)
+        .map(|e| {
+            let path = e.instance_path.to_string();
+            if path.is_empty() {
+                format!("{e}")
+            } else {
+                format!("{path}: {e}")
+            }
+        })
+        .collect();
+    if !error_messages.is_empty() {
+        return Err(error_messages.join("; "));
     }
     Ok(())
 }
