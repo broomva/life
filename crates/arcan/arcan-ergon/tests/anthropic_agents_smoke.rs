@@ -168,7 +168,10 @@ fn build_step_ctx<'a>(workflow_name: &'a str, provider: Arc<dyn Provider>) -> St
 fn assert_schema(value: &serde_json::Value, schema: &serde_json::Value, agent_name: &str) {
     let compiled = jsonschema::compile(schema)
         .unwrap_or_else(|e| panic!("agent `{agent_name}` output_schema does not compile: {e}"));
-    let errors: Vec<String> = compiled.iter_errors(value).map(|e| format!("{e}")).collect();
+    let errors: Vec<String> = compiled
+        .iter_errors(value)
+        .map(|e| format!("{e}"))
+        .collect();
     if !errors.is_empty() {
         panic!(
             "agent `{agent_name}` output failed schema validation:\n  errors: {}\n  value: {}",
