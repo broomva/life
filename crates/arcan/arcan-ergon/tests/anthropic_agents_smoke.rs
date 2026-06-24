@@ -166,7 +166,7 @@ fn build_step_ctx<'a>(workflow_name: &'a str, provider: Arc<dyn Provider>) -> St
 /// surfaces a clearer error if the agent's spec validation has been
 /// bypassed somehow).
 fn assert_schema(value: &serde_json::Value, schema: &serde_json::Value, agent_name: &str) {
-    let compiled = jsonschema::compile(schema)
+    let compiled = jsonschema::validator_for(schema)
         .unwrap_or_else(|e| panic!("agent `{agent_name}` output_schema does not compile: {e}"));
     let errors: Vec<String> = compiled
         .iter_errors(value)

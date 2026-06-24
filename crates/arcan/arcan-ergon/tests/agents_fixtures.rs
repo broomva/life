@@ -131,9 +131,9 @@ async fn each_blessed_agent_schema_compiles_under_production_validator() {
     for &name in REQUIRED_BLESSED_AGENTS {
         let spec = registry.get(name).await.expect("registered").spec();
 
-        jsonschema::compile(&spec.input_schema)
+        jsonschema::validator_for(&spec.input_schema)
             .unwrap_or_else(|e| panic!("agent `{name}`: input_schema does not compile: {e}"));
-        jsonschema::compile(&spec.output_schema)
+        jsonschema::validator_for(&spec.output_schema)
             .unwrap_or_else(|e| panic!("agent `{name}`: output_schema does not compile: {e}"));
     }
 }
