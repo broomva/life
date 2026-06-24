@@ -394,7 +394,7 @@ pub fn validate_against_schema(
     what: &str,
     agent_name: &str,
 ) -> Result<()> {
-    let compiled = jsonschema::compile(schema)
+    let compiled = jsonschema::validator_for(schema)
         .map_err(|e| anyhow!("agent `{agent_name}` {what}_schema is malformed: {e}"))?;
     let messages: Vec<String> = compiled
         .iter_errors(value)
