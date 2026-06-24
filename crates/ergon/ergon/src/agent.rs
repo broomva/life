@@ -751,7 +751,7 @@ fn validate_against_schema(value: &Value, schema: &Value) -> std::result::Result
     let error_messages: Vec<String> = compiled
         .iter_errors(value)
         .map(|e| {
-            let path = e.instance_path.to_string();
+            let path = e.instance_path().to_string();
             if path.is_empty() {
                 format!("{e}")
             } else {
