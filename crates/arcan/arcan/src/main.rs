@@ -780,7 +780,14 @@ fn run_serve(
     // FsPort write path uses. The FsPort write path takes its own clones.
     let exec_tracker = tracker.clone();
     let exec_fs_event_tx = fs_event_tx.clone();
-    let tracked_fs: Arc<dyn FsPort> = Arc::new(LagoTrackedFs::new(local_fs, tracker, fs_event_tx));
+    // BRO-1491: declare the per-session workspace base (`{data_dir}`, the
+    // kernel's `RuntimeConfig::root` — see `RuntimeConfig::new(data_dir)` below)
+    // so per-call scoping keys session writes as `/sessions/<id>/…` in the
+    // shared manifest, keeping concurrent sessions isolated + unique.
+    let session_base = data_dir.to_path_buf();
+    let tracked_fs: Arc<dyn FsPort> = Arc::new(
+        LagoTrackedFs::new(local_fs, tracker, fs_event_tx).with_session_base(session_base.clone()),
+    );
 
     let sandbox_policy = SandboxPolicy {
         workspace_root: workspace_root.clone(),
@@ -823,7 +830,10 @@ fn run_serve(
             exec_tracker,
             exec_fs_event_tx,
             workspace_root.clone(),
-        );
+        )
+        // BRO-1491: scope exec-path reconciliation to the session workspace
+        // (session-unique keys) when a call carries a per-session root.
+        .with_session_base(session_base.clone());
         registry.register(PraxisToolBridge::new(bash_tool));
 
         // Extended tools
