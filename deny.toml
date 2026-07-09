@@ -16,6 +16,8 @@ ignore = [
     "RUSTSEC-2017-0008",  # serial unmaintained — transitive dep, no impact on agent runtime
     "RUSTSEC-2026-0104",  # rustls-webpki reachable panic on empty BIT STRING in CRL onlySomeReasons — we don't parse untrusted CRLs; patched in >=0.103.13 (follow-up dep bump)
     "RUSTSEC-2026-0173",  # proc-macro-error2 unmaintained — transitive via tabled_derive→tabled (CLI table rendering only); migrating off tabled tracked as a follow-up dep change
+    "RUSTSEC-2026-0194",  # quick-xml quadratic-attr DoS — deep-transitive (object_store→datafusion 45→lance→lago-lance→arcan); patched only >=0.41.0 (semver-breaking, needs the lance/datafusion stack upgrade). Reachable only on UNTRUSTED XML via NsReader; life uses quick-xml via object_store against trusted cloud storage. Rolls off with the lance/datafusion upgrade.
+    "RUSTSEC-2026-0195",  # quick-xml unbounded-namespace-alloc DoS — same provenance + mitigation as RUSTSEC-2026-0194.
     # RUSTSEC-2026-0002 (lru IterMut unsoundness) removed 2026-06-10: the
     # advisory no longer matches any crate in the graph (cargo-deny
     # "no crate matched advisory criteria").

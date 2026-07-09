@@ -9,6 +9,7 @@
 # RUSTSEC-2026-0104 — rustls-webpki reachable panic on crafted CRLs; we don't parse untrusted CRLs. Patched in >=0.103.13 (follow-up dep bump).
 # RUSTSEC-2026-0098 — rustls-webpki name-constraint URI-name acceptance; transitive via aws-smithy-http-client → hyper-rustls 0.24 → rustls 0.21 → rustls-webpki 0.101. We don't use Name Constraints in our PKI surface (Tier-1 verifier uses ES256 against a known issuer); rolls off when aws-sdk-kms upgrades its TLS chain.
 # RUSTSEC-2026-0099 — rustls-webpki wildcard name-constraint acceptance; same provenance as RUSTSEC-2026-0098. Same mitigation reasoning.
+# RUSTSEC-2026-0194 / RUSTSEC-2026-0195 — quick-xml quadratic-attr / unbounded-namespace DoS. Deep-transitive (quick-xml 0.37 ← object_store ← datafusion 45 ← lance ← lago-lance ← arcan); patched only in >=0.41.0, a semver-breaking jump requiring the whole lance/datafusion/object_store stack to upgrade (tracked separately). Reachable only when parsing UNTRUSTED XML via NsReader/attributes-with-checks; life uses quick-xml solely through object_store against trusted cloud-storage endpoints, so the DoS surface does not apply. Rolls off when the lance/datafusion upgrade lands.
 [advisories]
 ignore = [
     "RUSTSEC-2023-0071",
@@ -20,4 +21,6 @@ ignore = [
     "RUSTSEC-2026-0104",
     "RUSTSEC-2026-0098",
     "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
