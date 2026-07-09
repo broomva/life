@@ -36,6 +36,13 @@ Thumbs.db
 
 # Claude Code worktrees
 .claude/worktrees/
+# ticket-dispatch arc↔governor IPC (BRO-1833) — runtime status a dispatched arc
+# writes at each pause; the governor reads it from the worktree. This repo is
+# the VPS Life-governor's $WORKDIR, so its arc worktrees are governed here.
+# Never a deliverable — the glob covers the file and any .tmp/temp variant so a
+# blanket `git add -A` in an arc worktree can never stage it. Mirrors the
+# workspace root .gitignore.
+.claude/arc-status.json*
 
 # Python
 .venv/
