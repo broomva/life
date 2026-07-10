@@ -71,7 +71,7 @@ ci_heal:
 # Closes the MERGE_READY → merged gap. Default-disabled; opt-in branch class.
 
 auto_merge:
-  enabled: false
+  enabled: true
   require_no_requested_changes: true
   require_branch_up_to_date: true
   merge_method: squash
@@ -116,6 +116,15 @@ auto_merge:
     #   action: auto
     # - branch_pattern: "research/*"
     #   action: auto
+    # Agent-worked ticket-dispatch arcs (BRO-1833 P6): the arc that works a Life
+    # ticket merges its OWN PR via the p9 lifecycle (watch -> merge-ready ->
+    # auto-merge) after CI-green + a fresh-context P20 (>=7/10). The governor never
+    # merges (invariant 4). Server-side backstop: broomva/life main requires the
+    # `Merge Gate` check (merge-gate.yml) — so CI-green is enforced repo-side, not
+    # only by the arc's p9 flow. Governance/injection paths above still
+    # hard-require-human via the matcher pre-pass.
+    - branch_pattern: "feature/bro-*"
+      action: auto
   default_action: notify
 
 # === Indirect-prompt-injection defense — PreToolUse write gate (2026-05-15) ===
