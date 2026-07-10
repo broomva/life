@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 use anima_core::soul::{AgentSoul, SoulBuilder};
 use anima_identity::{InProcessAnima, MasterSeed};
 use anyhow::{Context, Result};
+use zeroize::Zeroizing;
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────
 
@@ -291,20 +292,29 @@ fn write_seed(identity_dir: &Path, seed_bytes: &[u8; 32]) -> Result<()> {
 /// Read the master seed from `.life/identity/seed.local.bin`, if present.
 /// Returns `Ok(None)` if the file doesn't exist; `Err` if it exists but is
 /// malformed (wrong length).
-fn read_seed(identity_dir: &Path) -> Result<Option<[u8; 32]>> {
+///
+/// The result is wrapped in `Zeroizing` so the raw master-seed bytes are
+/// wiped on drop rather than lingering on the heap/stack (BRO-1468). The
+/// intermediate `Vec<u8>` read off disk is likewise zeroized on drop.
+fn read_seed(identity_dir: &Path) -> Result<Option<Zeroizing<[u8; 32]>>> {
     let path = identity_dir.join("seed.local.bin");
     if !path.exists() {
         return Ok(None);
     }
-    let bytes =
-        std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let arr: [u8; 32] = bytes.try_into().map_err(|v: Vec<u8>| {
-        anyhow::anyhow!(
+    let bytes = Zeroizing::new(
+        std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?,
+    );
+    if bytes.len() != 32 {
+        return Err(anyhow::anyhow!(
             "{} has wrong length: {} bytes (expected 32)",
             path.display(),
-            v.len()
-        )
-    })?;
+            bytes.len()
+        ));
+    }
+    // Copy from the heap Vec into a fixed array (leaves `bytes` intact so its
+    // own zeroize-on-drop still fires); both buffers are zeroized on drop.
+    let mut arr = Zeroizing::new([0u8; 32]);
+    arr.copy_from_slice(bytes.as_slice());
     Ok(Some(arr))
 }
 
@@ -387,19 +397,21 @@ pub fn bootstrap_anima_identity(life_dir: &Path) -> Result<(IdentitySummary, boo
     }
 
     // ── Reuse a leftover seed if the operator ran reset half-way through ─
+    // `seed_bytes` is `Zeroizing<[u8; 32]>` throughout so the transient
+    // master-seed copy is wiped on drop (BRO-1468).
     let seed_bytes = match read_seed(&identity_dir)? {
         Some(bytes) => bytes,
         None => {
             let seed = MasterSeed::generate();
-            let bytes = *seed.as_bytes();
-            // Seed handed to InProcessAnima below; bytes is a copy held here
-            // for at-rest persistence before the seed gets zeroized on drop.
+            // Copy held here for at-rest persistence; the in-memory copy is
+            // zeroized on drop (the `MasterSeed` itself zeroizes separately).
+            let bytes = Zeroizing::new(*seed.as_bytes());
             write_seed(&identity_dir, &bytes)?;
             bytes
         }
     };
 
-    let seed = MasterSeed::from_bytes(seed_bytes);
+    let seed = MasterSeed::from_bytes(*seed_bytes);
     let custody = InProcessAnima::from_seed_arc(seed)
         .context("failed to derive identity from master seed")?;
 
@@ -806,6 +818,37 @@ mod tests {
         assert!(
             err.contains("wrong length"),
             "error should describe the length problem; got: {err}"
+        );
+    }
+
+    /// BRO-1468: `read_seed` returns the master seed in a `Zeroizing` buffer
+    /// so the raw bytes are wiped on drop rather than lingering. Two things
+    /// are asserted: (1) the seed round-trips intact — a mis-scoped zeroize
+    /// that cleared a buffer still in use would break identity loading; and
+    /// (2) the Drop path (`Zeroize::zeroize`, which `Zeroizing::drop` calls)
+    /// zeroes the returned buffer.
+    #[test]
+    fn read_seed_returns_zeroizing_wiped_on_drop() {
+        use zeroize::Zeroize;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let identity_dir = tmp.path().join("identity");
+        std::fs::create_dir_all(&identity_dir).unwrap();
+
+        let expected = [0xABu8; 32];
+        write_seed(&identity_dir, &expected).unwrap();
+
+        let mut seed = read_seed(&identity_dir)
+            .unwrap()
+            .expect("seed present on disk");
+        assert_eq!(*seed, expected, "seed round-trips intact (not mis-cleared)");
+
+        // `Zeroizing::drop` delegates to exactly this call; invoking it
+        // directly lets us observe the wipe without reading freed memory.
+        seed.zeroize();
+        assert_eq!(
+            *seed, [0u8; 32],
+            "transient seed buffer must be zeroized by the Drop path"
         );
     }
 }

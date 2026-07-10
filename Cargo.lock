@@ -461,6 +461,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "walkdir",
+ "zeroize",
 ]
 
 [[package]]
@@ -6308,6 +6309,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
