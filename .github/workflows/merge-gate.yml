@@ -1,0 +1,80 @@
+# Merge Gate — the single required check for autonomous + human merges (BRO-1833 P6).
+#
+# WHY: the CI workflow (ci.yml) is path-filtered at the workflow level
+# (paths-ignore: docs/**, research/**, **/*.md), so a docs-only PR skips the
+# entire suite. Requiring the individual CI jobs would leave those checks in a
+# permanent "Expected" state on docs-only PRs and block them forever (GitHub's
+# skipped-but-required footgun). This job instead runs on EVERY PR (no filter)
+# and passes iff every OTHER check-run on the PR head has concluded without a
+# hard failure — so it is always reported, tolerant of skipped/path-filtered
+# checks, and is the one thing the branch ruleset requires.
+#
+# It is the server-side backstop behind the ticket-dispatch loop's autonomous
+# `p9 auto-merge`: an arc can only merge its own PR once this gate is green,
+# which means the full CI suite (Format/Lint/MSRV/Security/dep-rules/tests) that
+# actually ran on the code change passed. Native `gh api` only — no third-party
+# actions on the merge-critical path (supply-chain hygiene).
+name: merge-gate
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: merge-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: read
+  statuses: read
+
+jobs:
+  gate:
+    name: Merge Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Require all other checks green (or skipped)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Conclusions that BLOCK a merge (a check that actually failed).
+          # success / skipped / neutral do NOT block.
+          BLOCKING='failure|cancelled|timed_out|action_required|startup_failure|stale'
+          for i in $(seq 1 80); do   # up to ~40 min (Rust CI + macOS runners are slow)
+            # All check-runs on this head SHA except this gate itself.
+            runs=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs" \
+                     --jq '.check_runs[] | select(.name != "Merge Gate") | [.name, .status, (.conclusion // "")] | @tsv' \
+                   || echo "")
+            # Legacy commit statuses (belt-and-suspenders; most checks are check-runs).
+            st_state=$(gh api "repos/$REPO/commits/$SHA/status" --jq '.state' 2>/dev/null || echo "unknown")
+
+            failed=$(printf '%s\n' "$runs" | awk -F'\t' -v b="$BLOCKING" 'NF>=3 && $3 ~ ("^(" b ")$"){print $1}')
+            if [ -n "$failed" ] || [ "$st_state" = "failure" ] || [ "$st_state" = "error" ]; then
+              echo "::error::Merge Gate FAILED — blocking checks:"
+              [ -n "$failed" ] && printf '  - %s\n' $failed
+              [ "$st_state" = "failure" ] || [ "$st_state" = "error" ] && echo "  - (legacy commit status: $st_state)"
+              exit 1
+            fi
+
+            n=$(printf '%s\n' "$runs" | grep -c . || true)
+            incomplete=$(printf '%s\n' "$runs" | awk -F'\t' 'NF>=2 && $2 != "completed"{c++} END{print c+0}')
+
+            if [ "$n" -gt 0 ] && [ "$incomplete" -eq 0 ] && { [ "$st_state" = "success" ] || [ "$st_state" = "pending" ]; }; then
+              echo "Merge Gate PASS — $n check(s) completed, none failed (commit status: $st_state)."
+              exit 0
+            fi
+            # No other checks after a short grace = path-filtered/docs-only PR (CI never ran) → nothing to gate.
+            if [ "$n" -eq 0 ] && [ "$i" -ge 5 ]; then
+              echo "Merge Gate PASS — no other checks on this PR after grace (CI path-filtered / docs-only)."
+              exit 0
+            fi
+            echo "waiting: $n check(s), $incomplete still running, commit status=$st_state (poll $i/80)…"
+            sleep 30
+          done
+          echo "::error::Merge Gate timed out waiting for checks to conclude."
+          exit 1
