@@ -14,6 +14,7 @@ use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use blake3::Hasher;
 use chrono::Utc;
+use life_stream_metrics::StreamMetrics;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -388,6 +389,15 @@ pub trait WorkflowTickDispatcher: Send + Sync {
     -> Result<WorkflowTickOutcome>;
 }
 
+/// Channel-label for the substrate broadcast bus on `stream.broadcast.*`
+/// metrics (BRO-1322). Every kernel `EventRecord` fans out through here to
+/// the arcand substrate dispatch pump and other subscribers.
+pub const SUBSTRATE_STREAM_CHANNEL: &str = "arcan.substrate";
+
+/// Capacity of the substrate broadcast bus — the denominator of the
+/// `stream.broadcast.buffer_saturation` gauge.
+pub const SUBSTRATE_STREAM_CAPACITY: usize = 2048;
+
 #[derive(Clone)]
 pub struct KernelRuntime {
     config: RuntimeConfig,
@@ -399,6 +409,13 @@ pub struct KernelRuntime {
     turn_middlewares: Vec<Arc<dyn TurnMiddleware>>,
     workflow_dispatcher: Option<Arc<dyn WorkflowTickDispatcher>>,
     stream: broadcast::Sender<EventRecord>,
+    /// Stream-lag observability for the substrate broadcast bus (`stream`).
+    /// The bus type stays a raw `broadcast::Sender<EventRecord>` because
+    /// `subscribe_events()` / `event_sender()` are load-bearing public API
+    /// with many consumers; metrics are recorded at the send site (and by the
+    /// arcand substrate pump on the consume side) rather than by wrapping the
+    /// channel type. See BRO-1322.
+    stream_metrics: StreamMetrics,
     sessions: Arc<Mutex<HashMap<String, SessionRuntimeState>>>,
     /// Names of the kernel's own governed (harness/registry) tools.
     ///
@@ -441,7 +458,7 @@ impl KernelRuntime {
         policy_gate: Arc<dyn PolicyGatePort>,
         turn_middlewares: Vec<Arc<dyn TurnMiddleware>>,
     ) -> Self {
-        let (stream, _) = broadcast::channel(2048);
+        let (stream, _) = broadcast::channel(SUBSTRATE_STREAM_CAPACITY);
         Self {
             config,
             event_store,
@@ -452,6 +469,7 @@ impl KernelRuntime {
             turn_middlewares,
             workflow_dispatcher: None,
             stream,
+            stream_metrics: StreamMetrics::new(SUBSTRATE_STREAM_CHANNEL),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             registry_tool_names: std::collections::HashSet::new(),
         }
@@ -1609,6 +1627,16 @@ impl KernelRuntime {
         self.stream.clone()
     }
 
+    /// Stream-lag metrics for the substrate broadcast bus (BRO-1322).
+    ///
+    /// The send side (publish count, saturation, consumer count) is recorded
+    /// internally on every `record_and_broadcast`. Consumers — chiefly the
+    /// arcand substrate dispatch pump — call this to record their own drains
+    /// and `RecvError::Lagged` events against the same channel label.
+    pub fn stream_metrics(&self) -> &StreamMetrics {
+        &self.stream_metrics
+    }
+
     pub async fn record_external_event(
         &self,
         session_id: &SessionId,
@@ -2235,6 +2263,15 @@ impl KernelRuntime {
             }
         };
         let _ = self.stream.send(persisted.clone());
+        // BRO-1322: surface substrate-bus publish rate + saturation. The len /
+        // receiver_count are read post-send so saturation reflects the backlog
+        // the slowest subscriber now carries.
+        self.stream_metrics
+            .on_published(Some(persisted.kind.variant_name()));
+        self.stream_metrics
+            .set_saturation(self.stream.len(), SUBSTRATE_STREAM_CAPACITY);
+        self.stream_metrics
+            .set_consumer_count(self.stream.receiver_count());
         self.mark_branch_head(session_id, branch_id, persisted.sequence)?;
         Ok(())
     }

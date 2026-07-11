@@ -128,6 +128,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "hex",
+ "life-stream-metrics",
  "life-vigil",
  "opentelemetry",
  "parking_lot",
@@ -2278,6 +2279,7 @@ version = "0.3.0"
 dependencies = [
  "aios-protocol",
  "async-trait",
+ "life-stream-metrics",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5577,6 +5579,7 @@ version = "0.3.0"
 dependencies = [
  "futures",
  "lago-core",
+ "life-stream-metrics",
  "redb",
  "serde",
  "serde_json",
@@ -6633,10 +6636,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "life-stream-metrics"
+version = "0.3.0"
+dependencies = [
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "tokio",
+]
+
+[[package]]
 name = "life-vigil"
 version = "0.3.0"
 dependencies = [
  "aios-protocol",
+ "life-stream-metrics",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
@@ -7733,6 +7746,8 @@ dependencies = [
  "rand 0.9.4",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
  "tracing",
 ]
 

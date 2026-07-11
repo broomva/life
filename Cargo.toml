@@ -110,6 +110,7 @@ members = [
     "crates/inference/life-inference",
     # Vigil — observability
     "crates/vigil/life-vigil",
+    "crates/vigil/life-stream-metrics",
     # Spaces — networking (excluded: needs spacetime generate to update bindings)
     # "crates/spaces/life-spaces",
     # Relay — remote sessions
@@ -239,6 +240,7 @@ life-kernel-gate = { path = "crates/life-kernel/life-kernel-gate", version = "0.
 life-kernel-proto = { path = "crates/life-kernel/life-kernel-proto", version = "0.3.0" }
 life-inference = { path = "crates/inference/life-inference", version = "0.3.0" }
 life-vigil = { path = "crates/vigil/life-vigil", version = "0.3.0" }
+life-stream-metrics = { path = "crates/vigil/life-stream-metrics", version = "0.3.0" }
 nous-api = { path = "crates/nous/nous-api", version = "0.3.0" }
 nous-core = { path = "crates/nous/nous-core", version = "0.3.0" }
 nous-heuristics = { path = "crates/nous/nous-heuristics", version = "0.3.0" }

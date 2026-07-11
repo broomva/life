@@ -31,6 +31,19 @@ pub mod semconv;
 pub mod spans;
 pub mod tokens;
 
+/// Stream-aware observability — broadcast/mpsc lag, drain rate, and saturation
+/// metrics (BRO-1322). Re-exported so `life-vigil` is the single observability
+/// import surface; the implementation lives in the dependency-light
+/// [`life_stream_metrics`] crate that the substrate primitives depend on.
+pub mod stream {
+    pub use life_stream_metrics::{
+        MeasuredReceiver, MeasuredSender, StreamMetrics, measured_channel, measured_channel_with,
+    };
+}
+pub use life_stream_metrics::{
+    MeasuredReceiver, MeasuredSender, StreamMetrics, measured_channel, measured_channel_with,
+};
+
 pub use config::{LogFormat, OtlpProtocol, VigConfig};
 pub use envelope::{CircuitState, CostSource, LlmRequestEnvelope, LlmResponseEconomics};
 pub use jsonl::{JsonlWriter, LlmCallRecord};

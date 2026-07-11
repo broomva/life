@@ -22,6 +22,12 @@ tracing-opentelemetry = "0.30"
 # Shared contract
 aios-protocol = { version = "0.3.0", path = "../../aios/aios-protocol" }
 
+# Stream-lag observability (BRO-1322) — re-exported so `life-vigil` is the
+# single import surface for Life observability. The substrate primitives that
+# publish streams depend on `life-stream-metrics` directly (it stays tiny);
+# hosts wiring the telemetry pipeline reach the wrapper through `life-vigil`.
+life-stream-metrics = { version = "0.3.0", path = "../life-stream-metrics" }
+
 # Error handling
 thiserror = "2.0"
 

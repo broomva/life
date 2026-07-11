@@ -1,10 +1,18 @@
 //! [`WakeRouter`] — multiplexes concurrent triggers into a single wake stream.
 
+use life_stream_metrics::StreamMetrics;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use crate::{WakeEvent, WakeTrigger};
+
+/// Channel-label for the WakeRouter mpsc on `stream.broadcast.*` metrics
+/// (BRO-1322). The router is single-consumer (mpsc), so `lagged_total` is
+/// always 0 by design — only `published_total` + `consumed_total` are
+/// meaningful, giving symmetry with the broadcast channels and a drain-rate
+/// signal for tuning `--router-buffer`.
+pub const WAKE_ROUTER_CHANNEL: &str = "chronos.wake_router";
 
 /// Multiplexes multiple [`WakeTrigger`] sources into a single async stream of [`WakeEvent`]s.
 ///
@@ -21,6 +29,7 @@ pub struct WakeRouter {
     rx: mpsc::Receiver<WakeEvent>,
     tx: mpsc::Sender<WakeEvent>,
     handles: Vec<JoinHandle<()>>,
+    metrics: StreamMetrics,
 }
 
 impl WakeRouter {
@@ -33,6 +42,7 @@ impl WakeRouter {
             rx,
             tx,
             handles: Vec::new(),
+            metrics: StreamMetrics::new(WAKE_ROUTER_CHANNEL),
         }
     }
 
@@ -43,13 +53,18 @@ impl WakeRouter {
     pub fn add_trigger(&mut self, mut trigger: Box<dyn WakeTrigger>) {
         let tx = self.tx.clone();
         let name = trigger.name();
+        // BRO-1322: each forwarder gets a clone of the (cheap) metric bundle so
+        // it can record `published_total` labelled by the wake source.
+        let metrics = self.metrics.clone();
         let handle = tokio::spawn(async move {
             info!(trigger = name, "trigger started");
             while let Some(event) = trigger.next_wake().await {
+                let source = event.source.as_str();
                 if tx.send(event).await.is_err() {
                     warn!(trigger = name, "router closed; trigger forwarder exiting");
                     break;
                 }
+                metrics.on_published(Some(source));
             }
             info!(trigger = name, "trigger exhausted");
         });
@@ -61,7 +76,13 @@ impl WakeRouter {
     /// Returns `None` once every spawned trigger has returned `None` AND the router's
     /// internal sender has been dropped (which happens in [`WakeRouter::shutdown`]).
     pub async fn next_wake(&mut self) -> Option<WakeEvent> {
-        self.rx.recv().await
+        let event = self.rx.recv().await;
+        if let Some(ref e) = event {
+            // BRO-1322: drain-rate signal. mpsc single-consumer ⇒ no lag.
+            self.metrics
+                .on_consumed("wake-router", Some(e.source.as_str()));
+        }
+        event
     }
 
     /// Number of trigger forwarder tasks currently spawned.
@@ -77,6 +98,7 @@ impl WakeRouter {
             mut rx,
             tx,
             handles,
+            metrics: _,
         } = self;
         drop(tx);
         for handle in &handles {
