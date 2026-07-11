@@ -580,16 +580,30 @@ mod tests {
         );
     }
 
+    /// The blessed runtime tool palette (BRO-1469, operator sign-off): shell,
+    /// read/write, and search. Every blessed skill's `allowed_tools` MUST be a
+    /// subset of this. Skills and custom tooling compose on top; the tier gate
+    /// (`arcand/src/canonical.rs`) then bounds who may actually use each tool.
+    const BLESSED_TOOL_PALETTE: &[&str] = &[
+        "bash",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "grep",
+        "glob",
+        "list_dir",
+    ];
+
     /// Safety invariant (BRO-1469): every skill in the in-repo blessed runtime
-    /// set (`runtime-skills/`) must be discoverable AND declare
-    /// `allowed_tools: []`. A zero-tool skill requests no capability, so it is
-    /// safe on the anonymous public chat surface (which grants zero caps) at
-    /// every tier. Adding a skill that needs tools is a deliberate capability
-    /// expansion — it must NOT slip into the blessed set silently. If this test
-    /// fails, either a blessed skill declared tools (audit it) or the set size
-    /// changed (update `EXPECTED` and `runtime-skills/README.md`).
+    /// set (`runtime-skills/`) must be discoverable AND declare an
+    /// `allowed_tools` list that is a subset of `BLESSED_TOOL_PALETTE`. A tool
+    /// outside the palette (network egress, secrets, an unreviewed MCP server,
+    /// …) is a deliberate capability expansion and must NOT slip into the
+    /// blessed set silently. If this test fails, either a blessed skill declared
+    /// an off-palette tool (audit it), the palette changed (re-sign-off), or the
+    /// set size changed (update `EXPECTED` and `runtime-skills/README.md`).
     #[test]
-    fn blessed_runtime_skills_are_discoverable_and_zero_tool() {
+    fn blessed_runtime_skills_are_discoverable_and_within_palette() {
         // crates/arcan/arcan → repo root is three levels up.
         let runtime_skills = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../runtime-skills")
@@ -598,26 +612,54 @@ mod tests {
 
         let registry = SkillRegistry::discover(&[runtime_skills]).unwrap();
 
-        const EXPECTED: &[&str] = &["brainstorm", "explain", "getting-started", "summarize"];
+        const EXPECTED: &[&str] = &[
+            "brainstorm",
+            "explain",
+            "getting-started",
+            "summarize",
+            "workspace",
+        ];
         assert_eq!(
             registry.count(),
             EXPECTED.len(),
             "blessed runtime skill count changed — update EXPECTED and runtime-skills/README.md"
         );
 
+        let palette: std::collections::HashSet<&str> =
+            BLESSED_TOOL_PALETTE.iter().copied().collect();
+
         for name in EXPECTED {
             let skill = registry
                 .activate(name)
                 .unwrap_or_else(|| panic!("blessed skill `{name}` not discovered"));
-            assert_eq!(
-                skill.meta.allowed_tools,
-                Some(vec![]),
-                "blessed skill `{name}` must declare `allowed_tools: []` (zero-tool invariant)"
-            );
+            // Every blessed skill declares its tools explicitly (never `None` /
+            // "unknown"), and every declared tool is within the palette.
+            let tools = skill.meta.allowed_tools.as_ref().unwrap_or_else(|| {
+                panic!("blessed skill `{name}` must declare an explicit `allowed_tools` list")
+            });
+            for tool in tools {
+                assert!(
+                    palette.contains(tool.as_str()),
+                    "blessed skill `{name}` declares off-palette tool `{tool}` — \
+                     extend BLESSED_TOOL_PALETTE (with operator sign-off) or remove it"
+                );
+            }
             assert_eq!(
                 skill.meta.user_invocable,
                 Some(true),
                 "blessed skill `{name}` should be user-invocable"
+            );
+        }
+
+        // The palette must be *realized*: at least one blessed skill exercises
+        // the shell + write tools, else "bash, read/write" is blessed in name
+        // only. The `workspace` flagship carries the full palette.
+        let workspace = registry.activate("workspace").expect("workspace skill");
+        let ws_tools = workspace.meta.allowed_tools.clone().unwrap_or_default();
+        for required in ["bash", "write_file", "read_file"] {
+            assert!(
+                ws_tools.iter().any(|t| t == required),
+                "workspace skill must exercise `{required}` (blessed palette realization)"
             );
         }
     }

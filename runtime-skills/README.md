@@ -13,45 +13,58 @@ this directory at boot when `--skills-dir` / `ARCAN_SKILLS_DIR` points here.
 ## Why a *blessed* set (the capability decision)
 
 The runtime skill set shapes agent behavior on a **public, unauthenticated
-surface**. Overshipping is not free — a skill that declares tools it can invoke
-becomes new attack surface for whoever can reach the chat endpoint. So the set
-is curated and reviewed, not auto-synced from developer skill directories.
+surface**. So the set is curated and reviewed, not auto-synced from developer
+skill directories.
 
 **These are NOT the developer/build skills** under `.agents/skills/`
 (control-metalayer-loop, harness-engineering-playbook, check, release-check).
 Those exist to build *Life itself* and must never reach a chat user.
 
-## The zero-tool invariant
+## The blessed tool palette
 
-Every skill in this directory declares `allowed_tools: []`.
+The blessed base toolset — approved by operator sign-off (BRO-1469) — is:
 
-This is a hard safety property, enforced by a regression test in
-`crates/arcan/arcan/src/skills.rs`:
+```
+bash · read_file · write_file · edit_file · grep · glob · list_dir
+```
 
-- A skill with `allowed_tools: []` requests **no tool capability**. It is pure
-  behavioral guidance (a prompt) injected into the system prompt.
-- Arcan's tier gate (`arcand/src/canonical.rs`) admits a skill to a tier's
-  catalog only when its `allowed_tools` are a subset of that tier's safe set.
-  The **anonymous tier grants zero capabilities**, so only zero-tool skills are
-  ever visible or activatable there. `allowed_tools: []` satisfies every tier
-  (the empty set is a subset of every set), so these skills are safe at
-  anonymous / free / pro alike while adding **no** new execution surface.
+i.e. **shell, read/write, and search**. Skills and other custom tooling
+**compose on top of** this base. The invariant, enforced by a regression test
+in `crates/arcan/arcan/src/skills.rs`, is:
 
-Adding a skill that needs tools is a **deliberate capability expansion**: it
-requires bumping the tier that will see it, documenting the tools, and operator
-sign-off in the PR — not a silent drop-in here.
+> Every blessed skill's `allowed_tools` must be a **subset of the palette**.
+
+A skill declaring a tool *outside* the palette (network egress, secrets, an
+unreviewed MCP server, …) is a deliberate capability expansion — it must NOT
+land here without extending the palette and re-signing off.
+
+### Two layers keep this safe
+
+1. **The palette (this repo)** bounds what any blessed skill may ask for.
+2. **The tier gate** (`arcand/src/canonical.rs`) bounds who may actually use it.
+   A skill is admitted to a tier's catalog only when its `allowed_tools` are a
+   subset of that tier's safe set, and an active skill's tools are further
+   *intersected* with the tier at execution time (more-restrictive wins):
+   - **anonymous** — grants zero capabilities; conversation only.
+   - **free** — read + search (`read_file`, `list_dir`, `glob`, `grep`); no
+     writes, no shell.
+   - **pro / enterprise** — the full palette.
+
+   So `write_file` / `bash` skills are effectively pro-tier; read/search skills
+   reach free; and a skill with `allowed_tools: []` is available to everyone.
+   The palette is the ceiling; the tier is the floor.
 
 ## The current blessed set
 
-| Skill | Purpose | Tools |
+| Skill | Purpose | Declared tools |
 |---|---|---|
-| `getting-started` | Onboards a new chat user; explains what Life can do and how to interact | none |
-| `explain` | Explains a concept, error, or pasted code clearly and pedagogically | none |
-| `summarize` | Condenses pasted text into a faithful TL;DR + key points + action items | none |
-| `brainstorm` | Generates and pressure-tests options for a decision, with honest tradeoffs | none |
+| `getting-started` | Onboards a new chat user; can peek at the workspace to orient | `read_file`, `list_dir`, `glob` |
+| `explain` | Explains a concept / error / code, grounded in real workspace files | `read_file`, `grep`, `glob`, `list_dir` |
+| `summarize` | Faithful TL;DR + key points + action items from pasted text or a file | `read_file`, `glob`, `list_dir` |
+| `brainstorm` | Generates & pressure-tests options with honest tradeoffs | *(none)* |
+| `workspace` | The general working agent — read/search/edit files + run shell | `bash`, `read_file`, `write_file`, `edit_file`, `grep`, `glob`, `list_dir` |
 
-All four are prompt-only, `user_invocable: true`, and safe on the anonymous
-surface.
+All are `user_invocable: true`, and every declared tool is within the palette.
 
 ## How the image ships it
 
@@ -69,8 +82,10 @@ because `~` resolved to root under `runuser`).
 
 ## Adding or changing a skill
 
-1. Add `runtime-skills/<name>/SKILL.md` with `allowed_tools: []`.
+1. Add `runtime-skills/<name>/SKILL.md` with `allowed_tools` ⊆ the palette.
 2. Keep it genuinely useful and safe on a public surface — no internal/dev
    concerns, no data exfiltration prompts, no jailbreak bait.
-3. Update the table above and the count in the `skills.rs` regression test.
+3. Update the table above and the count/palette in the `skills.rs` regression
+   test.
 4. Get operator sign-off in the PR — this is a public-surface capability change.
+   Widening the palette itself (a new tool category) always requires sign-off.

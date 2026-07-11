@@ -1,6 +1,6 @@
 ---
 name: brainstorm
-description: Helps the user generate and pressure-test ideas or options for a decision, with honest tradeoffs rather than a wall of suggestions. Prompt-only; requests no tools.
+description: Helps the user generate and pressure-test ideas or options for a decision, with honest tradeoffs rather than a wall of suggestions.
 license: MIT
 tags:
   - ideation
