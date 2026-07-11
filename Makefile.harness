@@ -1,17 +1,16 @@
-.PHONY: smoke test lint typecheck check ci
-
-smoke:
-	@./scripts/harness/smoke.sh
-
-test:
-	@./scripts/harness/test.sh
+# Harness-engineering convenience targets. The control metalayer (Makefile.control,
+# included LAST) OWNS the gate targets smoke/check/test/ci — this file must NOT
+# define them, or GNU make ACCUMULATES prerequisites across the duplicate `check:`
+# definitions (a recipe override does not drop prereqs), leaking scripts/harness/
+# lint.sh into `make check`/`make ci`. That divergence — a stricter clippy than
+# ci.yml (no `-A too_many_arguments`, plus `--all-targets --all-features`) — would
+# false-block PRs on a lint ci.yml explicitly allows. Exactly what BRO-1858 P20
+# caught. So this file keeps ONLY its unique standalone targets `lint`/`typecheck`
+# (documented in AGENTS.md), reconciled to mirror .github/workflows/ci.yml.
+.PHONY: lint typecheck
 
 lint:
 	@./scripts/harness/lint.sh
 
 typecheck:
 	@./scripts/harness/typecheck.sh
-
-check: lint typecheck
-
-ci: smoke check test
