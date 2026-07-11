@@ -11,6 +11,10 @@ description = "Core types and traits for Chronos — the temporal substrate of t
 [dependencies]
 aios-protocol.workspace = true
 async-trait.workspace = true
+# Stream-lag observability (BRO-1322). Additive counters for the WakeRouter
+# mpsc — a substrate observability primitive, not a Life impl crate; allow-
+# listed in scripts/architecture/verify_dependencies_chronos.sh.
+life-stream-metrics.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

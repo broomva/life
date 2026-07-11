@@ -49,6 +49,26 @@ Contract-derived span builders that create properly-attributed `tracing` spans:
 - `life.budget.cost_remaining_usd` — gauge of remaining cost budget
 - `life.mode.transitions` — counter of operating mode transitions
 
+### stream (BRO-1322) — `stream.broadcast.*`
+
+Stream-aware observability lives in the sibling crate `life-stream-metrics`
+(dependency-light: `opentelemetry` + `tokio` only, so the substrate primitives
+that publish streams can adopt it without the OTLP export machinery). Vigil
+re-exports it — `life_vigil::{StreamMetrics, MeasuredSender, MeasuredReceiver,
+measured_channel}` — so it is the single observability import surface.
+
+Two surfaces: `StreamMetrics` for call-site instrumentation (where the channel
+type must stay a raw `tokio` sender/receiver, or it's an mpsc), and
+`MeasuredSender`/`MeasuredReceiver` — a transparent broadcast wrapper for
+self-contained channels (instruments both ends + latency in one type swap).
+
+Instrumented channels: `lago.journal.stream` (wrapper), `arcan.substrate`
+(call-site), `chronos.wake_router` (call-site, counters only — mpsc). Metrics:
+`published_total`, `consumed_total`, `lagged_total`, `skipped_messages_total`,
+`buffer_saturation` (gauge 0..1), `consumer_count` (gauge),
+`delta_latency_seconds` (histogram). Grafana template at
+`dashboards/stream-broadcast.json`.
+
 ## Environment Variables
 
 | Variable | Description | Default |

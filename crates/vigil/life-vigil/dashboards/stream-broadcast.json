@@ -1,0 +1,222 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Prometheus datasource scraping the OTel collector that receives Life stream.broadcast.* metrics",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
+    { "type": "panel", "id": "table", "name": "Table", "version": "" },
+    { "type": "panel", "id": "heatmap", "name": "Heatmap", "version": "" }
+  ],
+  "annotations": { "list": [] },
+  "description": "Stream-aware Vigil (BRO-1322): broadcast lag, drain rate, and buffer saturation for every instrumented Life stream channel (lago.journal.stream, arcan.substrate, chronos.wake_router). Metric names follow the OTel->Prometheus convention: stream.broadcast.* -> stream_broadcast_*. If your collector appends unit suffixes, adjust the metric names in each panel query.",
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "tags": ["life", "vigil", "streaming", "bro-1322"],
+  "templating": {
+    "list": [
+      {
+        "name": "channel",
+        "label": "Channel",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(stream_broadcast_published_total, channel)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "panels": [
+    {
+      "type": "row",
+      "title": "Overview",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Lag events (rate, 5m) — should be 0",
+      "description": "Any non-zero rate of RecvError::Lagged means a consumer is dropping kernel events. This is the silent-degradation alarm.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.0001 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum(rate(stream_broadcast_lagged_total{channel=~\"$channel\"}[5m]))",
+          "legendFormat": "lag events/s"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Buffer saturation per channel (0..1)",
+      "description": "max_lag / capacity. Approaching 1.0 means the slowest consumer is about to lag and the channel capacity (N) should be raised.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 9, "x": 6, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "red", "value": 0.8 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max", "lastNotNull"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "max by (channel) (stream_broadcast_buffer_saturation{channel=~\"$channel\"})",
+          "legendFormat": "{{channel}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Active consumers per channel",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 9, "x": 15, "y": 1 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "max by (channel) (stream_broadcast_consumer_count{channel=~\"$channel\"})",
+          "legendFormat": "{{channel}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Throughput",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Publish vs consume rate",
+      "description": "Publisher rate vs aggregate consumer drain rate per channel. A persistent gap (published > consumed) precedes lag.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "cps", "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "lastNotNull"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (channel) (rate(stream_broadcast_published_total{channel=~\"$channel\"}[5m]))",
+          "legendFormat": "{{channel}} published"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (channel) (rate(stream_broadcast_consumed_total{channel=~\"$channel\"}[5m]))",
+          "legendFormat": "{{channel}} consumed"
+        }
+      ]
+    },
+    {
+      "type": "heatmap",
+      "title": "Publish -> consume latency",
+      "description": "stream.broadcast.delta_latency_seconds — wall-clock from publish to drain. Requires the histogram to be exported as _bucket series.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 8 },
+      "options": { "calculate": false, "cellGap": 1, "color": { "scheme": "Spectral", "mode": "scheme" }, "yAxis": { "unit": "s" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (le) (rate(stream_broadcast_delta_latency_seconds_bucket{channel=~\"$channel\"}[5m]))",
+          "format": "heatmap",
+          "legendFormat": "{{le}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Lagging consumers",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "Top 10 lagging consumers (skipped messages, 5m)",
+      "description": "Which consumer_id on which channel is dropping the most messages. Empty is healthy.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "topk(10, sum by (channel, consumer_id) (rate(stream_broadcast_skipped_messages_total{channel=~\"$channel\"}[5m])))",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "renameByName": { "Value": "skipped msgs/s", "channel": "channel", "consumer_id": "consumer" }
+          }
+        }
+      ]
+    }
+  ]
+}

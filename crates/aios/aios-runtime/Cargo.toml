@@ -24,6 +24,7 @@ tracing-opentelemetry = "0.30"
 opentelemetry = "0.29"
 uuid.workspace = true
 life-vigil.workspace = true
+life-stream-metrics.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true
