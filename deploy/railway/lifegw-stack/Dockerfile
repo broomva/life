@@ -111,6 +111,12 @@ COPY --from=builder /build/.target/release/lagod  /usr/local/bin/lagod
 # fails-closed with unknown_agent when the registry is empty).
 COPY agents/ /opt/life/agents/
 
+# Blessed runtime skill set for arcan's SkillRegistry. Without them, boot
+# scans the CWD/HOME-relative defaults and finds nothing (skills_found=0);
+# entrypoint.sh passes `--skills-dir /opt/life/skills`. See
+# runtime-skills/README.md for the zero-tool blessed-set policy. BRO-1469.
+COPY runtime-skills/ /opt/life/skills/
+
 COPY deploy/railway/lifegw-stack/lifegw.toml    /etc/lifegw/config.toml
 COPY deploy/railway/lifegw-stack/lifed.toml     /etc/lifed/config.toml
 COPY deploy/railway/lifegw-stack/Caddyfile      /etc/caddy/Caddyfile

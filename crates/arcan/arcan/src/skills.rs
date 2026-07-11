@@ -39,6 +39,29 @@ pub struct SkillRegistryCache {
     pub skills: BTreeMap<String, RegistryEntry>,
 }
 
+/// Compute the effective skill-discovery directories.
+///
+/// When an explicit blessed-skills directory is supplied (via `--skills-dir` /
+/// `ARCAN_SKILLS_DIR`), it is scanned **first**, ahead of the configured
+/// defaults (`.arcan/skills`, `.agents/skills`, `~/.agents/skills`). Container
+/// images ship a curated blessed set there (see `runtime-skills/README.md`), so
+/// discovery no longer depends on the process CWD/HOME — the fragility that
+/// produced `skills_found=0` in prod (`~` resolved to `/root` under `runuser`).
+/// BRO-1469.
+pub fn effective_skill_dirs(base: &[PathBuf], blessed: Option<&Path>) -> Vec<PathBuf> {
+    match blessed {
+        Some(dir) => {
+            let mut dirs = Vec::with_capacity(base.len() + 1);
+            dirs.push(dir.to_path_buf());
+            // Skip an exact duplicate of the blessed dir among the defaults so
+            // the same skill isn't discovered twice (last-writer-wins on name).
+            dirs.extend(base.iter().filter(|d| d.as_path() != dir).cloned());
+            dirs
+        }
+        None => base.to_vec(),
+    }
+}
+
 /// Discover skills from the configured directories and optionally write a registry cache.
 ///
 /// Returns the `SkillRegistry` for runtime use.
@@ -518,6 +541,85 @@ mod tests {
 
         let prompt = build_system_prompt(&registry);
         assert!(prompt.is_empty());
+    }
+
+    #[test]
+    fn effective_skill_dirs_prepends_blessed() {
+        let base = vec![
+            PathBuf::from(".arcan/skills"),
+            PathBuf::from(".agents/skills"),
+        ];
+        let blessed = PathBuf::from("/opt/life/skills");
+        let dirs = effective_skill_dirs(&base, Some(&blessed));
+        assert_eq!(dirs[0], blessed, "blessed dir must be scanned first");
+        assert_eq!(dirs.len(), 3);
+        assert!(dirs.contains(&PathBuf::from(".agents/skills")));
+    }
+
+    #[test]
+    fn effective_skill_dirs_none_is_identity() {
+        let base = vec![PathBuf::from(".arcan/skills")];
+        assert_eq!(effective_skill_dirs(&base, None), base);
+    }
+
+    #[test]
+    fn effective_skill_dirs_dedupes_blessed_from_defaults() {
+        let base = vec![
+            PathBuf::from("/opt/life/skills"),
+            PathBuf::from(".agents/skills"),
+        ];
+        let blessed = PathBuf::from("/opt/life/skills");
+        let dirs = effective_skill_dirs(&base, Some(&blessed));
+        assert_eq!(
+            dirs,
+            vec![
+                PathBuf::from("/opt/life/skills"),
+                PathBuf::from(".agents/skills"),
+            ],
+            "blessed dir must appear exactly once"
+        );
+    }
+
+    /// Safety invariant (BRO-1469): every skill in the in-repo blessed runtime
+    /// set (`runtime-skills/`) must be discoverable AND declare
+    /// `allowed_tools: []`. A zero-tool skill requests no capability, so it is
+    /// safe on the anonymous public chat surface (which grants zero caps) at
+    /// every tier. Adding a skill that needs tools is a deliberate capability
+    /// expansion — it must NOT slip into the blessed set silently. If this test
+    /// fails, either a blessed skill declared tools (audit it) or the set size
+    /// changed (update `EXPECTED` and `runtime-skills/README.md`).
+    #[test]
+    fn blessed_runtime_skills_are_discoverable_and_zero_tool() {
+        // crates/arcan/arcan → repo root is three levels up.
+        let runtime_skills = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../runtime-skills")
+            .canonicalize()
+            .expect("runtime-skills/ must exist at the repo root");
+
+        let registry = SkillRegistry::discover(&[runtime_skills]).unwrap();
+
+        const EXPECTED: &[&str] = &["brainstorm", "explain", "getting-started", "summarize"];
+        assert_eq!(
+            registry.count(),
+            EXPECTED.len(),
+            "blessed runtime skill count changed — update EXPECTED and runtime-skills/README.md"
+        );
+
+        for name in EXPECTED {
+            let skill = registry
+                .activate(name)
+                .unwrap_or_else(|| panic!("blessed skill `{name}` not discovered"));
+            assert_eq!(
+                skill.meta.allowed_tools,
+                Some(vec![]),
+                "blessed skill `{name}` must declare `allowed_tools: []` (zero-tool invariant)"
+            );
+            assert_eq!(
+                skill.meta.user_invocable,
+                Some(true),
+                "blessed skill `{name}` should be user-invocable"
+            );
+        }
     }
 
     #[test]
