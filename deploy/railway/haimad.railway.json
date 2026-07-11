@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "watchPatterns": [
+      "Cargo.toml",
+      "Cargo.lock",
+      "crates/**",
+      "apps/**",
+      "proto/**"
+    ]
+  }
+}
