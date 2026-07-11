@@ -1,0 +1,77 @@
+# Control Harness — runs the control metalayer's OWN canonical gate (`make ci`) in CI.
+#
+# WHY (BRO-1858): the control metalayer DECLARES `make ci` (smoke → check → test,
+# via scripts/control/*.sh) as its gate, but that gate was only enforced by
+# BYPASSABLE local git hooks (pre-commit=smoke, pre-push=check) and never in CI.
+# A gate enforced only by local discipline is open-loop. This workflow makes the
+# canonical commands a REQUIRED, unbypassable CI check (closed-loop) and catches
+# drift between "what governance says the gate is" and "what actually passes".
+#
+# This deliberately overlaps ci.yml's Format/Lint/Test — that duplication is the
+# self-consistency tax: ci.yml runs the raw cargo jobs (hardened, MSRV, security,
+# dep-rules, macOS); this proves the CANONICAL `make` command surface itself is
+# green. ci.yml stays the source of coverage; this stays the source of governance
+# self-consistency. `scripts/control/*.sh` mirror ci.yml's commands exactly.
+name: Control Harness
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "**/CLAUDE.md"
+      - "**/AGENTS.md"
+      - "**/CHANGELOG.md"
+      - "docs/**"
+      - "research/**"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "**/CLAUDE.md"
+      - "**/AGENTS.md"
+      - "**/CHANGELOG.md"
+      - "docs/**"
+      - "research/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  harness:
+    name: make ci (control harness)
+    runs-on: ubuntu-latest
+    # Same disk-exhaustion hardening as ci.yml's Test (Linux) lane: `make ci`
+    # runs `cargo test --workspace` over the 125-crate workspace.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free runner disk (unused preinstalled toolchains)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/.ghcup /opt/hostedtoolcache/CodeQL \
+                      /usr/share/swift || true
+          df -h /
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-harness
+      - name: make ci (smoke + check + test — the control metalayer's canonical gate)
+        run: make ci
+      - name: Disk headroom after harness
+        if: always()
+        run: df -h /
