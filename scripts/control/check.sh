@@ -15,20 +15,13 @@ if [ -n "${CONTROL_CHECK_CMD:-}" ]; then
   exit 0
 fi
 
-# Multi-workspace monorepo: all Life crates (format + lint)
-if command -v cargo >/dev/null 2>&1; then
-  ran=0
-  for ws in aiOS arcan lago autonomic praxis vigil spaces anima haima nous; do
-    if [ -f "$ws/Cargo.toml" ]; then
-      (cd "$ws" && cargo fmt --check && cargo clippy --workspace -- -D warnings)
-      ran=1
-    fi
-  done
-  [ "$ran" -eq 1 ] && exit 0
-fi
-
+# Single root virtual workspace (crates/<cluster>/<crate>) — BRO-1858.
+# Mirror .github/workflows/ci.yml's Format + Lint gates exactly so `make check`
+# (and the pre-push hook) validate the SAME surface as CI. The old per-subdir loop
+# was stale dead code (those dirs no longer carry Cargo.toml).
 if [ -f Cargo.toml ] && command -v cargo >/dev/null 2>&1; then
-  cargo clippy --all-targets --all-features -- -D warnings
+  cargo fmt --all -- --check
+  cargo clippy --workspace -- -D warnings -A clippy::too_many_arguments
   exit 0
 fi
 

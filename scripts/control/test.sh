@@ -15,20 +15,11 @@ if [ -n "${CONTROL_TEST_CMD:-}" ]; then
   exit 0
 fi
 
-# Multi-workspace monorepo: aiOS + Arcan + Lago + Autonomic + Spaces
-if command -v cargo >/dev/null 2>&1; then
-  ran=0
-  for ws in aiOS arcan lago autonomic praxis vigil spaces anima haima nous; do
-    if [ -f "$ws/Cargo.toml" ]; then
-      (cd "$ws" && cargo test --workspace --quiet)
-      ran=1
-    fi
-  done
-  [ "$ran" -eq 1 ] && exit 0
-fi
-
+# Single root virtual workspace (crates/<cluster>/<crate>) — BRO-1858.
+# `--workspace` at the root mirrors .github/workflows/ci.yml's Test (Linux) gate.
+# The old per-subdir loop was stale dead code (those dirs no longer carry Cargo.toml).
 if [ -f Cargo.toml ] && command -v cargo >/dev/null 2>&1; then
-  cargo test --quiet
+  cargo test --workspace --quiet
   exit 0
 fi
 
