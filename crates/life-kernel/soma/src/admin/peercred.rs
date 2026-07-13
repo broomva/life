@@ -2,9 +2,10 @@
 //!
 //! Mirrors the lifegw implementation at
 //! `crates/life-runtime/lifegw/src/admin/peercred.rs`. soma's admin
-//! plane reaches `unsafe` only for the SO_PEERCRED syscall + group
-//! lookup — `lib.rs` denies unsafe at the crate root, this module
-//! re-allows it locally.
+//! plane reaches `unsafe` only for the SO_PEERCRED syscall — `lib.rs`
+//! denies unsafe at the crate root, this module re-allows it locally.
+//! Group lookups go through the safe reentrant `nix::unistd::Group`
+//! wrapper (`getgrnam_r`), not raw `getgrnam`.
 
 #![allow(unsafe_code)]
 
@@ -87,19 +88,21 @@ mod imp {
 
 pub use imp::{PeerCred, peer_cred};
 
-/// Look up the GID of a named group via `getgrnam(3)`.
+/// Look up the GID of a named group via the **reentrant** `getgrnam_r(3)`
+/// (through [`nix::unistd::Group`]).
+///
+/// `getgrnam(3)` (the non-reentrant variant) returns a pointer into a
+/// process-shared static buffer, so a concurrent group or passwd lookup on
+/// another thread can clobber the record between the call and the `gr_gid`
+/// read — a data race that intermittently flaked the sibling
+/// `group_gid_root_resolves` test under `cargo test`'s parallel runner
+/// (BRO-1861) and is a latent hazard on the admin-auth path itself.
+/// `getgrnam_r` fills a caller-owned buffer, so it is thread-safe and no
+/// longer needs `unsafe`.
 pub fn group_gid(name: &str) -> std::io::Result<Option<u32>> {
-    use std::ffi::CString;
-    let cname = CString::new(name)
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "group name has nul"))?;
-    // SAFETY: getgrnam returns a raw pointer that points to
-    // thread-static memory; we copy out the gid before another call
-    // could clobber it.
-    let g = unsafe { libc::getgrnam(cname.as_ptr()) };
-    if g.is_null() {
-        return Ok(None);
-    }
-    Ok(Some(unsafe { (*g).gr_gid }))
+    let group = nix::unistd::Group::from_name(name)
+        .map_err(|e| std::io::Error::other(format!("getgrnam_r({name}): {e}")))?;
+    Ok(group.map(|g| g.gid.as_raw()))
 }
 
 /// Sub-phase E parity: query supplementary groups for a uid.
