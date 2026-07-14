@@ -25,6 +25,7 @@
 pub mod config;
 pub mod envelope;
 pub mod jsonl;
+pub mod ledger;
 pub mod metrics;
 pub mod pricing;
 pub mod semconv;
@@ -47,6 +48,12 @@ pub use life_stream_metrics::{
 pub use config::{LogFormat, OtlpProtocol, VigConfig};
 pub use envelope::{CircuitState, CostSource, LlmRequestEnvelope, LlmResponseEconomics};
 pub use jsonl::{JsonlWriter, LlmCallRecord};
+pub use ledger::{
+    Attribution, ExogeneityCheck, ExogeneityHook, ForkError, ForkEvent, ForkSample, ForkVariable,
+    LedgerEvent, LedgerEventType, NonAttributiveReason, OutcomeDistribution, PearsonExogeneityHook,
+    ReplayerIndependence, RuntimeIdentity, VariableKind, VersionProbeEvent, VersionStability,
+    pearson_correlation,
+};
 pub use metrics::GenAiMetrics;
 pub use pricing::{ModelPricing, PRICING_SNAPSHOT, estimate_cost, lookup_pricing};
 pub use tokens::estimate_tokens;

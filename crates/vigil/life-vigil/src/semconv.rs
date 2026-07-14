@@ -199,6 +199,50 @@ pub const VIGIL_STATUS: &str = "vigil.status";
 /// Low-cardinality route or policy label used for cost attribution metrics.
 pub const VIGIL_ROUTE: &str = "vigil.route";
 
+// ─── Vigil Intervention Ledger Attributes (BRO-1880) ────────────────────────
+
+/// Ledger event type discriminant (`fork` or `version_probe`).
+pub const VIGIL_LEDGER_EVENT_TYPE: &str = "vigil.ledger.event_type";
+
+/// Stable identifier for a fork event.
+pub const VIGIL_LEDGER_FORK_ID: &str = "vigil.ledger.fork_id";
+
+/// Stable identifier for a version-probe event.
+pub const VIGIL_LEDGER_PROBE_ID: &str = "vigil.ledger.probe_id";
+
+/// Name of the manipulated (`do()` target) variable.
+pub const VIGIL_LEDGER_MANIPULATED: &str = "vigil.ledger.manipulated";
+
+/// Kind of the manipulated variable (seed, scheduler_order, tool_latency, …).
+pub const VIGIL_LEDGER_MANIPULATED_KIND: &str = "vigil.ledger.manipulated_kind";
+
+/// Number of variables pinned to the original run.
+pub const VIGIL_LEDGER_FROZEN_COUNT: &str = "vigil.ledger.frozen_count";
+
+/// Number of variables declared unpinnable for the fork.
+pub const VIGIL_LEDGER_FREE_COUNT: &str = "vigil.ledger.free_count";
+
+/// Number of fork/probe executions (N).
+pub const VIGIL_LEDGER_N: &str = "vigil.ledger.n";
+
+/// Attribution standing (single_fork, distributional, non_attributive).
+pub const VIGIL_LEDGER_ATTRIBUTION: &str = "vigil.ledger.attribution";
+
+/// Exogeneity-check result (not_checked, independent, confounded, indeterminate).
+pub const VIGIL_LEDGER_EXOGENEITY: &str = "vigil.ledger.exogeneity";
+
+/// Whether the replayer is independent of the original runtime (BRO-1037).
+pub const VIGIL_LEDGER_REPLAYER_INDEPENDENT: &str = "vigil.ledger.replayer_independent";
+
+/// Baseline model version for a version probe.
+pub const VIGIL_LEDGER_FROM_VERSION: &str = "vigil.ledger.from_version";
+
+/// Probed model version for a version probe.
+pub const VIGIL_LEDGER_TO_VERSION: &str = "vigil.ledger.to_version";
+
+/// Whether the probed behaviour is version-stable.
+pub const VIGIL_LEDGER_VERSION_STABLE: &str = "vigil.ledger.version_stable";
+
 // ─── Reliability Attributes ─────────────────────────────────────────────────
 
 /// Number of retries before the request succeeded (0 = first attempt).
@@ -301,6 +345,24 @@ mod tests {
         assert!(VIGIL_LLM_POLICY_DECISION.starts_with("vigil.llm."));
         assert!(VIGIL_STATUS.starts_with("vigil."));
         assert!(VIGIL_ROUTE.starts_with("vigil."));
+    }
+
+    #[test]
+    fn vigil_ledger_constants_use_correct_prefix() {
+        assert!(VIGIL_LEDGER_EVENT_TYPE.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_FORK_ID.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_PROBE_ID.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_MANIPULATED.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_MANIPULATED_KIND.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_FROZEN_COUNT.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_FREE_COUNT.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_N.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_ATTRIBUTION.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_EXOGENEITY.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_REPLAYER_INDEPENDENT.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_FROM_VERSION.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_TO_VERSION.starts_with("vigil.ledger."));
+        assert!(VIGIL_LEDGER_VERSION_STABLE.starts_with("vigil.ledger."));
     }
 
     #[test]

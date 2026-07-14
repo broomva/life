@@ -2,11 +2,11 @@
 
 Observability foundation for the Life Agent OS — OpenTelemetry-native tracing, GenAI semantic conventions, and contract-derived instrumentation.
 
-**Version**: 0.1.0 | **Rust**: edition 2024, MSRV 1.85 | **Tests**: 26 passing (+2 ignored)
+**Version**: 0.3.0 | **Rust**: edition 2024, MSRV 1.85 | **Tests**: 80 passing (+2 ignored)
 
 ## Architecture
 
-Vigil is a single crate with four modules:
+Vigil is a single crate composed of the following modules:
 
 ### config (`src/config.rs`)
 
@@ -48,6 +48,49 @@ Contract-derived span builders that create properly-attributed `tracing` spans:
 - `life.budget.tokens_remaining` — gauge of remaining token budget
 - `life.budget.cost_remaining_usd` — gauge of remaining cost budget
 - `life.mode.transitions` — counter of operating mode transitions
+
+### ledger (`src/ledger.rs`) — intervention ledger (BRO-1880)
+
+Makes a **fork** a first-class recorded Vigil event so a causal claim derived
+from a replay is auditable, not testimony. Deterministic replay gives a control
+group; a *diagnosis* ("which context fragment caused this write?") needs an
+intervention — re-run with exactly one thing changed. That is only honest when
+every other variable is pinned; otherwise a fork changes three things while
+pretending to change one.
+
+`ForkEvent` carries the **validity tuple**:
+
+- `frozen` — variables pinned to the original run (seeds, scheduler order, tool
+  latency/payloads, retrieved context, model version)
+- `manipulated` — the single `do()` target
+- `free` — variables declared unpinnable for this fork
+- `n` — number of fork executions
+- `outcomes` — `OutcomeDistribution` over the N runs
+
+Three semantics are enforced at the schema level (machine-checkable, not
+asserted):
+
+1. **Single-fork attribution requires total pinning** — `free ≠ ∅ ∧ N == 1` ⇒
+   `Attribution::NonAttributive` (a single run cannot average out free variation).
+2. **Distributional attribution requires exogeneity** — for `N > 1` the free
+   variables must be independent of the manipulated one. The `ExogeneityHook`
+   trait (default `PearsonExogeneityHook`) emits an `ExogeneityCheck`
+   (`Independent`/`Confounded`/`Indeterminate`) stored on the event; without a
+   passing check the distributional claim is non-attributive. Example: latency
+   jitter must not correlate with whether the suspect fragment was dropped.
+3. **Model-version change is a plant swap, not an intervention** — a `ForkEvent`
+   whose manipulated target (or a free variable) is the model version is
+   rejected at construction; it must be a `VersionProbeEvent`, which answers
+   "is this behaviour version-stable?" via total-variation distance between the
+   two versions' outcome distributions — no causal attribution.
+
+**Replayer independence (BRO-1037)** — every event carries both the
+`original_runtime` and the `replayer` `RuntimeIdentity`; `replayer_independence()`
+flags a `SelfRecorded` ledger (same process instance recording its own forks),
+so a fork is `is_valid_evidence()` only when it is *both* attributive *and*
+independently recorded. `LedgerEvent` is the tagged (`event_type`) sum of
+`Fork`/`VersionProbe` for heterogeneous ledger streams. Span attributes under
+`vigil.ledger.*`.
 
 ### stream (BRO-1322) — `stream.broadcast.*`
 
