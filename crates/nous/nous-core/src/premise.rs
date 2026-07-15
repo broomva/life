@@ -210,6 +210,12 @@ pub enum StalenessSignalKind {
     /// A predicted plant reading diverged from the observed one.
     PlantDivergence,
     /// Consecutive no-op actions accumulated past the reverse-burden threshold.
+    ///
+    /// Pinned to `noop_accumulation` so the serde wire form matches
+    /// [`label()`](Self::label); the default `snake_case` derive would split the
+    /// "NoOp" acronym into `no_op_accumulation`, desyncing the JSON `kind` field
+    /// from the label used in logs and rationale text.
+    #[serde(rename = "noop_accumulation")]
     NoOpAccumulation,
 }
 
@@ -240,7 +246,8 @@ pub struct PremiseStalenessSignal {
     /// Signal strength: cosine distance, normalized plant gap, or no-op run
     /// length (as `f64`), depending on `kind`.
     pub magnitude: f64,
-    /// The watcher's observation index at which the signal fired.
+    /// The watcher's monotonic observation sequence — counting every
+    /// `observe_*` call (output, plant, and action) — at which the signal fired.
     pub observation: u64,
     /// Optional detail string.
     pub detail: Option<String>,
@@ -302,6 +309,10 @@ pub struct PremiseValidityWatcher {
     config: PremiseWatchConfig,
     window: VecDeque<Vec<f64>>,
     observations: u64,
+    /// Monotonic index over *every* `observe_*` call, used to stamp signals so
+    /// plant/no-op signals get a call-sequential index rather than the
+    /// output-only `observations` count.
+    sequence: u64,
     consecutive_noops: usize,
 }
 
@@ -313,6 +324,7 @@ impl PremiseValidityWatcher {
             config,
             window: VecDeque::new(),
             observations: 0,
+            sequence: 0,
             consecutive_noops: 0,
         }
     }
@@ -325,6 +337,12 @@ impl PremiseValidityWatcher {
     /// Total number of output observations fed so far.
     pub fn observations(&self) -> u64 {
         self.observations
+    }
+
+    /// Monotonic count of all observations (output, plant, and action) fed so
+    /// far — the index that stamps each emitted signal's `observation` field.
+    pub fn sequence(&self) -> u64 {
+        self.sequence
     }
 
     /// Current consecutive no-op run length.
@@ -341,6 +359,7 @@ impl PremiseValidityWatcher {
     /// fired, so the baseline adapts.
     pub fn observe_output(&mut self, features: &[f64]) -> Option<PremiseStalenessSignal> {
         self.observations += 1;
+        self.sequence += 1;
         let signal = if self.config.window > 0 && self.window.len() >= self.config.window {
             let mean = window_mean(&self.window);
             let distance = cosine_distance(features, &mean);
@@ -348,7 +367,7 @@ impl PremiseValidityWatcher {
                 session_id: self.session_id.clone(),
                 kind: StalenessSignalKind::OutputDivergence,
                 magnitude: distance,
-                observation: self.observations,
+                observation: self.sequence,
                 detail: Some(format!(
                     "cosine distance {:.3} > k={:.3} over {}-back window",
                     distance, self.config.distance_threshold, self.config.window
@@ -383,13 +402,14 @@ impl PremiseValidityWatcher {
         predicted: f64,
         observed: f64,
     ) -> Option<PremiseStalenessSignal> {
+        self.sequence += 1;
         let scale = predicted.abs().max(observed.abs()).max(f64::EPSILON);
         let normalized = (predicted - observed).abs() / scale;
         (normalized > self.config.plant_divergence_threshold).then(|| PremiseStalenessSignal {
             session_id: self.session_id.clone(),
             kind: StalenessSignalKind::PlantDivergence,
             magnitude: normalized.min(1.0),
-            observation: self.observations,
+            observation: self.sequence,
             detail: Some(format!(
                 "predicted {predicted:.3} vs observed {observed:.3}, normalized gap {normalized:.3}"
             )),
@@ -402,6 +422,7 @@ impl PremiseValidityWatcher {
     /// `config.noop_threshold` the burden reverses and each further no-op fires
     /// a signal whose magnitude is the run length.
     pub fn observe_action(&mut self, made_progress: bool) -> Option<PremiseStalenessSignal> {
+        self.sequence += 1;
         if made_progress {
             self.consecutive_noops = 0;
             return None;
@@ -412,7 +433,7 @@ impl PremiseValidityWatcher {
                 session_id: self.session_id.clone(),
                 kind: StalenessSignalKind::NoOpAccumulation,
                 magnitude: self.consecutive_noops as f64,
-                observation: self.observations,
+                observation: self.sequence,
                 detail: Some(format!(
                     "{} consecutive no-ops >= threshold {}",
                     self.consecutive_noops, self.config.noop_threshold
@@ -741,6 +762,50 @@ mod tests {
         for _ in 0..10 {
             assert!(w.observe_output(&[1.0, 0.0]).is_none());
         }
+    }
+
+    #[test]
+    fn staleness_kind_serde_matches_label() {
+        // Regression (CodeRabbit): the serde wire form must equal `label()` for
+        // every variant — in particular NoOpAccumulation, which the default
+        // snake_case derive would render as `no_op_accumulation`.
+        for kind in [
+            StalenessSignalKind::OutputDivergence,
+            StalenessSignalKind::PlantDivergence,
+            StalenessSignalKind::NoOpAccumulation,
+        ] {
+            let json = serde_json::to_string(&kind).unwrap();
+            assert_eq!(json, format!("\"{}\"", kind.label()));
+            let back: StalenessSignalKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, kind);
+        }
+        assert_eq!(
+            serde_json::to_string(&StalenessSignalKind::NoOpAccumulation).unwrap(),
+            "\"noop_accumulation\""
+        );
+    }
+
+    #[test]
+    fn observation_index_is_sequential_across_detectors() {
+        // Regression (CodeRabbit): plant/no-op signals must carry a call-
+        // sequential index, not the stale output-only count.
+        let cfg = PremiseWatchConfig {
+            noop_threshold: 1,
+            ..Default::default()
+        };
+        let mut w = PremiseValidityWatcher::new("s", cfg);
+        // 1: action no-op fires (threshold 1) → observation == sequence == 1.
+        let s1 = w.observe_action(false).expect("fires at threshold 1");
+        assert_eq!(s1.observation, 1);
+        // 2: plant divergence fires → observation == 2 (not 0/output-count).
+        let s2 = w.observe_plant(1.0, 0.0).expect("plant fires");
+        assert_eq!(s2.observation, 2);
+        // 3: another no-op → observation == 3.
+        let s3 = w.observe_action(false).expect("fires again");
+        assert_eq!(s3.observation, 3);
+        // sequence counts all three; output count stayed 0.
+        assert_eq!(w.sequence(), 3);
+        assert_eq!(w.observations(), 0);
     }
 
     #[test]
