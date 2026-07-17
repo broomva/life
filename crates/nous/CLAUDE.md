@@ -11,7 +11,7 @@ Hybrid deployment: embedded inline heuristics (< 2ms, Arcan middleware hooks) + 
 
 ## Crates
 
-- `nous-core` — Types, traits, errors (zero I/O). `NousEvaluator` trait, `EvalScore`, `EvalResult`, `EvalLayer` taxonomy
+- `nous-core` — Types, traits, errors (zero I/O). `NousEvaluator` trait, `EvalScore`, `EvalResult`, `EvalLayer` taxonomy. Dual-classifier surface (`premise` module): `watch_premise_validity(session)` premise-staleness detector (output/plant/no-op divergence, deterministic, no LLM in hot path), `FailureClass` (epistemic/control/both/neither) → `DiagnosisRoute`, and `reconcile` discrepancy taxonomy (`PremiseStale` third class + `ShadowCompetence` inverse/promote-candidate)
 - `nous-heuristics` — Inline evaluators: token efficiency, budget adherence, tool correctness, argument validity, safety compliance, step efficiency
 - `nous-middleware` — `NousMiddleware: impl arcan_core::Middleware` — wires evaluators into agent loop
 - `nous-judge` — Async LLM-as-judge: plan quality, plan adherence, task completion
