@@ -1,7 +1,7 @@
 # Praxis — Canonical Tool Execution Engine
 
 **Version**: 0.1.0 | **Date**: 2026-07-17 | **Status**: Active (Phase 4 — MCP server complete)
-**Tests**: 141 passing | 5 crates | Rust 2024 Edition (MSRV 1.85)
+**Tests**: 145 passing | 5 crates | Rust 2024 Edition (MSRV 1.85)
 
 Praxis is the canonical tool execution and sandbox engine for the Agent OS. It implements the `Tool` trait from `aios-protocol` and provides filesystem, editing, shell, memory, MCP server/client, and skill discovery tools.
 
@@ -24,7 +24,7 @@ aios-protocol (Tool trait, ToolDefinition, ToolCall, ToolResult, ToolError)
 
 ## Crates
 
-### praxis-core (40 tests)
+### praxis-core (41 tests)
 - **SandboxPolicy**: cwd validation, env filtering, timeout enforcement, output truncation
 - **FsPolicy**: workspace boundary enforcement via canonicalize + starts_with
 - **CommandRunner**: trait + LocalCommandRunner implementation
@@ -34,7 +34,7 @@ aios-protocol (Tool trait, ToolDefinition, ToolCall, ToolResult, ToolError)
   `RevisionLink` + `BeliefRevisionAcknowledgment`, `ContentAddressedRef` (blake3),
   `AnimaDid`, `BeliefClass`. Formation context as a typed, content-addressed write token.
 
-### praxis-tools (51 tests)
+### praxis-tools (54 tests)
 - **ReadFileTool**: reads files with hashline tags for content-addressed editing
 - **WriteFileTool**: writes files within workspace boundary
 - **ListDirTool**: lists directory contents with metadata

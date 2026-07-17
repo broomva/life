@@ -132,7 +132,7 @@ description: Visual decision matrix + worked examples for the four-dimensional B
   <div class="check"><b>3 · Bi-temporal</b><br/>valid_from &amp; recorded_at set<br/><span class="err">IncompleteBiTemporalStamp</span></div>
   <div class="check"><b>4 · Scope qualifier</b><br/>present for normative beliefs<br/><span class="err">MissingScopeQualifier</span></div>
   <div class="check"><b>5 · Evidence trace</b><br/>≥ 1 cited evidence<br/><span class="err">MissingEvidence</span></div>
-  <div class="check"><b>6 · Revision link</b><br/>required on overlap ≥ 0.5<br/><span class="err">MissingRevisionLink / RevisionTargetNotFound</span></div>
+  <div class="check"><b>6 · Revision link</b><br/>required on overlap ≥ 0.5; must target the live head<br/><span class="err">MissingRevisionLink / RevisionMustTargetHead / AmbiguousOverlap / RevisionTargetNotFound</span></div>
 </div>
 
 <h3>Overlap → revision decision</h3>
@@ -141,9 +141,11 @@ description: Visual decision matrix + worked examples for the four-dimensional B
   <tbody>
     <tr><td>none</td><td>—</td><td>absent</td><td><span class="pill ok">accept</span> first assertion</td></tr>
     <tr><td>yes, same principal + scope</td><td>&lt; 0.5 (disjoint)</td><td>absent</td><td><span class="pill ok">accept</span> parallel belief</td></tr>
-    <tr><td>yes, same principal + scope</td><td>≥ 0.5 (overlap)</td><td>absent</td><td><span class="pill rej">reject</span> <code>MissingRevisionLink</code></td></tr>
-    <tr><td>yes, same principal + scope</td><td>≥ 0.5 (overlap)</td><td>present → live head</td><td><span class="pill ok">accept</span> supersede, becomes visible history</td></tr>
-    <tr><td>any</td><td>any</td><td>present → non-existent target</td><td><span class="pill rej">reject</span> <code>RevisionTargetNotFound</code></td></tr>
+    <tr><td>one live head, same principal + scope</td><td>≥ 0.5 (overlap)</td><td>absent</td><td><span class="pill rej">reject</span> <code>MissingRevisionLink</code></td></tr>
+    <tr><td>one live head, same principal + scope</td><td>≥ 0.5 (overlap)</td><td>present → <b>exactly</b> the live head</td><td><span class="pill ok">accept</span> supersede, becomes visible history</td></tr>
+    <tr><td>one live head, same principal + scope</td><td>≥ 0.5 (overlap)</td><td>present → stale / cross-principal / other</td><td><span class="pill rej">reject</span> <code>RevisionMustTargetHead</code></td></tr>
+    <tr><td><b>two or more</b> live heads overlap</td><td>≥ 0.5 each</td><td>any</td><td><span class="pill rej">reject</span> <code>AmbiguousOverlap</code> — narrow scope</td></tr>
+    <tr><td>none</td><td>—</td><td>present → non-existent target</td><td><span class="pill rej">reject</span> <code>RevisionTargetNotFound</code></td></tr>
   </tbody>
 </table>
 

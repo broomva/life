@@ -140,6 +140,34 @@ pub enum BeliefWriteError {
         hash: String,
     },
 
+    /// Check 5 — a revision link was provided but it does not target the live
+    /// belief it must revise. Either a live overlapping head exists and the
+    /// link points elsewhere (stale, cross-principal, or unrelated), or no
+    /// overlapping belief exists in this slot to revise at all.
+    #[error(
+        "belief write rejected: revision link must target the live overlapping belief for this \
+         principal + scope{}",
+        match .expected_id {
+            Some(id) => format!(" (expected id {id})"),
+            None => " (no overlapping belief exists to revise — remove the revision link or narrow the scope)".to_string(),
+        }
+    )]
+    RevisionMustTargetHead {
+        /// The id of the live head the link must target, if one exists.
+        expected_id: Option<String>,
+    },
+
+    /// Check 5 — more than one live belief overlaps the write's scope, so the
+    /// revision target is ambiguous.
+    #[error(
+        "belief write rejected: {count} live beliefs overlap this principal + scope; narrow the \
+         scope_qualifier so the revision target is unambiguous"
+    )]
+    AmbiguousOverlap {
+        /// How many live beliefs overlap.
+        count: usize,
+    },
+
     /// Check 6 — the bi-temporal stamp is incomplete.
     #[error(
         "belief write rejected: bi-temporal stamp is incomplete (valid_from and recorded_at must \
@@ -183,8 +211,9 @@ pub fn revision_masks_contradiction(newer: &BeliefWriteToken, older: &ContentAdd
 pub struct RevisionChainEntry {
     /// The belief record at this link.
     pub record: BeliefRecord,
-    /// The acknowledgment that links this record to its predecessor, if this
-    /// record supersedes an earlier one.
+    /// The acknowledgment that links this record to the *successor* which
+    /// superseded it — i.e. the revision that discarded this record as a draft.
+    /// `None` for the live head (nothing supersedes it).
     pub via: Option<BeliefRevisionAcknowledgment>,
 }
 
@@ -253,24 +282,29 @@ impl BeliefStore {
         })
     }
 
-    /// The live (not-yet-superseded) belief for `principal` in the same coarse
-    /// `scope` whose qualifier overlaps `qualifier` at or above the Jaccard
-    /// threshold, plus the measured overlap. `None` when the slot is free.
-    fn find_overlapping(
+    /// Indices of every **live** (not-yet-superseded) belief for `principal` in
+    /// the same coarse `scope` whose qualifier overlaps `qualifier` at or above
+    /// the Jaccard threshold, each paired with the measured overlap.
+    ///
+    /// Returns *all* overlapping live heads (not just the strongest): more than
+    /// one means the revision target is ambiguous and the write must be
+    /// rejected rather than silently superseding one head while leaving another
+    /// conflicting belief live.
+    fn live_overlapping_indices(
         &self,
         principal: &AnimaDid,
         scope: &BeliefScope,
         qualifier: &ScopeQualifier,
-    ) -> Option<(&BeliefRecord, f64)> {
+    ) -> Vec<(usize, f64)> {
         self.records
             .iter()
-            .filter(|rec| rec.is_live())
-            .filter(|rec| &rec.token.signed_by == principal)
-            .filter(|rec| &rec.token.scope == scope)
-            .map(|rec| (rec, rec.token.scope_qualifier.jaccard(qualifier)))
+            .enumerate()
+            .filter(|(_, rec)| rec.is_live())
+            .filter(|(_, rec)| &rec.token.signed_by == principal)
+            .filter(|(_, rec)| &rec.token.scope == scope)
+            .map(|(i, rec)| (i, rec.token.scope_qualifier.jaccard(qualifier)))
             .filter(|(_, j)| *j >= ScopeQualifier::OVERLAP_THRESHOLD)
-            // Prefer the strongest overlap when several slots are close.
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .collect()
     }
 
     /// Write a normative belief through the four-dimensional token, enforcing
@@ -318,29 +352,55 @@ impl BeliefStore {
         }
 
         // Check 5 — revision link required when an overlapping live belief
-        // already exists for this principal.
+        // already exists for this principal, and it must target that exact live
+        // head. This prevents a write from superseding an unrelated, stale
+        // (already-superseded), or cross-principal record while leaving the
+        // conflicting live belief in place.
         let principal = token.signed_by.clone();
-        let overlap = self
-            .find_overlapping(&principal, &token.scope, &token.scope_qualifier)
-            .map(|(rec, j)| (rec.id.clone(), j));
+        let overlaps =
+            self.live_overlapping_indices(&principal, &token.scope, &token.scope_qualifier);
 
-        let superseded_index = match (&overlap, &token.revision_link) {
-            (Some((existing_id, jaccard)), None) => {
+        // More than one live overlapping head ⇒ the revision target is
+        // ambiguous. Reject rather than pick one arbitrarily.
+        if overlaps.len() > 1 {
+            return Err(BeliefWriteError::AmbiguousOverlap {
+                count: overlaps.len(),
+            });
+        }
+
+        let superseded_index = match (overlaps.first().copied(), &token.revision_link) {
+            // A live overlapping head exists but the write does not revise it.
+            (Some((head_idx, jaccard)), None) => {
                 return Err(BeliefWriteError::MissingRevisionLink {
-                    existing_id: existing_id.clone(),
-                    jaccard: *jaccard,
+                    existing_id: self.records[head_idx].id.clone(),
+                    jaccard,
                 });
             }
-            (_, Some(link)) => {
-                // A revision link — dangling or not — must point at a real
-                // belief, whether or not an overlap was detected.
-                let idx = self.resolve_index(&link.superseded).ok_or_else(|| {
-                    BeliefWriteError::RevisionTargetNotFound {
-                        hash: link.superseded.content_hash.clone(),
-                    }
-                })?;
-                Some(idx)
+            // A live overlapping head exists and the write carries a revision
+            // link — it MUST target exactly that head (identity by content ref).
+            (Some((head_idx, _)), Some(link)) => {
+                let head_ref = self.records[head_idx].as_ref();
+                if link.superseded != head_ref {
+                    return Err(BeliefWriteError::RevisionMustTargetHead {
+                        expected_id: Some(self.records[head_idx].id.clone()),
+                    });
+                }
+                Some(head_idx)
             }
+            // No live overlapping head, but a revision link was supplied. There
+            // is nothing in this slot to revise: the target is either dangling
+            // (does not resolve) or points at a stale / cross-principal record.
+            (None, Some(link)) => match self.resolve_index(&link.superseded) {
+                None => {
+                    return Err(BeliefWriteError::RevisionTargetNotFound {
+                        hash: link.superseded.content_hash.clone(),
+                    });
+                }
+                Some(_) => {
+                    return Err(BeliefWriteError::RevisionMustTargetHead { expected_id: None });
+                }
+            },
+            // Free slot, first assertion.
             (None, None) => None,
         };
 
@@ -494,6 +554,10 @@ mod tests {
 
     fn alice() -> AnimaDid {
         AnimaDid::new("did:key:z6MkAlice")
+    }
+
+    fn bob() -> AnimaDid {
+        AnimaDid::new("did:key:z6MkBob")
     }
 
     fn store_with_cap() -> BeliefStore {
@@ -987,6 +1051,151 @@ mod tests {
                 assert_eq!(existing_id, "blf-00000002"); // B, the live head
             }
             other => panic!("expected MissingRevisionLink, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn revision_link_must_target_live_head_not_stale() {
+        let mut store = store_with_cap();
+        let a = store
+            .write_belief(
+                BeliefClaim::new("market", "A"),
+                token(
+                    ScopeQualifier::from_pairs([("metric", "engagement")]),
+                    None,
+                    1000,
+                    1000,
+                ),
+            )
+            .unwrap();
+        let b = store
+            .write_belief(
+                BeliefClaim::new("market", "B"),
+                token(
+                    ScopeQualifier::from_pairs([("metric", "engagement")]),
+                    Some(RevisionLink::new(
+                        a.as_ref(),
+                        vec![EvidenceRef::source("e1")],
+                        BeliefRevisionAcknowledgment::new(
+                            RevisionTrigger::NewEvidence,
+                            RevisionChange::Negated,
+                            "A→B",
+                        ),
+                    )),
+                    2000,
+                    2000,
+                ),
+            )
+            .unwrap();
+        // C tries to supersede the STALE A (already superseded by B) instead of
+        // the live head B — rejected; it must target B.
+        let err = store
+            .write_belief(
+                BeliefClaim::new("market", "C"),
+                token(
+                    ScopeQualifier::from_pairs([("metric", "engagement")]),
+                    Some(RevisionLink::new(
+                        a.as_ref(),
+                        vec![EvidenceRef::source("e2")],
+                        BeliefRevisionAcknowledgment::new(
+                            RevisionTrigger::NewEvidence,
+                            RevisionChange::Negated,
+                            "C targets stale A",
+                        ),
+                    )),
+                    3000,
+                    3000,
+                ),
+            )
+            .unwrap_err();
+        match err {
+            BeliefWriteError::RevisionMustTargetHead { expected_id } => {
+                assert_eq!(expected_id.as_deref(), Some(b.id.as_str()));
+            }
+            other => panic!("expected RevisionMustTargetHead, got {other:?}"),
+        }
+        // The live head B is untouched.
+        assert!(store.get(&b.id).unwrap().is_live());
+    }
+
+    #[test]
+    fn revision_link_cannot_cross_principal() {
+        let mut store = store_with_cap();
+        let a = store
+            .write_belief(
+                BeliefClaim::new("market", "A"),
+                token(
+                    ScopeQualifier::from_pairs([("metric", "engagement")]),
+                    None,
+                    1000,
+                    1000,
+                ),
+            )
+            .unwrap();
+        // Bob writes an overlapping belief and tries to supersede Alice's A.
+        // Bob has no live overlapping head of his own, so the link targets a
+        // record he does not own → rejected.
+        let bob_token = BeliefWriteToken {
+            capability_id: CapabilityId::new("cap-belief-write"),
+            scope: BeliefScope::new("market"),
+            scope_qualifier: ScopeQualifier::from_pairs([("metric", "engagement")]),
+            cited_evidence: vec![EvidenceRef::source("observation")],
+            formation_context: SessionContext::new("sess-b", bob()),
+            revision_link: Some(RevisionLink::new(
+                a.as_ref(),
+                vec![EvidenceRef::source("e")],
+                BeliefRevisionAcknowledgment::new(
+                    RevisionTrigger::NewEvidence,
+                    RevisionChange::Negated,
+                    "bob supersedes alice",
+                ),
+            )),
+            signed_by: bob(),
+            timestamp: BiTemporalStamp::new(ts(2000), ts(2000)),
+        };
+        let err = store
+            .write_belief(BeliefClaim::new("market", "B-bob"), bob_token)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            BeliefWriteError::RevisionMustTargetHead { expected_id: None }
+        ));
+        // Alice's belief is untouched.
+        assert!(store.get(&a.id).unwrap().is_live());
+    }
+
+    #[test]
+    fn ambiguous_multi_head_overlap_is_rejected() {
+        let mut store = store_with_cap();
+        // Two disjoint (hence both live) beliefs in the same coarse scope.
+        store
+            .write_belief(
+                BeliefClaim::new("market", "A"),
+                token(ScopeQualifier::from_pairs([("x", "1")]), None, 1000, 1000),
+            )
+            .unwrap();
+        store
+            .write_belief(
+                BeliefClaim::new("market", "B"),
+                token(ScopeQualifier::from_pairs([("y", "1")]), None, 1100, 1100),
+            )
+            .unwrap();
+        // C's qualifier {x:1, y:1} overlaps BOTH A and B at jaccard 0.5 → the
+        // revision target is ambiguous, so the write is rejected.
+        let err = store
+            .write_belief(
+                BeliefClaim::new("market", "C"),
+                token(
+                    ScopeQualifier::from_pairs([("x", "1"), ("y", "1")]),
+                    None,
+                    2000,
+                    2000,
+                ),
+            )
+            .unwrap_err();
+        match err {
+            BeliefWriteError::AmbiguousOverlap { count } => assert_eq!(count, 2),
+            other => panic!("expected AmbiguousOverlap, got {other:?}"),
         }
     }
 }

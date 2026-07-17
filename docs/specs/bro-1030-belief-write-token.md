@@ -52,6 +52,10 @@ The claim itself (`BeliefClaim { subject, proposition }`) is passed alongside
 the token to `write_belief` — the token carries *authorization and provenance*,
 the claim carries *content*. Content addressing hashes
 `(scope, canonicalised scope_qualifier, subject, proposition)` with blake3.
+Every variable-length field is **length-prefixed** (and the qualifier pair
+count written explicitly), so distinct inputs can never alias to the same hash
+— e.g. qualifier pairs `("a=b", "c")` and `("a", "b=c")`, which naive
+`key=value\0` framing would collide, hash differently.
 
 ## Write-path checks (`praxis-tools::belief::BeliefStore::write_belief`)
 
@@ -67,14 +71,21 @@ Enforced in this order; each maps to a `BeliefWriteError` variant:
    `MissingScopeQualifier`.
 5. **Evidence trace** — ≥ 1 cited evidence for normative beliefs ⇒ else
    `MissingEvidence`.
-6. **Revision link required when applicable** — if a **live** belief for the
-   same principal + coarse scope has a scope-qualifier Jaccard overlap ≥ 0.5,
-   the write **must** carry a `revision_link` ⇒ else
-   `MissingRevisionLink { existing_id, jaccard }`. A revision link (dangling or
-   not) must resolve to a real stored belief ⇒ else `RevisionTargetNotFound`.
+6. **Revision link required, and it must target the live head** — if a **live**
+   belief for the same principal + coarse scope has a scope-qualifier Jaccard
+   overlap ≥ 0.5, the write **must** carry a `revision_link` ⇒ else
+   `MissingRevisionLink { existing_id, jaccard }`. When a link is supplied it
+   must target **exactly that live head** (identity by content hash +
+   `valid_from`); a link that points at a stale/superseded, cross-principal, or
+   otherwise non-head record ⇒ `RevisionMustTargetHead { expected_id }`. If more
+   than one live belief overlaps, the target is ambiguous ⇒ `AmbiguousOverlap`
+   (narrow the `scope_qualifier`). A link in a slot with no overlapping belief
+   whose target does not resolve ⇒ `RevisionTargetNotFound`.
 
-On success the predecessor named by the revision link is stamped
-`superseded_by`, so the slot has exactly one **live** head.
+On success **only** the live head named by the revision link is stamped
+`superseded_by`, so the slot still has exactly one **live** head. Because the
+target is resolved to the live head by index (not by a global hash lookup), a
+write can never mutate another principal's record.
 
 ## Two belief classes
 

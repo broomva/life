@@ -412,31 +412,48 @@ impl ContentAddressedRef {
     }
 }
 
+/// Length-prefix a variable-length field into the hasher: a domain tag, then
+/// the field's byte length as u64 little-endian, then the field bytes.
+///
+/// Length-prefixing (rather than delimiter framing) makes the encoding
+/// unambiguous: no combination of field contents can be reinterpreted as a
+/// different field boundary, because a byte inside a field can never be
+/// mistaken for the length that precedes it.
+fn hash_field(hasher: &mut Hasher, tag: &[u8], data: &[u8]) {
+    hasher.update(tag);
+    hasher.update(&(data.len() as u64).to_le_bytes());
+    hasher.update(data);
+}
+
 /// Compute the Blake3 content hash of a belief's *semantic identity*:
 /// coarse scope, canonicalised qualifiers, subject, and proposition.
 ///
-/// Two writes with identical content hash to the same value regardless of who
-/// wrote them or when — that is what makes supersession referenceable.
+/// Two writes with identical semantic identity hash to the same value
+/// regardless of who wrote them or when — that is what makes supersession
+/// referenceable.
+///
+/// Every variable-length field is length-prefixed and the qualifier pair count
+/// is written explicitly, so distinct inputs can never alias to the same hash:
+/// e.g. the qualifier pairs `("a=b", "c")` and `("a", "b=c")` — which a naive
+/// `key=value\0` concatenation would collide — produce distinct hashes here.
 pub fn content_hash(
     scope: &BeliefScope,
     qualifier: &ScopeQualifier,
     claim: &BeliefClaim,
 ) -> String {
     let mut hasher = Hasher::new();
-    hasher.update(b"praxis.belief.v1\0");
-    hasher.update(scope.as_str().as_bytes());
-    hasher.update(b"\0scope_qualifier\0");
+    hasher.update(b"praxis.belief.v1");
+    hash_field(&mut hasher, b"scope", scope.as_str().as_bytes());
+    // Explicit pair count, then each length-prefixed key/value.
     // BTreeMap iterates in key order — canonical.
+    hasher.update(b"qualifiers");
+    hasher.update(&(qualifier.qualifiers.len() as u64).to_le_bytes());
     for (k, v) in &qualifier.qualifiers {
-        hasher.update(k.as_str().as_bytes());
-        hasher.update(b"=");
-        hasher.update(v.as_str().as_bytes());
-        hasher.update(b"\0");
+        hash_field(&mut hasher, b"qk", k.as_str().as_bytes());
+        hash_field(&mut hasher, b"qv", v.as_str().as_bytes());
     }
-    hasher.update(b"\0subject\0");
-    hasher.update(claim.subject.as_bytes());
-    hasher.update(b"\0proposition\0");
-    hasher.update(claim.proposition.as_bytes());
+    hash_field(&mut hasher, b"subject", claim.subject.as_bytes());
+    hash_field(&mut hasher, b"proposition", claim.proposition.as_bytes());
     hasher.finalize().to_hex().to_string()
 }
 
@@ -682,6 +699,35 @@ mod tests {
             content_hash(&scope, &q1, &claim),
             content_hash(&scope, &q2, &claim)
         );
+    }
+
+    #[test]
+    fn content_hash_is_unambiguous_across_field_boundaries() {
+        // A naive `key=value\0` concatenation would collide these two qualifier
+        // pair sets (both flatten to "a=b=c"); length-prefixing keeps them
+        // distinct.
+        let scope = BeliefScope::new("market");
+        let claim = BeliefClaim::new("market", "reliable");
+        let q1 = ScopeQualifier::from_pairs([("a=b", "c")]);
+        let q2 = ScopeQualifier::from_pairs([("a", "b=c")]);
+        assert_ne!(
+            content_hash(&scope, &q1, &claim),
+            content_hash(&scope, &q2, &claim)
+        );
+
+        // Field boundaries between scope/subject/proposition are also
+        // unambiguous: shifting a byte across a boundary changes the hash.
+        let a = content_hash(
+            &BeliefScope::new("mark"),
+            &ScopeQualifier::empty(),
+            &BeliefClaim::new("etmarket", "reliable"),
+        );
+        let b = content_hash(
+            &BeliefScope::new("market"),
+            &ScopeQualifier::empty(),
+            &BeliefClaim::new("market", "reliable"),
+        );
+        assert_ne!(a, b);
     }
 
     #[test]
