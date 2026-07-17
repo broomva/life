@@ -10,6 +10,8 @@ description = "Core sandbox policy, workspace enforcement, and command runner fo
 
 [dependencies]
 aios-protocol.workspace = true
+blake3.workspace = true
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

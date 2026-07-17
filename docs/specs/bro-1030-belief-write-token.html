@@ -1,0 +1,230 @@
+<!doctype html>
+<!--
+name: bro-1030-belief-write-token-decision-matrix
+audience: human
+category: C
+ticket: BRO-1030
+description: Visual decision matrix + worked examples for the four-dimensional BeliefWriteToken
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BeliefWriteToken — Decision Matrix &amp; Worked Examples · BRO-1030</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121822;
+    --panel-2: #172130;
+    --ink: #e6edf3;
+    --muted: #93a1b0;
+    --line: #223042;
+    --blue: #4f8cff;
+    --green: #3fb950;
+    --amber: #d29922;
+    --red: #f85149;
+    --violet: #a371f7;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: radial-gradient(1200px 600px at 20% -10%, #16202e 0%, var(--bg) 60%);
+    color: var(--ink); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 0 20px 96px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  header { padding: 56px 0 24px; border-bottom: 1px solid var(--line); }
+  .kicker { color: var(--blue); font: 600 13px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+  h1 { font-size: 34px; margin: 14px 0 8px; letter-spacing: -.02em; }
+  h2 { font-size: 22px; margin: 48px 0 14px; letter-spacing: -.01em; }
+  h3 { font-size: 16px; margin: 26px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
+  p.lede { color: var(--muted); font-size: 18px; max-width: 74ch; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 26px 0; }
+  @media (max-width: 820px) { .grid4 { grid-template-columns: repeat(2, 1fr); } }
+  .dim {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px;
+    position: relative; overflow: hidden;
+  }
+  .dim::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--accent); }
+  .dim.cap { --accent: var(--blue); } .dim.time { --accent: var(--green); }
+  .dim.scope { --accent: var(--amber); } .dim.rev { --accent: var(--violet); }
+  .dim .q { font-size: 13px; color: var(--muted); }
+  .dim .f { font: 600 13px/1.5 var(--mono); color: var(--accent); margin-top: 8px; word-break: break-word; }
+  .dim h4 { margin: 4px 0 6px; font-size: 15px; }
+  .badge-new { position: absolute; top: 10px; right: 10px; background: var(--violet); color: #0b0f14; font: 700 10px/1 var(--mono); padding: 4px 6px; border-radius: 6px; letter-spacing: .06em; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  tr:hover td { background: #0f1620; }
+  code { font-family: var(--mono); background: #0f1620; padding: 2px 6px; border-radius: 6px; font-size: .88em; color: #cdd9e5; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; margin: 18px 0; }
+  pre { background: #0c1219; border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.55; }
+  .pill { display: inline-block; font: 600 11px/1 var(--mono); padding: 5px 8px; border-radius: 999px; letter-spacing: .04em; }
+  .ok { background: rgba(63,185,80,.14); color: var(--green); border: 1px solid rgba(63,185,80,.35); }
+  .rej { background: rgba(248,81,73,.14); color: var(--red); border: 1px solid rgba(248,81,73,.35); }
+  .flow { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .check { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; flex: 1 1 220px; }
+  .check b { color: var(--blue); font-family: var(--mono); }
+  .check .err { color: var(--red); font-family: var(--mono); font-size: 12px; }
+  .ex { border-left: 3px solid var(--accent, var(--line)); padding-left: 16px; margin: 22px 0; }
+  .ex.pass { --accent: var(--green); } .ex.fail { --accent: var(--red); } .ex.hist { --accent: var(--violet); }
+  .foot { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+  .foot code { font-size: 12px; }
+  svg { max-width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="kicker">BRO-1030 · praxis · belief formation</div>
+  <h1>The four-dimensional <code>BeliefWriteToken</code></h1>
+  <p class="lede">Silent accumulation of a belief cannot be distinguished from deliberate
+  updating unless the write records <em>how the belief was formed</em>. Four dimensions make
+  formation context first-class — and the fourth turns a contradiction from a versioning
+  failure into visible history.</p>
+</header>
+
+<h2>The four dimensions</h2>
+<div class="grid4">
+  <div class="dim cap"><div class="q">Who authorized this belief?</div><h4>Capability</h4><div class="f">capability_id</div></div>
+  <div class="dim time"><div class="q">When in the world / in the system?</div><h4>Bi-temporal</h4><div class="f">timestamp<br/>{ valid_from, recorded_at }</div></div>
+  <div class="dim scope"><div class="q">About what, precisely?</div><h4>Scope</h4><div class="f">scope +<br/>scope_qualifier</div></div>
+  <div class="dim rev"><span class="badge-new">NEW</span><div class="q">What was superseded?</div><h4>Revision</h4><div class="f">revision_link</div></div>
+</div>
+
+<div class="panel">
+<svg viewBox="0 0 980 210" role="img" aria-label="Belief formation flow">
+  <defs>
+    <marker id="arw" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#5b6b7d"/>
+    </marker>
+  </defs>
+  <!-- prior belief -->
+  <rect x="18" y="70" width="190" height="70" rx="12" fill="#172130" stroke="#a371f7" stroke-width="1.5"/>
+  <text x="113" y="98" fill="#e6edf3" font-size="14" text-anchor="middle" font-weight="600">Prior belief "A"</text>
+  <text x="113" y="118" fill="#93a1b0" font-size="12" text-anchor="middle" font-family="monospace">content_hash + valid_from</text>
+  <!-- revision link -->
+  <line x1="208" y1="105" x2="300" y2="105" stroke="#5b6b7d" stroke-width="2" marker-end="url(#arw)"/>
+  <text x="254" y="96" fill="#a371f7" font-size="11" text-anchor="middle" font-family="monospace">revision_link</text>
+  <!-- token -->
+  <rect x="302" y="18" width="360" height="174" rx="14" fill="#121822" stroke="#223042"/>
+  <text x="482" y="42" fill="#e6edf3" font-size="14" text-anchor="middle" font-weight="700">BeliefWriteToken (belief "not-A")</text>
+  <rect x="318" y="56" width="150" height="34" rx="8" fill="#0c1219" stroke="#4f8cff"/><text x="393" y="78" fill="#4f8cff" font-size="12" text-anchor="middle" font-family="monospace">capability_id</text>
+  <rect x="496" y="56" width="150" height="34" rx="8" fill="#0c1219" stroke="#3fb950"/><text x="571" y="78" fill="#3fb950" font-size="12" text-anchor="middle" font-family="monospace">timestamp</text>
+  <rect x="318" y="100" width="150" height="34" rx="8" fill="#0c1219" stroke="#d29922"/><text x="393" y="122" fill="#d29922" font-size="12" text-anchor="middle" font-family="monospace">scope + qualifier</text>
+  <rect x="496" y="100" width="150" height="34" rx="8" fill="#0c1219" stroke="#a371f7"/><text x="571" y="122" fill="#a371f7" font-size="12" text-anchor="middle" font-family="monospace">revision_link</text>
+  <rect x="318" y="144" width="328" height="34" rx="8" fill="#0c1219" stroke="#223042"/><text x="482" y="166" fill="#93a1b0" font-size="12" text-anchor="middle" font-family="monospace">signed_by · cited_evidence · formation_context</text>
+  <!-- write path -->
+  <line x1="662" y1="105" x2="754" y2="105" stroke="#5b6b7d" stroke-width="2" marker-end="url(#arw)"/>
+  <text x="708" y="96" fill="#93a1b0" font-size="11" text-anchor="middle" font-family="monospace">write_belief</text>
+  <!-- store -->
+  <rect x="756" y="70" width="206" height="70" rx="12" fill="#172130" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="859" y="98" fill="#e6edf3" font-size="14" text-anchor="middle" font-weight="600">Live head "not-A"</text>
+  <text x="859" y="118" fill="#93a1b0" font-size="12" text-anchor="middle" font-family="monospace">A stamped superseded_by</text>
+</svg>
+</div>
+
+<h2>Write-path decision matrix</h2>
+<p class="lede">Each check runs in order. The first failure short-circuits with its typed error.</p>
+<div class="flow">
+  <div class="check"><b>1 · Capability presence</b><br/>capability resolves to a grant<br/><span class="err">MissingCapability / UnknownCapability</span></div>
+  <div class="check"><b>2 · Scope match</b><br/>grant authorizes the scope<br/><span class="err">ScopeMismatch</span></div>
+  <div class="check"><b>3 · Bi-temporal</b><br/>valid_from &amp; recorded_at set<br/><span class="err">IncompleteBiTemporalStamp</span></div>
+  <div class="check"><b>4 · Scope qualifier</b><br/>present for normative beliefs<br/><span class="err">MissingScopeQualifier</span></div>
+  <div class="check"><b>5 · Evidence trace</b><br/>≥ 1 cited evidence<br/><span class="err">MissingEvidence</span></div>
+  <div class="check"><b>6 · Revision link</b><br/>required on overlap ≥ 0.5<br/><span class="err">MissingRevisionLink / RevisionTargetNotFound</span></div>
+</div>
+
+<h3>Overlap → revision decision</h3>
+<table>
+  <thead><tr><th>Existing live belief in slot?</th><th>Qualifier Jaccard</th><th><code>revision_link</code></th><th>Outcome</th></tr></thead>
+  <tbody>
+    <tr><td>none</td><td>—</td><td>absent</td><td><span class="pill ok">accept</span> first assertion</td></tr>
+    <tr><td>yes, same principal + scope</td><td>&lt; 0.5 (disjoint)</td><td>absent</td><td><span class="pill ok">accept</span> parallel belief</td></tr>
+    <tr><td>yes, same principal + scope</td><td>≥ 0.5 (overlap)</td><td>absent</td><td><span class="pill rej">reject</span> <code>MissingRevisionLink</code></td></tr>
+    <tr><td>yes, same principal + scope</td><td>≥ 0.5 (overlap)</td><td>present → live head</td><td><span class="pill ok">accept</span> supersede, becomes visible history</td></tr>
+    <tr><td>any</td><td>any</td><td>present → non-existent target</td><td><span class="pill rej">reject</span> <code>RevisionTargetNotFound</code></td></tr>
+  </tbody>
+</table>
+
+<h2>Two belief classes</h2>
+<table>
+  <thead><tr><th>Class</th><th>Surface</th><th>All 4 dimensions?</th><th>Survives on</th></tr></thead>
+  <tbody>
+    <tr><td>Untested-normative</td><td>Praxis principal · <code>write_belief</code></td><td><span class="pill ok">yes</span></td><td>capability + scope + revision-link consistency</td></tr>
+    <tr><td>Tested-operational</td><td>Vigil-observed · <code>record_operational</code></td><td><span class="pill rej">no</span></td><td>functional aliveness</td></tr>
+  </tbody>
+</table>
+<p class="lede">Migration: a write carrying a token → Praxis normative path; a legacy token-less
+write → Vigil operational surface. New writes without a revision link on an overlapping
+scope are rejected, never silently accepted.</p>
+
+<h2>Worked examples</h2>
+
+<div class="ex pass">
+<h3><span class="pill ok">accept</span> First assertion in a fresh slot</h3>
+<pre>write_belief(
+  claim   = { subject: "market", proposition: "engagement metrics are reliable" },
+  token   = { capability_id: "cap-belief-write", scope: "market",
+              scope_qualifier: { metric: "engagement" },
+              cited_evidence: [ { source: "observation" } ],
+              revision_link: None, timestamp: { valid_from, recorded_at } } )
+→ Ok(blf-00000001)   // live head, class = UntestedNormative</pre>
+</div>
+
+<div class="ex fail">
+<h3><span class="pill rej">reject</span> Contradiction with no acknowledgment</h3>
+<pre>// slot already holds "engagement is reliable" (blf-00000001)
+write_belief(
+  claim = { subject: "market", proposition: "engagement is NOT reliable" },
+  token = { scope: "market", scope_qualifier: { metric: "engagement" },
+            revision_link: None, ... } )
+→ Err(MissingRevisionLink { existing_id: "blf-00000001", jaccard: 1.00 })
+// "either revise the existing belief or specify a non-overlapping scope"</pre>
+</div>
+
+<div class="ex hist">
+<h3><span class="pill" style="background:rgba(163,113,247,.16);color:#a371f7;border:1px solid rgba(163,113,247,.4)">visible history</span> Same contradiction, acknowledged</h3>
+<pre>write_belief(
+  claim = { subject: "market", proposition: "engagement is NOT reliable" },
+  token = { scope: "market", scope_qualifier: { metric: "engagement" },
+            revision_link: {
+              superseded: { content_hash: hash(blf-00000001), valid_from },
+              triggered_by: [ { source: "lago:event", locator: "evt-99" } ],
+              acknowledgment: {
+                trigger: NewEvidence, change: Negated,
+                rationale: "engagement turned out to be gameable under adversarial load" } },
+            ... } )
+→ Ok(blf-00000002)   // blf-00000001 stamped superseded_by = blf-00000002
+// bookkeeping: revision_masks_contradiction() ⇒ true ⇒ NOT flagged as a contradiction</pre>
+</div>
+
+<div class="ex pass">
+<h3><span class="pill ok">accept</span> Disjoint qualifier → parallel belief</h3>
+<pre>// slot holds "engagement is reliable" under { metric: "engagement" }
+write_belief(
+  claim = { subject: "market", proposition: "revenue is reliable" },
+  token = { scope: "market", scope_qualifier: { metric: "revenue" },  // jaccard 0.0
+            revision_link: None, ... } )
+→ Ok(blf-00000002)   // two live beliefs coexist — no revision required</pre>
+</div>
+
+<h2>Revision-graph traversal &amp; the Nous L2 surface</h2>
+<div class="panel">
+<p><code>traverse_revisions(belief_id, depth)</code> walks immediate-predecessor links from the
+live head back through discarded drafts — <code>C → B → A</code> — each entry carrying the
+acknowledgment that linked its successor to it.</p>
+<p><code>recent_supersessions(principal, limit)</code> is the substrate read-model the Nous L2
+metacognitive surface projects as <em>"what did I supersede recently, and why"</em>. Praxis owns
+the queryable substrate; Nous projects it — no <code>praxis → nous</code> dependency.</p>
+</div>
+
+<div class="foot">
+  <p>Canonical contract: <code>docs/specs/bro-1030-belief-write-token.md</code> · Implementation:
+  <code>crates/praxis/praxis-core/src/belief.rs</code>, <code>crates/praxis/praxis-tools/src/belief.rs</code>.</p>
+  <p>Origin: /loop runs 117 (khlo — capability), 118 (Cornelius-Trinity — scope), 119 (vina — revision).
+  The fourth dimension is what keeps bi-temporal stamps from being a mere playback device.</p>
+</div>
+</div>
+</body>
+</html>

@@ -1,7 +1,7 @@
 # Praxis — Canonical Tool Execution Engine
 
-**Version**: 0.1.0 | **Date**: 2026-03-19 | **Status**: Active (Phase 4 — MCP server complete)
-**Tests**: 90 passing | 4 crates | Rust 2024 Edition (MSRV 1.85)
+**Version**: 0.1.0 | **Date**: 2026-07-17 | **Status**: Active (Phase 4 — MCP server complete)
+**Tests**: 141 passing | 5 crates | Rust 2024 Edition (MSRV 1.85)
 
 Praxis is the canonical tool execution and sandbox engine for the Agent OS. It implements the `Tool` trait from `aios-protocol` and provides filesystem, editing, shell, memory, MCP server/client, and skill discovery tools.
 
@@ -24,13 +24,17 @@ aios-protocol (Tool trait, ToolDefinition, ToolCall, ToolResult, ToolError)
 
 ## Crates
 
-### praxis-core (12 tests)
+### praxis-core (40 tests)
 - **SandboxPolicy**: cwd validation, env filtering, timeout enforcement, output truncation
 - **FsPolicy**: workspace boundary enforcement via canonicalize + starts_with
 - **CommandRunner**: trait + LocalCommandRunner implementation
 - **Error types**: PraxisError (thiserror)
+- **belief** (BRO-1030): four-dimensional `BeliefWriteToken` types — `CapabilityId`,
+  `BeliefScope` + `ScopeQualifier` (Jaccard overlap), `BiTemporalStamp`,
+  `RevisionLink` + `BeliefRevisionAcknowledgment`, `ContentAddressedRef` (blake3),
+  `AnimaDid`, `BeliefClass`. Formation context as a typed, content-addressed write token.
 
-### praxis-tools (24 tests)
+### praxis-tools (51 tests)
 - **ReadFileTool**: reads files with hashline tags for content-addressed editing
 - **WriteFileTool**: writes files within workspace boundary
 - **ListDirTool**: lists directory contents with metadata
@@ -39,6 +43,12 @@ aios-protocol (Tool trait, ToolDefinition, ToolCall, ToolResult, ToolError)
 - **EditFileTool**: hashline (Blake3) content-addressed line editing
 - **BashTool**: shell command execution within sandbox constraints
 - **ReadMemoryTool / WriteMemoryTool**: agent memory persistence (file-based markdown)
+- **belief** (BRO-1030): `BeliefStore` + `write_belief` (six write-path checks, incl.
+  `MissingRevisionLink` on overlapping scope), `CapabilityGrant` registry,
+  `traverse_revisions` (revision-graph chain), `route_write` + `record_operational`
+  (normative/operational migration), `recent_supersessions` (Nous L2 read-model),
+  `revision_masks_contradiction` (bookkeeping contradiction gate). See
+  `docs/specs/bro-1030-belief-write-token.{md,html}`.
 
 ### praxis-skills (11 tests)
 - **SkillMetadata**: parsed from SKILL.md YAML frontmatter

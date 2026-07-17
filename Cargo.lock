@@ -8252,6 +8252,8 @@ name = "praxis-core"
 version = "0.3.0"
 dependencies = [
  "aios-protocol",
+ "blake3",
+ "chrono",
  "serde",
  "serde_json",
  "tempfile",
@@ -8302,6 +8304,7 @@ dependencies = [
  "arcan-sandbox",
  "async-trait",
  "blake3",
+ "chrono",
  "glob",
  "praxis-core",
  "regex",
