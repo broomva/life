@@ -12,6 +12,7 @@ description = "Canonical tool implementations (filesystem, editing, shell, memor
 aios-protocol.workspace = true
 praxis-core.workspace = true
 blake3.workspace = true
+chrono.workspace = true
 glob.workspace = true
 regex.workspace = true
 serde.workspace = true
