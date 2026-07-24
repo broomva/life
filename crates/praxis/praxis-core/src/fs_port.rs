@@ -7,6 +7,7 @@
 
 use crate::error::PraxisResult;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Metadata about a filesystem entry.
 #[derive(Debug, Clone)]
@@ -64,4 +65,20 @@ pub trait FsPort: Send + Sync {
 
     /// Return a path relative to the workspace root, if within bounds.
     fn relative(&self, absolute_path: &Path) -> Option<PathBuf>;
+
+    /// Return a filesystem port scoped to a per-session workspace `root`
+    /// (BRO-1491 — multi-tenancy isolation).
+    ///
+    /// The returned port enforces its own boundary at `root`, so a port scoped
+    /// to session A's workspace cannot read or write session B's — this is the
+    /// isolation guarantee. Tracking implementations additionally keep their
+    /// change-tracking keys session-unique (see the `arcan-lago` tracked FS).
+    ///
+    /// The default returns `None` (the implementation offers no per-session
+    /// scoping), so callers fall back to the construction-time port. Filesystem
+    /// backends that support isolation ([`LocalFs`](crate::local_fs::LocalFs)
+    /// and the lago-tracked FS) override this.
+    fn scoped(&self, _root: &Path) -> Option<Arc<dyn FsPort>> {
+        None
+    }
 }

@@ -179,7 +179,8 @@ impl Tool for EditFileTool {
         }
     }
 
-    fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let fs = crate::fs::effective_fs(&self.fs, ctx);
         let path_str = call
             .input
             .get("path")
@@ -218,15 +219,13 @@ impl Tool for EditFileTool {
         );
         let _guard = span.enter();
 
-        let path = self
-            .fs
-            .resolve_for_write(Path::new(path_str))
-            .map_err(|e| ToolError::PolicyViolation {
-                message: e.to_string(),
-            })?;
+        let path =
+            fs.resolve_for_write(Path::new(path_str))
+                .map_err(|e| ToolError::PolicyViolation {
+                    message: e.to_string(),
+                })?;
 
-        let content = self
-            .fs
+        let content = fs
             .read_to_string(&path)
             .map_err(|e| ToolError::ExecutionFailed {
                 tool_name: "edit_file".into(),
@@ -244,8 +243,7 @@ impl Tool for EditFileTool {
         let new_line_count = new_content.lines().count();
         let lines_changed = (new_line_count as isize - original_line_count as isize).unsigned_abs();
 
-        self.fs
-            .write(&path, new_content.as_bytes())
+        fs.write(&path, new_content.as_bytes())
             .map_err(|e| ToolError::ExecutionFailed {
                 tool_name: "edit_file".into(),
                 message: format!("Failed to write file: {e}"),

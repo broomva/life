@@ -7,6 +7,7 @@ use crate::error::PraxisResult;
 use crate::fs_port::{FsDirEntry, FsMetadata, FsPort};
 use crate::workspace::FsPolicy;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Local filesystem backed by `std::fs` with [`FsPolicy`] enforcement.
 #[derive(Debug, Clone)]
@@ -99,6 +100,13 @@ impl FsPort for LocalFs {
 
     fn relative(&self, absolute_path: &Path) -> Option<PathBuf> {
         self.policy.relative(absolute_path)
+    }
+
+    fn scoped(&self, root: &Path) -> Option<Arc<dyn FsPort>> {
+        // Rebase the boundary policy at the per-session root. The returned FS
+        // rejects any path outside `root`, so a session scoped here cannot
+        // reach another session's workspace (BRO-1491 isolation).
+        Some(Arc::new(LocalFs::new(FsPolicy::new(root))))
     }
 }
 
@@ -230,5 +238,55 @@ mod tests {
 
         let rel = fs.relative(&file).unwrap();
         assert_eq!(rel, PathBuf::from("sub/test.txt"));
+    }
+
+    // ── Per-session scoping (BRO-1491) ──────────────────────────────────
+
+    #[test]
+    fn scoped_rebases_workspace_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session = tmp.path().join("sessions/abc");
+        std::fs::create_dir_all(&session).unwrap();
+
+        let fs = LocalFs::new(FsPolicy::new(tmp.path()));
+        let scoped = fs.scoped(&session).expect("LocalFs supports scoping");
+
+        assert_eq!(
+            scoped.workspace_root().canonicalize().unwrap(),
+            session.canonicalize().unwrap()
+        );
+
+        // A relative write lands under the scoped root, not the parent.
+        scoped
+            .write(Path::new("artifacts/receipt.txt"), b"scoped")
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(session.join("artifacts/receipt.txt")).unwrap(),
+            "scoped"
+        );
+    }
+
+    #[test]
+    fn scoped_isolates_sibling_sessions() {
+        // Session A must not be able to read session B's file even via an
+        // explicit relative traversal — the boundary is at the session root.
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("sessions/a");
+        let b = tmp.path().join("sessions/b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(b.join("secret.txt"), "top secret").unwrap();
+
+        let boot = LocalFs::new(FsPolicy::new(tmp.path()));
+        let fs_a = boot.scoped(&a).unwrap();
+
+        // Reaching into session B is rejected as outside the workspace.
+        let err = fs_a
+            .read_to_string(Path::new("../b/secret.txt"))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::PraxisError::PathOutsideWorkspace { .. }
+        ));
     }
 }

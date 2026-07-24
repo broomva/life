@@ -85,6 +85,15 @@ impl ToolHarnessPort for ArcanHarnessAdapter {
             run_id: format!("run-{}", request.call.call_id),
             session_id: request.session_id.as_str().to_owned(),
             iteration: 1,
+            // BRO-1491: thread the kernel's per-session workspace root
+            // (`manifest.workspace_root`) into tool execution so filesystem
+            // tools scope to `{data_dir}/sessions/<id>/` instead of the shared
+            // boot workspace. Empty ⇒ None (no per-session scoping).
+            workspace_root: if request.workspace_root.is_empty() {
+                None
+            } else {
+                Some(request.workspace_root.clone())
+            },
         };
 
         let tool_span =

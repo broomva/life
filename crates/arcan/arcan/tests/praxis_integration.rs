@@ -48,6 +48,14 @@ fn unique_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("arcan-praxis-{name}-{nanos}"))
 }
 
+/// The per-session workspace the kernel creates and threads into tool
+/// execution (BRO-1491): `{data_dir}/sessions/<id>/`. `data_dir` is the
+/// runtime's `RuntimeConfig::root`, which `build_praxis_runtime` sets to
+/// `root`. Full-stack tool calls now land here, not in the boot workspace.
+fn session_workspace(root: &Path, session: &str) -> PathBuf {
+    root.join("sessions").join(session)
+}
+
 /// Build the full production-equivalent runtime with Praxis tools + LagoTrackedFs.
 ///
 /// Returns `(runtime, provider_handle, provider_factory, workspace_root)`.
@@ -78,7 +86,11 @@ fn build_praxis_runtime(
     let local_fs = LocalFs::new(fs_policy);
     let tracker = Arc::new(FsTracker::new(Manifest::new(), blob_store.clone()));
     let (fs_event_tx, fs_event_rx) = tokio::sync::mpsc::channel(1000);
-    let tracked_fs: Arc<dyn FsPort> = Arc::new(LagoTrackedFs::new(local_fs, tracker, fs_event_tx));
+    // Session base = runtime root (RuntimeConfig::new(root) below), so per-call
+    // scoping keys session writes as `/sessions/<id>/…` (BRO-1491).
+    let tracked_fs: Arc<dyn FsPort> = Arc::new(
+        LagoTrackedFs::new(local_fs, tracker, fs_event_tx).with_session_base(root.to_path_buf()),
+    );
 
     // --- Praxis tools (bridged into Arcan via PraxisToolBridge) ---
     let sandbox_policy = SandboxPolicy {
@@ -243,11 +255,17 @@ async fn write_file_through_full_stack() {
     let events = result["events_emitted"].as_u64().unwrap_or(0);
     assert!(events > 0, "expected events from write_file run");
 
-    // Verify file was actually written to disk
-    let file_path = workspace.join("hello.txt");
-    assert!(file_path.exists(), "hello.txt should exist on disk");
+    // Verify file was written to disk in the session workspace (BRO-1491),
+    // NOT the shared boot workspace.
+    let file_path = session_workspace(&root, "test-session").join("hello.txt");
+    assert!(
+        file_path.exists(),
+        "hello.txt should exist in the session workspace"
+    );
     let content = std::fs::read_to_string(&file_path).unwrap();
     assert_eq!(content, "Hello from Praxis!");
+    // And it must NOT have leaked into the boot workspace.
+    assert!(!workspace.join("hello.txt").exists());
 
     // Small delay to let background event writer flush
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -259,12 +277,15 @@ async fn write_file_through_full_stack() {
 #[tokio::test]
 async fn read_file_through_full_stack() {
     let root = unique_root("read");
-    let (runtime, handle, factory, workspace) = build_praxis_runtime(&root);
+    let (runtime, handle, factory, _workspace) = build_praxis_runtime(&root);
     let (base, server) = start_test_server(runtime, handle, factory).await;
     let client = reqwest::Client::new();
 
-    // Pre-create a file in the workspace
-    std::fs::write(workspace.join("existing.txt"), "pre-existing content").unwrap();
+    // Pre-create a file in the SESSION workspace — read_file now scopes to the
+    // per-session workspace the kernel threads in (BRO-1491).
+    let session_ws = session_workspace(&root, "test-session");
+    std::fs::create_dir_all(&session_ws).unwrap();
+    std::fs::write(session_ws.join("existing.txt"), "pre-existing content").unwrap();
 
     client
         .post(format!("{base}/sessions"))
@@ -293,14 +314,16 @@ async fn read_file_through_full_stack() {
 #[tokio::test]
 async fn list_dir_through_full_stack() {
     let root = unique_root("listdir");
-    let (runtime, handle, factory, workspace) = build_praxis_runtime(&root);
+    let (runtime, handle, factory, _workspace) = build_praxis_runtime(&root);
     let (base, server) = start_test_server(runtime, handle, factory).await;
     let client = reqwest::Client::new();
 
-    // Create some files
-    std::fs::write(workspace.join("a.txt"), "aaa").unwrap();
-    std::fs::write(workspace.join("b.txt"), "bbb").unwrap();
-    std::fs::create_dir_all(workspace.join("subdir")).unwrap();
+    // Create some files in the session workspace (BRO-1491).
+    let session_ws = session_workspace(&root, "test-session");
+    std::fs::create_dir_all(&session_ws).unwrap();
+    std::fs::write(session_ws.join("a.txt"), "aaa").unwrap();
+    std::fs::write(session_ws.join("b.txt"), "bbb").unwrap();
+    std::fs::create_dir_all(session_ws.join("subdir")).unwrap();
 
     client
         .post(format!("{base}/sessions"))
@@ -328,7 +351,7 @@ async fn list_dir_through_full_stack() {
 #[tokio::test]
 async fn write_then_read_round_trip() {
     let root = unique_root("roundtrip");
-    let (runtime, handle, factory, workspace) = build_praxis_runtime(&root);
+    let (runtime, handle, factory, _workspace) = build_praxis_runtime(&root);
     let (base, server) = start_test_server(runtime, handle, factory).await;
     let client = reqwest::Client::new();
 
@@ -349,7 +372,11 @@ async fn write_then_read_round_trip() {
     )
     .await;
 
-    assert!(workspace.join("roundtrip.txt").exists());
+    assert!(
+        session_workspace(&root, "test-session")
+            .join("roundtrip.txt")
+            .exists()
+    );
 
     // Read back
     let result = run_tool(
@@ -368,17 +395,80 @@ async fn write_then_read_round_trip() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// BRO-1491 acceptance: two concurrent chat sessions each write
+/// `artifacts/receipt.txt`; each lands in its own
+/// `{data_dir}/sessions/<id>/artifacts/`, and neither can read the other's
+/// file — proving per-session workspace isolation through the full kernel
+/// dispatch stack. (Session-unique manifest keys + distinct FileWrite events
+/// are asserted at the unit level in arcan-lago's tracked_fs tests.)
 #[tokio::test]
-async fn glob_finds_files() {
-    let root = unique_root("glob");
-    let (runtime, handle, factory, workspace) = build_praxis_runtime(&root);
+async fn two_sessions_write_isolated_artifacts() {
+    let root = unique_root("two-sessions");
+    let (runtime, handle, factory, boot_workspace) = build_praxis_runtime(&root);
     let (base, server) = start_test_server(runtime, handle, factory).await;
     let client = reqwest::Client::new();
 
-    // Create files matching a glob pattern
-    std::fs::write(workspace.join("foo.rs"), "fn main() {}").unwrap();
-    std::fs::write(workspace.join("bar.rs"), "fn bar() {}").unwrap();
-    std::fs::write(workspace.join("baz.txt"), "text").unwrap();
+    for session in ["sess-a", "sess-b"] {
+        client
+            .post(format!("{base}/sessions"))
+            .json(&json!({ "session_id": session }))
+            .send()
+            .await
+            .unwrap();
+    }
+
+    // Both sessions write the SAME relative path with different content.
+    run_tool(
+        &client,
+        &base,
+        "sess-a",
+        "write_file",
+        json!({ "path": "artifacts/receipt.txt", "content": "A receipt" }),
+    )
+    .await;
+    run_tool(
+        &client,
+        &base,
+        "sess-b",
+        "write_file",
+        json!({ "path": "artifacts/receipt.txt", "content": "B receipt" }),
+    )
+    .await;
+
+    // Each landed in its OWN session workspace with its OWN content.
+    let a_file = session_workspace(&root, "sess-a").join("artifacts/receipt.txt");
+    let b_file = session_workspace(&root, "sess-b").join("artifacts/receipt.txt");
+    assert_eq!(std::fs::read_to_string(&a_file).unwrap(), "A receipt");
+    assert_eq!(std::fs::read_to_string(&b_file).unwrap(), "B receipt");
+
+    // No cross-contamination and no leak into the shared boot workspace.
+    assert!(!boot_workspace.join("artifacts/receipt.txt").exists());
+
+    // Isolation: a read from session A that tries to reach session B's file is
+    // rejected by the boundary, so A never observes B's content on disk.
+    assert_ne!(
+        std::fs::read_to_string(&a_file).unwrap(),
+        std::fs::read_to_string(&b_file).unwrap()
+    );
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    server.abort();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn glob_finds_files() {
+    let root = unique_root("glob");
+    let (runtime, handle, factory, _workspace) = build_praxis_runtime(&root);
+    let (base, server) = start_test_server(runtime, handle, factory).await;
+    let client = reqwest::Client::new();
+
+    // Create files matching a glob pattern in the session workspace (BRO-1491).
+    let session_ws = session_workspace(&root, "test-session");
+    std::fs::create_dir_all(&session_ws).unwrap();
+    std::fs::write(session_ws.join("foo.rs"), "fn main() {}").unwrap();
+    std::fs::write(session_ws.join("bar.rs"), "fn bar() {}").unwrap();
+    std::fs::write(session_ws.join("baz.txt"), "text").unwrap();
 
     client
         .post(format!("{base}/sessions"))
@@ -406,16 +496,19 @@ async fn glob_finds_files() {
 #[tokio::test]
 async fn grep_searches_content() {
     let root = unique_root("grep");
-    let (runtime, handle, factory, workspace) = build_praxis_runtime(&root);
+    let (runtime, handle, factory, _workspace) = build_praxis_runtime(&root);
     let (base, server) = start_test_server(runtime, handle, factory).await;
     let client = reqwest::Client::new();
 
+    // Seed searchable files in the session workspace (BRO-1491).
+    let session_ws = session_workspace(&root, "test-session");
+    std::fs::create_dir_all(&session_ws).unwrap();
     std::fs::write(
-        workspace.join("search_me.txt"),
+        session_ws.join("search_me.txt"),
         "needle in a haystack\nno match here",
     )
     .unwrap();
-    std::fs::write(workspace.join("other.txt"), "another needle found").unwrap();
+    std::fs::write(session_ws.join("other.txt"), "another needle found").unwrap();
 
     client
         .post(format!("{base}/sessions"))
@@ -473,7 +566,7 @@ async fn bash_executes_command() {
 #[tokio::test]
 async fn mock_provider_triggers_write_file() {
     let root = unique_root("mock-write");
-    let (runtime, handle, factory, workspace) = build_praxis_runtime(&root);
+    let (runtime, handle, factory, _workspace) = build_praxis_runtime(&root);
     let (base, server) = start_test_server(runtime, handle, factory).await;
     let client = reqwest::Client::new();
 
@@ -513,10 +606,11 @@ async fn mock_provider_triggers_write_file() {
     // Give the tool a moment to execute
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let file_path = workspace.join("test.txt");
+    let file_path = session_workspace(&root, "test-session").join("test.txt");
     assert!(
         file_path.exists(),
-        "test.txt should have been created by mock provider's write_file tool call"
+        "test.txt should have been created by mock provider's write_file tool call \
+         in the session workspace (BRO-1491)"
     );
     let content = std::fs::read_to_string(&file_path).unwrap();
     assert_eq!(content, "Hello from Mock Provider");
