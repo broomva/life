@@ -406,7 +406,7 @@ zstd = "0.13"
 # against the declared `output_schema`. Replaces the v0.1
 # hand-rolled validator. See
 # `docs/superpowers/specs/2026-05-09-bro-1006-authored-agents-architecture.md` §6.
-jsonschema = { version = "0.18", default-features = false }
+jsonschema = { version = "0.46", default-features = false }
 # YAML-frontmatter splitter for parsing `agents/<name>.md` files.
 # Body becomes `AgentSpec.instructions`; frontmatter becomes the
 # structured fields. See spec §4.
