@@ -1,0 +1,22 @@
+{
+  "measured_at": "2026-07-11T13:47:47+00:00",
+  "window_days": 7,
+  "shadow": true,
+  "gh_ok": false,
+  "repos": [],
+  "m6s_meta_work_ship_ratio": null,
+  "raw": {
+    "pr_count_counted": 0,
+    "product_ship": 0.0,
+    "meta_ship": 0.0,
+    "excluded": {
+      "bot": 0,
+      "author": 0,
+      "unclassifiable": 0
+    },
+    "details": [],
+    "note": "no author_allowlist \u2014 failing closed (h \u27c2 U)",
+    "per_repo": [],
+    "errors": []
+  }
+}

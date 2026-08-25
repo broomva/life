@@ -1,0 +1,126 @@
+{
+  "measured_at": "2026-07-11T13:04:41+00:00",
+  "workspace": "/Users/broomva/broomva/core/life",
+  "window_days": 7,
+  "sessions_analyzed": 1,
+  "metrics": {
+    "m1_continue_nudges_per_session": 0.0,
+    "m2_tool_error_rate": 0.0,
+    "m3_read_before_edit_rate": 0.0,
+    "m4_permission_bypass_per_session": 0.0,
+    "m5_kg_load_rate": 0.0,
+    "m6_meta_work_session_ratio": null
+  },
+  "raw": {
+    "sessions_analyzed": 1,
+    "continue_nudges": 0,
+    "tool_results": 9,
+    "tool_errors": 0,
+    "read_before_edit_errors": 0,
+    "sandbox_bypasses": 0,
+    "edits": 0,
+    "kg_sessions": 0,
+    "meta_sessions": 0,
+    "product_sessions": 0
+  },
+  "results": [
+    {
+      "key": "m1_continue_nudges_per_session",
+      "value": 0.0,
+      "level": "L1",
+      "status": "no_setpoint",
+      "name": "m1"
+    },
+    {
+      "key": "m2_tool_error_rate",
+      "value": 0.0,
+      "level": "L0",
+      "status": "no_setpoint",
+      "name": "m2"
+    },
+    {
+      "key": "m3_read_before_edit_rate",
+      "value": 0.0,
+      "level": "L0",
+      "status": "no_setpoint",
+      "name": "m3"
+    },
+    {
+      "key": "m4_permission_bypass_per_session",
+      "value": 0.0,
+      "level": "L0",
+      "status": "no_setpoint",
+      "name": "m4"
+    },
+    {
+      "key": "m5_kg_load_rate",
+      "value": 0.0,
+      "level": "L2",
+      "status": "no_setpoint",
+      "name": "m5"
+    },
+    {
+      "key": "m6_meta_work_session_ratio",
+      "value": null,
+      "level": "L3",
+      "status": "no_setpoint",
+      "name": "m6"
+    }
+  ],
+  "worst": null,
+  "closure": {
+    "closed": false,
+    "sensor_live": true,
+    "levels_closed": false,
+    "reference_authored": false,
+    "authored_by": "unknown",
+    "sessions": 1,
+    "levels": {
+      "L0": {
+        "live": true,
+        "metrics": [
+          {
+            "name": "m2",
+            "value": 0.0
+          },
+          {
+            "name": "m3",
+            "value": 0.0
+          },
+          {
+            "name": "m4",
+            "value": 0.0
+          }
+        ]
+      },
+      "L1": {
+        "live": true,
+        "metrics": [
+          {
+            "name": "m1",
+            "value": 0.0
+          }
+        ]
+      },
+      "L2": {
+        "live": true,
+        "metrics": [
+          {
+            "name": "m5",
+            "value": 0.0
+          }
+        ]
+      },
+      "L3": {
+        "live": false,
+        "metrics": [
+          {
+            "name": "m6",
+            "value": null
+          }
+        ]
+      }
+    },
+    "extra_levels": {}
+  }
+}
