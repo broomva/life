@@ -33,7 +33,10 @@ fn collect(provider: &SdkMeterProvider, exporter: &InMemoryMetricExporter) -> Ve
 }
 
 /// Every exported metric named `name`, across all resources and scopes.
-fn metrics_named<'a>(rms: &'a [ResourceMetrics], name: &'a str) -> impl Iterator<Item = &'a Metric> {
+fn metrics_named<'a>(
+    rms: &'a [ResourceMetrics],
+    name: &'a str,
+) -> impl Iterator<Item = &'a Metric> {
     rms.iter()
         .flat_map(|rm| rm.scope_metrics())
         .flat_map(|sm| sm.metrics())

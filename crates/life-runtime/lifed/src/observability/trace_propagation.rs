@@ -91,7 +91,11 @@ where
             opentelemetry::global::get_text_map_propagator(|prop| prop.extract(&extractor));
         Box::pin(async move {
             let span = tracing::Span::current();
-            span.set_parent(parent_cx);
+            // tracing-opentelemetry 0.31+ reports why a parent could not be
+            // attached (no otel layer in logging-only mode, span disabled or
+            // already started). Each case leaves the span a root, which is the
+            // same graceful degradation 0.30 applied silently.
+            let _ = span.set_parent(parent_cx);
             inner.call(req).await
         })
     }
