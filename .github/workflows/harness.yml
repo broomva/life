@@ -55,7 +55,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Free runner disk (unused preinstalled toolchains)
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
