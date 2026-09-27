@@ -359,11 +359,16 @@ impl BiTemporalStamp {
         }
     }
 
-    /// True when both stamps are past the Unix epoch sentinel — i.e. neither
-    /// was left at the zero/default value.
+    /// True when neither stamp was left at the zero/default (Unix epoch)
+    /// sentinel.
+    ///
+    /// `valid_from` is world time, so a belief about a pre-1970 fact is
+    /// legitimate: only the sentinel itself is rejected, not everything before
+    /// it. `recorded_at` is the system's own write time and cannot precede the
+    /// epoch, so it must be strictly after it.
     pub fn is_complete(&self) -> bool {
         let epoch = DateTime::<Utc>::UNIX_EPOCH;
-        self.valid_from > epoch && self.recorded_at > epoch
+        self.valid_from != epoch && self.recorded_at > epoch
     }
 }
 
@@ -743,6 +748,10 @@ mod tests {
     fn bitemporal_completeness() {
         assert!(BiTemporalStamp::new(ts(1000), ts(2000)).is_complete());
         assert!(!BiTemporalStamp::new(DateTime::<Utc>::UNIX_EPOCH, ts(2000)).is_complete());
+        // A historical belief (valid from 1965) is complete: only the epoch
+        // sentinel is rejected, not every pre-1970 instant.
+        assert!(BiTemporalStamp::new(ts(-157_766_400), ts(2000)).is_complete());
+        assert!(!BiTemporalStamp::new(ts(1000), DateTime::<Utc>::UNIX_EPOCH).is_complete());
     }
 
     #[test]

@@ -484,6 +484,7 @@ impl BeliefStore {
 
         while let Some(rec) = current {
             let next_link: Option<RevisionLink> = rec.token.revision_link.clone();
+            let rec_id = rec.id.clone();
             chain.push(RevisionChainEntry {
                 record: rec,
                 via: via.take(),
@@ -494,7 +495,18 @@ impl BeliefStore {
             match next_link {
                 Some(link) => {
                     via = Some(link.acknowledgment.clone());
-                    current = self.resolve(&link.superseded).cloned();
+                    // Follow the store's own back-pointer, not the link's
+                    // content-addressed ref. The write path stamps the exact
+                    // record it superseded with `superseded_by`, so this is
+                    // unique. `resolve(&link.superseded)` is not: the content
+                    // hash is principal-agnostic by design and a revision may
+                    // keep the same `valid_from`, so a first match can land on
+                    // another principal's record or skip a version.
+                    current = self
+                        .records
+                        .iter()
+                        .find(|r| r.superseded_by.as_deref() == Some(rec_id.as_str()))
+                        .cloned();
                     steps += 1;
                 }
                 None => break,
@@ -836,6 +848,72 @@ mod tests {
             err,
             BeliefWriteError::RevisionTargetNotFound { .. }
         ));
+    }
+
+    fn ack(note: &str) -> BeliefRevisionAcknowledgment {
+        BeliefRevisionAcknowledgment::new(RevisionTrigger::NewEvidence, RevisionChange::Negated, note)
+    }
+
+    #[test]
+    fn traverse_follows_its_own_principal_when_refs_collide() {
+        // Alice and Bob hold the SAME claim, scope, qualifier and valid_from, so
+        // their records carry identical content-addressed refs. Bob's revision
+        // chain must lead back to Bob's record, not to the first match.
+        let mut store = store_with_cap();
+        let q = || ScopeQualifier::from_pairs([("metric", "engagement")]);
+        let alice_rec = store
+            .write_belief(BeliefClaim::new("market", "same"), token(q(), None, 1000, 1000))
+            .unwrap();
+        let mut bt = token(q(), None, 1000, 1001);
+        bt.signed_by = bob();
+        bt.formation_context = SessionContext::new("sess-2", bob());
+        let bob_rec = store
+            .write_belief(BeliefClaim::new("market", "same"), bt)
+            .unwrap();
+        assert_eq!(alice_rec.as_ref(), bob_rec.as_ref(), "precondition: refs collide");
+
+        let mut rt = token(
+            q(),
+            Some(RevisionLink::new(bob_rec.as_ref(), vec![EvidenceRef::source("e")], ack("bob revises"))),
+            2000,
+            2000,
+        );
+        rt.signed_by = bob();
+        rt.formation_context = SessionContext::new("sess-2", bob());
+        let bob_rev = store
+            .write_belief(BeliefClaim::new("market", "revised"), rt)
+            .unwrap();
+
+        let chain = store.traverse_revisions(&bob_rev.id, 10);
+        assert_eq!(chain.len(), 2);
+        assert_eq!(chain[1].record.id, bob_rec.id, "must not cross to Alice's record");
+    }
+
+    #[test]
+    fn traverse_does_not_skip_a_version_with_repeated_content() {
+        // Three versions with identical content and valid_from share one ref;
+        // v3's predecessor is v2, not the first record carrying that ref.
+        let mut store = store_with_cap();
+        let q = || ScopeQualifier::from_pairs([("metric", "engagement")]);
+        let v1 = store
+            .write_belief(BeliefClaim::new("market", "x"), token(q(), None, 1000, 1000))
+            .unwrap();
+        let link = |r: &BeliefRecord| {
+            Some(RevisionLink::new(r.as_ref(), vec![EvidenceRef::source("e")], ack("restated")))
+        };
+        let v2 = store
+            .write_belief(BeliefClaim::new("market", "x"), token(q(), link(&v1), 1000, 2000))
+            .unwrap();
+        let v3 = store
+            .write_belief(BeliefClaim::new("market", "x"), token(q(), link(&v2), 1000, 3000))
+            .unwrap();
+
+        let ids: Vec<_> = store
+            .traverse_revisions(&v3.id, 10)
+            .into_iter()
+            .map(|e| e.record.id)
+            .collect();
+        assert_eq!(ids, vec![v3.id, v2.id, v1.id]);
     }
 
     #[test]
