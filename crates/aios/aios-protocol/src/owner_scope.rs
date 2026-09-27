@@ -464,6 +464,28 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_binding_directory_is_rejected_by_reader_and_binder() {
+        let tmp = data_dir();
+        let planted = tmp.path().join("planted");
+        fs::create_dir_all(&planted).unwrap();
+        fs::write(planted.join("sess-a"), "bob").unwrap();
+        std::os::unix::fs::symlink(&planted, tmp.path().join(SESSION_OWNERS_DIR)).unwrap();
+        assert_eq!(
+            session_owner(tmp.path(), "sess-a"),
+            Err(OwnerScopeError::NotContained)
+        );
+        assert_eq!(
+            bind_session_owner(tmp.path(), "sess-b", "alice"),
+            Err(OwnerScopeError::NotContained)
+        );
+        assert!(
+            !planted.join("sess-b").exists(),
+            "nothing written through the link"
+        );
+    }
+
     #[test]
     fn owners_are_isolated_and_an_owner_is_stable_across_sessions() {
         let tmp = data_dir();

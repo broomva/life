@@ -255,6 +255,11 @@ enum Command {
         #[command(subcommand)]
         action: SkillsAction,
     },
+    /// Manage owner-scoped memory (BRO-1491)
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
     /// Inspect, scaffold, and dry-run validate authored agents
     /// (`agents/<name>.md` files). See agents/README.md for the
     /// authoring format. (BRO-1008)
@@ -283,6 +288,20 @@ enum Command {
         /// Display model reasoning/thinking tokens in the output
         #[arg(long)]
         show_reasoning: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum MemoryAction {
+    /// Copy the legacy shared memory (`<data-dir>/memory/`) into one owner's
+    /// memory. Legacy memory was written by every session, so which owner it
+    /// belongs to is an operator decision. Copies regular files only, never
+    /// overwrites the owner's files, and never deletes or modifies the legacy
+    /// directory. Run it per owner who should inherit the legacy store.
+    AdoptLegacy {
+        /// The owner id: the authenticated subject (`sub` claim) of the user.
+        #[arg(long)]
+        owner: String,
     },
 }
 
@@ -1942,6 +1961,28 @@ fn main() -> anyhow::Result<()> {
             ))
         }
         Some(Command::Config { action }) => run_config(&data_dir, action),
+        Some(Command::Memory {
+            action: MemoryAction::AdoptLegacy { owner },
+        }) => {
+            let report = aios_protocol::owner_scope::adopt_legacy_memory(&data_dir, &owner)
+                .map_err(|error| anyhow::anyhow!("adopt-legacy failed: {error}"))?;
+            println!(
+                "adopted legacy memory into owner {owner:?}: {} copied, {} skipped (owner already had them), {} skipped (not regular files)",
+                report.copied.len(),
+                report.skipped_existing.len(),
+                report.skipped_not_file.len()
+            );
+            for name in &report.copied {
+                println!("  copied   {name}");
+            }
+            for name in &report.skipped_existing {
+                println!("  kept     {name} (owner's own file wins)");
+            }
+            for name in &report.skipped_not_file {
+                println!("  ignored  {name}");
+            }
+            Ok(())
+        }
         Some(Command::Skills { action }) => {
             let resolved = config::resolve(
                 &file_config,

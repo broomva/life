@@ -66,6 +66,89 @@ when mocked tests passed but the prod migration failed.
 **How to apply:** Always use testcontainers or a real test DB for auth tests.
 ```
 
+## Owner Scoping (BRO-1491)
+
+`arcan serve` keeps memory **per authenticated owner**, not per daemon.
+Before BRO-1491 every session read and wrote one `{data_dir}/memory/`, so any
+tenant could read or overwrite another's memory. The user decided that memory
+belongs to the authenticated owner and persists across that owner's sessions.
+
+**Layout** (`aios_protocol::owner_scope`):
+
+```text
+{data_dir}/session-owners/<session_id>   binding file; content = owner id
+{data_dir}/owners/<owner_id>/memory/     that owner's memory
+{data_dir}/memory/                       legacy shared store (single-user mode only)
+```
+
+**Mode.** `MemoryLocation::for_deployment` selects one of two modes:
+
+- **`PerOwner` (multi-tenant).** Selected whenever `ARCAN_JWT_SECRET`,
+  `AUTH_SECRET` or `ANIMA_JWT_SECRET` is set, or when the substrate socket
+  (`--uds-socket`) is bound.
+- **`Shared`.** Selected in every other case, i.e. single-user local mode.
+
+**Where the owner comes from.** The owner is the JWT-verified subject
+(`AuthUser.user_id`) of the request that created the session. A request field
+never supplies it: the body's `owner` is ignored in multi-tenant mode. The
+binding is written once, atomically, and is never rebound. It lives outside
+`sessions/<id>/` because the session's own file tools can write there.
+
+**Consumers.** Every consumer resolves memory through
+`MemoryLocation::resolve(session_id)`:
+
+- the `read_memory` and `write_memory` tools;
+- the system prompt's memory section;
+- the `MemoryExtractionObserver` run summary.
+
+A session with no binding has **no memory** in multi-tenant mode. The tools
+refuse, and nothing falls back to the shared store.
+
+**Guards.** Owner ids use the #1771 session-id grammar
+(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`). The owner directory is checked for
+canonical containment before anything is created inside it, and so is the
+memory directory. A tampered or symlinked binding fails closed.
+
+On the HTTP plane:
+
+- An owned session is reachable only by its owner. The `/sessions/{id}/*`
+  route layer answers everyone else with 404.
+- `/user/memory/*` may act only on the caller.
+
+The substrate gRPC plane and the chronos wake API carry no verified owner, so
+they refuse owned sessions.
+
+### Migrating the legacy shared store
+
+The legacy `{data_dir}/memory/` is **never deleted and never modified**. In
+multi-tenant mode it is simply not served. It was written by every session,
+so the operator decides who inherits it:
+
+```bash
+arcan --data-dir <dir> memory adopt-legacy --owner <sub>   # once per inheriting owner
+```
+
+The command copies regular files only, never overwrites a file the owner
+already has, and reports what it copied, kept and ignored. Single-user
+deployments need no migration: with no auth secret set, `Shared` mode keeps
+using `{data_dir}/memory/`.
+
+Sessions created before the upgrade have no binding. They stay reachable as
+before but get no memory. The first caller cannot claim them: an existing
+workspace is never bound retroactively.
+
+### Residuals (not covered)
+
+- **The shell is not a filesystem boundary** (BRO-2608 item 1). A `bash`
+  command can read any path the daemon can, including other owners' memory
+  and the binding files.
+- **Topology B has no verified owner at arcand.** Topology B is lifegw →
+  lifed → substrate. arcand does not verify lifed's Tier-3 token, so
+  substrate-created sessions get no memory until an owner is threaded and
+  verified on that plane.
+- **`GET /sessions` still lists every session.** It returns no memory
+  content.
+
 ## MEMORY.md — The Always-Loaded Index
 
 ```markdown
