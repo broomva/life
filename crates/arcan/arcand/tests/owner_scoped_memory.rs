@@ -354,6 +354,66 @@ async fn owner_a_cannot_read_or_write_owner_b_memory() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
 
+    // Arm 3b — every other session route, including the POSTs next to the
+    // exempt `/runs`, answers 404 to another owner (positive control: bob).
+    for (method, route) in [
+        ("POST", "branches"),
+        ("GET", "branches"),
+        ("POST", "approvals/some-approval"),
+        ("POST", "signal"),
+        ("GET", "state"),
+        ("PATCH", "identity"),
+    ] {
+        let send = |user: &str| {
+            d.client
+                .request(
+                    method.parse().unwrap(),
+                    format!("{}/sessions/sess-bob/{route}", d.base),
+                )
+                .bearer_auth(token(user))
+                .json(&json!({ "name": "x", "approved": true, "user_id": user, "signal": "x" }))
+                .send()
+        };
+        let as_alice = send("alice").await.unwrap();
+        assert_eq!(
+            as_alice.status(),
+            StatusCode::NOT_FOUND,
+            "{method} {route} as alice"
+        );
+        let as_bob = send("bob").await.unwrap().status();
+        assert_ne!(
+            as_bob,
+            StatusCode::NOT_FOUND,
+            "{method} {route}: the owner must get past the layer"
+        );
+    }
+
+    // Arm 3c — a grammar-invalid alias of bob's id never passes the layer
+    // (FileEventStore resolves `./sess-bob` to bob's own event file).
+    for path in [
+        ".%2Fsess-bob",
+        "sess-bob%2F.",
+        "x%2F..%2Fsess-bob",
+        "sess-bob%00",
+    ] {
+        for route in ["events", "state"] {
+            let r = d
+                .client
+                .get(format!("{}/sessions/{path}/{route}", d.base))
+                .bearer_auth(token("alice"))
+                .send()
+                .await
+                .unwrap();
+            let status = r.status();
+            let body = r.text().await.unwrap();
+            assert!(
+                !body.contains("BOB-SECRET-7f3a"),
+                "{path}/{route} leaked: {body}"
+            );
+            assert_eq!(status, StatusCode::NOT_FOUND, "{path}/{route}");
+        }
+    }
+
     // Arm 4 — Alice cannot re-create (and so claim) Bob's session id.
     assert_eq!(
         d.create_session("alice", "sess-bob").await.status(),

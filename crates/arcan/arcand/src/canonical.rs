@@ -3325,8 +3325,7 @@ fn claim_session(
         return Ok(());
     };
     let binding = match owner_scope::read_binding(data_dir, session_id) {
-        // A malformed id is rejected by the runtime's own grammar check (400).
-        Err(OwnerScopeError::InvalidSession(_)) => return Ok(()),
+        Err(OwnerScopeError::InvalidSession(error)) => return Err(bad_request(error)),
         Err(error) => return Err(owner_scope_unavailable(&error)),
         Ok(binding) => binding,
     };
@@ -3345,7 +3344,7 @@ fn claim_session(
         None => owner_scope::claim_unowned(data_dir, session_id),
     };
     match written {
-        Ok(()) | Err(OwnerScopeError::InvalidSession(_)) => Ok(()),
+        Ok(()) => Ok(()),
         Err(OwnerScopeError::Conflict) => Err(mismatch(session_id)),
         Err(error) => Err(owner_scope_unavailable(&error)),
     }
@@ -3385,7 +3384,9 @@ async fn require_session_owner(
         .get::<AuthUser>()
         .map(|user| user.user_id.clone());
     let allowed = match owner_scope::read_binding(data_dir, session_id) {
-        Err(OwnerScopeError::InvalidSession(_)) => true,
+        // Not every handler validates the id, and a store keyed by a
+        // normalized path can alias `./<id>` to `<id>`: refuse it here.
+        Err(OwnerScopeError::InvalidSession(_)) => false,
         Err(error) => return owner_scope_unavailable(&error).into_response(),
         Ok(Binding::Owner(owner)) => caller.as_deref() == Some(owner.as_str()),
         Ok(Binding::Unowned | Binding::Absent) => caller.is_none(),
