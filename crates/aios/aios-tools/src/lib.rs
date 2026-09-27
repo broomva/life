@@ -105,18 +105,27 @@ pub struct ToolDispatcher {
     registry: Arc<ToolRegistry>,
     policy: Arc<dyn PolicyEngine>,
     sandbox: Arc<dyn SandboxRunner>,
+    /// `{data_dir}/sessions`: every request's workspace root must be exactly
+    /// `sessions_dir/<session_id>` (BRO-1491).
+    sessions_dir: PathBuf,
 }
 
 impl ToolDispatcher {
+    /// `sessions_dir` is the kernel's `{root}/sessions`: pass the same root
+    /// the runtime was built with (`RuntimeConfig::new(root)`). It is required
+    /// because the dispatcher has no workspace of its own to fall back to; a
+    /// request whose root is not its session's workspace is refused.
     pub fn new(
         registry: Arc<ToolRegistry>,
         policy: Arc<dyn PolicyEngine>,
         sandbox: Arc<dyn SandboxRunner>,
+        sessions_dir: impl Into<PathBuf>,
     ) -> Self {
         Self {
             registry,
             policy,
             sandbox,
+            sessions_dir: sessions_dir.into(),
         }
     }
 
@@ -124,7 +133,9 @@ impl ToolDispatcher {
         self.registry.clone()
     }
 
-    pub async fn dispatch(
+    /// Private: `context.workspace_root` is trusted here. The only entry point
+    /// is [`ToolHarnessPort::execute`], which verifies it first.
+    async fn dispatch(
         &self,
         session_id: SessionId,
         context: &ToolContext,
@@ -357,9 +368,21 @@ impl ToolHarnessPort for ToolDispatcher {
         &self,
         request: ToolExecutionRequest,
     ) -> std::result::Result<PortToolExecutionReport, KernelError> {
-        let context = ToolContext {
-            workspace_root: PathBuf::from(&request.workspace_root),
-        };
+        // BRO-1491: the root is a filesystem boundary, so it must be exactly
+        // this session's workspace. A forged or foreign root is refused, never
+        // used; an empty one has nothing to fall back to.
+        let workspace_root = aios_protocol::session_path::verify_session_root(
+            &self.sessions_dir,
+            request.session_id.as_str(),
+            Path::new(&request.workspace_root),
+        )
+        .map_err(|error| {
+            KernelError::CapabilityDenied(format!(
+                "session workspace for {:?} rejected: {error}",
+                request.session_id.as_str()
+            ))
+        })?;
+        let context = ToolContext { workspace_root };
         match self
             .dispatch(request.session_id, &context, request.call.clone())
             .await
@@ -450,6 +473,65 @@ mod tests {
             assert!(
                 canonical_session_path(&root, path).is_err(),
                 "{path:?} must be refused"
+            );
+        }
+    }
+
+    /// The forged-root attack through the real `ToolHarnessPort` entry point
+    /// (BRO-1491, P20 round 3): the request's root must be its own session's
+    /// workspace, not merely any directory the paths are then confined to.
+    #[tokio::test]
+    async fn execute_refuses_a_root_that_is_not_the_sessions_workspace() {
+        use super::{ToolDispatcher, ToolRegistry};
+        use aios_protocol::{
+            KernelError, SessionId, ToolCall, ToolExecutionRequest, ToolHarnessPort, ToolOutcome,
+        };
+        use std::sync::Arc;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions = tmp.path().join("data/sessions");
+        std::fs::create_dir_all(sessions.join("sess-a")).unwrap();
+        std::fs::create_dir_all(sessions.join("sess-b")).unwrap();
+        std::fs::write(sessions.join("sess-a/own.txt"), "A's note").unwrap();
+        std::fs::write(sessions.join("sess-b/secret.txt"), "B's secret").unwrap();
+        std::fs::write(tmp.path().join("secret.txt"), "home secret").unwrap();
+
+        let dispatcher = ToolDispatcher::new(
+            Arc::new(ToolRegistry::with_core_tools()),
+            Arc::new(aios_policy::SessionPolicyEngine::new(
+                aios_protocol::PolicySet::default(),
+            )),
+            Arc::new(aios_sandbox::LocalSandboxRunner::new(Vec::new())),
+            &sessions,
+        );
+        let read = |session: &str, root: &std::path::Path, path: &str| ToolExecutionRequest {
+            session_id: SessionId::from_string(session),
+            workspace_root: root.display().to_string(),
+            call: ToolCall::new("fs.read", serde_json::json!({ "path": path }), vec![]),
+        };
+
+        // Positive control: the session's own workspace works.
+        let own = dispatcher
+            .execute(read("sess-a", &sessions.join("sess-a"), "own.txt"))
+            .await
+            .expect("own workspace must be readable");
+        match own.outcome {
+            ToolOutcome::Success { output } => assert_eq!(output["content"], "A's note"),
+            other => panic!("expected success, got {other:?}"),
+        }
+
+        for (session, root, path) in [
+            ("sess-a", sessions.join("sess-b"), "secret.txt"),
+            ("sess-a", sessions.join("sess-a/../sess-b"), "secret.txt"),
+            ("sess-a", tmp.path().to_path_buf(), "secret.txt"),
+            ("sess-a", std::path::PathBuf::from("/"), "etc/hosts"),
+            ("sess-a", std::path::PathBuf::new(), "own.txt"),
+            ("../sess-b", sessions.join("sess-b"), "secret.txt"),
+        ] {
+            let result = dispatcher.execute(read(session, &root, path)).await;
+            assert!(
+                matches!(result, Err(KernelError::CapabilityDenied(_))),
+                "{session:?} @ {root:?} must be refused, got {result:?}"
             );
         }
     }
