@@ -343,6 +343,16 @@ pub struct ToolContext {
     /// Kernel-tier dispatch context (session, agent, trace, …).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kernel_ctx: Option<crate::kernel::KernelContext>,
+    /// Per-session workspace root for this tool call (BRO-1491).
+    ///
+    /// The kernel threads `manifest.workspace_root` — the session's isolated
+    /// workspace `{data_dir}/sessions/<id>/` — through every tool execution so
+    /// filesystem tools can scope their [`FsPort`](crate::tool) to that root
+    /// instead of a single boot-time workspace shared across all sessions.
+    /// `None` for callers that do not run inside a per-session kernel dispatch
+    /// (tools fall back to their construction-time workspace).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<String>,
 }
 
 // ── Tool errors ───────────────────────────────────────────────────────
@@ -919,9 +929,33 @@ mod kernel_ext_tests {
         assert!(ctx.wallet.is_none());
         assert!(ctx.cost_hint.is_none());
         assert!(ctx.kernel_ctx.is_none());
+        assert!(ctx.workspace_root.is_none());
         assert_eq!(ctx.iteration, 0);
         assert!(ctx.run_id.is_empty());
         assert!(ctx.session_id.is_empty());
+    }
+
+    #[test]
+    fn tool_context_workspace_root_roundtrips_and_skips_when_none() {
+        // Absent → skipped in the serialized form and deserializes back to None.
+        let none = ToolContext {
+            run_id: "r1".into(),
+            session_id: "s1".into(),
+            iteration: 1,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&none).unwrap();
+        assert!(!json.contains("workspace_root"));
+
+        // Present → roundtrips (BRO-1491 per-session workspace threading).
+        let scoped = ToolContext {
+            workspace_root: Some("/data/sessions/abc/".into()),
+            ..none
+        };
+        let json = serde_json::to_string(&scoped).unwrap();
+        assert!(json.contains("\"workspace_root\":\"/data/sessions/abc/\""));
+        let back: ToolContext = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.workspace_root.as_deref(), Some("/data/sessions/abc/"));
     }
 
     #[test]
@@ -974,6 +1008,7 @@ mod kernel_ext_tests {
                 ..Default::default()
             }),
             kernel_ctx: None,
+            workspace_root: None,
         };
         let json = serde_json::to_string(&ctx).unwrap();
         assert!(json.contains("\"wallet\""));

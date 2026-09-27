@@ -106,6 +106,12 @@ pub struct ModelCompletion {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolExecutionRequest {
     pub session_id: SessionId,
+    /// The session's workspace, `{data_dir}/sessions/<session_id>`, taken from
+    /// the manifest `KernelRuntime` wrote after checking it with
+    /// [`crate::session_path::verify_session_root`] (BRO-1491). A harness that
+    /// uses it as a filesystem boundary must still confine each tool path
+    /// inside it. A harness that did not get the request from the runtime
+    /// should re-verify it, as `ArcanHarnessAdapter` does.
     pub workspace_root: String,
     pub call: ToolCall,
 }

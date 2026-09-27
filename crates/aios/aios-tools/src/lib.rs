@@ -105,18 +105,27 @@ pub struct ToolDispatcher {
     registry: Arc<ToolRegistry>,
     policy: Arc<dyn PolicyEngine>,
     sandbox: Arc<dyn SandboxRunner>,
+    /// `{data_dir}/sessions`: every request's workspace root must be exactly
+    /// `sessions_dir/<session_id>` (BRO-1491).
+    sessions_dir: PathBuf,
 }
 
 impl ToolDispatcher {
+    /// `sessions_dir` is the kernel's `{root}/sessions`: pass the same root
+    /// the runtime was built with (`RuntimeConfig::new(root)`). It is required
+    /// because the dispatcher has no workspace of its own to fall back to; a
+    /// request whose root is not its session's workspace is refused.
     pub fn new(
         registry: Arc<ToolRegistry>,
         policy: Arc<dyn PolicyEngine>,
         sandbox: Arc<dyn SandboxRunner>,
+        sessions_dir: impl Into<PathBuf>,
     ) -> Self {
         Self {
             registry,
             policy,
             sandbox,
+            sessions_dir: sessions_dir.into(),
         }
     }
 
@@ -124,7 +133,9 @@ impl ToolDispatcher {
         self.registry.clone()
     }
 
-    pub async fn dispatch(
+    /// Private: `context.workspace_root` is trusted here. The only entry point
+    /// is [`ToolHarnessPort::execute`], which verifies it first.
+    async fn dispatch(
         &self,
         session_id: SessionId,
         context: &ToolContext,
@@ -294,21 +305,53 @@ impl ToolDispatcher {
     }
 }
 
+/// Resolve a tool-supplied path inside the session workspace `root`, or fail.
+///
+/// Containment is structural rather than a check on the result:
+/// 1. The path is rebuilt from its `Normal` components only. `..`, a root, or
+///    a drive prefix is refused outright, so the lexical path cannot leave
+///    `root` whether or not its directories exist yet. (The previous version
+///    returned the candidate unchecked when its parent was missing, so
+///    `new/../../../escaped` created directories and wrote outside `root`.)
+/// 2. The deepest ancestor that already exists (found with `symlink_metadata`,
+///    so a dangling symlink counts as existing) is canonicalized and must stay
+///    under the canonical `root`. That rejects a symlink inside the workspace
+///    pointing out of it.
+/// 3. `root` itself must canonicalize; an unresolvable root is an error rather
+///    than a fallback to the raw path.
+///
+/// Not covered: a directory swapped for a symlink between this check and the
+/// caller's I/O. Doing that needs rename/symlink rights inside the workspace,
+/// which only `shell.exec` has, and the shell is not confined to the
+/// workspace in the first place.
 fn canonical_session_path(root: &Path, relative_path: &str) -> Result<PathBuf> {
-    let normalized = relative_path.trim_start_matches('/');
-    let candidate = root.join(normalized);
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    let parent = candidate.parent().unwrap_or(root.as_path());
+    use std::path::Component;
 
-    if !parent.exists() {
-        return Ok(candidate);
+    let root = root
+        .canonicalize()
+        .with_context(|| format!("failed resolving workspace root {root:?}"))?;
+
+    let mut candidate = root.clone();
+    for component in Path::new(relative_path.trim_start_matches('/')).components() {
+        match component {
+            Component::Normal(part) => candidate.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                bail!("path escapes workspace root: {relative_path}")
+            }
+        }
     }
 
-    let canonical_parent = parent
+    let mut existing = candidate.as_path();
+    while existing.symlink_metadata().is_err() {
+        existing = existing
+            .parent()
+            .context("workspace root has no existing ancestor")?;
+    }
+    let canonical_existing = existing
         .canonicalize()
-        .with_context(|| format!("failed canonicalizing parent {parent:?}"))?;
-
-    if !canonical_parent.starts_with(&root) {
+        .with_context(|| format!("failed resolving {existing:?}"))?;
+    if !canonical_existing.starts_with(&root) {
         bail!("path escapes workspace root: {relative_path}");
     }
 
@@ -325,9 +368,21 @@ impl ToolHarnessPort for ToolDispatcher {
         &self,
         request: ToolExecutionRequest,
     ) -> std::result::Result<PortToolExecutionReport, KernelError> {
-        let context = ToolContext {
-            workspace_root: PathBuf::from(&request.workspace_root),
-        };
+        // BRO-1491: the root is a filesystem boundary, so it must be exactly
+        // this session's workspace. A forged or foreign root is refused, never
+        // used; an empty one has nothing to fall back to.
+        let workspace_root = aios_protocol::session_path::verify_session_root(
+            &self.sessions_dir,
+            request.session_id.as_str(),
+            Path::new(&request.workspace_root),
+        )
+        .map_err(|error| {
+            KernelError::CapabilityDenied(format!(
+                "session workspace for {:?} rejected: {error}",
+                request.session_id.as_str()
+            ))
+        })?;
+        let context = ToolContext { workspace_root };
         match self
             .dispatch(request.session_id, &context, request.call.clone())
             .await
@@ -345,5 +400,145 @@ impl ToolHarnessPort for ToolDispatcher {
                 format!("tool execution requires approval: {tool_name}"),
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical_session_path;
+
+    fn workspace() -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("sessions/sess-a");
+        std::fs::create_dir_all(root.join("artifacts")).unwrap();
+        (tmp, root)
+    }
+
+    #[test]
+    fn paths_inside_the_workspace_resolve_under_it() {
+        let (_tmp, root) = workspace();
+        let canonical_root = root.canonicalize().unwrap();
+        for path in [
+            "artifacts/receipt.txt",
+            "/artifacts/receipt.txt",
+            "./artifacts/./receipt.txt",
+            "new/dirs/that/do/not/exist/yet.txt",
+            "top.txt",
+        ] {
+            let resolved = canonical_session_path(&root, path)
+                .unwrap_or_else(|e| panic!("{path:?} must resolve: {e:#}"));
+            assert!(
+                resolved.starts_with(&canonical_root),
+                "{path:?} resolved to {resolved:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn escaping_paths_are_refused() {
+        let (tmp, root) = workspace();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        for path in [
+            // The missing-parent bypass: nothing under `new/` exists yet.
+            "new/../../../escaped/file",
+            "new/../../sess-b/receipt.txt",
+            "../sess-b/receipt.txt",
+            "artifacts/../../..",
+            "..",
+        ] {
+            assert!(
+                canonical_session_path(&root, path).is_err(),
+                "{path:?} must be refused"
+            );
+        }
+        assert!(!tmp.path().join("escaped").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_out_of_the_workspace_are_refused() {
+        let (tmp, root) = workspace();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("nowhere"), root.join("dangling")).unwrap();
+
+        for path in [
+            "link/secret.txt",
+            "link/new/dir/file",
+            "dangling",
+            "dangling/x",
+        ] {
+            assert!(
+                canonical_session_path(&root, path).is_err(),
+                "{path:?} must be refused"
+            );
+        }
+    }
+
+    /// The forged-root attack through the real `ToolHarnessPort` entry point
+    /// (BRO-1491, P20 round 3): the request's root must be its own session's
+    /// workspace, not merely any directory the paths are then confined to.
+    #[tokio::test]
+    async fn execute_refuses_a_root_that_is_not_the_sessions_workspace() {
+        use super::{ToolDispatcher, ToolRegistry};
+        use aios_protocol::{
+            KernelError, SessionId, ToolCall, ToolExecutionRequest, ToolHarnessPort, ToolOutcome,
+        };
+        use std::sync::Arc;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions = tmp.path().join("data/sessions");
+        std::fs::create_dir_all(sessions.join("sess-a")).unwrap();
+        std::fs::create_dir_all(sessions.join("sess-b")).unwrap();
+        std::fs::write(sessions.join("sess-a/own.txt"), "A's note").unwrap();
+        std::fs::write(sessions.join("sess-b/secret.txt"), "B's secret").unwrap();
+        std::fs::write(tmp.path().join("secret.txt"), "home secret").unwrap();
+
+        let dispatcher = ToolDispatcher::new(
+            Arc::new(ToolRegistry::with_core_tools()),
+            Arc::new(aios_policy::SessionPolicyEngine::new(
+                aios_protocol::PolicySet::default(),
+            )),
+            Arc::new(aios_sandbox::LocalSandboxRunner::new(Vec::new())),
+            &sessions,
+        );
+        let read = |session: &str, root: &std::path::Path, path: &str| ToolExecutionRequest {
+            session_id: SessionId::from_string(session),
+            workspace_root: root.display().to_string(),
+            call: ToolCall::new("fs.read", serde_json::json!({ "path": path }), vec![]),
+        };
+
+        // Positive control: the session's own workspace works.
+        let own = dispatcher
+            .execute(read("sess-a", &sessions.join("sess-a"), "own.txt"))
+            .await
+            .expect("own workspace must be readable");
+        match own.outcome {
+            ToolOutcome::Success { output } => assert_eq!(output["content"], "A's note"),
+            other => panic!("expected success, got {other:?}"),
+        }
+
+        for (session, root, path) in [
+            ("sess-a", sessions.join("sess-b"), "secret.txt"),
+            ("sess-a", sessions.join("sess-a/../sess-b"), "secret.txt"),
+            ("sess-a", tmp.path().to_path_buf(), "secret.txt"),
+            ("sess-a", std::path::PathBuf::from("/"), "etc/hosts"),
+            ("sess-a", std::path::PathBuf::new(), "own.txt"),
+            ("../sess-b", sessions.join("sess-b"), "secret.txt"),
+        ] {
+            let result = dispatcher.execute(read(session, &root, path)).await;
+            assert!(
+                matches!(result, Err(KernelError::CapabilityDenied(_))),
+                "{session:?} @ {root:?} must be refused, got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unresolvable_root_is_an_error_not_a_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(canonical_session_path(&tmp.path().join("missing"), "x.txt").is_err());
     }
 }

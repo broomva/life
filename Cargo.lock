@@ -113,6 +113,7 @@ dependencies = [
  "indexmap 2.14.0",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "uuid",
 ]
@@ -135,6 +136,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-opentelemetry",
@@ -166,6 +168,7 @@ dependencies = [
  "indexmap 2.14.0",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -947,6 +950,7 @@ dependencies = [
  "aios-runtime",
  "aios-sandbox",
  "aios-tools",
+ "anyhow",
  "arcan-aios-adapters",
  "arcan-core",
  "arcan-lago",

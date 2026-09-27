@@ -14,6 +14,31 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::info;
 
+/// Resolve the effective filesystem port for a tool call (BRO-1491).
+///
+/// With no per-session root in the [`ToolContext`], this is the
+/// construction-time port (single shared workspace / non-kernel callers). With
+/// a root, it is a port scoped to that session workspace. A backend that cannot
+/// scope is an error, not a fallback: falling back would hand a session the
+/// shared workspace it was supposed to be isolated from.
+pub(crate) fn effective_fs(
+    base: &Arc<dyn FsPort>,
+    ctx: &ToolContext,
+) -> Result<Arc<dyn FsPort>, ToolError> {
+    match ctx.workspace_root.as_deref() {
+        Some(root) if !root.is_empty() => {
+            base.scoped(Path::new(root))
+                .ok_or_else(|| ToolError::PolicyViolation {
+                    message: format!(
+                        "per-session workspace {root} requested, but this filesystem \
+                         backend cannot scope to it"
+                    ),
+                })
+        }
+        _ => Ok(base.clone()),
+    }
+}
+
 // ── ReadFileTool ─────────────────────────────────────────────────────
 
 /// Reads a file and returns content with hashline tags for editing.
@@ -52,7 +77,8 @@ impl Tool for ReadFileTool {
         }
     }
 
-    fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let fs = effective_fs(&self.fs, ctx)?;
         let path_str = call
             .input
             .get("path")
@@ -68,16 +94,14 @@ impl Tool for ReadFileTool {
         );
         let _guard = span.enter();
 
-        let path =
-            self.fs
-                .resolve(Path::new(path_str))
-                .map_err(|e| ToolError::ExecutionFailed {
-                    tool_name: "read_file".into(),
-                    message: e.to_string(),
-                })?;
+        let path = fs
+            .resolve(Path::new(path_str))
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool_name: "read_file".into(),
+                message: e.to_string(),
+            })?;
 
-        let content = self
-            .fs
+        let content = fs
             .read_to_string(&path)
             .map_err(|e| ToolError::ExecutionFailed {
                 tool_name: "read_file".into(),
@@ -137,7 +161,8 @@ impl Tool for WriteFileTool {
         }
     }
 
-    fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let fs = effective_fs(&self.fs, ctx)?;
         let path_str = call
             .input
             .get("path")
@@ -161,16 +186,14 @@ impl Tool for WriteFileTool {
         )
         .entered();
 
-        let path = self
-            .fs
-            .resolve_for_write(Path::new(path_str))
-            .map_err(|e| ToolError::ExecutionFailed {
-                tool_name: "write_file".into(),
-                message: e.to_string(),
-            })?;
+        let path =
+            fs.resolve_for_write(Path::new(path_str))
+                .map_err(|e| ToolError::ExecutionFailed {
+                    tool_name: "write_file".into(),
+                    message: e.to_string(),
+                })?;
 
-        self.fs
-            .write(&path, content.as_bytes())
+        fs.write(&path, content.as_bytes())
             .map_err(|e| ToolError::ExecutionFailed {
                 tool_name: "write_file".into(),
                 message: format!("Failed to write file: {e}"),
@@ -227,7 +250,8 @@ impl Tool for ListDirTool {
         }
     }
 
-    fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let fs = effective_fs(&self.fs, ctx)?;
         let path_str = call
             .input
             .get("path")
@@ -243,16 +267,14 @@ impl Tool for ListDirTool {
         )
         .entered();
 
-        let path =
-            self.fs
-                .resolve(Path::new(path_str))
-                .map_err(|e| ToolError::ExecutionFailed {
-                    tool_name: "list_dir".into(),
-                    message: e.to_string(),
-                })?;
+        let path = fs
+            .resolve(Path::new(path_str))
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool_name: "list_dir".into(),
+                message: e.to_string(),
+            })?;
 
-        let entries = self
-            .fs
+        let entries = fs
             .read_dir(&path)
             .map_err(|e| ToolError::ExecutionFailed {
                 tool_name: "list_dir".into(),
@@ -317,7 +339,8 @@ impl Tool for GlobTool {
         }
     }
 
-    fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let fs = effective_fs(&self.fs, ctx)?;
         let pattern = call
             .input
             .get("pattern")
@@ -338,11 +361,10 @@ impl Tool for GlobTool {
             .get("path")
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.fs.workspace_root().to_path_buf());
+            .unwrap_or_else(|| fs.workspace_root().to_path_buf());
 
         let base_dir =
-            self.fs
-                .resolve(Path::new(&base_dir))
+            fs.resolve(Path::new(&base_dir))
                 .map_err(|e| ToolError::ExecutionFailed {
                     tool_name: "glob".into(),
                     message: e.to_string(),
@@ -356,9 +378,9 @@ impl Tool for GlobTool {
                 message: format!("Invalid glob pattern: {e}"),
             })?
             .filter_map(Result::ok)
-            .filter(|path| self.fs.resolve(path).is_ok())
+            .filter(|path| fs.resolve(path).is_ok())
             .map(|path| {
-                path.strip_prefix(self.fs.workspace_root())
+                path.strip_prefix(fs.workspace_root())
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| path.display().to_string())
             })
@@ -419,7 +441,8 @@ impl Tool for GrepTool {
         }
     }
 
-    fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let fs = effective_fs(&self.fs, ctx)?;
         let pattern_str = call
             .input
             .get("pattern")
@@ -445,11 +468,10 @@ impl Tool for GrepTool {
             .get("path")
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.fs.workspace_root().to_path_buf());
+            .unwrap_or_else(|| fs.workspace_root().to_path_buf());
 
         let base_dir =
-            self.fs
-                .resolve(Path::new(&base_dir))
+            fs.resolve(Path::new(&base_dir))
                 .map_err(|e| ToolError::ExecutionFailed {
                     tool_name: "grep".into(),
                     message: e.to_string(),
@@ -505,7 +527,7 @@ impl Tool for GrepTool {
 
                 if regex.is_match(&line) {
                     let rel_path = path
-                        .strip_prefix(self.fs.workspace_root())
+                        .strip_prefix(fs.workspace_root())
                         .map(|p| p.display().to_string())
                         .unwrap_or_else(|_| path.display().to_string());
 
@@ -730,6 +752,138 @@ mod tests {
         assert_eq!(result.output["count"], 1);
         let matches = result.output["matches"].as_array().unwrap();
         assert!(matches[0]["file"].as_str().unwrap().contains("a.rs"));
+    }
+
+    // ── Per-session scoping via ctx.workspace_root (BRO-1491) ────────────
+
+    #[test]
+    fn write_file_scopes_to_ctx_workspace_root() {
+        // Tool built over a boot workspace, but the call carries a per-session
+        // workspace root: the write must land in the session workspace.
+        let dir = TempDir::new().unwrap();
+        let boot = dir.path().join("boot");
+        let session = dir.path().join("sessions/s1");
+        std::fs::create_dir_all(&boot).unwrap();
+        std::fs::create_dir_all(&session).unwrap();
+
+        let fs = Arc::new(LocalFs::new(FsPolicy::new(&boot)));
+        let tool = WriteFileTool::new(fs);
+
+        let ctx = ToolContext {
+            workspace_root: Some(session.to_string_lossy().into_owned()),
+            ..make_ctx()
+        };
+        let call = make_call(
+            "write_file",
+            json!({"path": "artifacts/receipt.txt", "content": "scoped"}),
+        );
+        let result = tool.execute(&call, &ctx).unwrap();
+        assert_eq!(result.output["success"], true);
+
+        // Landed in the session workspace, NOT the boot workspace.
+        assert!(session.join("artifacts/receipt.txt").exists());
+        assert!(!boot.join("artifacts/receipt.txt").exists());
+    }
+
+    /// A backend that keeps `FsPort::scoped`'s default (`None`).
+    struct UnscopableFs(LocalFs);
+
+    impl FsPort for UnscopableFs {
+        fn workspace_root(&self) -> &Path {
+            self.0.workspace_root()
+        }
+        fn resolve(&self, path: &Path) -> praxis_core::error::PraxisResult<PathBuf> {
+            self.0.resolve(path)
+        }
+        fn resolve_for_write(&self, path: &Path) -> praxis_core::error::PraxisResult<PathBuf> {
+            self.0.resolve_for_write(path)
+        }
+        fn read_to_string(&self, path: &Path) -> praxis_core::error::PraxisResult<String> {
+            self.0.read_to_string(path)
+        }
+        fn read_bytes(&self, path: &Path) -> praxis_core::error::PraxisResult<Vec<u8>> {
+            self.0.read_bytes(path)
+        }
+        fn write(&self, path: &Path, content: &[u8]) -> praxis_core::error::PraxisResult<()> {
+            self.0.write(path, content)
+        }
+        fn exists(&self, path: &Path) -> bool {
+            self.0.exists(path)
+        }
+        fn metadata(
+            &self,
+            path: &Path,
+        ) -> praxis_core::error::PraxisResult<praxis_core::fs_port::FsMetadata> {
+            self.0.metadata(path)
+        }
+        fn read_dir(
+            &self,
+            path: &Path,
+        ) -> praxis_core::error::PraxisResult<Vec<praxis_core::fs_port::FsDirEntry>> {
+            self.0.read_dir(path)
+        }
+        fn create_dir_all(&self, path: &Path) -> praxis_core::error::PraxisResult<()> {
+            self.0.create_dir_all(path)
+        }
+        fn relative(&self, absolute_path: &Path) -> Option<PathBuf> {
+            self.0.relative(absolute_path)
+        }
+    }
+
+    #[test]
+    fn a_backend_that_cannot_scope_fails_closed() {
+        // A per-session root with a backend that cannot honor it must not fall
+        // back to the shared boot workspace.
+        let dir = TempDir::new().unwrap();
+        let boot = dir.path().join("boot");
+        let session = dir.path().join("sessions/s1");
+        std::fs::create_dir_all(&boot).unwrap();
+        std::fs::create_dir_all(&session).unwrap();
+        std::fs::write(boot.join("shared.txt"), "other tenants").unwrap();
+
+        let fs: Arc<dyn FsPort> = Arc::new(UnscopableFs(LocalFs::new(FsPolicy::new(&boot))));
+        let ctx = ToolContext {
+            workspace_root: Some(session.to_string_lossy().into_owned()),
+            ..make_ctx()
+        };
+
+        let write = WriteFileTool::new(fs.clone()).execute(
+            &make_call("write_file", json!({"path": "x.txt", "content": "leak"})),
+            &ctx,
+        );
+        assert!(
+            matches!(write, Err(ToolError::PolicyViolation { .. })),
+            "{write:?}"
+        );
+        assert!(!boot.join("x.txt").exists());
+
+        let read = ReadFileTool::new(fs)
+            .execute(&make_call("read_file", json!({"path": "shared.txt"})), &ctx);
+        assert!(
+            matches!(read, Err(ToolError::PolicyViolation { .. })),
+            "{read:?}"
+        );
+    }
+
+    #[test]
+    fn read_file_scoped_cannot_escape_session() {
+        let dir = TempDir::new().unwrap();
+        let boot = dir.path().join("boot");
+        let session = dir.path().join("sessions/s1");
+        std::fs::create_dir_all(&boot).unwrap();
+        std::fs::create_dir_all(&session).unwrap();
+        // A file in the boot workspace is invisible once scoped to the session.
+        std::fs::write(boot.join("boot-only.txt"), "boot").unwrap();
+
+        let fs = Arc::new(LocalFs::new(FsPolicy::new(&boot)));
+        let tool = ReadFileTool::new(fs);
+        let ctx = ToolContext {
+            workspace_root: Some(session.to_string_lossy().into_owned()),
+            ..make_ctx()
+        };
+
+        let call = make_call("read_file", json!({"path": "../boot/boot-only.txt"}));
+        assert!(tool.execute(&call, &ctx).is_err());
     }
 
     #[test]

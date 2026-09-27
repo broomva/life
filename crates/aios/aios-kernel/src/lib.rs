@@ -105,7 +105,12 @@ impl KernelBuilder {
 
         let registry = Arc::new(ToolRegistry::with_core_tools());
         let sandbox = Arc::new(LocalSandboxRunner::new(self.allowed_commands));
-        let dispatcher = Arc::new(ToolDispatcher::new(registry, policy_engine, sandbox));
+        let dispatcher = Arc::new(ToolDispatcher::new(
+            registry,
+            policy_engine,
+            sandbox,
+            self.root.join("sessions"),
+        ));
         let tool_harness: Arc<dyn ToolHarnessPort> = dispatcher;
 
         let provider: Arc<dyn ModelProviderPort> = Arc::new(BaselineModelProvider);

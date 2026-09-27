@@ -382,6 +382,7 @@ mod tests {
             run_id: "run-1".into(),
             session_id: "sess-1".into(),
             iteration: 1,
+            ..Default::default()
         };
         let result = ToolResult {
             call_id: "c1".into(),
@@ -407,6 +408,7 @@ mod tests {
             run_id: "run-1".into(),
             session_id: "sess-1".into(),
             iteration: 1,
+            ..Default::default()
         };
         let result = ToolResult {
             call_id: "c1".into(),
@@ -612,6 +614,7 @@ mod tests {
             run_id: "run-1".into(),
             session_id: "sess-1".into(),
             iteration: 1,
+            ..Default::default()
         };
         mw.post_tool_call(
             &context,

@@ -51,7 +51,7 @@ impl Tool for BashTool {
         }
     }
 
-    fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         let command_line = call
             .input
             .get("command")
@@ -69,12 +69,28 @@ impl Tool for BashTool {
         let _guard = span.enter();
         let start = Instant::now();
 
+        // BRO-1491: when the kernel threaded a per-session workspace root,
+        // start commands there (the runner's cwd check is rebased with it).
+        // Otherwise use the construction-time (boot) policy. This sets the
+        // starting directory; it is NOT a filesystem boundary. A command can
+        // still reach any path the process can through absolute paths or `cd`,
+        // because neither `LocalCommandRunner` nor the subprocess fallback of
+        // the production sandbox runner confines the filesystem. Shell
+        // isolation between sessions needs the OS-level sandbox.
+        let policy = match ctx.workspace_root.as_deref().filter(|r| !r.is_empty()) {
+            Some(root) => SandboxPolicy {
+                workspace_root: PathBuf::from(root),
+                ..self.policy.clone()
+            },
+            None => self.policy.clone(),
+        };
+
         let cwd = call
             .input
             .get("cwd")
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.policy.workspace_root.clone());
+            .unwrap_or_else(|| policy.workspace_root.clone());
 
         let request = CommandRequest {
             executable: "/bin/bash".into(),
@@ -85,7 +101,7 @@ impl Tool for BashTool {
 
         let result =
             self.runner
-                .run(&self.policy, &request)
+                .run(&policy, &request)
                 .map_err(|e| ToolError::ExecutionFailed {
                     tool_name: "bash".into(),
                     message: e.to_string(),
@@ -179,6 +195,61 @@ mod tests {
         let call = make_call("bash", json!({"command": "echo hello"}));
         let result = tool.execute(&call, &ctx);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn bash_cwd_follows_session_workspace_root() {
+        // BRO-1491: the boot policy roots at `boot`, but the call carries a
+        // per-session workspace root — the command must run there.
+        let dir = TempDir::new().unwrap();
+        let boot = dir.path().join("boot");
+        let session = dir.path().join("sessions/s1");
+        std::fs::create_dir_all(&boot).unwrap();
+        std::fs::create_dir_all(&session).unwrap();
+
+        let policy = test_policy(&boot);
+        let tool = BashTool::new(policy, Box::new(LocalCommandRunner::new()));
+        let ctx = ToolContext {
+            workspace_root: Some(session.to_string_lossy().into_owned()),
+            ..make_ctx()
+        };
+
+        let call = make_call("bash", json!({"command": "pwd"}));
+        let result = tool.execute(&call, &ctx).unwrap();
+        assert_eq!(result.output["exit_code"], 0);
+        let stdout = result.output["stdout"].as_str().unwrap();
+        let canonical_session = session.canonicalize().unwrap();
+        assert!(
+            stdout
+                .trim()
+                .ends_with(canonical_session.file_name().unwrap().to_str().unwrap()),
+            "pwd `{}` should be the session workspace `{}`",
+            stdout.trim(),
+            canonical_session.display()
+        );
+    }
+
+    #[test]
+    fn bash_scoped_cwd_outside_session_rejected() {
+        // An explicit cwd escaping the session boundary is rejected.
+        let dir = TempDir::new().unwrap();
+        let boot = dir.path().join("boot");
+        let session = dir.path().join("sessions/s1");
+        std::fs::create_dir_all(&boot).unwrap();
+        std::fs::create_dir_all(&session).unwrap();
+
+        let tool = BashTool::new(test_policy(&boot), Box::new(LocalCommandRunner::new()));
+        let ctx = ToolContext {
+            workspace_root: Some(session.to_string_lossy().into_owned()),
+            ..make_ctx()
+        };
+
+        // `boot` is outside the session workspace → cwd validation rejects it.
+        let call = make_call(
+            "bash",
+            json!({"command": "pwd", "cwd": boot.to_string_lossy()}),
+        );
+        assert!(tool.execute(&call, &ctx).is_err());
     }
 
     #[test]
