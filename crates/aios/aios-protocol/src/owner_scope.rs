@@ -148,7 +148,10 @@ pub fn bind_session_owner(
     validate_session_id(session_id).map_err(OwnerScopeError::InvalidSession)?;
     validate_owner_id(owner)?;
     let dir = data_dir.join(SESSION_OWNERS_DIR);
-    ensure_real_dir(data_dir, &dir)?;
+    fs::create_dir_all(data_dir).map_err(OwnerScopeError::io)?;
+    create_dir_if_absent(&dir)?;
+    // `session_owner` refuses a `session-owners` that is not a real directory
+    // (a planted symlink), and it runs before anything is written below.
     if let Some(existing) = session_owner(data_dir, session_id)? {
         return if existing == owner {
             Ok(())
@@ -312,18 +315,6 @@ fn create_dir_if_absent(path: &Path) -> Result<(), OwnerScopeError> {
         Err(e) if e.kind() == ErrorKind::AlreadyExists => Ok(()),
         Err(e) => Err(OwnerScopeError::io(e)),
     }
-}
-
-/// Create `dir` (a direct child of `data_dir`) if absent and require it to be
-/// a real directory, not a symlink.
-fn ensure_real_dir(data_dir: &Path, dir: &Path) -> Result<(), OwnerScopeError> {
-    fs::create_dir_all(data_dir).map_err(OwnerScopeError::io)?;
-    create_dir_if_absent(dir)?;
-    let meta = fs::symlink_metadata(dir).map_err(OwnerScopeError::io)?;
-    if !meta.is_dir() {
-        return Err(OwnerScopeError::NotContained);
-    }
-    Ok(())
 }
 
 #[cfg(test)]
