@@ -137,7 +137,15 @@ impl AgentSubstrate for SubstrateService {
                 .await
                 .map_err(|e| {
                     tracing::warn!(sid = %sid_proto.value, error = %e, "create_session_with_id failed");
-                    Status::internal(format!("create_session_with_id: {e}"))
+                    // BRO-1491: an id that fails the path-safety check is the
+                    // caller's error.
+                    if e.downcast_ref::<aios_protocol::session_path::SessionPathError>()
+                        .is_some()
+                    {
+                        Status::invalid_argument(format!("create_session_with_id: {e}"))
+                    } else {
+                        Status::internal(format!("create_session_with_id: {e}"))
+                    }
                 })?;
         }
 

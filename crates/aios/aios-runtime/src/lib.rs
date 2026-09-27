@@ -533,12 +533,17 @@ impl KernelRuntime {
         policy: PolicySet,
         model_routing: ModelRouting,
     ) -> Result<SessionManifest> {
+        // BRO-1491: the id names a directory, and that directory becomes the
+        // session's filesystem boundary. Reject anything that is not a single
+        // well-formed path component before it is looked up or joined.
+        aios_protocol::session_path::validate_session_id(session_id.as_str())?;
+
         if let Some(existing) = self.sessions.lock().get(session_id.as_str()) {
             return Ok(existing.manifest.clone());
         }
 
         let owner = owner.into();
-        let session_root = self.session_root(&session_id);
+        let session_root = self.contained_session_root(&session_id).await?;
         self.initialize_workspace(session_root.as_path()).await?;
 
         let manifest = SessionManifest {
@@ -2548,8 +2553,21 @@ impl KernelRuntime {
         Ok(())
     }
 
-    fn session_root(&self, session_id: &SessionId) -> PathBuf {
-        self.config.root.join("sessions").join(session_id.as_str())
+    /// Create `{root}/sessions/<id>/` and return its canonical path, refusing
+    /// any directory that does not resolve to exactly that location (BRO-1491).
+    ///
+    /// Runs before `initialize_workspace` writes anything, so a session
+    /// directory planted as a symlink to somewhere else is rejected without a
+    /// single file being created at its target.
+    async fn contained_session_root(&self, session_id: &SessionId) -> Result<PathBuf> {
+        let sessions_dir = self.config.root.join("sessions");
+        let session_root = sessions_dir.join(session_id.as_str());
+        fs::create_dir_all(&session_root).await?;
+        Ok(aios_protocol::session_path::verify_session_root(
+            &sessions_dir,
+            session_id.as_str(),
+            &session_root,
+        )?)
     }
 
     async fn write_pretty_json<T: Serialize>(&self, path: PathBuf, value: &T) -> Result<()> {

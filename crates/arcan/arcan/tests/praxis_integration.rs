@@ -129,7 +129,9 @@ fn build_praxis_runtime(
     ));
 
     // --- Tool harness ---
-    let tool_harness: Arc<dyn ToolHarnessPort> = Arc::new(ArcanHarnessAdapter::new(registry));
+    // Mirrors `run_serve`: per-session roots must be `{root}/sessions/<id>`.
+    let tool_harness: Arc<dyn ToolHarnessPort> =
+        Arc::new(ArcanHarnessAdapter::new(registry).with_sessions_dir(root.join("sessions")));
 
     // --- Policy + Approvals ---
     let policy_gate: Arc<dyn PolicyGatePort> =
@@ -444,16 +446,231 @@ async fn two_sessions_write_isolated_artifacts() {
     // No cross-contamination and no leak into the shared boot workspace.
     assert!(!boot_workspace.join("artifacts/receipt.txt").exists());
 
-    // Isolation: a read from session A that tries to reach session B's file is
-    // rejected by the boundary, so A never observes B's content on disk.
-    assert_ne!(
-        std::fs::read_to_string(&a_file).unwrap(),
-        std::fs::read_to_string(&b_file).unwrap()
+    // Isolation, through the real dispatch path: session A asks read_file for
+    // session B's receipt three ways. None may return B's content.
+    let b_abs = b_file.canonicalize().unwrap().display().to_string();
+    for path in [
+        "../sess-b/artifacts/receipt.txt",
+        b_abs.as_str(),
+        "artifacts/../../sess-b/artifacts/receipt.txt",
+    ] {
+        run_tool(
+            &client,
+            &base,
+            "sess-a",
+            "read_file",
+            json!({ "path": path }),
+        )
+        .await;
+    }
+    // Positive control: the same channel DOES carry file content, so the
+    // absence below is a measurement, not a blind spot.
+    run_tool(
+        &client,
+        &base,
+        "sess-b",
+        "read_file",
+        json!({ "path": "artifacts/receipt.txt" }),
+    )
+    .await;
+    assert!(
+        session_events_text(&client, &base, "sess-b")
+            .await
+            .contains("B receipt"),
+        "positive control: B reading its own receipt must surface the content"
+    );
+    let a_events = session_events_text(&client, &base, "sess-a").await;
+    assert!(
+        !a_events.contains("B receipt"),
+        "session A observed session B's file"
+    );
+    assert!(
+        a_events.matches("path not within workspace").count() >= 3,
+        "all three cross-session reads must fail at the workspace boundary"
     );
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     server.abort();
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// Every event of a session's main branch, serialized, for substring checks.
+async fn session_events_text(client: &reqwest::Client, base: &str, session: &str) -> String {
+    let response = client
+        .get(format!("{base}/sessions/{session}/events"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    response.text().await.unwrap()
+}
+
+/// POST `body` to `path` as raw HTTP/1.1, bypassing client-side URL
+/// normalization, and return the response status code.
+async fn raw_post_status(base: &str, path: &str, body: &serde_json::Value) -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let addr = base.trim_start_matches("http://");
+    let body = body.to_string();
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8_lossy(&response);
+    let status_line = response.lines().next().unwrap_or_default();
+    status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or_else(|| panic!("no status in {status_line:?}"))
+}
+
+/// Every path under `dir`, relative and sorted.
+fn tree(dir: &Path) -> Vec<String> {
+    fn walk(base: &Path, dir: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            out.push(path.strip_prefix(base).unwrap().display().to_string());
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                walk(base, &path, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
+    out.sort();
+    out
+}
+
+/// BRO-1491 security regression: a client-chosen session id cannot steer the
+/// session workspace (the tool boundary) out of `{data_dir}/sessions/`.
+///
+/// Before the fix, `{"session_id":"x/../sess-b"}` produced a session rooted at
+/// B's workspace, so `read_file "artifacts/receipt.txt"` returned B's receipt,
+/// and `{"session_id":"../.."}` rooted a session at the data dir's parent.
+/// Both creation routes (`POST /sessions` and the auto-create in
+/// `POST /sessions/{id}/runs`) must refuse such ids with 400 and leave the
+/// filesystem untouched.
+#[tokio::test]
+async fn traversal_session_ids_are_rejected_over_http() {
+    // `root` is the data dir; its parent stands in for the operator's home.
+    let home = unique_root("traversal-home");
+    let root = home.join("data");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(home.join(".bashrc"), "home secret").unwrap();
+    let (runtime, handle, factory, _boot) = build_praxis_runtime(&root);
+    let (base, server) = start_test_server(runtime, handle, factory).await;
+    let client = reqwest::Client::new();
+
+    // Victim session with a receipt the attacker wants.
+    client
+        .post(format!("{base}/sessions"))
+        .json(&json!({ "session_id": "sess-b" }))
+        .send()
+        .await
+        .unwrap();
+    run_tool(
+        &client,
+        &base,
+        "sess-b",
+        "write_file",
+        json!({ "path": "artifacts/receipt.txt", "content": "B receipt" }),
+    )
+    .await;
+    let before = tree(&home);
+
+    let absolute = home.display().to_string();
+    let overlong = "x".repeat(129);
+    for id in [
+        "x/../sess-b",
+        "..",
+        "../..",
+        "../../..",
+        absolute.as_str(),
+        "/etc",
+        "",
+        "%2e%2e%2f%2e%2e",
+        "..\\..",
+        overlong.as_str(),
+    ] {
+        let response = client
+            .post(format!("{base}/sessions"))
+            .json(&json!({ "session_id": id }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "POST /sessions {{\"session_id\": {id:?}}} must be rejected"
+        );
+    }
+
+    // The run route auto-creates sessions from its path segment. Sent as raw
+    // HTTP/1.1 bytes: a compliant client folds `%2E%2E` into a dot-segment and
+    // never sends it, but an attacker is not bound by one. axum decodes the
+    // segment, so these reach the handler as `..`, `../..`, `x/../sess-b`...
+    for segment in [
+        "%2E%2E",
+        "..%2F..",
+        "%2E%2E%2F%2E%2E",
+        "x%2F..%2Fsess-b",
+        "..%5C..",
+    ] {
+        let status = raw_post_status(
+            &base,
+            &format!("/sessions/{segment}/runs"),
+            &json!({
+                "objective": "escape",
+                "proposed_tool": {
+                    "tool_name": "read_file",
+                    "input": { "path": "artifacts/receipt.txt" }
+                }
+            }),
+        )
+        .await;
+        assert_eq!(
+            status, 400,
+            "raw POST /sessions/{segment}/runs must be rejected"
+        );
+    }
+
+    assert_eq!(
+        tree(&home),
+        before,
+        "a rejected session id must not create or write anything"
+    );
+
+    // Legitimate ids keep working end to end.
+    client
+        .post(format!("{base}/sessions"))
+        .json(&json!({ "session_id": "sess-a" }))
+        .send()
+        .await
+        .unwrap();
+    run_tool(
+        &client,
+        &base,
+        "sess-a",
+        "write_file",
+        json!({ "path": "artifacts/receipt.txt", "content": "A receipt" }),
+    )
+    .await;
+    assert_eq!(
+        std::fs::read_to_string(session_workspace(&root, "sess-a").join("artifacts/receipt.txt"))
+            .unwrap(),
+        "A receipt"
+    );
+
+    server.abort();
+    let _ = std::fs::remove_dir_all(home);
 }
 
 #[tokio::test]

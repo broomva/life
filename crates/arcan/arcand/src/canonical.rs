@@ -1100,6 +1100,7 @@ async fn persist_last_session_hint(runtime: &KernelRuntime, session_id: &Session
     request_body = CreateSessionRequest,
     responses(
         (status = 200, description = "Session created", body = SessionManifestSchema),
+        (status = 400, description = "Session id is not a single path-safe component", body = ErrorResponse),
         (status = 500, description = "Internal error", body = ErrorResponse)
     )
 )]
@@ -1126,7 +1127,7 @@ async fn create_session(
             .runtime
             .create_session_with_id(SessionId::from_string(session_id), owner, policy, routing)
             .await
-            .map_err(internal_error)?
+            .map_err(session_create_error)?
     } else {
         state
             .runtime
@@ -1249,6 +1250,7 @@ async fn upgrade_session_identity(
     request_body = RunRequest,
     responses(
         (status = 200, description = "Run completed", body = RunResponse),
+        (status = 400, description = "Session id is not a single path-safe component", body = ErrorResponse),
         (status = 500, description = "Internal error", body = ErrorResponse)
     )
 )]
@@ -1273,7 +1275,7 @@ async fn run_session(
                 ModelRouting::default(),
             )
             .await
-            .map_err(internal_error)?;
+            .map_err(session_create_error)?;
     }
 
     let capabilities: Vec<aios_protocol::Capability> = request
@@ -3200,6 +3202,19 @@ fn bad_request(error: impl std::fmt::Display) -> (StatusCode, Json<serde_json::V
         StatusCode::BAD_REQUEST,
         Json(json!({ "error": error.to_string() })),
     )
+}
+
+/// A client-chosen session id that fails the path-safety grammar or
+/// containment check (BRO-1491) is the caller's error: 400, not 500.
+fn session_create_error(error: anyhow::Error) -> (StatusCode, Json<serde_json::Value>) {
+    if error
+        .downcast_ref::<aios_protocol::session_path::SessionPathError>()
+        .is_some()
+    {
+        bad_request(error)
+    } else {
+        internal_error(error)
+    }
 }
 
 // ─── Skill catalog helpers ────────────────────────────────────────────────────

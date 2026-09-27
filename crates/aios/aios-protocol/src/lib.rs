@@ -17,6 +17,7 @@
 //! - [`sandbox`] — SandboxTier, SandboxLimits, NetworkPolicy
 //! - [`memory`] — SoulProfile, Observation, Provenance, MemoryScope
 //! - [`session`] — SessionManifest, BranchInfo, CheckpointManifest
+//! - [`session_path`] — session id grammar + canonical workspace containment (BRO-1491)
 //! - [`finance`] — Finance DTOs (wallet, authorization, settlement, transaction history, usage)
 //! - [`payment`] — PaymentPort for agent financial operations (x402, MPP)
 //! - [`ports`] — Runtime boundary ports (event store, provider, tools, policy, approvals,
@@ -61,6 +62,7 @@ pub mod rcs;
 pub mod relay;
 pub mod sandbox;
 pub mod session;
+pub mod session_path;
 pub mod state;
 pub mod tool;
 pub mod world;

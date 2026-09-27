@@ -1056,7 +1056,11 @@ fn run_serve(
         )
     });
 
-    let mut harness = ArcanHarnessAdapter::new(registry);
+    // BRO-1491: per-session roots are accepted only when they are exactly
+    // `{data_dir}/sessions/<session_id>` (the kernel's layout, rooted at the
+    // same `data_dir` passed to `RuntimeConfig::new` below).
+    let mut harness =
+        ArcanHarnessAdapter::new(registry).with_sessions_dir(data_dir.join("sessions"));
     if let Some(ref obs) = nous_observer {
         harness = harness.with_observer(obs.clone());
     }

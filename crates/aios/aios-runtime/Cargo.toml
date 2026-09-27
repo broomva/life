@@ -28,6 +28,7 @@ life-stream-metrics.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true
