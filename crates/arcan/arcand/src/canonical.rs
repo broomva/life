@@ -3204,16 +3204,23 @@ fn bad_request(error: impl std::fmt::Display) -> (StatusCode, Json<serde_json::V
     )
 }
 
-/// A client-chosen session id that fails the path-safety grammar or
-/// containment check (BRO-1491) is the caller's error: 400, not 500.
+/// Map a session-creation failure to a response (BRO-1491).
+///
+/// A session id that fails the grammar is the caller's error: 400, with the
+/// reason. A failed containment or resolve check means the server's own
+/// `sessions/` tree is not what it should be (a planted symlink, an I/O
+/// fault): 500, with a generic body, because the detail names absolute server
+/// paths. The detail goes to the log instead.
 fn session_create_error(error: anyhow::Error) -> (StatusCode, Json<serde_json::Value>) {
-    if error
-        .downcast_ref::<aios_protocol::session_path::SessionPathError>()
-        .is_some()
-    {
-        bad_request(error)
-    } else {
-        internal_error(error)
+    use aios_protocol::session_path::SessionPathError;
+    match error.downcast_ref::<SessionPathError>() {
+        Some(SessionPathError::Empty | SessionPathError::TooLong { .. })
+        | Some(SessionPathError::Grammar { .. }) => bad_request(error),
+        Some(SessionPathError::NotContained { .. } | SessionPathError::Unresolvable { .. }) => {
+            tracing::error!(error = %error, "session workspace failed containment");
+            internal_error("session workspace could not be created")
+        }
+        None => internal_error(error),
     }
 }
 

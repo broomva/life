@@ -648,6 +648,28 @@ async fn traversal_session_ids_are_rejected_over_http() {
         "a rejected session id must not create or write anything"
     );
 
+    // A well-formed id whose directory was planted as a symlink out of the
+    // tree fails containment: a server-side fault, 500, and the response
+    // must not disclose server paths.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&home, root.join("sessions/planted")).unwrap();
+        let response = client
+            .post(format!("{base}/sessions"))
+            .json(&json!({ "session_id": "planted" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = response.text().await.unwrap();
+        assert!(
+            !body.contains(&*home.to_string_lossy()) && !body.contains("sessions"),
+            "response leaks server paths: {body}"
+        );
+        std::fs::remove_file(root.join("sessions/planted")).unwrap();
+        assert!(!home.join("manifest.json").exists());
+    }
+
     // Legitimate ids keep working end to end.
     client
         .post(format!("{base}/sessions"))
