@@ -104,6 +104,11 @@ binding is written once, atomically, and is never rebound. It lives outside
 A session with no binding has **no memory** in multi-tenant mode. The tools
 refuse, and nothing falls back to the shared store.
 
+`knowledge_search` (cross-session event search) indexes every session's
+journal, including memory tool arguments and results. In multi-tenant mode it
+returns only sessions bound to the caller's own owner, and refuses a caller
+with no owner.
+
 **Guards.** Owner ids use the #1771 session-id grammar
 (`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`). The owner directory is checked for
 canonical containment before anything is created inside it, and so is the
