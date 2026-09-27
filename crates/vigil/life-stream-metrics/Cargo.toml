@@ -1,0 +1,28 @@
+[package]
+name = "life-stream-metrics"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.85"
+description = "Stream-aware observability for the Life Agent OS — OTel metrics for broadcast/mpsc lag, drain rate, and saturation"
+license = "MIT"
+repository = "https://github.com/broomva/vigil"
+
+[dependencies]
+# OpenTelemetry metrics only — this crate stays deliberately tiny so the
+# substrate primitives that publish streams (lago-journal, aios-runtime,
+# chronos-core) can depend on it without pulling the full OTLP export
+# machinery (that lives in `life-vigil`) or `aios-protocol`.
+opentelemetry = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt", "time", "macros"] }
+
+[dev-dependencies]
+# In-memory metric exporter + manual reader for the forced-lag / healthy-flow
+# tests and the OTLP-path export verification (metric names appear in an export).
+opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+
+[lints.rust]
+unused_must_use = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"

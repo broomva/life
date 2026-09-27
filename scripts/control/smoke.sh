@@ -9,20 +9,12 @@ if [ -n "${CONTROL_SMOKE_CMD:-}" ]; then
   exit 0
 fi
 
-# Multi-workspace monorepo: aiOS + Arcan + Lago + Autonomic + Spaces
-if command -v cargo >/dev/null 2>&1; then
-  ran=0
-  for ws in aiOS arcan lago autonomic praxis vigil spaces anima haima nous; do
-    if [ -f "$ws/Cargo.toml" ]; then
-      (cd "$ws" && cargo check --quiet)
-      ran=1
-    fi
-  done
-  [ "$ran" -eq 1 ] && exit 0
-fi
-
+# Single root virtual workspace (crates/<cluster>/<crate>) — BRO-1858.
+# The old per-subdir loop (aiOS/arcan/lago/…) is stale: those top-level dirs no
+# longer carry Cargo.toml, so `--workspace` at the root is the current model and
+# mirrors .github/workflows/ci.yml (aiOS is now a separate repo, not a member).
 if [ -f Cargo.toml ] && command -v cargo >/dev/null 2>&1; then
-  cargo check --quiet
+  cargo check --workspace --quiet
   exit 0
 fi
 

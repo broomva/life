@@ -285,6 +285,7 @@ runuser --preserve-environment -u life -g life-runtime -- \
     --uds-socket "${LIFE_RUNTIME_DIR}/arcan.sock" \
     --data-dir "${ARCAN_DATA_DIR}" \
     --agents-dir /opt/life/agents \
+    --skills-dir /opt/life/skills \
     --workspace "${ARCAN_WORKSPACE_DIR}" \
   &
 ARCAN_PID=$!

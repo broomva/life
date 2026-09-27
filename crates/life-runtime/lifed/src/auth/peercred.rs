@@ -10,7 +10,9 @@
 //! This module is the only place the lifed crate reaches for `unsafe`.
 //! `lib.rs` denies unsafe at the crate root; we re-allow it here for the
 //! one syscall block that drives `getsockopt(SO_PEERCRED)`,
-//! `pidfd_open(2)`, `getgrnam(3)`, and `getuid(2)`.
+//! `pidfd_open(2)`, and `getuid(2)`. Group lookups go through the safe
+//! reentrant `nix::unistd::Group` wrapper (`getgrnam_r`), not raw
+//! `getgrnam`.
 
 #![allow(unsafe_code)]
 
@@ -102,17 +104,20 @@ pub use imp::{PeerCred, peer_cred, pidfd_open};
 
 /// Look up the GID of a named group. Used to gate admin-plane access by
 /// `cfg.admin_plane.unix_socket_group`.
+///
+/// Uses the **reentrant** `getgrnam_r(3)` (via [`nix::unistd::Group`])
+/// rather than `getgrnam(3)`. The non-reentrant `getgrnam` returns a pointer
+/// into a process-shared static buffer, so a concurrent group or passwd
+/// lookup on another thread can clobber the record between the call and the
+/// `gr_gid` read — a data race that intermittently flaked the sibling
+/// `group_gid_root_resolves` test under `cargo test`'s parallel runner
+/// (BRO-1861) and is a latent hazard on the admin-auth path itself.
+/// `getgrnam_r` fills a caller-owned buffer, so it is thread-safe and no
+/// longer needs `unsafe`.
 pub fn group_gid(name: &str) -> std::io::Result<Option<u32>> {
-    use std::ffi::CString;
-    let cname = CString::new(name)
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "group name has nul"))?;
-    // SAFETY: getgrnam returns a raw pointer that points to thread-static memory; we
-    // copy out the gid before another call could clobber it.
-    let g = unsafe { libc::getgrnam(cname.as_ptr()) };
-    if g.is_null() {
-        return Ok(None);
-    }
-    Ok(Some(unsafe { (*g).gr_gid }))
+    let group = nix::unistd::Group::from_name(name)
+        .map_err(|e| std::io::Error::other(format!("getgrnam_r({name}): {e}")))?;
+    Ok(group.map(|g| g.gid.as_raw()))
 }
 
 /// Test whether `cred` belongs to a process whose primary group is `gid`.

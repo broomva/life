@@ -56,8 +56,12 @@ def is_internal(dep):
     return any(dep == p.rstrip("-") or dep.startswith(p) for p in INTERNAL_PREFIXES)
 
 # Allowed internal dependencies per source crate.
+# `life-stream-metrics` is a substrate observability primitive (opentelemetry
+# only — no Life impl crates, no aios-protocol coupling), added to chronos-core
+# for BRO-1322 WakeRouter drain-rate metrics. It does NOT loosen the "no arcan/
+# lago/autonomic impl deps in chronos-core" rule the M0 plan locked.
 ALLOWED = {
-    "chronos-core":     {"aios-protocol"},
+    "chronos-core":     {"aios-protocol", "life-stream-metrics"},
     "chronos-triggers": {"chronos-core"},
     "chronos-lago":     {"chronos-core", "aios-protocol", "lago-core"},
     "chronos-api":      {"chronos-core"},

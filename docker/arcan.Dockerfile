@@ -35,10 +35,16 @@ COPY --from=builder /build/target/release/arcan /usr/local/bin/arcan
 # relative to the workdir; without them spawn_agent returns unknown_agent.
 COPY --chown=arcan:arcan agents/ /home/arcan/agents/
 
+# Blessed runtime skill set — SkillRegistry scans ARCAN_SKILLS_DIR first so
+# discovery does not depend on CWD/HOME (skills_found=0 otherwise). See
+# runtime-skills/README.md for the zero-tool blessed-set policy. BRO-1469.
+COPY --chown=arcan:arcan runtime-skills/ /home/arcan/skills/
+
 USER arcan
 WORKDIR /home/arcan
 
 ENV RUST_LOG=info
+ENV ARCAN_SKILLS_DIR=/home/arcan/skills
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

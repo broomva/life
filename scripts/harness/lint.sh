@@ -9,22 +9,15 @@ if [ -n "${HARNESS_LINT_CMD:-}" ]; then
   exit 0
 fi
 
-# Multi-workspace monorepo: aiOS + Arcan + Lago + Spaces
-if command -v cargo >/dev/null 2>&1; then
-  cd "$root_dir"
-  ran=0
-  for ws in aiOS arcan lago spaces anima autonomic haima nous praxis vigil; do
-    if [ -f "$ws/Cargo.toml" ]; then
-      (cd "$ws" && cargo clippy --workspace -- -D warnings)
-      ran=1
-    fi
-  done
-  [ "$ran" -eq 1 ] && exit 0
-fi
-
+# Single root virtual workspace (crates/<cluster>/<crate>) — BRO-1858.
+# Mirror .github/workflows/ci.yml's Lint gate EXACTLY (incl. the
+# `-A too_many_arguments` allow) so `make lint` never false-blocks on a lint CI
+# permits. The old per-subdir loop was stale (those dirs no longer carry
+# Cargo.toml); the old `--all-targets --all-features` fallthrough was stricter
+# than ci.yml.
 if [ -f "$root_dir/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
   cd "$root_dir"
-  cargo clippy --all-targets --all-features -- -D warnings
+  cargo clippy --workspace -- -D warnings -A clippy::too_many_arguments
   exit 0
 fi
 

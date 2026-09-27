@@ -54,6 +54,11 @@ life-paths = { path = "../../life-paths", version = "0.3.0" }
 anima-identity = { path = "../../anima/anima-identity" }
 anima-core = { path = "../../anima/anima-core" }
 
+# Zeroize the transient seed copies `read_seed` pulls off disk (BRO-1468) so
+# raw master-seed bytes don't linger on the heap/stack after use. `MasterSeed`
+# already zeroizes on drop; this covers the buffers around it.
+zeroize.workspace = true
+
 [dev-dependencies]
 tempfile = "3"
 

@@ -9,22 +9,12 @@ if [ -n "${HARNESS_TYPECHECK_CMD:-}" ]; then
   exit 0
 fi
 
-# Multi-workspace monorepo: aiOS + Arcan + Lago + Spaces
-if command -v cargo >/dev/null 2>&1; then
-  cd "$root_dir"
-  ran=0
-  for ws in aiOS arcan lago spaces; do
-    if [ -f "$ws/Cargo.toml" ]; then
-      (cd "$ws" && cargo check --quiet)
-      ran=1
-    fi
-  done
-  [ "$ran" -eq 1 ] && exit 0
-fi
-
+# Single root virtual workspace (crates/<cluster>/<crate>) — BRO-1858.
+# `cargo check --workspace` mirrors ci.yml's build/MSRV surface; the old
+# per-subdir loop was stale dead code.
 if [ -f "$root_dir/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
   cd "$root_dir"
-  cargo check --quiet
+  cargo check --workspace --quiet
   exit 0
 fi
 

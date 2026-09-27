@@ -7,6 +7,9 @@ use aios_protocol::event::EventKind;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::premise::{
+    Diagnosis, DiagnosisRoute, FailureClass, PremiseStalenessSignal, StalenessSignalKind,
+};
 use crate::score::{EvalScore, ScoreLabel};
 use crate::taxonomy::EvalLayer;
 
@@ -49,6 +52,18 @@ pub enum NousEvent {
         trial_id: Option<String>,
         outcome: serde_json::Value,
     },
+    /// A premise-staleness detector fired, tagged with its dual-classifier
+    /// diagnosis and route. This is the second Nous observation lens alongside
+    /// control-divergence (see [`crate::premise`]).
+    PremiseStalenessAlarm {
+        session_id: String,
+        kind: StalenessSignalKind,
+        magnitude: f64,
+        class: FailureClass,
+        route: DiagnosisRoute,
+        run_id: Option<String>,
+        explanation: Option<String>,
+    },
 }
 
 /// Summary of a score for event serialization.
@@ -82,6 +97,23 @@ impl NousEvent {
             session_id: score.session_id.clone(),
             run_id: score.run_id.clone(),
             explanation: score.explanation.clone(),
+        }
+    }
+
+    /// Create a premise-staleness alarm event from a fired signal and its
+    /// dual-classifier diagnosis.
+    pub fn from_premise_signal(signal: &PremiseStalenessSignal, diagnosis: &Diagnosis) -> Self {
+        Self::PremiseStalenessAlarm {
+            session_id: signal.session_id.clone(),
+            kind: signal.kind,
+            magnitude: signal.magnitude,
+            class: diagnosis.class,
+            route: diagnosis.route,
+            run_id: None,
+            explanation: signal
+                .detail
+                .clone()
+                .or_else(|| diagnosis.rationale.clone()),
         }
     }
 
@@ -150,6 +182,26 @@ impl NousEvent {
                     "session_id": session_id,
                     "trial_id": trial_id,
                     "outcome": outcome,
+                }),
+            ),
+            Self::PremiseStalenessAlarm {
+                session_id,
+                kind,
+                magnitude,
+                class,
+                route,
+                run_id,
+                explanation,
+            } => (
+                "eval.PremiseStalenessAlarm",
+                json!({
+                    "session_id": session_id,
+                    "kind": kind,
+                    "magnitude": magnitude,
+                    "class": class,
+                    "route": route,
+                    "run_id": run_id,
+                    "explanation": explanation,
                 }),
             ),
         };
@@ -238,6 +290,33 @@ impl NousEvent {
                     session_id,
                     trial_id,
                     outcome,
+                })
+            }
+            "eval.PremiseStalenessAlarm" => {
+                let session_id = data.get("session_id")?.as_str()?.to_owned();
+                let kind: StalenessSignalKind =
+                    serde_json::from_value(data.get("kind")?.clone()).ok()?;
+                let magnitude = data.get("magnitude")?.as_f64()?;
+                let class: FailureClass =
+                    serde_json::from_value(data.get("class")?.clone()).ok()?;
+                let route: DiagnosisRoute =
+                    serde_json::from_value(data.get("route")?.clone()).ok()?;
+                let run_id = data
+                    .get("run_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned);
+                let explanation = data
+                    .get("explanation")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned);
+                Some(Self::PremiseStalenessAlarm {
+                    session_id,
+                    kind,
+                    magnitude,
+                    class,
+                    route,
+                    run_id,
+                    explanation,
                 })
             }
             _ => None,
@@ -403,6 +482,59 @@ mod tests {
             }
         } else {
             panic!("expected Custom variant");
+        }
+    }
+
+    #[test]
+    fn premise_staleness_alarm_roundtrip() {
+        use crate::premise::{DiagnosisRoute, FailureClass, StalenessSignalKind};
+
+        let event = NousEvent::PremiseStalenessAlarm {
+            session_id: "sess-1".into(),
+            kind: StalenessSignalKind::OutputDivergence,
+            magnitude: 0.62,
+            class: FailureClass::Epistemic,
+            route: DiagnosisRoute::PremiseUpdate,
+            run_id: Some("run-7".into()),
+            explanation: Some("cosine distance 0.62 > k".into()),
+        };
+        let kind = event.into_event_kind();
+        if let EventKind::Custom { event_type, data } = kind {
+            assert_eq!(event_type, "eval.PremiseStalenessAlarm");
+            assert_eq!(data["class"], "epistemic");
+            assert_eq!(data["route"], "premise_update");
+            assert_eq!(data["kind"], "output_divergence");
+            let parsed = NousEvent::from_custom(&event_type, &data).unwrap();
+            match parsed {
+                NousEvent::PremiseStalenessAlarm {
+                    class, route, kind, ..
+                } => {
+                    assert_eq!(class, FailureClass::Epistemic);
+                    assert_eq!(route, DiagnosisRoute::PremiseUpdate);
+                    assert_eq!(kind, StalenessSignalKind::OutputDivergence);
+                }
+                _ => panic!("expected PremiseStalenessAlarm variant"),
+            }
+        } else {
+            panic!("expected Custom variant");
+        }
+    }
+
+    #[test]
+    fn premise_alarm_from_signal_and_diagnosis() {
+        use crate::premise::watch_premise_validity;
+
+        let mut w = watch_premise_validity("sess-1");
+        let signal = w.observe_plant(1.0, 0.0).expect("plant divergence fires");
+        let diagnosis = signal.diagnose(false);
+        let event = NousEvent::from_premise_signal(&signal, &diagnosis);
+        assert!(NousEvent::is_eval_event("eval.PremiseStalenessAlarm"));
+        match event {
+            NousEvent::PremiseStalenessAlarm { class, route, .. } => {
+                assert_eq!(class, crate::premise::FailureClass::Epistemic);
+                assert_eq!(route, crate::premise::DiagnosisRoute::PremiseUpdate);
+            }
+            _ => panic!("expected PremiseStalenessAlarm"),
         }
     }
 

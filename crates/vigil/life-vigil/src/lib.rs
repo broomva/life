@@ -25,15 +25,35 @@
 pub mod config;
 pub mod envelope;
 pub mod jsonl;
+pub mod ledger;
 pub mod metrics;
 pub mod pricing;
 pub mod semconv;
 pub mod spans;
 pub mod tokens;
 
+/// Stream-aware observability — broadcast/mpsc lag, drain rate, and saturation
+/// metrics (BRO-1322). Re-exported so `life-vigil` is the single observability
+/// import surface; the implementation lives in the dependency-light
+/// [`life_stream_metrics`] crate that the substrate primitives depend on.
+pub mod stream {
+    pub use life_stream_metrics::{
+        MeasuredReceiver, MeasuredSender, StreamMetrics, measured_channel, measured_channel_with,
+    };
+}
+pub use life_stream_metrics::{
+    MeasuredReceiver, MeasuredSender, StreamMetrics, measured_channel, measured_channel_with,
+};
+
 pub use config::{LogFormat, OtlpProtocol, VigConfig};
 pub use envelope::{CircuitState, CostSource, LlmRequestEnvelope, LlmResponseEconomics};
 pub use jsonl::{JsonlWriter, LlmCallRecord};
+pub use ledger::{
+    Attribution, ExogeneityCheck, ExogeneityHook, ForkError, ForkEvent, ForkSample, ForkVariable,
+    LedgerEvent, LedgerEventType, NonAttributiveReason, OutcomeDistribution, PearsonExogeneityHook,
+    ReplayerIndependence, RuntimeIdentity, VariableKind, VersionProbeEvent, VersionStability,
+    pearson_correlation,
+};
 pub use metrics::GenAiMetrics;
 pub use pricing::{ModelPricing, PRICING_SNAPSHOT, estimate_cost, lookup_pricing};
 pub use tokens::estimate_tokens;
