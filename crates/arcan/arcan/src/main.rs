@@ -684,6 +684,16 @@ fn run_serve(
     //   - `tokio::spawn()` works (tasks are queued, run when block_on starts)
     let workspace_root = resolve_workspace_root(workspace)?;
 
+    // BRO-1491: memory is per authenticated owner whenever this daemon can
+    // serve more than one principal — any auth secret configured, or the
+    // Topology-B substrate plane bound (lifed fronts many tenants, and that
+    // plane carries no verified owner, so its sessions get no memory rather
+    // than a shared one). Otherwise single-user mode keeps one shared store.
+    let memory_location = aios_protocol::owner_scope::MemoryLocation::for_deployment(
+        data_dir,
+        arcand::auth::multi_tenant_from_env() || uds_socket.is_some(),
+    );
+
     // BRO-1490 defence-in-depth: a non-writable workspace surfaces at
     // runtime as an opaque per-tool io error ("No such file or directory")
     // deep inside a chat turn. Probe once at boot and say exactly what is
@@ -850,12 +860,12 @@ fn run_serve(
         {
             registry.register(PraxisToolBridge::new(ListDirTool::new(tracked_fs)));
 
-            let memory_dir = data_dir.join("memory");
-            std::fs::create_dir_all(&memory_dir)?;
-            registry.register(PraxisToolBridge::new(ReadMemoryTool::new(
-                memory_dir.clone(),
+            registry.register(PraxisToolBridge::new(ReadMemoryTool::scoped(
+                memory_location.clone(),
             )));
-            registry.register(PraxisToolBridge::new(WriteMemoryTool::new(memory_dir)));
+            registry.register(PraxisToolBridge::new(WriteMemoryTool::scoped(
+                memory_location.clone(),
+            )));
 
             // --- Governed memory tools (event-sourced via Lago) ---
             let memory_projection = Arc::new(RwLock::new(MemoryProjection::new()));
@@ -1300,12 +1310,9 @@ fn run_serve(
         }
 
         // Memory extraction observer — writes key facts to .arcan/memory/
-        {
-            let memory_dir = data_dir.join("memory");
-            run_observers.push(Arc::new(memory_observer::MemoryExtractionObserver::new(
-                memory_dir,
-            )));
-        }
+        run_observers.push(Arc::new(memory_observer::MemoryExtractionObserver::new(
+            memory_location.clone(),
+        )));
 
         {
             // Register lifecycle observer for session cleanup.
@@ -1346,6 +1353,7 @@ fn run_serve(
             Some(free_tier_journal), // BRO-218: TTL tagging for free-tier sessions
             resolved.bare,           // minimal prompt for small-context models
             resolved.default_tier.as_deref(), // OSS tier override
+            memory_location,         // BRO-1491: per-owner memory when multi-tenant
         );
 
         // ── Optional substrate-plane gRPC server (Topology B) ─────────
