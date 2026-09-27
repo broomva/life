@@ -70,9 +70,13 @@ impl Tool for BashTool {
         let start = Instant::now();
 
         // BRO-1491: when the kernel threaded a per-session workspace root,
-        // rebase the sandbox boundary there so shell commands run inside — and
-        // cannot escape to — the session workspace. Otherwise use the
-        // construction-time (boot) policy.
+        // start commands there (the runner's cwd check is rebased with it).
+        // Otherwise use the construction-time (boot) policy. This sets the
+        // starting directory; it is NOT a filesystem boundary. A command can
+        // still reach any path the process can through absolute paths or `cd`,
+        // because neither `LocalCommandRunner` nor the subprocess fallback of
+        // the production sandbox runner confines the filesystem. Shell
+        // isolation between sessions needs the OS-level sandbox.
         let policy = match ctx.workspace_root.as_deref().filter(|r| !r.is_empty()) {
             Some(root) => SandboxPolicy {
                 workspace_root: PathBuf::from(root),

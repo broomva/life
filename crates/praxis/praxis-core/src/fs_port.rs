@@ -70,9 +70,15 @@ pub trait FsPort: Send + Sync {
     /// (BRO-1491 — multi-tenancy isolation).
     ///
     /// The returned port enforces its own boundary at `root`, so a port scoped
-    /// to session A's workspace cannot read or write session B's — this is the
-    /// isolation guarantee. Tracking implementations additionally keep their
-    /// change-tracking keys session-unique (see the `arcan-lago` tracked FS).
+    /// to session A's workspace cannot read or write session B's. Tracking
+    /// implementations additionally keep their change-tracking keys
+    /// session-unique (see the `arcan-lago` tracked FS).
+    ///
+    /// `root` is trusted: the new boundary replaces the old one rather than
+    /// narrowing it, so a root outside the tenant tree widens access. Callers
+    /// must pass a root already verified as the session's own workspace. In
+    /// arcan, `ArcanHarnessAdapter` verifies it with
+    /// `aios_protocol::session_path::verify_session_root` before any tool sees it.
     ///
     /// The default returns `None` (the implementation offers no per-session
     /// scoping), so callers fall back to the construction-time port. Filesystem

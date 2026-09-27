@@ -105,7 +105,8 @@ impl FsPort for LocalFs {
     fn scoped(&self, root: &Path) -> Option<Arc<dyn FsPort>> {
         // Rebase the boundary policy at the per-session root. The returned FS
         // rejects any path outside `root`, so a session scoped here cannot
-        // reach another session's workspace (BRO-1491 isolation).
+        // reach another session's workspace (BRO-1491 isolation), provided the
+        // caller verified `root` first (see `FsPort::scoped`).
         Some(Arc::new(LocalFs::new(FsPolicy::new(root))))
     }
 }
