@@ -743,8 +743,28 @@ fn compose_instructions(spec: &AgentSpec) -> String {
 /// a required property`). On schema-compile failure, returns a clear
 /// "schema is malformed" message — this is rare since
 /// `AgentSpec::validate()` structurally checks the schema first.
+/// Compile an agent's input/output schema with the dialect agents were
+/// authored against. A schema that declares `$schema` gets that draft; one
+/// that omits it is compiled as **Draft 7**, the default of jsonschema 0.18
+/// (`JSONSchema::options().compile`). jsonschema 0.46's `validator_for`
+/// falls back to 2020-12 instead, which would silently change validation for
+/// authored Draft 7 schemas (tuple `items`, `dependencies`, `definitions`).
+/// Every agent-schema compile (runtime, CLI, fixtures) goes through here so
+/// they cannot disagree.
+pub fn compile_agent_schema(
+    schema: &Value,
+) -> std::result::Result<jsonschema::Validator, jsonschema::ValidationError<'static>> {
+    if schema.get("$schema").is_some() {
+        jsonschema::validator_for(schema)
+    } else {
+        jsonschema::options()
+            .with_draft(jsonschema::Draft::Draft7)
+            .build(schema)
+    }
+}
+
 fn validate_against_schema(value: &Value, schema: &Value) -> std::result::Result<(), String> {
-    let compiled = match jsonschema::validator_for(schema) {
+    let compiled = match compile_agent_schema(schema) {
         Ok(c) => c,
         Err(e) => return Err(format!("malformed output_schema (compile error): {e}")),
     };
@@ -763,4 +783,40 @@ fn validate_against_schema(value: &Value, schema: &Value) -> std::result::Result
         return Err(error_messages.join("; "));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod schema_dialect_tests {
+    use super::compile_agent_schema;
+    use serde_json::json;
+
+    // `prefixItems` exists only in 2020-12, so it tells the dialects apart:
+    // 2020-12 checks position 0 against it; Draft 7 ignores the unknown
+    // keyword. (`dependencies` does not discriminate: jsonschema 0.46 still
+    // honours it under 2020-12.)
+
+    #[test]
+    fn schema_without_dollar_schema_keeps_the_draft7_default() {
+        let schema = json!({"type": "array", "prefixItems": [{"type": "string"}]});
+        let validator = compile_agent_schema(&schema).expect("compiles");
+        assert!(
+            validator.is_valid(&json!([1])),
+            "an undeclared schema must be validated as Draft 7 (jsonschema 0.18 behaviour), \
+             which ignores prefixItems"
+        );
+    }
+
+    #[test]
+    fn declared_dollar_schema_wins_over_the_default() {
+        let schema = json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "array",
+            "prefixItems": [{"type": "string"}]
+        });
+        let validator = compile_agent_schema(&schema).expect("compiles");
+        assert!(
+            !validator.is_valid(&json!([1])),
+            "a schema declaring 2020-12 must be validated as 2020-12"
+        );
+    }
 }
