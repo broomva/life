@@ -94,11 +94,18 @@ fn valid_branch_name(name: &str) -> bool {
 /// nobody's authority to use it.
 pub(crate) fn claim_for_substrate(runtime: &KernelRuntime, sid: &str) -> Result<(), Status> {
     use aios_protocol::owner_scope::{OwnerScopeError, claim_unowned};
+    // The daemon's own cross-tenant streams are no session's, not even an
+    // unowned one this plane could then drive and read.
+    if crate::canonical::RESERVED_SYSTEM_SESSIONS.contains(&sid) {
+        return Err(Status::permission_denied("session id is reserved"));
+    }
     match claim_unowned(runtime.root_path(), sid) {
         Ok(()) | Err(OwnerScopeError::InvalidSession(_)) => Ok(()),
-        Err(OwnerScopeError::Conflict) => Err(Status::permission_denied(
-            "session is owned by an authenticated principal; the substrate plane cannot act on it",
-        )),
+        Err(OwnerScopeError::Conflict | OwnerScopeError::Aliased) => {
+            Err(Status::permission_denied(
+                "session is owned by an authenticated principal; the substrate plane cannot act on it",
+            ))
+        }
         Err(error) => {
             tracing::error!(sid, %error, "session owner binding unavailable");
             Err(Status::internal("session owner binding unavailable"))

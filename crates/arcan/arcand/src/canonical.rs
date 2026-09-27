@@ -3333,6 +3333,7 @@ async fn claim_session(
         // A malformed id is refused by the runtime's own grammar check (400)
         // before anything is created; this layer adds no second guard.
         Err(OwnerScopeError::InvalidSession(_)) => return Ok(()),
+        Err(OwnerScopeError::Aliased) => return Err(mismatch(session_id)),
         Err(error) => return Err(owner_scope_unavailable(&error)),
         Ok(binding) => binding,
     };
@@ -3367,7 +3368,7 @@ async fn claim_session(
     };
     match written {
         Ok(()) | Err(OwnerScopeError::InvalidSession(_)) => Ok(()),
-        Err(OwnerScopeError::Conflict) => Err(mismatch(session_id)),
+        Err(OwnerScopeError::Conflict | OwnerScopeError::Aliased) => Err(mismatch(session_id)),
         Err(error) => Err(owner_scope_unavailable(&error)),
     }
 }
@@ -3414,8 +3415,10 @@ async fn require_session_owner(
         .map(|user| user.user_id.clone());
     let allowed = match owner_scope::read_binding(data_dir, session_id) {
         // Not every handler validates the id, and a store keyed by a
-        // normalized path can alias `./<id>` to `<id>`: refuse it here.
-        Err(OwnerScopeError::InvalidSession(_)) => false,
+        // normalized path can alias `./<id>` to `<id>`: refuse it here. An id
+        // that resolves to another session's binding (a case variant on a
+        // case-insensitive filesystem) is refused the same way.
+        Err(OwnerScopeError::InvalidSession(_) | OwnerScopeError::Aliased) => false,
         Err(error) => return owner_scope_unavailable(&error).into_response(),
         Ok(Binding::Owner(owner)) => caller.as_deref() == Some(owner.as_str()),
         Ok(Binding::Unowned | Binding::Absent) => caller.is_none(),

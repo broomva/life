@@ -640,6 +640,67 @@ async fn the_daemons_system_streams_can_be_claimed_by_nobody() {
     }
 }
 
+/// P20 round 4: a case variant of a reserved or owned id never reaches that
+/// session (only meaningful on a case-insensitive data dir, e.g. macOS APFS).
+#[tokio::test]
+async fn a_case_variant_id_never_reaches_another_session() {
+    let d = start_daemon().await;
+    assert_eq!(
+        d.create_session("bob", "sess-bob").await.status(),
+        StatusCode::OK
+    );
+    d.run_tool(
+        "bob",
+        "sess-bob",
+        "write_memory",
+        json!({"key": "secret", "content": "BOB-CASE-SECRET"}),
+    )
+    .await;
+    let insensitive = d.root.join("session-owners/SESS-BOB").exists();
+    // Alice claims case variants of a reserved stream and of bob's session.
+    let default_claim = d.create_session("alice", "DEFAULT").await.status();
+    let bob_claim = d.create_session("alice", "SESS-BOB").await.status();
+    if insensitive {
+        assert_eq!(
+            bob_claim,
+            StatusCode::CONFLICT,
+            "SESS-BOB aliases sess-bob here"
+        );
+    }
+    let _ = default_claim;
+    for (sid, route) in [
+        ("default", "events"),
+        ("sess-bob", "events"),
+        ("sess-bob", "state"),
+    ] {
+        let r = d
+            .client
+            .get(format!("{}/sessions/{sid}/{route}", d.base))
+            .bearer_auth(token("alice"))
+            .send()
+            .await
+            .unwrap();
+        let status = r.status();
+        let body = r.text().await.unwrap();
+        assert!(
+            !body.contains("BOB-CASE-SECRET"),
+            "{sid}/{route} leaked: {body}"
+        );
+        assert_eq!(status, StatusCode::NOT_FOUND, "{sid}/{route}");
+    }
+    for sid in ["SESS-BOB", "Sess-Bob"] {
+        let r = d
+            .client
+            .get(format!("{}/sessions/{sid}/events", d.base))
+            .bearer_auth(token("alice"))
+            .send()
+            .await
+            .unwrap();
+        let body = r.text().await.unwrap();
+        assert!(!body.contains("BOB-CASE-SECRET"), "{sid} leaked: {body}");
+    }
+}
+
 /// Reviewer PoC 1 (P20 round 1): a stream opened on an id before its owner
 /// creates it must not deliver that owner's events.
 #[tokio::test]
@@ -821,6 +882,17 @@ async fn the_substrate_plane_cannot_drive_an_owned_session() {
         .err()
         .expect("dispatch on an owned session must be refused");
     assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    // The daemon's reserved cross-tenant streams are refused too.
+    for reserved in arcand::canonical::RESERVED_SYSTEM_SESSIONS {
+        let err = service
+            .create_agent(tonic::Request::new(CreateAgentReq {
+                sid: sid(reserved),
+                label: String::new(),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::PermissionDenied, "{reserved}");
+    }
     // Positive control: the substrate creates its own sessions, claimed as
     // permanently unowned before they exist.
     service

@@ -76,6 +76,8 @@ pub enum OwnerScopeError {
     CorruptBinding,
     #[error("owner scope directory is not contained where it must be")]
     NotContained,
+    #[error("session id resolves to another session's binding")]
+    Aliased,
     #[error("owner scope I/O failed: {0}")]
     Io(String),
 }
@@ -260,6 +262,13 @@ pub fn read_binding(data_dir: &Path, session_id: &str) -> Result<Binding, OwnerS
         Err(e) => return Err(OwnerScopeError::io(e)),
         Ok(meta) if !meta.is_file() => return Err(OwnerScopeError::CorruptBinding),
         Ok(_) => {}
+    }
+    // On a case-insensitive filesystem `DEFAULT` opens `default`'s binding.
+    // The canonical path carries the stored spelling, which must equal the
+    // requested id byte for byte; anything else is another session's binding.
+    let stored = path.canonicalize().map_err(OwnerScopeError::io)?;
+    if stored.file_name() != Some(std::ffi::OsStr::new(session_id)) {
+        return Err(OwnerScopeError::Aliased);
     }
     let content = fs::read_to_string(&path).map_err(|_| OwnerScopeError::CorruptBinding)?;
     if content == UNOWNED_BINDING {
@@ -698,6 +707,34 @@ mod tests {
         assert_eq!(
             owner_memory_root(tmp.path(), "BOB"),
             Err(OwnerScopeError::NotContained)
+        );
+    }
+
+    /// P20 round 4: on a case-insensitive filesystem `SESS-X` must not read
+    /// (or be treated as) `sess-x`'s binding. Skipped where the filesystem is
+    /// case-sensitive (the ids are then independent).
+    #[test]
+    fn a_case_variant_session_id_never_reads_another_sessions_binding() {
+        let tmp = data_dir();
+        bind_session_owner(tmp.path(), "sess-x", "bob").unwrap();
+        if !tmp.path().join(SESSION_OWNERS_DIR).join("SESS-X").exists() {
+            return;
+        }
+        assert_eq!(
+            read_binding(tmp.path(), "SESS-X"),
+            Err(OwnerScopeError::Aliased)
+        );
+        assert_eq!(
+            session_owner(tmp.path(), "SESS-X"),
+            Err(OwnerScopeError::Aliased)
+        );
+        assert_eq!(
+            bind_session_owner(tmp.path(), "SESS-X", "mallory"),
+            Err(OwnerScopeError::Aliased)
+        );
+        assert_eq!(
+            read_binding(tmp.path(), "sess-x"),
+            Ok(Binding::Owner("bob".into()))
         );
     }
 
