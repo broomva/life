@@ -17,6 +17,7 @@
 //! - [`sandbox`] — SandboxTier, SandboxLimits, NetworkPolicy
 //! - [`memory`] — SoulProfile, Observation, Provenance, MemoryScope
 //! - [`session`] — SessionManifest, BranchInfo, CheckpointManifest
+//! - [`owner_scope`] — authenticated owner → memory directory binding + containment (BRO-1491)
 //! - [`session_path`] — session id grammar + canonical workspace containment (BRO-1491)
 //! - [`finance`] — Finance DTOs (wallet, authorization, settlement, transaction history, usage)
 //! - [`payment`] — PaymentPort for agent financial operations (x402, MPP)
@@ -54,6 +55,7 @@ pub mod knowledge;
 pub mod memory;
 pub mod mode;
 pub mod network_isolation;
+pub mod owner_scope;
 pub mod payment;
 pub mod policy;
 pub mod ports;
