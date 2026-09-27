@@ -661,13 +661,23 @@ async fn traversal_session_ids_are_rejected_over_http() {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        let body = response.text().await.unwrap();
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(
+            body["error"],
+            arcand::canonical::SESSION_WORKSPACE_UNAVAILABLE,
+            "the containment failure must answer with the generic body"
+        );
+        let body = body.to_string();
         assert!(
             !body.contains(&*home.to_string_lossy()) && !body.contains("sessions"),
             "response leaks server paths: {body}"
         );
         std::fs::remove_file(root.join("sessions/planted")).unwrap();
-        assert!(!home.join("manifest.json").exists());
+        assert_eq!(
+            tree(&home),
+            before,
+            "nothing may be written through the planted symlink"
+        );
     }
 
     // Legitimate ids keep working end to end.

@@ -3212,17 +3212,19 @@ fn bad_request(error: impl std::fmt::Display) -> (StatusCode, Json<serde_json::V
 /// fault): 500, with a generic body, because the detail names absolute server
 /// paths. The detail goes to the log instead.
 fn session_create_error(error: anyhow::Error) -> (StatusCode, Json<serde_json::Value>) {
-    use aios_protocol::session_path::SessionPathError;
-    match error.downcast_ref::<SessionPathError>() {
-        Some(SessionPathError::Empty | SessionPathError::TooLong { .. })
-        | Some(SessionPathError::Grammar { .. }) => bad_request(error),
-        Some(SessionPathError::NotContained { .. } | SessionPathError::Unresolvable { .. }) => {
-            tracing::error!(error = %error, "session workspace failed containment");
-            internal_error("session workspace could not be created")
+    match error.downcast_ref::<aios_protocol::session_path::SessionPathError>() {
+        Some(path_error) if path_error.is_invalid_id() => bad_request(error),
+        Some(_) => {
+            tracing::error!(error = %error, "session workspace failed its containment or resolve check");
+            internal_error(SESSION_WORKSPACE_UNAVAILABLE)
         }
         None => internal_error(error),
     }
 }
+
+/// Generic body for a session workspace that failed containment or could not
+/// be resolved; the detail names server paths and stays in the log.
+pub const SESSION_WORKSPACE_UNAVAILABLE: &str = "session workspace could not be created";
 
 // ─── Skill catalog helpers ────────────────────────────────────────────────────
 

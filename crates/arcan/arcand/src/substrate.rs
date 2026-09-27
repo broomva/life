@@ -139,16 +139,15 @@ impl AgentSubstrate for SubstrateService {
                     tracing::warn!(sid = %sid_proto.value, error = %e, "create_session_with_id failed");
                     // BRO-1491: an id that fails the path-safety check is the
                     // caller's error.
-                    use aios_protocol::session_path::SessionPathError;
-                    match e.downcast_ref::<SessionPathError>() {
-                        Some(
-                            SessionPathError::Empty
-                            | SessionPathError::TooLong { .. }
-                            | SessionPathError::Grammar { .. },
-                        ) => Status::invalid_argument(format!("create_session_with_id: {e}")),
+                    match e.downcast_ref::<aios_protocol::session_path::SessionPathError>() {
+                        Some(path_error) if path_error.is_invalid_id() => {
+                            Status::invalid_argument(format!("create_session_with_id: {e}"))
+                        }
                         // Containment/resolve faults name server paths; keep
                         // them in the log (warned above), not the response.
-                        Some(_) => Status::internal("session workspace could not be created"),
+                        Some(_) => {
+                            Status::internal(crate::canonical::SESSION_WORKSPACE_UNAVAILABLE)
+                        }
                         None => Status::internal(format!("create_session_with_id: {e}")),
                     }
                 })?;

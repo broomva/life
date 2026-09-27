@@ -56,6 +56,20 @@ pub enum SessionPathError {
     },
 }
 
+impl SessionPathError {
+    /// True when the id itself is malformed: the caller's error, safe to
+    /// report back (the message holds only the caller's own id, capped at
+    /// [`MAX_SESSION_ID_LEN`]). False for containment and resolve failures:
+    /// those mean the server's `sessions/` tree is not what it should be, and
+    /// their messages name absolute server paths.
+    pub fn is_invalid_id(&self) -> bool {
+        matches!(
+            self,
+            Self::Empty | Self::TooLong { .. } | Self::Grammar { .. }
+        )
+    }
+}
+
 /// Check `id` against the session-id grammar
 /// `^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`.
 pub fn validate_session_id(id: &str) -> Result<(), SessionPathError> {
@@ -261,6 +275,22 @@ mod tests {
             verify_session_root(&link.join("sessions"), "sess-a", &sessions.join("sess-a"))
                 .unwrap();
         assert_eq!(verified, sessions.join("sess-a").canonicalize().unwrap());
+    }
+
+    #[test]
+    fn only_grammar_failures_are_the_callers_error() {
+        assert!(validate_session_id("").unwrap_err().is_invalid_id());
+        assert!(validate_session_id("../x").unwrap_err().is_invalid_id());
+        assert!(
+            validate_session_id(&"x".repeat(MAX_SESSION_ID_LEN + 1))
+                .unwrap_err()
+                .is_invalid_id()
+        );
+        let (_tmp, sessions) = sessions_fixture();
+        let contained = verify_session_root(&sessions, "sess-a", &sessions.join("sess-b"));
+        assert!(!contained.unwrap_err().is_invalid_id());
+        let missing = verify_session_root(&sessions, "ghost", &sessions.join("ghost"));
+        assert!(!missing.unwrap_err().is_invalid_id());
     }
 
     #[test]
