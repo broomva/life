@@ -180,7 +180,7 @@ impl Tool for EditFileTool {
     }
 
     fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let fs = crate::fs::effective_fs(&self.fs, ctx);
+        let fs = crate::fs::effective_fs(&self.fs, ctx)?;
         let path_str = call
             .input
             .get("path")

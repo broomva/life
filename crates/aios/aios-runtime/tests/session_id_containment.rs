@@ -295,3 +295,54 @@ async fn legitimate_ids_create_contained_workspaces() {
             .is_file()
     );
 }
+
+/// On a case-insensitive filesystem (APFS and NTFS defaults) `victim` and
+/// `VICTIM` name the same directory. The grammar accepts both, so the
+/// containment check must stop the second one from being handed the first
+/// one's workspace. The property is asserted rather than the platform: on a
+/// case-sensitive filesystem both sessions exist with distinct workspaces; on
+/// a case-insensitive one the alias is rejected. What may never happen is two
+/// sessions sharing one workspace.
+#[tokio::test]
+async fn case_variant_ids_never_share_a_workspace() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("data");
+    let runtime = runtime(&data_dir);
+
+    let victim = create(&runtime, "victim").await.unwrap();
+    std::fs::write(
+        Path::new(&victim.workspace_root).join("state/secret.txt"),
+        "victim data",
+    )
+    .unwrap();
+
+    let case_insensitive = data_dir.join("sessions/VICTIM").exists();
+    match create(&runtime, "VICTIM").await {
+        Ok(alias) => {
+            assert!(
+                !case_insensitive,
+                "case-insensitive filesystem: VICTIM must not be accepted"
+            );
+            assert_ne!(alias.workspace_root, victim.workspace_root);
+            assert!(
+                !Path::new(&alias.workspace_root)
+                    .join("state/secret.txt")
+                    .exists()
+            );
+        }
+        Err(err) => {
+            assert!(
+                case_insensitive,
+                "case-sensitive filesystem: VICTIM is a distinct, valid id: {err:#}"
+            );
+            assert!(
+                matches!(
+                    err.downcast_ref::<aios_protocol::session_path::SessionPathError>(),
+                    Some(aios_protocol::session_path::SessionPathError::NotContained { .. })
+                ),
+                "wrong rejection: {err:#}"
+            );
+            assert!(!runtime.session_exists(&SessionId::from_string("VICTIM")));
+        }
+    }
+}

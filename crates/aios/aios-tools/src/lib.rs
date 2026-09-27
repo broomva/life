@@ -294,21 +294,53 @@ impl ToolDispatcher {
     }
 }
 
+/// Resolve a tool-supplied path inside the session workspace `root`, or fail.
+///
+/// Containment is structural rather than a check on the result:
+/// 1. The path is rebuilt from its `Normal` components only. `..`, a root, or
+///    a drive prefix is refused outright, so the lexical path cannot leave
+///    `root` whether or not its directories exist yet. (The previous version
+///    returned the candidate unchecked when its parent was missing, so
+///    `new/../../../escaped` created directories and wrote outside `root`.)
+/// 2. The deepest ancestor that already exists (found with `symlink_metadata`,
+///    so a dangling symlink counts as existing) is canonicalized and must stay
+///    under the canonical `root`. That rejects a symlink inside the workspace
+///    pointing out of it.
+/// 3. `root` itself must canonicalize; an unresolvable root is an error rather
+///    than a fallback to the raw path.
+///
+/// Not covered: a directory swapped for a symlink between this check and the
+/// caller's I/O. Doing that needs rename/symlink rights inside the workspace,
+/// which only `shell.exec` has, and the shell is not confined to the
+/// workspace in the first place.
 fn canonical_session_path(root: &Path, relative_path: &str) -> Result<PathBuf> {
-    let normalized = relative_path.trim_start_matches('/');
-    let candidate = root.join(normalized);
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    let parent = candidate.parent().unwrap_or(root.as_path());
+    use std::path::Component;
 
-    if !parent.exists() {
-        return Ok(candidate);
+    let root = root
+        .canonicalize()
+        .with_context(|| format!("failed resolving workspace root {root:?}"))?;
+
+    let mut candidate = root.clone();
+    for component in Path::new(relative_path.trim_start_matches('/')).components() {
+        match component {
+            Component::Normal(part) => candidate.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                bail!("path escapes workspace root: {relative_path}")
+            }
+        }
     }
 
-    let canonical_parent = parent
+    let mut existing = candidate.as_path();
+    while existing.symlink_metadata().is_err() {
+        existing = existing
+            .parent()
+            .context("workspace root has no existing ancestor")?;
+    }
+    let canonical_existing = existing
         .canonicalize()
-        .with_context(|| format!("failed canonicalizing parent {parent:?}"))?;
-
-    if !canonical_parent.starts_with(&root) {
+        .with_context(|| format!("failed resolving {existing:?}"))?;
+    if !canonical_existing.starts_with(&root) {
         bail!("path escapes workspace root: {relative_path}");
     }
 
@@ -345,5 +377,86 @@ impl ToolHarnessPort for ToolDispatcher {
                 format!("tool execution requires approval: {tool_name}"),
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical_session_path;
+
+    fn workspace() -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("sessions/sess-a");
+        std::fs::create_dir_all(root.join("artifacts")).unwrap();
+        (tmp, root)
+    }
+
+    #[test]
+    fn paths_inside_the_workspace_resolve_under_it() {
+        let (_tmp, root) = workspace();
+        let canonical_root = root.canonicalize().unwrap();
+        for path in [
+            "artifacts/receipt.txt",
+            "/artifacts/receipt.txt",
+            "./artifacts/./receipt.txt",
+            "new/dirs/that/do/not/exist/yet.txt",
+            "top.txt",
+        ] {
+            let resolved = canonical_session_path(&root, path)
+                .unwrap_or_else(|e| panic!("{path:?} must resolve: {e:#}"));
+            assert!(
+                resolved.starts_with(&canonical_root),
+                "{path:?} resolved to {resolved:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn escaping_paths_are_refused() {
+        let (tmp, root) = workspace();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        for path in [
+            // The missing-parent bypass: nothing under `new/` exists yet.
+            "new/../../../escaped/file",
+            "new/../../sess-b/receipt.txt",
+            "../sess-b/receipt.txt",
+            "artifacts/../../..",
+            "..",
+        ] {
+            assert!(
+                canonical_session_path(&root, path).is_err(),
+                "{path:?} must be refused"
+            );
+        }
+        assert!(!tmp.path().join("escaped").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_out_of_the_workspace_are_refused() {
+        let (tmp, root) = workspace();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("nowhere"), root.join("dangling")).unwrap();
+
+        for path in [
+            "link/secret.txt",
+            "link/new/dir/file",
+            "dangling",
+            "dangling/x",
+        ] {
+            assert!(
+                canonical_session_path(&root, path).is_err(),
+                "{path:?} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn unresolvable_root_is_an_error_not_a_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(canonical_session_path(&tmp.path().join("missing"), "x.txt").is_err());
     }
 }

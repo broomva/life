@@ -17,6 +17,17 @@
 //!    and the root must equal `canonical(sessions_dir)/<id>` exactly. A session
 //!    directory that is a symlink to somewhere else, or a root naming a
 //!    different session, fails here even when the id itself is well formed.
+//!    On a case-insensitive filesystem it also rejects a case variant of an
+//!    existing session (`VICTIM` when `victim` exists): the canonical path
+//!    carries the stored spelling, which differs from the requested id.
+//!
+//! What neither rule covers: a session directory replaced by a symlink AFTER
+//! verification and before the caller's I/O (check-then-use). Doing that needs
+//! rename or symlink rights inside `sessions/`. No file tool has them. Only a
+//! shell command does, and the shell is not confined to its workspace in the
+//! first place, so the race gives nothing the shell does not already have.
+//! Closing it needs directory-handle I/O (`openat` with `O_NOFOLLOW`), which is
+//! the OS-sandbox work, not this module's.
 
 use std::path::{Path, PathBuf};
 

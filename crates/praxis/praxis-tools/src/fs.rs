@@ -16,16 +16,26 @@ use tracing::info;
 
 /// Resolve the effective filesystem port for a tool call (BRO-1491).
 ///
-/// When the kernel threaded a per-session workspace root through the
-/// [`ToolContext`] and the backing port supports scoping, this returns a port
-/// scoped — and isolated — to that session workspace; otherwise it falls back
-/// to the construction-time port (single shared workspace / non-kernel callers).
-pub(crate) fn effective_fs(base: &Arc<dyn FsPort>, ctx: &ToolContext) -> Arc<dyn FsPort> {
+/// With no per-session root in the [`ToolContext`], this is the
+/// construction-time port (single shared workspace / non-kernel callers). With
+/// a root, it is a port scoped to that session workspace. A backend that cannot
+/// scope is an error, not a fallback: falling back would hand a session the
+/// shared workspace it was supposed to be isolated from.
+pub(crate) fn effective_fs(
+    base: &Arc<dyn FsPort>,
+    ctx: &ToolContext,
+) -> Result<Arc<dyn FsPort>, ToolError> {
     match ctx.workspace_root.as_deref() {
         Some(root) if !root.is_empty() => {
-            base.scoped(Path::new(root)).unwrap_or_else(|| base.clone())
+            base.scoped(Path::new(root))
+                .ok_or_else(|| ToolError::PolicyViolation {
+                    message: format!(
+                        "per-session workspace {root} requested, but this filesystem \
+                         backend cannot scope to it"
+                    ),
+                })
         }
-        _ => base.clone(),
+        _ => Ok(base.clone()),
     }
 }
 
@@ -68,7 +78,7 @@ impl Tool for ReadFileTool {
     }
 
     fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let fs = effective_fs(&self.fs, ctx);
+        let fs = effective_fs(&self.fs, ctx)?;
         let path_str = call
             .input
             .get("path")
@@ -152,7 +162,7 @@ impl Tool for WriteFileTool {
     }
 
     fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let fs = effective_fs(&self.fs, ctx);
+        let fs = effective_fs(&self.fs, ctx)?;
         let path_str = call
             .input
             .get("path")
@@ -241,7 +251,7 @@ impl Tool for ListDirTool {
     }
 
     fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let fs = effective_fs(&self.fs, ctx);
+        let fs = effective_fs(&self.fs, ctx)?;
         let path_str = call
             .input
             .get("path")
@@ -330,7 +340,7 @@ impl Tool for GlobTool {
     }
 
     fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let fs = effective_fs(&self.fs, ctx);
+        let fs = effective_fs(&self.fs, ctx)?;
         let pattern = call
             .input
             .get("pattern")
@@ -432,7 +442,7 @@ impl Tool for GrepTool {
     }
 
     fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let fs = effective_fs(&self.fs, ctx);
+        let fs = effective_fs(&self.fs, ctx)?;
         let pattern_str = call
             .input
             .get("pattern")
@@ -773,6 +783,86 @@ mod tests {
         // Landed in the session workspace, NOT the boot workspace.
         assert!(session.join("artifacts/receipt.txt").exists());
         assert!(!boot.join("artifacts/receipt.txt").exists());
+    }
+
+    /// A backend that keeps `FsPort::scoped`'s default (`None`).
+    struct UnscopableFs(LocalFs);
+
+    impl FsPort for UnscopableFs {
+        fn workspace_root(&self) -> &Path {
+            self.0.workspace_root()
+        }
+        fn resolve(&self, path: &Path) -> praxis_core::error::PraxisResult<PathBuf> {
+            self.0.resolve(path)
+        }
+        fn resolve_for_write(&self, path: &Path) -> praxis_core::error::PraxisResult<PathBuf> {
+            self.0.resolve_for_write(path)
+        }
+        fn read_to_string(&self, path: &Path) -> praxis_core::error::PraxisResult<String> {
+            self.0.read_to_string(path)
+        }
+        fn read_bytes(&self, path: &Path) -> praxis_core::error::PraxisResult<Vec<u8>> {
+            self.0.read_bytes(path)
+        }
+        fn write(&self, path: &Path, content: &[u8]) -> praxis_core::error::PraxisResult<()> {
+            self.0.write(path, content)
+        }
+        fn exists(&self, path: &Path) -> bool {
+            self.0.exists(path)
+        }
+        fn metadata(
+            &self,
+            path: &Path,
+        ) -> praxis_core::error::PraxisResult<praxis_core::fs_port::FsMetadata> {
+            self.0.metadata(path)
+        }
+        fn read_dir(
+            &self,
+            path: &Path,
+        ) -> praxis_core::error::PraxisResult<Vec<praxis_core::fs_port::FsDirEntry>> {
+            self.0.read_dir(path)
+        }
+        fn create_dir_all(&self, path: &Path) -> praxis_core::error::PraxisResult<()> {
+            self.0.create_dir_all(path)
+        }
+        fn relative(&self, absolute_path: &Path) -> Option<PathBuf> {
+            self.0.relative(absolute_path)
+        }
+    }
+
+    #[test]
+    fn a_backend_that_cannot_scope_fails_closed() {
+        // A per-session root with a backend that cannot honor it must not fall
+        // back to the shared boot workspace.
+        let dir = TempDir::new().unwrap();
+        let boot = dir.path().join("boot");
+        let session = dir.path().join("sessions/s1");
+        std::fs::create_dir_all(&boot).unwrap();
+        std::fs::create_dir_all(&session).unwrap();
+        std::fs::write(boot.join("shared.txt"), "other tenants").unwrap();
+
+        let fs: Arc<dyn FsPort> = Arc::new(UnscopableFs(LocalFs::new(FsPolicy::new(&boot))));
+        let ctx = ToolContext {
+            workspace_root: Some(session.to_string_lossy().into_owned()),
+            ..make_ctx()
+        };
+
+        let write = WriteFileTool::new(fs.clone()).execute(
+            &make_call("write_file", json!({"path": "x.txt", "content": "leak"})),
+            &ctx,
+        );
+        assert!(
+            matches!(write, Err(ToolError::PolicyViolation { .. })),
+            "{write:?}"
+        );
+        assert!(!boot.join("x.txt").exists());
+
+        let read = ReadFileTool::new(fs)
+            .execute(&make_call("read_file", json!({"path": "shared.txt"})), &ctx);
+        assert!(
+            matches!(read, Err(ToolError::PolicyViolation { .. })),
+            "{read:?}"
+        );
     }
 
     #[test]
