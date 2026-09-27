@@ -9,15 +9,15 @@ repository = "https://github.com/broomva/vigil"
 
 [dependencies]
 # OpenTelemetry core
-opentelemetry = "0.29"
-opentelemetry_sdk = { version = "0.29", features = ["trace", "metrics"] }
-opentelemetry-otlp = { version = "0.29", features = ["trace", "metrics", "grpc-tonic", "http-proto"] }
-opentelemetry-semantic-conventions = "0.29"
+opentelemetry = "0.32"
+opentelemetry_sdk = { version = "0.32", features = ["trace", "metrics"] }
+opentelemetry-otlp = { version = "0.32", features = ["trace", "metrics", "grpc-tonic", "http-proto"] }
+opentelemetry-semantic-conventions = "0.32"
 
 # Tracing bridge
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "registry", "fmt"] }
-tracing-opentelemetry = "0.30"
+tracing-opentelemetry = "0.33"
 
 # Shared contract
 aios-protocol = { version = "0.3.0", path = "../../aios/aios-protocol" }
@@ -32,7 +32,7 @@ life-stream-metrics = { version = "0.3.0", path = "../life-stream-metrics" }
 thiserror = "2.0"
 
 # gRPC transport (required for OTLP header injection)
-tonic = "0.12"
+tonic = { workspace = true }
 
 # Utilities
 serde = { version = "1", features = ["derive"] }

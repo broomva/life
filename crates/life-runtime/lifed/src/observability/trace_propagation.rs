@@ -64,6 +64,9 @@ impl Extractor for HeaderMapExtractor<'_> {
     }
 }
 
+/// Set once the first non-`LayerNotFound` parenting failure has been warned about.
+static SET_PARENT_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 impl<S> Service<Request<Body>> for TracePropagation<S>
 where
     S: Service<Request<Body>> + Clone + Send + 'static,
@@ -91,7 +94,24 @@ where
             opentelemetry::global::get_text_map_propagator(|prop| prop.extract(&extractor));
         Box::pin(async move {
             let span = tracing::Span::current();
-            span.set_parent(parent_cx);
+            match span.set_parent(parent_cx) {
+                Ok(()) => {}
+                // Logging-only mode installs no otel layer: spans are roots by
+                // design (Spec C₂ §9.1 graceful degradation), nothing to report.
+                Err(tracing_opentelemetry::SetParentError::LayerNotFound) => {}
+                // Anything else means incoming trace context was dropped (e.g.
+                // the span was already started before parenting). tracing-
+                // opentelemetry 0.30 hid this; surface it once at warn, then at
+                // debug, so a propagation regression is visible without flooding
+                // the request path.
+                Err(err) => {
+                    if !SET_PARENT_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        tracing::warn!(error = %err, "incoming trace context not attached; span exported as a root (further occurrences at debug)");
+                    } else {
+                        tracing::debug!(error = %err, "incoming trace context not attached");
+                    }
+                }
+            }
             inner.call(req).await
         })
     }

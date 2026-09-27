@@ -348,9 +348,9 @@ k256 = { version = "0.13", features = ["ecdsa", "sha256"] }
 p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
-opentelemetry = "0.29"
-opentelemetry-otlp = { version = "0.29", features = ["trace", "metrics", "grpc-tonic"] }
-opentelemetry_sdk = { version = "0.29", features = ["trace", "metrics"] }
+opentelemetry = "0.32"
+opentelemetry-otlp = { version = "0.32", features = ["trace", "metrics", "grpc-tonic"] }
+opentelemetry_sdk = { version = "0.32", features = ["trace", "metrics"] }
 parking_lot = "0.12"
 parquet = { version = "53", features = ["async"] }
 portable-pty = "0.8"
@@ -362,7 +362,7 @@ redb = "2"
 regex = "1"
 reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
 reqwest-eventsource = "0.6"
-rig-core = "0.36"
+rig = { package = "rig-core", version = "0.39" }
 rmcp = { version = "1.7", features = ["client", "server", "macros", "transport-child-process", "transport-io", "transport-streamable-http-server"] }
 rstar = "0.12"
 schemars = { version = "0.8", features = ["chrono"] }
@@ -389,7 +389,7 @@ tower = { version = "0.5", features = ["util", "limit", "load-shed", "timeout"] 
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 tracing = "0.1"
-tracing-opentelemetry = "0.30"
+tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 ulid = { version = "1", features = ["serde"] }
 url = { version = "2", features = ["serde"] }
@@ -406,7 +406,7 @@ zstd = "0.13"
 # against the declared `output_schema`. Replaces the v0.1
 # hand-rolled validator. See
 # `docs/superpowers/specs/2026-05-09-bro-1006-authored-agents-architecture.md` §6.
-jsonschema = { version = "0.18", default-features = false }
+jsonschema = { version = "0.46", default-features = false }
 # YAML-frontmatter splitter for parsing `agents/<name>.md` files.
 # Body becomes `AgentSpec.instructions`; frontmatter becomes the
 # structured fields. See spec §4.
