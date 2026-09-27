@@ -348,9 +348,9 @@ k256 = { version = "0.13", features = ["ecdsa", "sha256"] }
 p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
-opentelemetry = "0.29"
-opentelemetry-otlp = { version = "0.29", features = ["trace", "metrics", "grpc-tonic"] }
-opentelemetry_sdk = { version = "0.29", features = ["trace", "metrics"] }
+opentelemetry = "0.32"
+opentelemetry-otlp = { version = "0.32", features = ["trace", "metrics", "grpc-tonic"] }
+opentelemetry_sdk = { version = "0.32", features = ["trace", "metrics"] }
 parking_lot = "0.12"
 parquet = { version = "53", features = ["async"] }
 portable-pty = "0.8"
@@ -389,7 +389,7 @@ tower = { version = "0.5", features = ["util", "limit", "load-shed", "timeout"] 
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 tracing = "0.1"
-tracing-opentelemetry = "0.30"
+tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 ulid = { version = "1", features = ["serde"] }
 url = { version = "2", features = ["serde"] }

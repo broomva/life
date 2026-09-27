@@ -14,7 +14,7 @@ use life_stream_metrics::{
     METRIC_SKIPPED, RecvError, StreamMetrics, measured_channel_with,
 };
 use opentelemetry::metrics::MeterProvider as _;
-use opentelemetry_sdk::metrics::data::{Gauge, Histogram, ResourceMetrics, Sum};
+use opentelemetry_sdk::metrics::data::{AggregatedMetrics, Metric, MetricData, ResourceMetrics};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 
 /// Spin up an in-memory OTel metric pipeline and return the provider + the
@@ -32,19 +32,23 @@ fn collect(provider: &SdkMeterProvider, exporter: &InMemoryMetricExporter) -> Ve
     exporter.get_finished_metrics().expect("finished metrics")
 }
 
+/// Every exported metric named `name`, across all resources and scopes.
+fn metrics_named<'a>(
+    rms: &'a [ResourceMetrics],
+    name: &'a str,
+) -> impl Iterator<Item = &'a Metric> {
+    rms.iter()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(move |m| m.name() == name)
+}
+
 /// Sum every u64 `Sum` data point for `name` across the export.
 fn sum_u64(rms: &[ResourceMetrics], name: &str) -> u64 {
     let mut total = 0;
-    for rm in rms {
-        for sm in &rm.scope_metrics {
-            for m in &sm.metrics {
-                if m.name != name {
-                    continue;
-                }
-                if let Some(sum) = m.data.as_any().downcast_ref::<Sum<u64>>() {
-                    total += sum.data_points.iter().map(|dp| dp.value).sum::<u64>();
-                }
-            }
+    for m in metrics_named(rms, name) {
+        if let AggregatedMetrics::U64(MetricData::Sum(sum)) = m.data() {
+            total += sum.data_points().map(|dp| dp.value()).sum::<u64>();
         }
     }
     total
@@ -52,17 +56,10 @@ fn sum_u64(rms: &[ResourceMetrics], name: &str) -> u64 {
 
 /// Latest f64 `Gauge` value for `name`, if any.
 fn gauge_f64(rms: &[ResourceMetrics], name: &str) -> Option<f64> {
-    for rm in rms {
-        for sm in &rm.scope_metrics {
-            for m in &sm.metrics {
-                if m.name != name {
-                    continue;
-                }
-                if let Some(g) = m.data.as_any().downcast_ref::<Gauge<f64>>() {
-                    if let Some(dp) = g.data_points.last() {
-                        return Some(dp.value);
-                    }
-                }
+    for m in metrics_named(rms, name) {
+        if let AggregatedMetrics::F64(MetricData::Gauge(g)) = m.data() {
+            if let Some(dp) = g.data_points().last() {
+                return Some(dp.value());
             }
         }
     }
@@ -72,31 +69,20 @@ fn gauge_f64(rms: &[ResourceMetrics], name: &str) -> Option<f64> {
 /// Total histogram count for `name`.
 fn histogram_count(rms: &[ResourceMetrics], name: &str) -> u64 {
     let mut total = 0;
-    for rm in rms {
-        for sm in &rm.scope_metrics {
-            for m in &sm.metrics {
-                if m.name != name {
-                    continue;
-                }
-                if let Some(h) = m.data.as_any().downcast_ref::<Histogram<f64>>() {
-                    total += h.data_points.iter().map(|dp| dp.count).sum::<u64>();
-                }
-            }
+    for m in metrics_named(rms, name) {
+        if let AggregatedMetrics::F64(MetricData::Histogram(h)) = m.data() {
+            total += h.data_points().map(|dp| dp.count()).sum::<u64>();
         }
     }
     total
 }
 
 fn metric_names(rms: &[ResourceMetrics]) -> Vec<String> {
-    let mut names = Vec::new();
-    for rm in rms {
-        for sm in &rm.scope_metrics {
-            for m in &sm.metrics {
-                names.push(m.name.to_string());
-            }
-        }
-    }
-    names
+    rms.iter()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .map(|m| m.name().to_string())
+        .collect()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
