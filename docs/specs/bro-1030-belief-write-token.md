@@ -83,7 +83,10 @@ Enforced in this order; each maps to a `BeliefWriteError` variant:
    whose target does not resolve ⇒ `RevisionTargetNotFound`.
 
 On success **only** the live head named by the revision link is stamped
-`superseded_by`, so the slot still has exactly one **live** head. Because the
+`superseded_by`, so among the beliefs whose qualifier overlaps the new write
+there is still exactly one **live** head. A belief with a disjoint qualifier is
+a separate head in the same principal + scope and is left untouched, so the
+slot as a whole may hold several live heads. Because the
 target is resolved to the live head by index (not by a global hash lookup), a
 write can never mutate another principal's record.
 
