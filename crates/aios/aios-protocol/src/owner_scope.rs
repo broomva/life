@@ -14,6 +14,12 @@
 //! {data_dir}/memory/                       legacy shared memory (single-user mode only)
 //! ```
 //!
+//! A binding is written **before** the session is created, by every creator
+//! on every plane, atomically, and it is final. An authenticated creator
+//! writes its owner id; a plane with no authenticated principal writes the
+//! [`UNOWNED_BINDING`] marker. So a session is never visible without its
+//! final binding, and a tick never sees its session's owner change.
+//!
 //! The binding lives outside `sessions/<id>/` on purpose: the session
 //! workspace is writable by the session's own file tools, so anything stored
 //! there (including `manifest.json`'s `owner`) can be rewritten by the session
@@ -136,24 +142,64 @@ impl MemoryLocation {
     }
 }
 
-/// Record that `session_id` belongs to `owner`. Idempotent for the same
-/// owner; a session already bound to a different owner is a
-/// [`OwnerScopeError::Conflict`]. The binding is created atomically and is
-/// never overwritten.
+/// Binding content that marks a session as permanently unowned. The leading
+/// `-` is outside the owner grammar, so no owner id can equal it.
+pub const UNOWNED_BINDING: &str = "-unowned";
+
+/// A session's binding, as stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Binding {
+    /// No binding yet: nobody has created this session since owner scoping.
+    Absent,
+    /// Created by a plane with no authenticated principal. Never gets memory,
+    /// never becomes owned.
+    Unowned,
+    /// Created by this authenticated owner.
+    Owner(String),
+}
+
+/// Record that `session_id` belongs to `owner`, **before** the session is
+/// created.
+///
+/// Every creator on every plane writes a binding first, atomically, and a
+/// binding is final. Whoever wins the write decides the session's owner for
+/// good, so no session is ever visible unbound and no in-flight tick can see
+/// its owner change. Idempotent for the same owner. A session bound to
+/// anyone else, or claimed as unowned, is a [`OwnerScopeError::Conflict`].
 pub fn bind_session_owner(
     data_dir: &Path,
     session_id: &str,
     owner: &str,
 ) -> Result<(), OwnerScopeError> {
-    validate_session_id(session_id).map_err(OwnerScopeError::InvalidSession)?;
     validate_owner_id(owner)?;
+    write_binding(data_dir, session_id, owner)
+}
+
+/// Claim `session_id` as permanently unowned before a plane with no
+/// authenticated principal (chronos wakes, the substrate plane,
+/// unauthenticated HTTP) creates or drives it. Idempotent. A session already
+/// owned by someone is a [`OwnerScopeError::Conflict`].
+pub fn claim_unowned(data_dir: &Path, session_id: &str) -> Result<(), OwnerScopeError> {
+    write_binding(data_dir, session_id, UNOWNED_BINDING)
+}
+
+/// Write `content` as the binding for `session_id` unless one exists; an
+/// existing binding must already equal `content`.
+fn write_binding(data_dir: &Path, session_id: &str, content: &str) -> Result<(), OwnerScopeError> {
+    validate_session_id(session_id).map_err(OwnerScopeError::InvalidSession)?;
     let dir = data_dir.join(SESSION_OWNERS_DIR);
     fs::create_dir_all(data_dir).map_err(OwnerScopeError::io)?;
     create_dir_if_absent(&dir)?;
-    // `session_owner` refuses a `session-owners` that is not a real directory
+    let matches = |binding: &Binding| match binding {
+        Binding::Absent => false,
+        Binding::Unowned => content == UNOWNED_BINDING,
+        Binding::Owner(owner) => owner == content,
+    };
+    // `read_binding` refuses a `session-owners` that is not a real directory
     // (a planted symlink), and it runs before anything is written below.
-    if let Some(existing) = session_owner(data_dir, session_id)? {
-        return if existing == owner {
+    let existing = read_binding(data_dir, session_id)?;
+    if existing != Binding::Absent {
+        return if matches(&existing) {
             Ok(())
         } else {
             Err(OwnerScopeError::Conflict)
@@ -161,28 +207,30 @@ pub fn bind_session_owner(
     }
 
     // Write a temp file, then hard-link it into place: `hard_link` fails if
-    // the target exists, so two racing binders cannot both win and a reader
+    // the target exists, so two racing writers cannot both win and a reader
     // never sees a half-written binding. The temp name starts with '.', which
     // the session-id grammar rejects, so it can never be read as a binding.
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let tmp = dir.join(format!(".bind-{session_id}-{}-{nanos}", std::process::id()));
+    // pid + a process-wide counter keep concurrent writers' temp files apart
+    // (a clock alone collides between threads).
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".bind-{session_id}-{}-{seq}", std::process::id()));
     let result = (|| {
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&tmp)
             .map_err(OwnerScopeError::io)?;
-        file.write_all(owner.as_bytes())
+        file.write_all(content.as_bytes())
             .map_err(OwnerScopeError::io)?;
         file.sync_all().map_err(OwnerScopeError::io)?;
         match fs::hard_link(&tmp, dir.join(session_id)) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == ErrorKind::AlreadyExists => {
-                match session_owner(data_dir, session_id)? {
-                    Some(existing) if existing == owner => Ok(()),
-                    _ => Err(OwnerScopeError::Conflict),
+                if matches(&read_binding(data_dir, session_id)?) {
+                    Ok(())
+                } else {
+                    Err(OwnerScopeError::Conflict)
                 }
             }
             Err(e) => Err(OwnerScopeError::io(e)),
@@ -192,30 +240,42 @@ pub fn bind_session_owner(
     result
 }
 
-/// The owner bound to `session_id`, or `None` if the session has no binding.
+/// Read `session_id`'s binding.
 ///
-/// A binding that exists but is not a regular file, or whose content fails
-/// the owner grammar, is an error (never `None`): callers must fail closed on
-/// it rather than treat the session as unowned.
-pub fn session_owner(data_dir: &Path, session_id: &str) -> Result<Option<String>, OwnerScopeError> {
+/// A binding that exists but is not a regular file, or whose content is
+/// neither the unowned marker nor a grammatical owner id, is an error (never
+/// `Absent`): callers must fail closed on it.
+pub fn read_binding(data_dir: &Path, session_id: &str) -> Result<Binding, OwnerScopeError> {
     validate_session_id(session_id).map_err(OwnerScopeError::InvalidSession)?;
     let dir = data_dir.join(SESSION_OWNERS_DIR);
     match fs::symlink_metadata(&dir) {
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Binding::Absent),
         Err(e) => return Err(OwnerScopeError::io(e)),
         Ok(meta) if !meta.is_dir() => return Err(OwnerScopeError::NotContained),
         Ok(_) => {}
     }
     let path = dir.join(session_id);
     match fs::symlink_metadata(&path) {
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Binding::Absent),
         Err(e) => return Err(OwnerScopeError::io(e)),
         Ok(meta) if !meta.is_file() => return Err(OwnerScopeError::CorruptBinding),
         Ok(_) => {}
     }
-    let owner = fs::read_to_string(&path).map_err(|_| OwnerScopeError::CorruptBinding)?;
-    validate_owner_id(&owner).map_err(|_| OwnerScopeError::CorruptBinding)?;
-    Ok(Some(owner))
+    let content = fs::read_to_string(&path).map_err(|_| OwnerScopeError::CorruptBinding)?;
+    if content == UNOWNED_BINDING {
+        return Ok(Binding::Unowned);
+    }
+    validate_owner_id(&content).map_err(|_| OwnerScopeError::CorruptBinding)?;
+    Ok(Binding::Owner(content))
+}
+
+/// The owner bound to `session_id`, or `None` if the session is unowned or
+/// has no binding. Fails closed on a malformed binding (see [`read_binding`]).
+pub fn session_owner(data_dir: &Path, session_id: &str) -> Result<Option<String>, OwnerScopeError> {
+    Ok(match read_binding(data_dir, session_id)? {
+        Binding::Owner(owner) => Some(owner),
+        Binding::Absent | Binding::Unowned => None,
+    })
 }
 
 /// Create (if needed) and verify `owner`'s memory directory, returning its
@@ -404,6 +464,89 @@ mod tests {
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(entries, vec![std::ffi::OsString::from("sess-a")]);
+    }
+
+    #[test]
+    fn an_unowned_claim_is_final_and_never_yields_memory() {
+        let tmp = data_dir();
+        claim_unowned(tmp.path(), "sess-u").unwrap();
+        claim_unowned(tmp.path(), "sess-u").unwrap(); // idempotent
+        assert_eq!(read_binding(tmp.path(), "sess-u"), Ok(Binding::Unowned));
+        assert_eq!(
+            bind_session_owner(tmp.path(), "sess-u", "alice"),
+            Err(OwnerScopeError::Conflict),
+            "an unowned session can never become owned"
+        );
+        assert_eq!(session_owner(tmp.path(), "sess-u"), Ok(None));
+        let scope = MemoryLocation::PerOwner {
+            data_dir: tmp.path().to_path_buf(),
+        };
+        assert_eq!(scope.resolve("sess-u"), Ok(None));
+        // And an owned session can never be claimed unowned.
+        bind_session_owner(tmp.path(), "sess-o", "alice").unwrap();
+        assert_eq!(
+            claim_unowned(tmp.path(), "sess-o"),
+            Err(OwnerScopeError::Conflict)
+        );
+        assert_eq!(
+            session_owner(tmp.path(), "sess-o"),
+            Ok(Some("alice".into()))
+        );
+    }
+
+    /// Racing writers on one session: exactly one binding wins, every other
+    /// writer sees `Conflict`, and the stored binding is the winner's. Many
+    /// rounds, so the `hard_link` AlreadyExists path (not only the pre-check)
+    /// is exercised.
+    #[test]
+    fn racing_writers_produce_exactly_one_final_binding() {
+        let tmp = data_dir();
+        let mut hard_link_losers = 0;
+        for round in 0..200 {
+            let sid = format!("race-{round}");
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(6));
+            let handles: Vec<_> = (0..6)
+                .map(|i| {
+                    let dir = tmp.path().to_path_buf();
+                    let sid = sid.clone();
+                    let barrier = barrier.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        let who = match i % 3 {
+                            0 => "alice",
+                            1 => "bob",
+                            _ => UNOWNED_BINDING,
+                        };
+                        let result = if who == UNOWNED_BINDING {
+                            claim_unowned(&dir, &sid)
+                        } else {
+                            bind_session_owner(&dir, &sid, who)
+                        };
+                        (who, result)
+                    })
+                })
+                .collect();
+            let outcomes: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+            let stored = read_binding(tmp.path(), &sid).unwrap();
+            let winner = match &stored {
+                Binding::Owner(o) => o.as_str(),
+                Binding::Unowned => UNOWNED_BINDING,
+                Binding::Absent => panic!("no binding after a race"),
+            };
+            for (who, result) in &outcomes {
+                if *who == winner {
+                    assert_eq!(result, &Ok(()), "round {round}: the winner's peers succeed");
+                } else {
+                    assert_eq!(
+                        result,
+                        &Err(OwnerScopeError::Conflict),
+                        "round {round}: {who} lost"
+                    );
+                    hard_link_losers += 1;
+                }
+            }
+        }
+        assert!(hard_link_losers > 0);
     }
 
     #[test]

@@ -91,8 +91,19 @@ belongs to the authenticated owner and persists across that owner's sessions.
 **Where the owner comes from.** The owner is the JWT-verified subject
 (`AuthUser.user_id`) of the request that created the session. A request field
 never supplies it: the body's `owner` is ignored in multi-tenant mode. The
-binding is written once, atomically, and is never rebound. It lives outside
-`sessions/<id>/` because the session's own file tools can write there.
+binding lives outside `sessions/<id>/` because the session's own file tools
+can write there.
+
+**Bindings are written before creation and are final.** Every creator on every
+plane writes the binding first, atomically (`hard_link`, no clobber), before
+the session is created:
+
+- an authenticated HTTP caller writes its owner id;
+- chronos wakes, the substrate plane and unauthenticated HTTP write the
+  `-unowned` marker, which no owner id can equal.
+
+The first write wins for good. A session is therefore never visible without
+its final binding, and a tick never sees its owner change.
 
 **Consumers.** Every consumer resolves memory through
 `MemoryLocation::resolve(session_id)`:
@@ -116,9 +127,12 @@ memory directory. A tampered or symlinked binding fails closed.
 
 On the HTTP plane:
 
-- An owned session is reachable only by its owner. The `/sessions/{id}/*`
-  route layer answers everyone else with 404.
-- `/user/memory/*` may act only on the caller.
+- An authenticated caller reaches only sessions it owns. Another owner's
+  session, an unowned session, and an id nobody has claimed yet all answer
+  404, so a caller cannot pre-subscribe to a stream.
+- `POST /sessions/{id}/runs` may create its session, so it authorizes itself
+  by claiming the session first.
+- `/user/memory/*` and the identity `PATCH` may name only the caller.
 
 The substrate gRPC plane and the chronos wake API carry no verified owner, so
 they refuse owned sessions.
@@ -138,11 +152,20 @@ already has, and reports what it copied, kept and ignored. Single-user
 deployments need no migration: with no auth secret set, `Shared` mode keeps
 using `{data_dir}/memory/`.
 
-Sessions created before the upgrade have no binding. They stay reachable as
-before but get no memory. The first caller cannot claim them: an existing
-workspace is never bound retroactively.
+Sessions created before the upgrade have no binding, and an existing
+workspace is never bound retroactively. In multi-tenant mode:
+
+- authenticated callers get 404 on them (409 on re-create);
+- the substrate and chronos planes may still claim them as unowned;
+- they never get memory.
 
 ### Residuals (not covered)
+
+- **Unauthenticated HTTP.** `--uds-socket` without a JWT secret selects
+  `PerOwner` while the HTTP plane has no authentication. HTTP sessions are then
+  unowned and get no memory. This is intended: fail closed.
+- **Owner ids outside the grammar** (e.g. `auth0|123`) are refused with 403 on
+  session create.
 
 - **The shell is not a filesystem boundary** (BRO-2608 item 1). A `bash`
   command can read any path the daemon can, including other owners' memory

@@ -503,30 +503,159 @@ async fn memory_export_is_limited_to_the_caller() {
 }
 
 #[tokio::test]
-async fn an_unowned_session_gets_no_memory_and_nobody_can_claim_it() {
+async fn a_pre_existing_workspace_can_be_claimed_by_nobody() {
     let d = start_daemon().await;
     // A workspace from before owner scoping, with no binding.
     std::fs::create_dir_all(d.root.join("sessions/legacy-1")).unwrap();
-    std::fs::create_dir_all(d.root.join("memory")).unwrap();
-    std::fs::write(d.root.join("memory/notes.md"), "LEGACY-SHARED-55").unwrap();
     assert_eq!(
         d.create_session("alice", "legacy-1").await.status(),
-        StatusCode::OK
+        StatusCode::CONFLICT
     );
+    let r = d
+        .run_tool("alice", "legacy-1", "read_memory", json!({"key": "notes"}))
+        .await;
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
     assert!(
         !d.root.join("session-owners/legacy-1").exists(),
         "a pre-existing workspace must not be claimed by the first caller"
     );
-    d.run_tool("alice", "legacy-1", "read_memory", json!({"key": "notes"}))
-        .await;
-    let (_, events) = d.events_text("alice", "legacy-1").await;
-    assert!(
-        !events.contains("LEGACY-SHARED-55"),
-        "legacy memory served in multi-tenant mode"
+}
+
+/// Reviewer PoC 1 (P20 round 1): a stream opened on an id before its owner
+/// creates it must not deliver that owner's events.
+#[tokio::test]
+async fn a_stream_opened_before_the_session_exists_is_refused() {
+    let d = start_daemon().await;
+    let stream = |user: &'static str| {
+        d.client
+            .get(format!("{}/sessions/victim-chat/events/stream", d.base))
+            .bearer_auth(token(user))
+            .send()
+    };
+    assert_eq!(
+        stream("mallory").await.unwrap().status(),
+        StatusCode::NOT_FOUND,
+        "pre-subscription must be refused"
     );
+    assert_eq!(
+        d.create_session("bob", "victim-chat").await.status(),
+        StatusCode::OK
+    );
+    d.run_tool(
+        "bob",
+        "victim-chat",
+        "write_memory",
+        json!({"key": "secret", "content": "BOB-SECRET-POC"}),
+    )
+    .await;
+    assert_eq!(
+        stream("mallory").await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    // Positive control: the owner's own stream opens.
+    assert_eq!(stream("bob").await.unwrap().status(), StatusCode::OK);
+}
+
+/// Reviewer PoC 2 (P20 round 1): a server-generated session must never be
+/// visible without its owner binding. A poller that opens a stream on every
+/// new session it sees in `GET /sessions` must never get one open.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_server_generated_session_is_never_visible_unbound() {
+    let d = Arc::new(start_daemon().await);
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let poller = {
+        let d = d.clone();
+        let stop = stop.clone();
+        tokio::spawn(async move {
+            let mut seen = std::collections::HashSet::new();
+            let mut attempts = Vec::new();
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let list: Value = d
+                    .client
+                    .get(format!("{}/sessions", d.base))
+                    .bearer_auth(token("mallory"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap_or(Value::Null);
+                let ids: Vec<String> = list
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|s| s["session_id"].as_str().map(str::to_owned))
+                    .collect();
+                for sid in ids {
+                    if seen.insert(sid.clone()) {
+                        let status = d
+                            .client
+                            .get(format!("{}/sessions/{sid}/events/stream", d.base))
+                            .bearer_auth(token("mallory"))
+                            .send()
+                            .await
+                            .unwrap()
+                            .status();
+                        attempts.push((sid, status));
+                    }
+                }
+            }
+            attempts
+        })
+    };
+    for _ in 0..25 {
+        let r = d
+            .client
+            .post(format!("{}/sessions", d.base))
+            .bearer_auth(token("bob"))
+            .json(&json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        let manifest: Value = r.json().await.unwrap();
+        let sid = manifest["session_id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            read_file(&d.root.join("session-owners").join(&sid)).as_deref(),
+            Some("bob"),
+            "a server-generated session is bound to its creator"
+        );
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    let attempts = poller.await.unwrap();
     assert!(
-        events.contains("no authenticated owner"),
-        "the refusal must be explicit"
+        !attempts.is_empty(),
+        "the poller must have seen sessions (vacuity check)"
+    );
+    for (sid, status) in &attempts {
+        assert_eq!(
+            *status,
+            StatusCode::NOT_FOUND,
+            "mallory opened a stream on {sid}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_identity_upgrade_cannot_name_another_user() {
+    let d = start_daemon().await;
+    assert_eq!(
+        d.create_session("mallory", "m-1").await.status(),
+        StatusCode::OK
+    );
+    let patch = |user: &'static str| {
+        d.client
+            .patch(format!("{}/sessions/m-1/identity", d.base))
+            .bearer_auth(token("mallory"))
+            .json(&json!({ "user_id": user }))
+            .send()
+    };
+    assert_eq!(patch("bob").await.unwrap().status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        patch("mallory").await.unwrap().status(),
+        StatusCode::OK,
+        "positive control"
     );
 }
 
@@ -573,7 +702,8 @@ async fn the_substrate_plane_cannot_drive_an_owned_session() {
         .err()
         .expect("dispatch on an owned session must be refused");
     assert_eq!(err.code(), tonic::Code::PermissionDenied);
-    // Positive control: an unowned session is still served by the substrate.
+    // Positive control: the substrate creates its own sessions, claimed as
+    // permanently unowned before they exist.
     service
         .create_agent(tonic::Request::new(CreateAgentReq {
             sid: sid("sub-free"),
@@ -581,15 +711,21 @@ async fn the_substrate_plane_cannot_drive_an_owned_session() {
         }))
         .await
         .expect("unowned sessions stay available to the substrate plane");
-    // And binding is what flips it.
-    bind_session_owner(&d.root, "sub-free", "carol").unwrap();
-    assert!(
-        service
-            .create_agent(tonic::Request::new(CreateAgentReq {
-                sid: sid("sub-free"),
-                label: String::new()
-            }))
-            .await
-            .is_err()
+    assert_eq!(
+        aios_protocol::owner_scope::read_binding(&d.root, "sub-free"),
+        Ok(aios_protocol::owner_scope::Binding::Unowned)
     );
+    // Nobody can later take the substrate's session as an owner...
+    assert!(bind_session_owner(&d.root, "sub-free", "carol").is_err());
+    assert_eq!(
+        d.create_session("carol", "sub-free").await.status(),
+        StatusCode::CONFLICT
+    );
+    // ...and no authenticated HTTP caller can read it.
+    let (status, _) = d.events_text("carol", "sub-free").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let r = d
+        .run_tool("carol", "sub-free", "read_memory", json!({"key": "k"}))
+        .await;
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
 }

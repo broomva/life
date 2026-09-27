@@ -36,7 +36,7 @@ use crate::auth::{
     AuthConfig, AuthUser, IdentityClaims, JwtError, Tier, jwt_auth_middleware,
     validate_identity_token,
 };
-use aios_protocol::owner_scope::{self, MemoryLocation, OwnerScopeError};
+use aios_protocol::owner_scope::{self, Binding, MemoryLocation, OwnerScopeError};
 use axum::{Extension, extract::Request, middleware::Next};
 
 // ─── Mirror schemas for external aios-protocol types ─────────────────────────
@@ -1159,26 +1159,20 @@ async fn create_session(
         }
     });
     let routing = request.model_routing.unwrap_or_default();
-    let manifest = if let Some(session_id) = request.session_id {
-        if let Some(owner) = &bound_owner {
-            reserve_session(&state, &session_id, owner)?;
-        }
-        state
-            .runtime
-            .create_session_with_id(SessionId::from_string(session_id), owner, policy, routing)
-            .await
-            .map_err(session_create_error)?
-    } else {
-        let manifest = state
-            .runtime
-            .create_session(owner, policy, routing)
-            .await
-            .map_err(internal_error)?;
-        if let Some(owner) = &bound_owner {
-            bind_fresh_session(&state, manifest.session_id.as_str(), owner)?;
-        }
-        manifest
-    };
+    // The id is fixed up front (server-generated when absent) so the session
+    // can be claimed before the runtime creates it: it is never visible
+    // without its final owner binding.
+    let session_id = request
+        .session_id
+        .unwrap_or_else(|| SessionId::default().as_str().to_owned());
+    claim_session(&state, &session_id, bound_owner.as_deref(), |_| {
+        session_owned_elsewhere()
+    })?;
+    let manifest = state
+        .runtime
+        .create_session_with_id(SessionId::from_string(session_id), owner, policy, routing)
+        .await
+        .map_err(session_create_error)?;
     persist_last_session_hint(state.runtime.as_ref(), &manifest.session_id).await;
     Ok(Json(manifest))
 }
@@ -1224,8 +1218,12 @@ struct UpgradeSessionIdentityResponse {
 async fn upgrade_session_identity(
     Path(session_id): Path<String>,
     State(state): State<CanonicalState>,
+    auth_user: Option<Extension<AuthUser>>,
     Json(body): Json<UpgradeSessionIdentityRequest>,
 ) -> Result<Json<UpgradeSessionIdentityResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // BRO-1491: the user this session's memory events are attributed to may
+    // only be the caller itself, never an arbitrary body field.
+    authorize_user_scope(&state, auth_user.as_deref(), &body.user_id)?;
     let session_id = SessionId::from_string(session_id);
 
     if !state.runtime.session_exists(&session_id) {
@@ -1310,14 +1308,18 @@ async fn run_session(
         .as_deref()
         .map(BranchId::from_string)
         .unwrap_or_else(BranchId::main);
+    // BRO-1491: this route is not behind `require_session_owner`, because it
+    // may create its session. Authorize here: the caller must own the session,
+    // or claim it (as owner, or as unowned when unauthenticated) before the
+    // runtime creates it.
+    let bound_owner = authenticated_owner(&state, auth_user.as_ref().map(|u| u.user_id.as_str()))?;
+    claim_session(
+        &state,
+        session_id.as_str(),
+        bound_owner.as_deref(),
+        session_not_found,
+    )?;
     if !state.runtime.session_exists(&session_id) {
-        // BRO-1491: a session a run creates is owned by the authenticated
-        // caller, exactly as if it had come through `POST /sessions`.
-        let bound_owner =
-            authenticated_owner(&state, auth_user.as_ref().map(|u| u.user_id.as_str()))?;
-        if let Some(owner) = &bound_owner {
-            reserve_session(&state, session_id.as_str(), owner)?;
-        }
         state
             .runtime
             .create_session_with_id(
@@ -3293,52 +3295,71 @@ fn owner_scope_unavailable(error: &OwnerScopeError) -> ApiError {
     internal_error("session owner could not be recorded")
 }
 
-/// Reserve a caller-chosen session id for `owner` before the runtime touches
-/// its workspace.
-///
-/// An id already bound to `owner` is fine (idempotent create); one bound to
-/// anyone else is refused. An unbound id whose workspace already exists was
-/// created before owner scoping, or by a plane with no authenticated owner:
-/// it stays unowned rather than being claimed by whoever asks first.
-fn reserve_session(state: &CanonicalState, session_id: &str, owner: &str) -> Result<(), ApiError> {
-    let Some(data_dir) = state.memory_location.owner_data_dir() else {
-        return Ok(());
-    };
-    match owner_scope::session_owner(data_dir, session_id) {
-        Ok(Some(existing)) if existing == owner => return Ok(()),
-        Ok(Some(_)) => return Err(session_owned_elsewhere()),
-        Ok(None) => {}
-        // A malformed id is rejected by the runtime's own grammar check (400).
-        Err(OwnerScopeError::InvalidSession(_)) => return Ok(()),
-        Err(error) => return Err(owner_scope_unavailable(&error)),
-    }
-    let workspace = state.runtime.root_path().join("sessions").join(session_id);
-    if std::fs::symlink_metadata(&workspace).is_ok() {
-        return Ok(());
-    }
-    bind_fresh_session(state, session_id, owner)
+fn session_not_found(session_id: &str) -> ApiError {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": format!("session not found: {session_id}") })),
+    )
 }
 
-/// Bind a session this request just created to `owner`.
-fn bind_fresh_session(
+/// Claim `session_id` for this request's principal before the runtime
+/// creates or drives it (multi-tenant mode; a no-op in single-user mode).
+///
+/// `owner` is the authenticated owner, or `None` when the request has no
+/// authenticated principal (the session is then claimed as permanently
+/// unowned: no memory). The claim is the session's final binding, written
+/// before the session exists (`owner_scope::bind_session_owner`), so a
+/// session is never visible without it and never changes owner mid-tick.
+///
+/// A session already bound to this principal passes (idempotent). Anything
+/// else is refused with `mismatch`: bound to someone else, claimed by the
+/// other kind of principal, or an unbound workspace that already exists
+/// (created before owner scoping — nobody may claim it now).
+fn claim_session(
     state: &CanonicalState,
     session_id: &str,
-    owner: &str,
+    owner: Option<&str>,
+    mismatch: fn(&str) -> ApiError,
 ) -> Result<(), ApiError> {
     let Some(data_dir) = state.memory_location.owner_data_dir() else {
         return Ok(());
     };
-    match owner_scope::bind_session_owner(data_dir, session_id, owner) {
+    let binding = match owner_scope::read_binding(data_dir, session_id) {
+        // A malformed id is rejected by the runtime's own grammar check (400).
+        Err(OwnerScopeError::InvalidSession(_)) => return Ok(()),
+        Err(error) => return Err(owner_scope_unavailable(&error)),
+        Ok(binding) => binding,
+    };
+    match (&binding, owner) {
+        (Binding::Owner(bound), Some(caller)) if bound == caller => return Ok(()),
+        (Binding::Unowned, None) => return Ok(()),
+        (Binding::Owner(_) | Binding::Unowned, _) => return Err(mismatch(session_id)),
+        (Binding::Absent, _) => {}
+    }
+    let workspace = state.runtime.root_path().join("sessions").join(session_id);
+    if std::fs::symlink_metadata(&workspace).is_ok() {
+        return Err(mismatch(session_id));
+    }
+    let written = match owner {
+        Some(owner) => owner_scope::bind_session_owner(data_dir, session_id, owner),
+        None => owner_scope::claim_unowned(data_dir, session_id),
+    };
+    match written {
         Ok(()) | Err(OwnerScopeError::InvalidSession(_)) => Ok(()),
-        Err(OwnerScopeError::Conflict) => Err(session_owned_elsewhere()),
+        Err(OwnerScopeError::Conflict) => Err(mismatch(session_id)),
         Err(error) => Err(owner_scope_unavailable(&error)),
     }
 }
 
-/// Route layer for `/sessions/{session_id}/…`: a session bound to an owner is
-/// reachable only by that authenticated owner. Anyone else gets the same 404
-/// as for a session that does not exist. Unbound sessions keep their
-/// pre-BRO-1491 behavior (and have no memory in multi-tenant mode).
+/// Route layer for `/sessions/{session_id}/…` (multi-tenant mode).
+///
+/// An authenticated caller reaches only sessions bound to itself: another
+/// owner's session, an unowned one, and an id nobody has claimed yet all get
+/// the same 404 as a session that does not exist, so a caller cannot
+/// pre-subscribe to a stream for an id someone else is about to create.
+/// With no authenticated principal (auth disabled) only unowned sessions
+/// pass. `POST /sessions/{id}/runs` is the one route that may create its
+/// session, so it authorizes itself in `run_session` via [`claim_session`].
 async fn require_session_owner(
     State(state): State<CanonicalState>,
     Path(params): Path<HashMap<String, String>>,
@@ -3351,19 +3372,28 @@ async fn require_session_owner(
     ) else {
         return next.run(request).await;
     };
+    let is_run = request.method() == axum::http::Method::POST
+        && request
+            .extensions()
+            .get::<axum::extract::MatchedPath>()
+            .is_some_and(|path| path.as_str() == "/sessions/{session_id}/runs");
+    if is_run {
+        return next.run(request).await;
+    }
     let caller = request
         .extensions()
         .get::<AuthUser>()
         .map(|user| user.user_id.clone());
-    match owner_scope::session_owner(data_dir, session_id) {
-        Ok(None) | Err(OwnerScopeError::InvalidSession(_)) => next.run(request).await,
-        Ok(Some(owner)) if caller.as_deref() == Some(owner.as_str()) => next.run(request).await,
-        Ok(Some(_)) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("session not found: {session_id}") })),
-        )
-            .into_response(),
-        Err(error) => owner_scope_unavailable(&error).into_response(),
+    let allowed = match owner_scope::read_binding(data_dir, session_id) {
+        Err(OwnerScopeError::InvalidSession(_)) => true,
+        Err(error) => return owner_scope_unavailable(&error).into_response(),
+        Ok(Binding::Owner(owner)) => caller.as_deref() == Some(owner.as_str()),
+        Ok(Binding::Unowned | Binding::Absent) => caller.is_none(),
+    };
+    if allowed {
+        next.run(request).await
+    } else {
+        session_not_found(session_id).into_response()
     }
 }
 

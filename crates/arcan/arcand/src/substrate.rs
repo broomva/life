@@ -83,23 +83,25 @@ fn valid_branch_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-/// Refuse a substrate-plane call on a session an authenticated owner holds
+/// Claim a session for the substrate plane before creating or driving it
 /// (BRO-1491).
 ///
-/// The substrate plane carries no verified owner, and a session's tools
-/// resolve memory through its owner binding, so driving (or re-creating) an
-/// owned session from here would act on that owner's memory with nobody's
-/// authority. Sessions this plane creates are unowned and are unaffected.
-pub(crate) fn refuse_owner_bound_session(runtime: &KernelRuntime, sid: &str) -> Result<(), Status> {
-    use aios_protocol::owner_scope::{OwnerScopeError, session_owner};
-    match session_owner(runtime.root_path(), sid) {
-        Ok(None) | Err(OwnerScopeError::InvalidSession(_)) => Ok(()),
-        Ok(Some(_)) => Err(Status::permission_denied(
+/// The substrate plane carries no verified owner, so it may only act on
+/// sessions that are permanently unowned. The claim writes that as the
+/// session's final binding (`owner_scope::claim_unowned`) before anything
+/// else happens. A session an authenticated owner holds is refused: its
+/// tools resolve memory through its owner binding, and this plane has
+/// nobody's authority to use it.
+pub(crate) fn claim_for_substrate(runtime: &KernelRuntime, sid: &str) -> Result<(), Status> {
+    use aios_protocol::owner_scope::{OwnerScopeError, claim_unowned};
+    match claim_unowned(runtime.root_path(), sid) {
+        Ok(()) | Err(OwnerScopeError::InvalidSession(_)) => Ok(()),
+        Err(OwnerScopeError::Conflict) => Err(Status::permission_denied(
             "session is owned by an authenticated principal; the substrate plane cannot act on it",
         )),
         Err(error) => {
-            tracing::error!(sid, %error, "session owner binding unreadable");
-            Err(Status::internal("session owner binding unreadable"))
+            tracing::error!(sid, %error, "session owner binding unavailable");
+            Err(Status::internal("session owner binding unavailable"))
         }
     }
 }
@@ -135,7 +137,7 @@ impl AgentSubstrate for SubstrateService {
             return Err(Status::invalid_argument("empty sid"));
         }
         let session_id = SessionId::from_string(&sid_proto.value);
-        refuse_owner_bound_session(&self.runtime, &sid_proto.value)?;
+        claim_for_substrate(&self.runtime, &sid_proto.value)?;
 
         // Idempotent: if the session already exists, return the same
         // agent_id (the sid itself in Phase 1 — see proto comment for
@@ -208,7 +210,7 @@ impl AgentSubstrate for SubstrateService {
             return Err(Status::invalid_argument("empty sid"));
         }
         let session_id = SessionId::from_string(&sid_proto.value);
-        refuse_owner_bound_session(&self.runtime, &sid_proto.value)?;
+        claim_for_substrate(&self.runtime, &sid_proto.value)?;
         if !self.runtime.session_exists(&session_id) {
             return Err(Status::failed_precondition(format!(
                 "session not found: {sid}",

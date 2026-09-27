@@ -51,15 +51,17 @@ impl KernelDispatcher for ArcandKernelDispatcher {
         // it directly. Chronos always dispatches on the `main` branch (the M0 convention).
         let branch = BranchId::main();
 
-        // BRO-1491: the wake API carries no verified owner, so it must not
-        // drive a session an authenticated owner holds (its tools would act
-        // on that owner's memory).
-        match aios_protocol::owner_scope::session_owner(
+        // BRO-1491: the wake API carries no verified owner, so it may only
+        // drive sessions that are permanently unowned. Claim that as the
+        // session's final binding before creating or ticking it; a session an
+        // authenticated owner holds is refused (its tools would act on that
+        // owner's memory).
+        match aios_protocol::owner_scope::claim_unowned(
             self.runtime.root_path(),
             session_id.as_str(),
         ) {
-            Ok(None) | Err(aios_protocol::owner_scope::OwnerScopeError::InvalidSession(_)) => {}
-            Ok(Some(_)) => {
+            Ok(()) | Err(aios_protocol::owner_scope::OwnerScopeError::InvalidSession(_)) => {}
+            Err(aios_protocol::owner_scope::OwnerScopeError::Conflict) => {
                 return Ok(DispatchOutcome::failed(
                     "session is owned by an authenticated principal; a wake cannot drive it"
                         .to_string(),
@@ -67,7 +69,7 @@ impl KernelDispatcher for ArcandKernelDispatcher {
             }
             Err(error) => {
                 return Ok(DispatchOutcome::failed(format!(
-                    "session owner binding unreadable: {error}"
+                    "session owner binding unavailable: {error}"
                 )));
             }
         }
