@@ -743,23 +743,29 @@ fn compose_instructions(spec: &AgentSpec) -> String {
 /// a required property`). On schema-compile failure, returns a clear
 /// "schema is malformed" message — this is rare since
 /// `AgentSpec::validate()` structurally checks the schema first.
-/// Compile an agent's input/output schema with the dialect agents were
-/// authored against, reproducing jsonschema 0.18 (`JSONSchema::options().compile`):
-/// a `$schema` naming a known draft gets that draft; an absent **or
-/// unrecognised** `$schema` is compiled as **Draft 7**. jsonschema 0.46 would
-/// default the first to 2020-12 and fail to compile the second (it tries to
-/// resolve the unknown meta-schema), silently changing or rejecting authored
-/// Draft 7 schemas.
-/// Every agent-schema compile (runtime, CLI, fixtures) goes through here so
-/// they cannot disagree.
+/// Compile an agent's input/output schema exactly as jsonschema 0.18 did in
+/// this workspace (`JSONSchema::options().compile`, built with
+/// `default-features = false`). That build recognised only the `http://`
+/// draft-04/06/07 meta-schema URIs; the 2019-09 and 2020-12 URIs sat behind
+/// the disabled `draft201909`/`draft202012` features. So a schema declaring
+/// draft-04 or draft-06 got that draft, and everything else (no `$schema`,
+/// draft-07, `https://` forms, 2019-09, 2020-12, custom URIs) was validated as
+/// **Draft 7**. jsonschema 0.46 would instead default to 2020-12 and reject
+/// unknown meta-schemas, silently changing or refusing authored agent
+/// schemas, so every agent-schema compile (runtime, CLI, fixtures) goes
+/// through here. Honouring declared 2019-09/2020-12 would be a deliberate
+/// behaviour change, not part of the dependency upgrade.
 pub fn compile_agent_schema(
     schema: &Value,
 ) -> std::result::Result<jsonschema::Validator, jsonschema::ValidationError<'static>> {
-    // `detect` returns the declared draft for a known `$schema` URI, its
-    // receiver (Draft 7) when `$schema` is absent, and `Unknown` otherwise.
-    let draft = match jsonschema::Draft::Draft7.detect(schema) {
-        jsonschema::Draft::Unknown => jsonschema::Draft::Draft7,
-        known => known,
+    let declared = schema
+        .get("$schema")
+        .and_then(Value::as_str)
+        .map(|uri| uri.trim_end_matches('#'));
+    let draft = match declared {
+        Some("http://json-schema.org/draft-04/schema") => jsonschema::Draft::Draft4,
+        Some("http://json-schema.org/draft-06/schema") => jsonschema::Draft::Draft6,
+        _ => jsonschema::Draft::Draft7,
     };
     jsonschema::options().with_draft(draft).build(schema)
 }
@@ -791,10 +797,9 @@ mod schema_dialect_tests {
     use super::compile_agent_schema;
     use serde_json::json;
 
-    // `prefixItems` exists only in 2020-12, so it tells the dialects apart:
-    // 2020-12 checks position 0 against it; Draft 7 ignores the unknown
-    // keyword. (`dependencies` does not discriminate: jsonschema 0.46 still
-    // honours it under 2020-12.)
+    // Discriminators: `prefixItems` exists only in 2020-12 (Draft 7 ignores
+    // it); `const` exists from draft-06 on (Draft 4 ignores it).
+    // (`dependencies` does not discriminate: 0.46 honours it under 2020-12.)
 
     #[test]
     fn schema_without_dollar_schema_keeps_the_draft7_default() {
@@ -802,15 +807,12 @@ mod schema_dialect_tests {
         let validator = compile_agent_schema(&schema).expect("compiles");
         assert!(
             validator.is_valid(&json!([1])),
-            "an undeclared schema must be validated as Draft 7 (jsonschema 0.18 behaviour), \
-             which ignores prefixItems"
+            "an undeclared schema must be validated as Draft 7, which ignores prefixItems"
         );
     }
 
     #[test]
     fn unrecognized_dollar_schema_falls_back_to_draft7() {
-        // jsonschema 0.18 ignored a `$schema` it did not recognise and used
-        // Draft 7; 0.46 would treat it as Draft::Unknown (2020-12 vocabulary).
         let schema = json!({
             "$schema": "https://example.com/custom-meta-schema",
             "type": "array",
@@ -819,12 +821,12 @@ mod schema_dialect_tests {
         let validator = compile_agent_schema(&schema).expect("compiles");
         assert!(
             validator.is_valid(&json!([1])),
-            "an unrecognised $schema must fall back to Draft 7, which ignores prefixItems"
+            "an unrecognised $schema must fall back to Draft 7 (0.18 parity)"
         );
     }
 
     #[test]
-    fn declared_dollar_schema_wins_over_the_default() {
+    fn declared_2020_12_is_validated_as_draft7_like_our_0_18_build() {
         let schema = json!({
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "array",
@@ -832,8 +834,21 @@ mod schema_dialect_tests {
         });
         let validator = compile_agent_schema(&schema).expect("compiles");
         assert!(
-            !validator.is_valid(&json!([1])),
-            "a schema declaring 2020-12 must be validated as 2020-12"
+            validator.is_valid(&json!([1])),
+            "0.18 without draft202012 validated a 2020-12 declaration as Draft 7"
+        );
+    }
+
+    #[test]
+    fn declared_draft4_is_honoured() {
+        let schema = json!({
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "const": 1
+        });
+        let validator = compile_agent_schema(&schema).expect("compiles");
+        assert!(
+            validator.is_valid(&json!(2)),
+            "a draft-04 declaration must be honoured; Draft 4 has no const"
         );
     }
 }
