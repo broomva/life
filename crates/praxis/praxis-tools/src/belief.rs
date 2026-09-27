@@ -851,7 +851,11 @@ mod tests {
     }
 
     fn ack(note: &str) -> BeliefRevisionAcknowledgment {
-        BeliefRevisionAcknowledgment::new(RevisionTrigger::NewEvidence, RevisionChange::Negated, note)
+        BeliefRevisionAcknowledgment::new(
+            RevisionTrigger::NewEvidence,
+            RevisionChange::Negated,
+            note,
+        )
     }
 
     #[test]
@@ -862,7 +866,10 @@ mod tests {
         let mut store = store_with_cap();
         let q = || ScopeQualifier::from_pairs([("metric", "engagement")]);
         let alice_rec = store
-            .write_belief(BeliefClaim::new("market", "same"), token(q(), None, 1000, 1000))
+            .write_belief(
+                BeliefClaim::new("market", "same"),
+                token(q(), None, 1000, 1000),
+            )
             .unwrap();
         let mut bt = token(q(), None, 1000, 1001);
         bt.signed_by = bob();
@@ -870,11 +877,19 @@ mod tests {
         let bob_rec = store
             .write_belief(BeliefClaim::new("market", "same"), bt)
             .unwrap();
-        assert_eq!(alice_rec.as_ref(), bob_rec.as_ref(), "precondition: refs collide");
+        assert_eq!(
+            alice_rec.as_ref(),
+            bob_rec.as_ref(),
+            "precondition: refs collide"
+        );
 
         let mut rt = token(
             q(),
-            Some(RevisionLink::new(bob_rec.as_ref(), vec![EvidenceRef::source("e")], ack("bob revises"))),
+            Some(RevisionLink::new(
+                bob_rec.as_ref(),
+                vec![EvidenceRef::source("e")],
+                ack("bob revises"),
+            )),
             2000,
             2000,
         );
@@ -886,7 +901,10 @@ mod tests {
 
         let chain = store.traverse_revisions(&bob_rev.id, 10);
         assert_eq!(chain.len(), 2);
-        assert_eq!(chain[1].record.id, bob_rec.id, "must not cross to Alice's record");
+        assert_eq!(
+            chain[1].record.id, bob_rec.id,
+            "must not cross to Alice's record"
+        );
     }
 
     #[test]
@@ -896,16 +914,29 @@ mod tests {
         let mut store = store_with_cap();
         let q = || ScopeQualifier::from_pairs([("metric", "engagement")]);
         let v1 = store
-            .write_belief(BeliefClaim::new("market", "x"), token(q(), None, 1000, 1000))
+            .write_belief(
+                BeliefClaim::new("market", "x"),
+                token(q(), None, 1000, 1000),
+            )
             .unwrap();
         let link = |r: &BeliefRecord| {
-            Some(RevisionLink::new(r.as_ref(), vec![EvidenceRef::source("e")], ack("restated")))
+            Some(RevisionLink::new(
+                r.as_ref(),
+                vec![EvidenceRef::source("e")],
+                ack("restated"),
+            ))
         };
         let v2 = store
-            .write_belief(BeliefClaim::new("market", "x"), token(q(), link(&v1), 1000, 2000))
+            .write_belief(
+                BeliefClaim::new("market", "x"),
+                token(q(), link(&v1), 1000, 2000),
+            )
             .unwrap();
         let v3 = store
-            .write_belief(BeliefClaim::new("market", "x"), token(q(), link(&v2), 1000, 3000))
+            .write_belief(
+                BeliefClaim::new("market", "x"),
+                token(q(), link(&v2), 1000, 3000),
+            )
             .unwrap();
 
         let ids: Vec<_> = store
