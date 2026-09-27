@@ -57,7 +57,7 @@ where
             .map_err(|_| CoreError::Provider("no messages provided".to_string()))?;
 
         let rig_request = CompletionRequest {
-            // rig 0.36: per-request model override — None keeps the
+            // rig 0.36+ (unchanged in 0.39): per-request model override — None keeps the
             // handle's own model; structured output unused here.
             model: None,
             output_schema: None,

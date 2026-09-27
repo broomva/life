@@ -744,23 +744,24 @@ fn compose_instructions(spec: &AgentSpec) -> String {
 /// "schema is malformed" message — this is rare since
 /// `AgentSpec::validate()` structurally checks the schema first.
 /// Compile an agent's input/output schema with the dialect agents were
-/// authored against. A schema that declares `$schema` gets that draft; one
-/// that omits it is compiled as **Draft 7**, the default of jsonschema 0.18
-/// (`JSONSchema::options().compile`). jsonschema 0.46's `validator_for`
-/// falls back to 2020-12 instead, which would silently change validation for
-/// authored Draft 7 schemas (tuple `items`, `dependencies`, `definitions`).
+/// authored against, reproducing jsonschema 0.18 (`JSONSchema::options().compile`):
+/// a `$schema` naming a known draft gets that draft; an absent **or
+/// unrecognised** `$schema` is compiled as **Draft 7**. jsonschema 0.46 would
+/// default the first to 2020-12 and fail to compile the second (it tries to
+/// resolve the unknown meta-schema), silently changing or rejecting authored
+/// Draft 7 schemas.
 /// Every agent-schema compile (runtime, CLI, fixtures) goes through here so
 /// they cannot disagree.
 pub fn compile_agent_schema(
     schema: &Value,
 ) -> std::result::Result<jsonschema::Validator, jsonschema::ValidationError<'static>> {
-    if schema.get("$schema").is_some() {
-        jsonschema::validator_for(schema)
-    } else {
-        jsonschema::options()
-            .with_draft(jsonschema::Draft::Draft7)
-            .build(schema)
-    }
+    // `detect` returns the declared draft for a known `$schema` URI, its
+    // receiver (Draft 7) when `$schema` is absent, and `Unknown` otherwise.
+    let draft = match jsonschema::Draft::Draft7.detect(schema) {
+        jsonschema::Draft::Unknown => jsonschema::Draft::Draft7,
+        known => known,
+    };
+    jsonschema::options().with_draft(draft).build(schema)
 }
 
 fn validate_against_schema(value: &Value, schema: &Value) -> std::result::Result<(), String> {
@@ -803,6 +804,22 @@ mod schema_dialect_tests {
             validator.is_valid(&json!([1])),
             "an undeclared schema must be validated as Draft 7 (jsonschema 0.18 behaviour), \
              which ignores prefixItems"
+        );
+    }
+
+    #[test]
+    fn unrecognized_dollar_schema_falls_back_to_draft7() {
+        // jsonschema 0.18 ignored a `$schema` it did not recognise and used
+        // Draft 7; 0.46 would treat it as Draft::Unknown (2020-12 vocabulary).
+        let schema = json!({
+            "$schema": "https://example.com/custom-meta-schema",
+            "type": "array",
+            "prefixItems": [{"type": "string"}]
+        });
+        let validator = compile_agent_schema(&schema).expect("compiles");
+        assert!(
+            validator.is_valid(&json!([1])),
+            "an unrecognised $schema must fall back to Draft 7, which ignores prefixItems"
         );
     }
 
