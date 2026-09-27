@@ -177,11 +177,13 @@ sha2 = { workspace = true, optional = true }
 # nix — Sub-phase E sweep (item #12): proper `getgrouplist(3)` +
 # `User::from_uid` via the safe wrappers in `nix::unistd`. Needed for
 # supplementary-group membership checks (admin authn no longer relies
-# on the *primary* GID alone). Linux-only: `getgrouplist` is gated to
-# Linux/BSD by nix; macOS dev boxes fall back to the existing
-# primary-gid path. The `user` feature enables `User::from_uid` /
-# `User::from_name` (`getpwuid_r` / `getpwnam_r`).
-[target.'cfg(target_os = "linux")'.dependencies]
+# on the *primary* GID alone). `getgrouplist` is gated to Linux in
+# peercred.rs, so macOS falls back to the primary-gid path there; but
+# `group_gid` calls `Group::from_name` (`getgrnam_r`) on every Unix, so
+# the crate itself must be a Unix dependency, not Linux-only (a Linux-only
+# nix broke every macOS build of lifegw with E0433). The `user` feature
+# enables `User::from_uid` / `User::from_name` (`getpwuid_r` / `getpwnam_r`).
+[target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", default-features = false, features = ["user"] }
 
 # Sub-phase E sweep (item #14): wrap the rustls `TlsAcceptor` itself
