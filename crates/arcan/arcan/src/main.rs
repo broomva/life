@@ -893,7 +893,11 @@ fn run_serve(
             registry.register(MemoryCommitTool::new(memory_journal));
 
             // Cross-session event search (BRO-432)
-            registry.register(EventSearchTool::new(journal.clone(), None));
+            // BRO-1491: results limited to the caller's owner when multi-tenant.
+            registry.register(
+                EventSearchTool::new(journal.clone(), None)
+                    .with_owner_scope(memory_location.clone()),
+            );
         }
     } // else (not bare)
 
