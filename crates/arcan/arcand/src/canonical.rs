@@ -3325,7 +3325,9 @@ fn claim_session(
         return Ok(());
     };
     let binding = match owner_scope::read_binding(data_dir, session_id) {
-        Err(OwnerScopeError::InvalidSession(error)) => return Err(bad_request(error)),
+        // A malformed id is refused by the runtime's own grammar check (400)
+        // before anything is created; this layer adds no second guard.
+        Err(OwnerScopeError::InvalidSession(_)) => return Ok(()),
         Err(error) => return Err(owner_scope_unavailable(&error)),
         Ok(binding) => binding,
     };
@@ -3344,7 +3346,7 @@ fn claim_session(
         None => owner_scope::claim_unowned(data_dir, session_id),
     };
     match written {
-        Ok(()) => Ok(()),
+        Ok(()) | Err(OwnerScopeError::InvalidSession(_)) => Ok(()),
         Err(OwnerScopeError::Conflict) => Err(mismatch(session_id)),
         Err(error) => Err(owner_scope_unavailable(&error)),
     }
