@@ -156,10 +156,14 @@ libc = "0.2"
 # builds an SDK config from the standard AWS credential chain (env
 # vars, IMDSv2, etc.); `aws-sdk-kms::Client` wraps that and exposes
 # `Sign` + `GetPublicKey`. We pin `behavior-version-latest` so a future
-# SDK behaviour change (e.g. retry policy) is explicit. `rustls` aligns
-# with the rest of the gateway's TLS posture (no native-tls).
-aws-config = { version = "1", optional = true, default-features = false, features = ["rustls", "rt-tokio", "behavior-version-latest"] }
-aws-sdk-kms = { version = "1", optional = true, default-features = false, features = ["rustls", "rt-tokio", "behavior-version-latest"] }
+# SDK behaviour change (e.g. retry policy) is explicit.
+# `default-https-client` is the SDK's current hyper-1 + rustls client (no
+# native-tls, matching the gateway's TLS posture). The older `rustls`
+# feature selected the legacy hyper-0.14 client, which dragged h2 0.3
+# (RUSTSEC-2026-0258, no patched 0.3 release) and rustls 0.21 /
+# rustls-webpki 0.101 into every `kms-aws` build.
+aws-config = { version = "1", optional = true, default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
+aws-sdk-kms = { version = "1", optional = true, default-features = false, features = ["default-https-client", "rt-tokio", "behavior-version-latest"] }
 
 # Sub-phase E (item #2): production GCP Cloud KMS body. Gated behind
 # the `kms-gcp` feature. `google-cloud-kms` v0.6 from the
@@ -177,11 +181,13 @@ sha2 = { workspace = true, optional = true }
 # nix — Sub-phase E sweep (item #12): proper `getgrouplist(3)` +
 # `User::from_uid` via the safe wrappers in `nix::unistd`. Needed for
 # supplementary-group membership checks (admin authn no longer relies
-# on the *primary* GID alone). Linux-only: `getgrouplist` is gated to
-# Linux/BSD by nix; macOS dev boxes fall back to the existing
-# primary-gid path. The `user` feature enables `User::from_uid` /
-# `User::from_name` (`getpwuid_r` / `getpwnam_r`).
-[target.'cfg(target_os = "linux")'.dependencies]
+# on the *primary* GID alone). `getgrouplist` is gated to Linux in
+# peercred.rs, so macOS falls back to the primary-gid path there; but
+# `group_gid` calls `Group::from_name` (`getgrnam_r`) on every Unix, so
+# the crate itself must be a Unix dependency, not Linux-only (a Linux-only
+# nix broke every macOS build of lifegw with E0433). The `user` feature
+# enables `User::from_uid` / `User::from_name` (`getpwuid_r` / `getpwnam_r`).
+[target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", default-features = false, features = ["user"] }
 
 # Sub-phase E sweep (item #14): wrap the rustls `TlsAcceptor` itself
