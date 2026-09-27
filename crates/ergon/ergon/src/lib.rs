@@ -62,7 +62,7 @@ pub mod stream;
 pub mod typed_agent;
 pub mod workflow;
 
-pub use agent::{Agent, AgentError, AgentSpec, RECORD_ANSWER_TOOL, run_spec};
+pub use agent::{Agent, AgentError, AgentSpec, RECORD_ANSWER_TOOL, compile_agent_schema, run_spec};
 pub use agent_registry::{
     AgentRegistry, ChainedAgentRegistry, FsAgentRegistry, InMemoryAgentRegistry, ParseError,
     RegistryError, parse_agent_md,

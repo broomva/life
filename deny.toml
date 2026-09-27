@@ -43,6 +43,7 @@ allow = [
     "MPL-2.0",
     "CC0-1.0",
     "0BSD",
+    "MIT-0",  # borrow-or-share (transitive via jsonschema 0.46 → referencing → fluent-uri); MIT without the attribution clause, same family as 0BSD/CC0
 ]
 confidence-threshold = 0.8
 
