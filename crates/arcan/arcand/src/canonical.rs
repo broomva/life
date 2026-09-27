@@ -1167,7 +1167,8 @@ async fn create_session(
         .unwrap_or_else(|| SessionId::default().as_str().to_owned());
     claim_session(&state, &session_id, bound_owner.as_deref(), |_| {
         session_owned_elsewhere()
-    })?;
+    })
+    .await?;
     let manifest = state
         .runtime
         .create_session_with_id(SessionId::from_string(session_id), owner, policy, routing)
@@ -1318,7 +1319,8 @@ async fn run_session(
         session_id.as_str(),
         bound_owner.as_deref(),
         session_not_found,
-    )?;
+    )
+    .await?;
     if !state.runtime.session_exists(&session_id) {
         state
             .runtime
@@ -3315,7 +3317,7 @@ fn session_not_found(session_id: &str) -> ApiError {
 /// else is refused with `mismatch`: bound to someone else, claimed by the
 /// other kind of principal, or an unbound workspace that already exists
 /// (created before owner scoping — nobody may claim it now).
-fn claim_session(
+async fn claim_session(
     state: &CanonicalState,
     session_id: &str,
     owner: Option<&str>,
@@ -3324,6 +3326,9 @@ fn claim_session(
     let Some(data_dir) = state.memory_location.owner_data_dir() else {
         return Ok(());
     };
+    if RESERVED_SYSTEM_SESSIONS.contains(&session_id) {
+        return Err(mismatch(session_id));
+    }
     let binding = match owner_scope::read_binding(data_dir, session_id) {
         // A malformed id is refused by the runtime's own grammar check (400)
         // before anything is created; this layer adds no second guard.
@@ -3337,9 +3342,24 @@ fn claim_session(
         (Binding::Owner(_) | Binding::Unowned, _) => return Err(mismatch(session_id)),
         (Binding::Absent, _) => {}
     }
+    // Unbound, but it may still exist from before owner scoping: as a
+    // workspace, or as an event stream with no workspace. Either way nobody
+    // may claim it now.
     let workspace = state.runtime.root_path().join("sessions").join(session_id);
     if std::fs::symlink_metadata(&workspace).is_ok() {
         return Err(mismatch(session_id));
+    }
+    match state
+        .runtime
+        .read_events(&SessionId::from_string(session_id), 0, 1)
+        .await
+    {
+        Ok(events) if events.is_empty() => {}
+        Ok(_) => return Err(mismatch(session_id)),
+        Err(error) => {
+            tracing::error!(session = session_id, %error, "cannot tell whether the session's event stream exists");
+            return Err(internal_error("session owner could not be recorded"));
+        }
     }
     let written = match owner {
         Some(owner) => owner_scope::bind_session_owner(data_dir, session_id, owner),
@@ -3351,6 +3371,13 @@ fn claim_session(
         Err(error) => Err(owner_scope_unavailable(&error)),
     }
 }
+
+/// Journal streams the daemon itself writes cross-tenant data into, under a
+/// grammar-valid id with no workspace: `arcan serve`'s filesystem-event writer
+/// and its Nous observer both use `"default"` (`arcan/src/main.rs`). No
+/// principal may claim them (multi-tenant mode), and so none may read them
+/// over the authenticated HTTP plane.
+pub const RESERVED_SYSTEM_SESSIONS: &[&str] = &["default"];
 
 /// Route layer for `/sessions/{session_id}/…` (multi-tenant mode).
 ///

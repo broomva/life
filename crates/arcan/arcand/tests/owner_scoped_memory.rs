@@ -109,6 +109,7 @@ impl ModelProviderPort for CapturingProvider {
 
 struct Daemon {
     base: String,
+    runtime: Arc<KernelRuntime>,
     root: PathBuf,
     prompts: Arc<Mutex<Vec<(String, String)>>>,
     client: reqwest::Client,
@@ -158,7 +159,7 @@ async fn start_daemon() -> Daemon {
     ));
 
     let router = create_canonical_router_with_skills(
-        runtime,
+        runtime.clone(),
         Arc::new(std::sync::RwLock::new(
             Arc::new(StubProvider) as Arc<dyn Provider>
         )) as SwappableProviderHandle,
@@ -182,6 +183,7 @@ async fn start_daemon() -> Daemon {
     });
     Daemon {
         base: format!("http://{addr}"),
+        runtime,
         root,
         prompts,
         client: reqwest::Client::new(),
@@ -579,6 +581,63 @@ async fn a_pre_existing_workspace_can_be_claimed_by_nobody() {
         !d.root.join("session-owners/legacy-1").exists(),
         "a pre-existing workspace must not be claimed by the first caller"
     );
+}
+
+/// P20 round 3: an event stream that exists without a workspace (a
+/// pre-owner-scoping session whose directory is gone) must not be claimable.
+#[tokio::test]
+async fn a_pre_existing_event_stream_without_a_workspace_can_be_claimed_by_nobody() {
+    use aios_protocol::{ModelRouting, SessionId};
+    let d = start_daemon().await;
+    d.runtime
+        .create_session_with_id(
+            SessionId::from_string("legacy-bob"),
+            "bob",
+            PolicySet::default(),
+            ModelRouting::default(),
+        )
+        .await
+        .unwrap();
+    std::fs::remove_dir_all(d.root.join("sessions/legacy-bob")).unwrap();
+    let events = d
+        .runtime
+        .read_events(&SessionId::from_string("legacy-bob"), 0, 1)
+        .await
+        .unwrap();
+    assert!(!events.is_empty(), "control: the stream exists");
+    assert_eq!(
+        d.create_session("alice", "legacy-bob").await.status(),
+        StatusCode::CONFLICT
+    );
+    let r = d
+        .run_tool("alice", "legacy-bob", "read_memory", json!({"key": "k"}))
+        .await;
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    let (status, _) = d.events_text("alice", "legacy-bob").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(!d.root.join("session-owners/legacy-bob").exists());
+}
+
+/// P20 round 3: the streams the daemon writes cross-tenant data into
+/// (`"default"`: filesystem events, Nous judgments) are claimable by nobody,
+/// even before their first event is written.
+#[tokio::test]
+async fn the_daemons_system_streams_can_be_claimed_by_nobody() {
+    let d = start_daemon().await;
+    for sid in arcand::canonical::RESERVED_SYSTEM_SESSIONS {
+        assert_eq!(
+            d.create_session("alice", sid).await.status(),
+            StatusCode::CONFLICT,
+            "{sid}"
+        );
+        let r = d
+            .run_tool("alice", sid, "read_memory", json!({"key": "k"}))
+            .await;
+        assert_eq!(r.status(), StatusCode::NOT_FOUND, "{sid}");
+        let (status, _) = d.events_text("alice", sid).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{sid}");
+        assert!(!d.root.join("session-owners").join(sid).exists(), "{sid}");
+    }
 }
 
 /// Reviewer PoC 1 (P20 round 1): a stream opened on an id before its owner

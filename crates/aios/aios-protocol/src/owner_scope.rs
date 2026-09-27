@@ -683,6 +683,24 @@ mod tests {
         );
     }
 
+    /// On a case-insensitive filesystem (macOS default) `BOB` would open
+    /// `bob`'s directory; the canonical check refuses it. Skipped where the
+    /// filesystem is case-sensitive (the variant is then a distinct owner).
+    #[test]
+    fn a_case_variant_owner_never_opens_another_owners_memory() {
+        let tmp = data_dir();
+        let bob = owner_memory_root(tmp.path(), "bob").unwrap();
+        fs::write(bob.join("secret.md"), "bob").unwrap();
+        let insensitive = tmp.path().join(OWNERS_DIR).join("BOB").exists();
+        if !insensitive {
+            return;
+        }
+        assert_eq!(
+            owner_memory_root(tmp.path(), "BOB"),
+            Err(OwnerScopeError::NotContained)
+        );
+    }
+
     #[test]
     fn adopt_copies_without_clobbering_and_never_deletes_the_legacy_store() {
         let tmp = data_dir();
