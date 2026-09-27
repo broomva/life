@@ -6,16 +6,10 @@
 # RUSTSEC-2025-0134 — rustls-pemfile unmaintained (transitive; migration to rustls-pki-types planned).
 # RUSTSEC-2017-0008 — serial crate unmaintained (transitive, no impact on agent runtime).
 # RUSTSEC-2026-0002 — lru IterMut stacked-borrows unsoundness (we don't use IterMut).
-# RUSTSEC-2026-0104 — rustls-webpki reachable panic on crafted CRLs; we don't parse untrusted CRLs. The 0.103 line is now patched (0.103.15);
-#   what remains is the lockfile-only rustls-webpki 0.101 on the legacy aws-smithy/rustls 0.21 chain (see 0098/0099), so it stays ignored here
-#   while cargo-deny (resolved graph) no longer matches it.
-# RUSTSEC-2026-0098 — rustls-webpki name-constraint URI-name acceptance; transitive via aws-smithy-http-client → hyper-rustls 0.24 → rustls 0.21 → rustls-webpki 0.101. We don't use Name Constraints in our PKI surface (Tier-1 verifier uses ES256 against a known issuer); rolls off when aws-sdk-kms upgrades its TLS chain.
-# RUSTSEC-2026-0099 — rustls-webpki wildcard name-constraint acceptance; same provenance as RUSTSEC-2026-0098. Same mitigation reasoning.
 # RUSTSEC-2026-0194 / RUSTSEC-2026-0195 — quick-xml quadratic-attr / unbounded-namespace DoS. Deep-transitive (quick-xml 0.37 ← object_store ← datafusion 45 ← lance ← lago-lance ← arcan); patched only in >=0.41.0, a semver-breaking jump requiring the whole lance/datafusion/object_store stack to upgrade (tracked separately). Reachable only when parsing UNTRUSTED XML via NsReader/attributes-with-checks; life uses quick-xml solely through object_store against trusted cloud-storage endpoints, so the DoS surface does not apply. Rolls off when the lance/datafusion upgrade lands.
-# RUSTSEC-2026-0258 — h2 unbounded empty DATA frames. The 0.4 line is patched (h2 0.4.19 in the lock); the remaining h2 0.3.27 is the
-#   same legacy chain as RUSTSEC-2026-0098/0099 (aws-smithy-http-client → hyper-rustls 0.24 → hyper 0.14 → h2 0.3), which has no 0.3 fix.
-#   `cargo tree --target all -i h2@0.3.27` finds no path in the build graph and cargo-deny does not match it: a lockfile-only entry.
-#   Rolls off when aws-smithy drops its hyper-0.14 client.
+# RUSTSEC-2026-0098 / -0099 / -0104 / -0258 removed 2026-09-27: lifegw's kms-aws now uses the AWS SDK's
+#   `default-https-client` (hyper 1 + rustls 0.23) instead of the legacy `rustls` feature, so hyper 0.14, h2 0.3,
+#   rustls 0.21 and rustls-webpki 0.101 are gone from Cargo.lock entirely.
 [advisories]
 ignore = [
     "RUSTSEC-2023-0071",
@@ -24,10 +18,6 @@ ignore = [
     "RUSTSEC-2025-0134",
     "RUSTSEC-2017-0008",
     "RUSTSEC-2026-0002",
-    "RUSTSEC-2026-0104",
-    "RUSTSEC-2026-0098",
-    "RUSTSEC-2026-0099",
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
-    "RUSTSEC-2026-0258",
 ]
