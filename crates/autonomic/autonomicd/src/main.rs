@@ -64,9 +64,17 @@ fn build_rule_set(config: &AutonomicConfig) -> RuleSet {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize telemetry via Vigil (structured logging + optional OTel export)
-    let _guard =
-        life_vigil::init_telemetry(VigConfig::for_service("autonomic").with_env_overrides())?;
+    // Initialize telemetry via Vigil (structured logging + optional OTel export).
+    // Telemetry is advisory: a failure must never stop the daemon (BRO-2642).
+    let _guard = match life_vigil::init_telemetry(
+        VigConfig::for_service("autonomic").with_env_overrides(),
+    ) {
+        Ok(guard) => Some(guard),
+        Err(e) => {
+            eprintln!("warning: telemetry init failed ({e}); continuing without telemetry");
+            None
+        }
+    };
 
     let args = CliArgs::parse();
 

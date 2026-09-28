@@ -349,7 +349,10 @@ p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 opentelemetry = "0.32"
-opentelemetry-otlp = { version = "0.32", features = ["trace", "metrics", "grpc-tonic"] }
+# TLS is feature-gated since opentelemetry-otlp 0.30: without a `tls-*` feature
+# an https endpoint fails exporter build (BRO-2642). aws-lc matches the rustls
+# backend already linked; webpki roots keep trust independent of the image.
+opentelemetry-otlp = { version = "0.32", features = ["trace", "metrics", "grpc-tonic", "tls-aws-lc", "tls-webpki-roots"] }
 opentelemetry_sdk = { version = "0.32", features = ["trace", "metrics"] }
 parking_lot = "0.12"
 parquet = { version = "53", features = ["async"] }

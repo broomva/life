@@ -11,7 +11,9 @@ repository = "https://github.com/broomva/vigil"
 # OpenTelemetry core
 opentelemetry = "0.32"
 opentelemetry_sdk = { version = "0.32", features = ["trace", "metrics"] }
-opentelemetry-otlp = { version = "0.32", features = ["trace", "metrics", "grpc-tonic", "http-proto"] }
+# TLS for both transports (BRO-2642): `tls-*` for gRPC (tonic), `reqwest-rustls`
+# for http/protobuf. Without them an https OTLP endpoint cannot be exported to.
+opentelemetry-otlp = { version = "0.32", features = ["trace", "metrics", "grpc-tonic", "http-proto", "tls-aws-lc", "tls-webpki-roots", "reqwest-rustls"] }
 opentelemetry-semantic-conventions = "0.32"
 
 # Tracing bridge
