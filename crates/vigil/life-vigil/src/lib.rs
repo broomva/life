@@ -102,6 +102,14 @@ pub struct VigGuard {
     meter_provider: Option<SdkMeterProvider>,
 }
 
+impl VigGuard {
+    /// Whether OTLP export is active. `false` means logging only: either no
+    /// endpoint was configured, or exporter init failed and was degraded.
+    pub fn is_exporting(&self) -> bool {
+        self.tracer_provider.is_some() || self.meter_provider.is_some()
+    }
+}
+
 impl Drop for VigGuard {
     fn drop(&mut self) {
         if let Some(ref tp) = self.tracer_provider {
@@ -124,36 +132,66 @@ impl Drop for VigGuard {
 /// Returns a [`VigGuard`] that flushes telemetry on drop.
 ///
 /// If no OTLP endpoint is set, only structured logging is configured.
+///
+/// OTLP export is advisory: if an exporter cannot be built (bad endpoint,
+/// missing TLS support, …) this logs a warning and falls back to logging
+/// only, so a telemetry misconfiguration never stops a daemon from booting
+/// (BRO-2642). Only a subscriber install failure is returned as an error.
 pub fn init_telemetry(config: VigConfig) -> Result<VigGuard, VigError> {
     let _ = VIGIL_CONFIG.set(config.clone());
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
-    if let Some(ref endpoint) = config.otlp_endpoint {
-        init_with_otel(config.clone(), endpoint, env_filter)
-    } else {
-        init_logging_only(&config, env_filter)
+    let Some(ref endpoint) = config.otlp_endpoint else {
+        return init_logging_only(&config, env_filter);
+    };
+
+    match build_providers(&config, endpoint) {
+        Ok((tracer_provider, meter_provider)) => {
+            init_with_otel(&config, tracer_provider, meter_provider, env_filter)
+        }
+        Err(e) => {
+            let guard = init_logging_only(&config, env_filter)?;
+            tracing::warn!(
+                error = %e,
+                "OTLP exporter init failed; continuing with logging only (no telemetry export)"
+            );
+            Ok(guard)
+        }
     }
 }
 
-/// Initialize with full OTel pipeline.
-fn init_with_otel(
-    config: VigConfig,
+/// Build both OTLP providers before touching any global state, so a failure
+/// in either leaves nothing half-installed.
+fn build_providers(
+    config: &VigConfig,
     endpoint: &str,
-    env_filter: EnvFilter,
-) -> Result<VigGuard, VigError> {
+) -> Result<(SdkTracerProvider, SdkMeterProvider), VigError> {
     // Resource::builder() automatically includes EnvResourceDetector,
     // which reads OTEL_RESOURCE_ATTRIBUTES (e.g. langsmith.project.name=arcan).
     let resource = Resource::builder()
         .with_service_name(config.service_name.clone())
         .build();
 
-    // Build tracer provider
-    let tracer_provider = build_tracer_provider(&config, endpoint, resource.clone())?;
-    global::set_tracer_provider(tracer_provider.clone());
+    let tracer_provider = build_tracer_provider(config, endpoint, resource.clone())?;
+    let meter_provider = match build_meter_provider(config, endpoint, resource) {
+        Ok(mp) => mp,
+        Err(e) => {
+            let _ = tracer_provider.shutdown();
+            return Err(e);
+        }
+    };
+    Ok((tracer_provider, meter_provider))
+}
 
-    // Build meter provider
-    let meter_provider = build_meter_provider(&config, endpoint, resource)?;
+/// Initialize with full OTel pipeline.
+fn init_with_otel(
+    config: &VigConfig,
+    tracer_provider: SdkTracerProvider,
+    meter_provider: SdkMeterProvider,
+    env_filter: EnvFilter,
+) -> Result<VigGuard, VigError> {
+    global::set_tracer_provider(tracer_provider.clone());
     global::set_meter_provider(meter_provider.clone());
 
     // Create OTel tracing layer with INFO filter to exclude debug-level
@@ -220,6 +258,21 @@ fn init_logging_only(config: &VigConfig, env_filter: EnvFilter) -> Result<VigGua
     })
 }
 
+/// TLS config for a gRPC OTLP endpoint: `Some` (with trust roots) for https.
+///
+/// The exporter's own https default is a `ClientTlsConfig` with no trust
+/// roots, which builds fine and then fails every handshake at export time.
+pub fn grpc_tls_config(
+    endpoint: &str,
+) -> Option<opentelemetry_otlp::tonic_types::transport::ClientTlsConfig> {
+    let is_https = endpoint
+        .get(..8)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"));
+    is_https.then(|| {
+        opentelemetry_otlp::tonic_types::transport::ClientTlsConfig::new().with_webpki_roots()
+    })
+}
+
 /// Build an OTLP tracer provider.
 fn build_tracer_provider(
     config: &VigConfig,
@@ -231,6 +284,10 @@ fn build_tracer_provider(
             let mut builder = opentelemetry_otlp::SpanExporter::builder()
                 .with_tonic()
                 .with_endpoint(endpoint);
+
+            if let Some(tls) = grpc_tls_config(endpoint) {
+                builder = builder.with_tls_config(tls);
+            }
 
             if !config.otlp_headers.is_empty() {
                 let mut metadata = tonic::metadata::MetadataMap::new();
@@ -287,6 +344,10 @@ fn build_meter_provider(
             let mut builder = opentelemetry_otlp::MetricExporter::builder()
                 .with_tonic()
                 .with_endpoint(endpoint);
+
+            if let Some(tls) = grpc_tls_config(endpoint) {
+                builder = builder.with_tls_config(tls);
+            }
 
             if !config.otlp_headers.is_empty() {
                 let mut metadata = tonic::metadata::MetadataMap::new();
@@ -362,6 +423,52 @@ mod tests {
 
         let e = VigError::Subscriber("sub error".to_string());
         assert!(e.to_string().contains("sub error"));
+    }
+
+    const HTTPS_ENDPOINT: &str = "https://us.cloud.langfuse.com/api/public/otel";
+
+    fn config_for(protocol: OtlpProtocol) -> VigConfig {
+        VigConfig {
+            otlp_protocol: protocol,
+            ..VigConfig::for_service("test")
+        }
+    }
+
+    /// BRO-2642: with opentelemetry-otlp >= 0.30 and no `tls-*` feature, an
+    /// https endpoint fails exporter build, which panicked lagod at boot.
+    #[tokio::test]
+    async fn exporters_build_against_https_endpoint() {
+        for protocol in [OtlpProtocol::Grpc, OtlpProtocol::Http] {
+            let config = config_for(protocol);
+            let resource = Resource::builder().with_service_name("test").build();
+
+            let tp = build_tracer_provider(&config, HTTPS_ENDPOINT, resource.clone())
+                .unwrap_or_else(|e| panic!("{protocol:?} span exporter over https: {e}"));
+            let mp = build_meter_provider(&config, HTTPS_ENDPOINT, resource)
+                .unwrap_or_else(|e| panic!("{protocol:?} metric exporter over https: {e}"));
+            let guard = VigGuard {
+                tracer_provider: Some(tp),
+                meter_provider: Some(mp),
+            };
+            assert!(guard.is_exporting());
+        }
+    }
+
+    #[test]
+    fn grpc_tls_config_only_for_https() {
+        assert!(grpc_tls_config(HTTPS_ENDPOINT).is_some());
+        assert!(grpc_tls_config("HTTPS://collector:4317").is_some());
+        assert!(grpc_tls_config("http://localhost:4317").is_none());
+        assert!(grpc_tls_config("").is_none());
+    }
+
+    #[tokio::test]
+    async fn build_providers_reports_invalid_endpoint() {
+        let config = config_for(OtlpProtocol::Grpc);
+        assert!(matches!(
+            build_providers(&config, "not a uri"),
+            Err(VigError::SpanExporter(_))
+        ));
     }
 
     #[test]

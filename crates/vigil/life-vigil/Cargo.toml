@@ -11,7 +11,10 @@ repository = "https://github.com/broomva/vigil"
 # OpenTelemetry core
 opentelemetry = "0.32"
 opentelemetry_sdk = { version = "0.32", features = ["trace", "metrics"] }
-opentelemetry-otlp = { version = "0.32", features = ["trace", "metrics", "grpc-tonic", "http-proto"] }
+# gRPC TLS (BRO-2642): without a `tls-*` feature an https endpoint fails exporter
+# build. http/protobuf TLS (`reqwest-rustls`) is deliberately NOT enabled here: its
+# client build `expect`s on an empty CA store, an abort init_telemetry cannot catch.
+opentelemetry-otlp = { version = "0.32", features = ["trace", "metrics", "grpc-tonic", "http-proto", "tls-aws-lc", "tls-webpki-roots"] }
 opentelemetry-semantic-conventions = "0.32"
 
 # Tracing bridge
