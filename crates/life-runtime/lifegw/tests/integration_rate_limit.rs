@@ -195,7 +195,10 @@ impl TestEnv {
     async fn dial_lifegw(&self) -> Channel {
         let cert_pem = self.cert_pem.clone();
         let addr = self.lifegw_addr;
-        let endpoint = Endpoint::from_static("https://localhost")
+        // `http://`: the connector below does the TLS itself. With tonic's TLS
+        // features unified in (opentelemetry-otlp `tls-aws-lc`, BRO-2642), an
+        // `https://` URI without a tonic tls_config is `HttpsUriWithoutTlsSupport`.
+        let endpoint = Endpoint::from_static("http://localhost")
             .timeout(Duration::from_secs(5))
             .connect_timeout(Duration::from_secs(5));
         endpoint
