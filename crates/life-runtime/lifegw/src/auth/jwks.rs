@@ -527,8 +527,8 @@ impl JwksCache {
     /// fetch always happens, deterministically.
     #[cfg(test)]
     fn arm_test_gate(&self, threshold: usize) {
-        self.test_waiting_count.store(0, Ordering::SeqCst);
-        self.test_gate_threshold.store(threshold, Ordering::SeqCst);
+        self.test_waiting_count.store(0, Ordering::Relaxed);
+        self.test_gate_threshold.store(threshold, Ordering::Relaxed);
     }
 
     /// Whether the dev-token Bearer shortcut is enabled.
@@ -835,7 +835,7 @@ impl JwksCache {
             // condvar, so an armed winner can block until every other
             // caller is provably at this point. See `arm_test_gate`.
             #[cfg(test)]
-            self.test_waiting_count.fetch_add(1, Ordering::SeqCst);
+            self.test_waiting_count.fetch_add(1, Ordering::Relaxed);
             while guard.inflight && guard.generation == waited_for {
                 self.flight_cv.wait(&mut guard);
             }
@@ -856,10 +856,28 @@ impl JwksCache {
         // until that many other callers are provably waiting on the
         // cohort (see the waiter-path counter above), instead of racing
         // real scheduler timing. No-op (threshold 0) outside tests.
+        //
+        // Bounded with a deadline: this is whitebox-coupled to the exact
+        // statement order below (waiters must increment their counter
+        // strictly before re-checking `inflight`). If a genuine
+        // single-flight regression — or an unrelated future refactor of
+        // this function that reorders that statement — ever breaks the
+        // invariant the gate relies on, an unbounded spin here would hang
+        // silently for the CI job's full timeout with no diagnostic.
+        // Panicking with a clear message instead keeps that failure mode
+        // fast and legible, matching the flaky assertion this test used
+        // to have before BRO-2637.
         #[cfg(test)]
         {
-            let threshold = self.test_gate_threshold.load(Ordering::SeqCst);
-            while self.test_waiting_count.load(Ordering::SeqCst) < threshold {
+            let threshold = self.test_gate_threshold.load(Ordering::Relaxed);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while self.test_waiting_count.load(Ordering::Relaxed) < threshold {
+                assert!(
+                    Instant::now() < deadline,
+                    "test gate timed out waiting for {threshold} callers to reach the \
+                     waiter branch (single-flight coalescing may be broken, or \
+                     force_refetch was refactored in a way that invalidates this seam)"
+                );
                 std::thread::yield_now();
             }
         }
