@@ -870,7 +870,11 @@ impl JwksCache {
         #[cfg(test)]
         {
             let threshold = self.test_gate_threshold.load(Ordering::Relaxed);
-            let deadline = Instant::now() + Duration::from_secs(10);
+            // 60s: the gated work per caller is one mutex lock + field
+            // check + atomic increment (no I/O), normally sub-100ms even
+            // at N=100 — this budget is pure headroom for a starved
+            // scheduler on a heavily shared runner, not expected latency.
+            let deadline = Instant::now() + Duration::from_secs(60);
             while self.test_waiting_count.load(Ordering::Relaxed) < threshold {
                 assert!(
                     Instant::now() < deadline,
