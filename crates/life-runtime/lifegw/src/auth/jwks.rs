@@ -49,6 +49,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::RwLock;
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -422,6 +424,19 @@ pub struct JwksCache {
     /// in addition to real JWS verification. Set only via
     /// [`JwksCache::dev_only`] (used by tests + the dev-mode boot path).
     dev_signer_enabled: bool,
+    /// Test-only seam (BRO-2637): when armed (> 0) via [`Self::arm_test_gate`],
+    /// the winner branch of [`Self::force_refetch`] blocks after claiming the
+    /// inflight slot until `test_waiting_count` reaches this threshold, i.e.
+    /// until that many other callers have observed `inflight = true` and are
+    /// about to wait on the condvar. This makes the herd-coalescing test
+    /// deterministic instead of racing real scheduler timing. Zero (the
+    /// default) disables the gate with no behavior change.
+    #[cfg(test)]
+    test_gate_threshold: AtomicUsize,
+    /// Test-only seam (BRO-2637): incremented by every waiter right before
+    /// it enters the condvar wait loop in [`Self::force_refetch`].
+    #[cfg(test)]
+    test_waiting_count: AtomicUsize,
 }
 
 impl JwksCache {
@@ -442,6 +457,10 @@ impl JwksCache {
             flight_cv: Condvar::new(),
             fetch_counter: AtomicU64::new(0),
             dev_signer_enabled: false,
+            #[cfg(test)]
+            test_gate_threshold: AtomicUsize::new(0),
+            #[cfg(test)]
+            test_waiting_count: AtomicUsize::new(0),
         }
     }
 
@@ -482,6 +501,10 @@ impl JwksCache {
             flight_cv: Condvar::new(),
             fetch_counter: AtomicU64::new(0),
             dev_signer_enabled: true,
+            #[cfg(test)]
+            test_gate_threshold: AtomicUsize::new(0),
+            #[cfg(test)]
+            test_waiting_count: AtomicUsize::new(0),
         }
     }
 
@@ -491,6 +514,21 @@ impl JwksCache {
     #[doc(hidden)]
     pub fn fetch_count(&self) -> u64 {
         self.fetch_counter.load(Ordering::Relaxed)
+    }
+
+    /// Test-only seam (BRO-2637): arm the winner-blocking gate in
+    /// [`Self::force_refetch`]. Once armed with `threshold`, the winner
+    /// will not call the underlying fetch until `threshold` other callers
+    /// have observed `inflight = true` and are about to wait on the
+    /// condvar — i.e. are provably waiting on the in-flight cohort. This
+    /// removes the scheduler-timing race that made
+    /// `single_flight_bounds_concurrent_refetch_to_one` flaky: with N
+    /// concurrent callers and the gate armed at `N - 1`, exactly one
+    /// fetch always happens, deterministically.
+    #[cfg(test)]
+    fn arm_test_gate(&self, threshold: usize) {
+        self.test_waiting_count.store(0, Ordering::Relaxed);
+        self.test_gate_threshold.store(threshold, Ordering::Relaxed);
     }
 
     /// Whether the dev-token Bearer shortcut is enabled.
@@ -792,6 +830,12 @@ impl JwksCache {
         if guard.inflight {
             // Waiter path — wait for the cohort to complete.
             let waited_for = guard.generation;
+            // Test-only seam (BRO-2637): record that this caller has
+            // observed `inflight = true` and is about to wait on the
+            // condvar, so an armed winner can block until every other
+            // caller is provably at this point. See `arm_test_gate`.
+            #[cfg(test)]
+            self.test_waiting_count.fetch_add(1, Ordering::Relaxed);
             while guard.inflight && guard.generation == waited_for {
                 self.flight_cv.wait(&mut guard);
             }
@@ -807,6 +851,40 @@ impl JwksCache {
         // record the cohort outcome, and notify.
         guard.inflight = true;
         drop(guard);
+
+        // Test-only seam (BRO-2637): if a test armed the gate, block here
+        // until that many other callers are provably waiting on the
+        // cohort (see the waiter-path counter above), instead of racing
+        // real scheduler timing. No-op (threshold 0) outside tests.
+        //
+        // Bounded with a deadline: this is whitebox-coupled to the exact
+        // statement order below (waiters must increment their counter
+        // strictly before re-checking `inflight`). If a genuine
+        // single-flight regression — or an unrelated future refactor of
+        // this function that reorders that statement — ever breaks the
+        // invariant the gate relies on, an unbounded spin here would hang
+        // silently for the CI job's full timeout with no diagnostic.
+        // Panicking with a clear message instead keeps that failure mode
+        // fast and legible, matching the flaky assertion this test used
+        // to have before BRO-2637.
+        #[cfg(test)]
+        {
+            let threshold = self.test_gate_threshold.load(Ordering::Relaxed);
+            // 60s: the gated work per caller is one mutex lock + field
+            // check + atomic increment (no I/O), normally sub-100ms even
+            // at N=100 — this budget is pure headroom for a starved
+            // scheduler on a heavily shared runner, not expected latency.
+            let deadline = Instant::now() + Duration::from_secs(60);
+            while self.test_waiting_count.load(Ordering::Relaxed) < threshold {
+                assert!(
+                    Instant::now() < deadline,
+                    "test gate timed out waiting for {threshold} callers to reach the \
+                     waiter branch (single-flight coalescing may be broken, or \
+                     force_refetch was refactored in a way that invalidates this seam)"
+                );
+                std::thread::yield_now();
+            }
+        }
 
         let result = self.fetch().and_then(|doc| {
             self.fetch_counter.fetch_add(1, Ordering::Relaxed);
@@ -1446,19 +1524,25 @@ mod tests {
 
     #[test]
     fn single_flight_bounds_concurrent_refetch_to_one() {
-        // Sub-phase D (D4): under N concurrent `force_refetch()`
-        // calls, the upstream fetch herd is BOUNDED — far less than N.
+        // Sub-phase D (D4), made deterministic under BRO-2637: under N
+        // concurrent `force_refetch()` calls, the upstream fetch herd
+        // must be coalesced to EXACTLY 1.
         //
-        // The exact number depends on scheduler timing because the
-        // single-flight coalescer admits a new winner once the prior
-        // winner releases the inflight slot. With `Inline` (zero-time)
-        // fetches, threads can serialise on the mutex and each one
-        // becomes its own winner. We use a synthetic delay via the
-        // file-source path with a small file to introduce ~0.1ms work
-        // per fetch which is enough for the coalescer to win — at
-        // 100 concurrent callers we observe well below 100 fetches,
-        // proving the herd is bounded. Without single-flight, the
-        // count would equal N exactly.
+        // This used to assert `fetch_count() <= 50` because whether a
+        // late caller sees `inflight` still true or already reset back
+        // to false is a real scheduler race — on a loaded runner more
+        // than 50/100 callers could miss the in-flight window and each
+        // become their own winner, turning main CI red (BRO-2637).
+        //
+        // The fix: hold the winner's fetch open on a test-only gate
+        // (`arm_test_gate` / `force_refetch`'s `#[cfg(test)]` seam) until
+        // all N-1 other callers are provably waiting — each has acquired
+        // the flight lock, observed `inflight = true`, and is one
+        // statement away from `flight_cv.wait(..)`. Only once every other
+        // caller is at that point does the winner's fetch proceed, so no
+        // caller can ever race past the winner and start its own fetch.
+        // That removes the timing dependency entirely: exactly 1 fetch,
+        // every run.
         use std::sync::Barrier;
         let (_encoding, entry) = make_es256_kid("k1");
         let dir = TempDir::new().expect("tempdir");
@@ -1476,6 +1560,7 @@ mod tests {
         let cache = Arc::new(JwksCache::new(cfg));
 
         let n = 100;
+        cache.arm_test_gate(n - 1);
         let barrier = Arc::new(Barrier::new(n));
         let mut handles = Vec::with_capacity(n);
         for _ in 0..n {
@@ -1490,18 +1575,13 @@ mod tests {
             h.join().expect("thread join");
         }
 
-        // Coalescing means we see SUBSTANTIALLY fewer than N fetches.
-        // The exact bound depends on timing but is always far under
-        // 100; we assert <= 50 as a stable bound that still proves
-        // the herd is being clamped.
+        // With every waiter provably parked before the winner's fetch
+        // runs, single-flight coalescing must produce exactly 1 fetch
+        // for all N=100 concurrent callers.
         let count = cache.fetch_count();
-        assert!(
-            count < n as u64,
-            "single-flight must reduce fetch count below N=100; observed {count}"
-        );
-        assert!(
-            count <= 50,
-            "single-flight should bound the herd to <=50/100; observed {count}"
+        assert_eq!(
+            count, 1,
+            "single-flight must coalesce all N={n} concurrent callers into exactly 1 fetch; observed {count}"
         );
     }
 
