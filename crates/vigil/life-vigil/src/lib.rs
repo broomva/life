@@ -262,7 +262,7 @@ fn init_logging_only(config: &VigConfig, env_filter: EnvFilter) -> Result<VigGua
 ///
 /// The exporter's own https default is a `ClientTlsConfig` with no trust
 /// roots, which builds fine and then fails every handshake at export time.
-fn grpc_tls_config(
+pub fn grpc_tls_config(
     endpoint: &str,
 ) -> Option<opentelemetry_otlp::tonic_types::transport::ClientTlsConfig> {
     let is_https = endpoint

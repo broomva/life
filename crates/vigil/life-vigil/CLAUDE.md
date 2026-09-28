@@ -128,6 +128,8 @@ Instrumented channels: `lago.journal.stream` (wrapper), `arcan.substrate`
 ### Langfuse
 
 ```bash
+# Langfuse accepts OTLP over HTTP only; the default `grpc` protocol boots fine
+# but every export fails. http/protobuf over https needs follow-up work (BRO-2642).
 export OTEL_EXPORTER_OTLP_ENDPOINT="https://cloud.langfuse.com/api/public/otel"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64(public_key:secret_key)>"
 export OTEL_SERVICE_NAME="arcan"
