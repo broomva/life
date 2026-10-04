@@ -413,7 +413,7 @@ jsonschema = { version = "0.46", default-features = false }
 # YAML-frontmatter splitter for parsing `agents/<name>.md` files.
 # Body becomes `AgentSpec.instructions`; frontmatter becomes the
 # structured fields. See spec §4.
-gray_matter = { version = "0.2", default-features = false, features = ["yaml"] }
+gray_matter = { version = "0.3", default-features = false, features = ["yaml"] }
 
 [workspace.lints.clippy]
 too_many_arguments = "allow"
