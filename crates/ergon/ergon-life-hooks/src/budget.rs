@@ -25,6 +25,10 @@ use std::sync::Arc;
 /// for example, downgrading `max_tokens` when the budget is tight, or
 /// stripping expensive tools — and return `Continue`. The hook re-checks
 /// after potential mutation.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait BudgetGate: Send + Sync {
     /// Decide whether the given inference call is allowed.

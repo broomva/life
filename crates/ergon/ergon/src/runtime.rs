@@ -64,6 +64,10 @@ use std::sync::Arc;
 /// `arcan_provider::Provider` and translates its events to ergon's
 /// [`crate::StreamEvent`] taxonomy. In tests: see the mock impl in
 /// `step.rs` `tests` module.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait Provider: Send + Sync {
     /// Stable, human-readable name of the provider (used in tracing,
@@ -106,6 +110,10 @@ pub trait Provider: Send + Sync {
 /// In production: a `PraxisToolRegistryAdapter` (BRO-1001) wraps
 /// `praxis_core::ToolRegistry` and bakes a `SandboxPolicy` in at
 /// construction. In tests: see the mock impl in `step.rs` `tests` module.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait ToolRegistry: Send + Sync {
     /// JSON-Schema-backed tool definitions advertised to the model.

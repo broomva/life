@@ -55,6 +55,10 @@ pub enum EgressProtocol {
 /// MVS default impl is `NoOpNetworkIsolation` (Phase 1, logs but allows
 /// all). `AllowListNetworkIsolation` lands in Phase 4.
 /// `EbpfNetworkIsolation` (CubeVS pattern) is Phase 6.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait NetworkIsolationPort: Send + Sync {
     /// Apply a network policy to a VM. Typically called exactly once at VM

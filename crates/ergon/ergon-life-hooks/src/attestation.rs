@@ -33,6 +33,10 @@ use std::sync::Arc;
 /// emits the signed event onto the lago journal.
 ///
 /// Errors are non-fatal — see module docs.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait SoulAttester: Send + Sync {
     /// Sign a `SessionStart`-equivalent event for the given session.

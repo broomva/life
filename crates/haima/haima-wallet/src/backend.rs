@@ -8,6 +8,10 @@ use haima_core::{HaimaResult, WalletAddress};
 /// Local wallets sign directly with a private key.
 /// MPC wallets delegate signing to a remote service (e.g., Coinbase CDP).
 /// This trait unifies both behind a single interface.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait WalletBackend: Send + Sync {
     /// Get the wallet's on-chain address.

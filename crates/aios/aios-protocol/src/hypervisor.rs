@@ -395,6 +395,10 @@ pub enum BackendError {
 ///
 /// Uses `#[async_trait]` so the trait is dyn-compatible; callers typically
 /// hold `Arc<dyn HypervisorBackend>` inside the kernel backend registry.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait HypervisorBackend: Send + Sync + 'static {
     /// Stable name used for routing + observability. Examples: `"local"`, `"cube"`, `"vercel"`.
@@ -446,6 +450,10 @@ pub trait HypervisorBackend: Send + Sync + 'static {
 /// invoke a filesystem-dependent operation. Implementors MUST also advertise
 /// [`BackendCapabilitySet::FILESYSTEM_EXT`] from
 /// [`HypervisorBackend::capabilities`].
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait HypervisorFilesystemExt: HypervisorBackend {
     /// Write a batch of files into the VM's guest filesystem.

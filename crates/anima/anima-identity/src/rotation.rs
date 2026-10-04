@@ -67,6 +67,10 @@ pub struct RotationChainQuery<'a> {
 /// callers hold `&dyn JournalResolver` so the resolver can be swapped
 /// at runtime (e.g. between staging Vault-backed lago and a local
 /// fixture).
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait JournalResolver: Send + Sync {
     /// Return all `anima.identity_rotated` events that mention

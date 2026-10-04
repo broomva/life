@@ -28,6 +28,10 @@ pub struct RunCompletionContext {
     pub knowledge_top_relevance: Option<f64>,
 }
 
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait ToolHarnessObserver: Send + Sync {
     async fn post_execute(&self, session_id: String, tool_name: String, is_error: bool);

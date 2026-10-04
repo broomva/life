@@ -11,6 +11,10 @@ use uuid::Uuid;
 ///
 /// Implementations manage a collection of live sessions internally.
 /// Output is streamed to the provided `event_tx` channel during `spawn`.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait::async_trait]
 pub trait SessionAdapter: Send + Sync {
     /// Spawn a new session. Returns session info.

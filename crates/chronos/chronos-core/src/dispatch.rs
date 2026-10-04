@@ -50,6 +50,10 @@ impl DispatchOutcome {
 /// the session exists, builds a `TickInput { objective: intent, .. }`, calls
 /// `KernelRuntime::tick_on_branch(session, BranchId::main(), input)`, and folds the `TickOutput`
 /// into a [`DispatchOutcome`].
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait KernelDispatcher: Send + Sync {
     /// Run one agent tick for `session_id` driven by `intent` (the wake's objective).

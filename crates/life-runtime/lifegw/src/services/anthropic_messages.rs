@@ -180,6 +180,10 @@ const X402_AMOUNT_USD_DEFAULT: &str = "0.10";
 ///
 /// `Send + Sync + 'static` so the trait is dyn-callable from inside
 /// the per-request handler.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait::async_trait]
 pub trait HaimaClient: Send + Sync + 'static {
     /// Pre-call gate. `estimated_cost_micros` is the worst-case spend

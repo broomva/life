@@ -26,6 +26,10 @@ use std::sync::Arc;
 /// `nous_core::NousEvaluator`. The returned JSON value is the canonical
 /// score representation (e.g. `{"novelty": 2, "specificity": 3,
 /// "relevance": 3, "total": 8}`); ergon does not impose a schema.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait ResponseScorer: Send + Sync {
     /// Score the response. Errors are non-fatal; the hook records the

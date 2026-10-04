@@ -67,6 +67,10 @@ pub struct SagaCtx {
     pub claims: CapabilityClaims,
 }
 
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait SagaStep: Send + Sync {
     async fn forward(&self, ctx: &SagaCtx) -> Result<(), SagaError>;
@@ -78,6 +82,10 @@ pub trait SagaStep: Send + Sync {
 /// requires every saga state transition lands in
 /// `system/lifed/saga/<saga_id>`. We expose a small trait so the saga
 /// driver doesn't take a hard dependency on `LagoCall`.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait SagaJournal: Send + Sync {
     /// Append one saga lifecycle event. Errors are logged by the caller

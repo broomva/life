@@ -139,6 +139,10 @@ impl InferenceRequest {
 /// Step lifecycle hooks ([`crate::Hook::on_step_start`],
 /// [`crate::Hook::on_step_end`]) fire automatically when a step runs
 /// via [`StepCtx::step`].
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait Step: Send + Sync {
     /// Typed input.

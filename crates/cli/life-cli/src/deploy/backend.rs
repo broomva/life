@@ -34,6 +34,10 @@ pub struct DeploymentResult {
 ///
 /// Implementations handle the specifics of provisioning, monitoring, and
 /// tearing down agent stacks on different cloud providers.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait DeployBackend: Send + Sync {
     /// Deploy an agent template to the cloud target.

@@ -307,6 +307,10 @@ fn record_outcome(guard: Option<PoolGuard>, success_or_permanent: bool) {
 /// the event journal and filesystem manifest. HTTP-backed impls
 /// (`VercelAiGatewayArcan`, `AnthropicArcan`) have no branch concept on
 /// the raw provider wire and ignore it; mocks accept and ignore it.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait ArcanCall: Send + Sync {
     async fn create_agent(&self, sid: &str) -> ArcanProxyResult<String>;

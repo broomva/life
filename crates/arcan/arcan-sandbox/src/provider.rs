@@ -55,6 +55,10 @@ use crate::types::{
     since = "0.2.0",
     note = "use aios_protocol::HypervisorBackend — SandboxProvider is retained as a transitional alias"
 )]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait SandboxProvider: Send + Sync + 'static {
     /// Stable, unique name used for config routing and observability labels.

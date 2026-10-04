@@ -151,6 +151,10 @@ pub enum StreamEvent {
 /// Sinks that buffer (mpsc-style) propagate backpressure by awaiting on
 /// their internal channel. The autonomous loop awaits each `emit` call
 /// in turn, so a slow sink throttles the upstream provider naturally.
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
+)]
 #[async_trait]
 pub trait StreamSink: Send + Sync {
     /// Forward a single stream event. Returns an error if the sink can no
