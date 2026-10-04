@@ -199,7 +199,7 @@ nix = { version = "0.31", default-features = false, features = ["user"] }
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }
-rcgen = "0.13"
+rcgen = "0.14"
 tonic-prost = "0.14"
 async-trait.workspace = true
 # Spec D D-Sub-C: integration tests need k256 (sign_wallet round-trip
