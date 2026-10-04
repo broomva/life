@@ -403,7 +403,7 @@ wait-timeout = "0.2"
 walkdir = "2"
 zeroize = { version = "1", features = ["derive"] }
 spacetimedb-sdk = "2.0"
-zstd = "0.13"
+zstd = "0.14"
 # Production JSON Schema validator (draft 7 / 2019-09 / 2020-12).
 # Used by `ergon::AgentSpec` to validate model-emitted answers
 # against the declared `output_schema`. Replaces the v0.1
