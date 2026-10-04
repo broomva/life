@@ -7,6 +7,14 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - dependencies
+    # BRO-2814: one grouped PR for routine bumps instead of ten separate
+    # ones hitting the same CI gates in parallel. Major bumps (API breaks)
+    # stay ungrouped so they still get individual review.
+    groups:
+      cargo-patch-and-minor:
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: github-actions
     directory: /
     schedule:

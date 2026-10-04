@@ -1,0 +1,18 @@
+# BRO-2814: pin the toolchain CI and local dev both resolve to.
+#
+# Before this file existed, every CI job used `dtolnay/rust-toolchain@stable`,
+# which floats to whatever is current `stable` on the day the job runs. main
+# went red with no code change in between: `stable` moved from rustc 1.93.0
+# to 1.99.0 and a new clippy lint pass started flagging every
+# `#[async_trait]`-annotated trait as `clippy::double_must_use`. Pinning here
+# makes that kind of drift a deliberate, reviewed bump (edit this file, see
+# what breaks, fix it in the same PR) instead of a silent one that only shows
+# up when Dependabot or a push happens to land that week.
+#
+# Bump deliberately: update `channel`, run `cargo fmt && cargo clippy
+# --workspace -- -D warnings -A clippy::too_many_arguments && cargo test
+# --workspace` locally, fix whatever the new toolchain flags, then commit
+# both together.
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]

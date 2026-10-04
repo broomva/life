@@ -417,6 +417,14 @@ gray_matter = { version = "0.2", default-features = false, features = ["yaml"] }
 
 [workspace.lints.clippy]
 too_many_arguments = "allow"
+# BRO-2814: async_trait's generated methods return a boxed `dyn Future`,
+# which clippy (since the stable->1.99.0 bump) treats as already
+# #[must_use]; the #[must_use] async_trait also stamps on top then reads
+# as redundant. Not a bug in any of the ~60 `#[async_trait]` port traits
+# this flags across the workspace — a known async-trait/clippy
+# interaction. Two crates that predate `[lints] workspace = true`
+# (arcan-tui, life-cli) carry a local #[allow(...)] instead.
+double_must_use = "allow"
 
 [profile.release]
 lto = "thin"
