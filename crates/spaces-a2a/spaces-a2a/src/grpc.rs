@@ -8,6 +8,7 @@ use crate::types::{MessagePart, TaskMessage};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
+#[allow(unused_qualifications, clippy::all)]
 pub mod pb {
     tonic::include_proto!("a2a.v1");
 }

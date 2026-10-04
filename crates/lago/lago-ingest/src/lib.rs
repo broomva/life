@@ -3,6 +3,7 @@ pub mod codec;
 pub mod server;
 
 /// Generated protobuf types.
+#[allow(unused_qualifications, clippy::all)]
 pub mod proto {
     tonic::include_proto!("lago.v1");
 }
