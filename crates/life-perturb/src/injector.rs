@@ -36,10 +36,6 @@ impl PerturbationHandle {
 
 /// One implementation per level. Concrete injectors live in this crate as
 /// stubs and will be filled in by the per-level workstreams (v0.1 → v1.0).
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait Injector: Send + Sync {
     /// The hierarchy level this injector targets.

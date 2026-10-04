@@ -130,10 +130,6 @@ impl LineageFilter {
 ///
 /// Implementations must preserve insertion order on read — downstream
 /// promoters rely on chronological iteration to detect drift.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait NousLineage: Send + Sync {
     /// Record a single scoring/judging event with its full provenance.

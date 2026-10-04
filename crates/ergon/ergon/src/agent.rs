@@ -264,10 +264,6 @@ impl AgentSpec {
 /// prefer `TypedAgent` for static cases or `AgentSpec` for dynamic
 /// cases. Implementing `Agent` directly is reserved for advanced
 /// patterns like recording wrappers, remote-dispatch shims, etc.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait Agent: Send + Sync {
     /// The (possibly-derived) spec for this agent. Cheap to call —

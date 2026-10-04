@@ -110,10 +110,6 @@ pub use praxis_skills_stub::{EmptySkillSet, SkillSet};
 ///   that consume skills override this.
 /// - The workflow does NOT supply tools, sandbox, or providers — those
 ///   come from the [`StepCtx`] the host runtime hands to `execute`.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait Workflow: Send + Sync + 'static {
     /// Typed input. Must round-trip through JSON (the host runtime

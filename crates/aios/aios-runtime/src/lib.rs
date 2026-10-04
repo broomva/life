@@ -143,10 +143,6 @@ pub enum ToolCallGuardDecision {
     },
 }
 
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait ToolCallGuard: Send + Sync {
     async fn on_tool_call(
@@ -156,10 +152,6 @@ pub trait ToolCallGuard: Send + Sync {
     ) -> Result<ToolCallGuardDecision>;
 }
 
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait TurnMiddleware: Send + Sync {
     async fn process(&self, ctx: &mut TurnContext, next: TurnNext<'_>) -> Result<TickOutput>;
@@ -388,10 +380,6 @@ pub struct WorkflowTickOutcome {
 /// by `arcan-ergon` (and any future workflow runtime) and registered
 /// on the [`KernelRuntime`] at construction time. See
 /// `core/life/docs/superpowers/specs/2026-05-08-bro-1001-ergon-tick-body.md`.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait WorkflowTickDispatcher: Send + Sync {
     /// Run a workflow as the body of a single tick. Errors propagate

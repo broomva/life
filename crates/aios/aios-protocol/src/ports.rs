@@ -170,10 +170,6 @@ pub struct ApprovalResolution {
     pub resolved_at: DateTime<Utc>,
 }
 
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait EventStorePort: Send + Sync {
     async fn append(&self, event: EventRecord) -> KernelResult<EventRecord>;
@@ -193,28 +189,16 @@ pub trait EventStorePort: Send + Sync {
     ) -> KernelResult<EventRecordStream>;
 }
 
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait ModelProviderPort: Send + Sync {
     async fn complete(&self, request: ModelCompletionRequest) -> KernelResult<ModelCompletion>;
 }
 
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait ToolHarnessPort: Send + Sync {
     async fn execute(&self, request: ToolExecutionRequest) -> KernelResult<ToolExecutionReport>;
 }
 
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait PolicyGatePort: Send + Sync {
     async fn evaluate(
@@ -232,10 +216,6 @@ pub trait PolicyGatePort: Send + Sync {
     }
 }
 
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait ApprovalPort: Send + Sync {
     async fn enqueue(&self, request: ApprovalRequest) -> KernelResult<ApprovalTicket>;
@@ -304,10 +284,6 @@ mod kernel_port {
     /// error), *not* the legacy [`crate::error::KernelResult`] used by
     /// the older ports (`EventStorePort`, `ModelProviderPort`, …). Those
     /// ports migrate in BRO-856.
-    #[allow(
-        clippy::double_must_use,
-        reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-    )]
     #[async_trait::async_trait]
     pub trait KernelPort: Send + Sync {
         /// Provision a new VM from `spec` under the attribution / budget
@@ -371,10 +347,6 @@ use crate::session::{CreateSessionRequest, SessionFilter, SessionManifest, TickI
 /// Implementors provide create/get/list/tick/stream/close over the session tier.
 /// `arcand` is the reference implementation; `life-kernel-facade` consumes this
 /// trait through `Arc<dyn SessionPort>`.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait SessionPort: Send + Sync {
     async fn create(&self, req: CreateSessionRequest) -> KernelResult<SessionManifest>;
@@ -411,10 +383,6 @@ use crate::memory::SoulProfile;
 /// Implementors provide soul-profile CRUD and belief-store access for an
 /// agent. `anima-core` is the reference implementation; `life-kernel-facade`
 /// consumes this trait through `Arc<dyn IdentityPort>`.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait IdentityPort: Send + Sync {
     /// Fetch the current [`SoulProfile`] for `agent`.
@@ -467,10 +435,6 @@ use crate::knowledge::{KnowledgeQuery, KnowledgeSearchResult, Note, NoteDraft, N
 /// Implementors provide full-text search, note CRUD, and graph traversal over
 /// the knowledge index. `lago-knowledge` is the reference implementation;
 /// `life-kernel-facade` consumes this trait through `Arc<dyn KnowledgePort>`.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait KnowledgePort: Send + Sync {
     async fn search(&self, query: KnowledgeQuery) -> KernelResult<KnowledgeSearchResult>;
@@ -484,10 +448,6 @@ pub trait KnowledgePort: Send + Sync {
 /// Implementors provide immutable put/get over SHA-256–addressed payloads.
 /// `lago-store` is the reference implementation; `life-kernel-facade` consumes
 /// this trait through `Arc<dyn BlobStorePort>`.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait BlobStorePort: Send + Sync {
     async fn put(
@@ -503,10 +463,6 @@ pub trait BlobStorePort: Send + Sync {
 ///
 /// Implementors record usage events and synthesize invoices. `life-kernel-facade`
 /// consumes this trait through `Arc<dyn BillingPort>`.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait BillingPort: Send + Sync {
     async fn record_usage(&self, usage: UsageRecord) -> KernelResult<()>;
@@ -540,10 +496,6 @@ use crate::homeostasis::{
 ///
 /// Streaming projections are returned as a [`BoxStream`] so callers can
 /// consume them incrementally without holding a large in-memory buffer.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait HomeostasisPort: Send + Sync {
     /// Return the current three-pillar homeostatic snapshot for `session`.
@@ -600,10 +552,6 @@ use crate::finance::{
 ///    `SettlementReceipt`.
 ///
 /// Authorization IDs correlate authorization ↔ receipt for audit.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait FinancePort: Send + Sync {
     /// Fetch the current wallet manifest (address, balance, policy) for `owner`.
@@ -665,10 +613,6 @@ use crate::evaluation::{
 /// Implementors provide rubric-based evaluation, heuristic scoring, and
 /// comparative judgement. `nousd` is the reference implementation;
 /// `life-kernel-facade` consumes this trait through `Arc<dyn EvaluationPort>`.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait EvaluationPort: Send + Sync {
     async fn evaluate(&self, req: EvaluationRequest) -> KernelResult<EvaluationReport>;
@@ -694,10 +638,6 @@ use crate::relay::{RelayFrame, RelayOpenRequest, RelaySession, RelayToken};
 /// Implementors proxy web-based remote agent sessions from life-relayd.
 /// Facade implementations return `KernelError::Unimplemented` until v0.2
 /// lights the proxies up (Phase 4).
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait RelayPort: Send + Sync {
     async fn open(&self, req: RelayOpenRequest) -> KernelResult<RelaySession>;
@@ -727,10 +667,6 @@ use crate::world::{WorldEvent, WorldId, WorldMutation, WorldSnapshot, WorldVersi
 /// Implementors provide snapshot queries, state mutations, and event streaming
 /// for a named world. `opsisd` is the reference implementation;
 /// `life-kernel-facade` consumes this trait through `Arc<dyn WorldPort>`.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait WorldPort: Send + Sync {
     /// Return the current state snapshot for `world`.

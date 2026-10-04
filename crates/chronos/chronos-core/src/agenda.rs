@@ -256,10 +256,6 @@ pub fn sort_for_dispatch(items: &mut [AgendaItem]) {
 /// across the daemon's HTTP handlers and wake loop. `#[async_trait]` boxes the returned futures
 /// for dyn-compatibility (the wake rate Chronos targets — ≤ 100/sec — makes the boxing cost
 /// negligible).
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait AgendaStore: Send + Sync {
     /// Add a new item to the agenda. Returns the freshly-minted id.

@@ -33,10 +33,6 @@ pub struct VerificationCase {
     pub should_pass: bool,
 }
 
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait SubstrateUnderTest: Send + Sync {
     fn audience(&self) -> &'static str;

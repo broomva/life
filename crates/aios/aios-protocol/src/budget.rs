@@ -106,10 +106,6 @@ pub enum BudgetDecision {
 /// Implementations are expected to be cheap and pure (no I/O on the hot
 /// path). MVS default impl is `NoOpBudgetGate` (Phase 1, permits everything).
 /// `SessionBudgetGate` lands in Phase 4. `RcsLambdaBudgetGate` is Phase 6.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait BudgetGatePort: Send + Sync {
     /// Check whether a dispatch should proceed under `ctx` with the given

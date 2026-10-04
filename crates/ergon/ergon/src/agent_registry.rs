@@ -68,10 +68,6 @@ use crate::error::ErgonError;
 /// Hosts can compose multiple registries via [`ChainedAgentRegistry`]:
 /// authored MD files take precedence over experimental lago entries,
 /// or vice versa, depending on the deployment's policy.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait AgentRegistry: Send + Sync {
     /// Resolve an agent by name. Returns `None` if no agent is

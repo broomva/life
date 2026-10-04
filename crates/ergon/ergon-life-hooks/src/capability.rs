@@ -21,10 +21,6 @@ use std::sync::Arc;
 /// The trait is **deliberately small** — one async method. Substrate
 /// integration (PolicySet evaluation, capability glob matching, etc.)
 /// happens behind this seam, not in this crate.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait CapabilityResolver: Send + Sync {
     /// Decide whether the given tool invocation is allowed.

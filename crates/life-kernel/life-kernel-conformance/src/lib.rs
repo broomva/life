@@ -66,10 +66,6 @@ pub trait CapturingEventStore: EventStorePort {
 /// trail without going through the `KernelPort` trait. Implementations
 /// are expected to return a *fresh* engine + store on every call —
 /// scenarios assume an empty journal at construction time.
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait ConformanceHarness: Send + Sync {
     /// Build a fresh engine + capturing store pair.

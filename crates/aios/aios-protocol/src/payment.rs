@@ -81,10 +81,6 @@ pub struct WalletBalanceInfo {
 /// Implementations:
 /// - `haima-x402`: x402 protocol (Coinbase/Cloudflare)
 /// - Future: MPP (Stripe/Tempo), direct fiat rails
-#[allow(
-    clippy::double_must_use,
-    reason = "async_trait boxes the return in a Pin<Box<dyn Future>>, which clippy now treats as already #[must_use]; the attribute it generates on top is therefore redundant, not a real bug"
-)]
 #[async_trait]
 pub trait PaymentPort: Send + Sync {
     /// Evaluate whether a payment should be authorized given current policy
