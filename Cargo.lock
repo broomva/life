@@ -237,7 +237,7 @@ dependencies = [
  "life-kernel-proto",
  "p256",
  "parking_lot",
- "rand 0.8.6",
+ "rand 0.10.1",
  "reqwest 0.12.28",
  "secrecy",
  "serde",
@@ -728,7 +728,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs 6.0.0",
  "open",
- "rand 0.9.4",
+ "rand 0.10.1",
  "reqwest 0.12.28",
  "rig-core",
  "serde",
@@ -2936,7 +2936,7 @@ dependencies = [
  "log",
  "object_store",
  "parking_lot",
- "rand 0.8.6",
+ "rand 0.8.8",
  "regex",
  "sqlparser",
  "tempfile",
@@ -3021,7 +3021,7 @@ dependencies = [
  "log",
  "object_store",
  "parking_lot",
- "rand 0.8.6",
+ "rand 0.8.8",
  "tempfile",
  "url",
 ]
@@ -3081,7 +3081,7 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "md-5",
- "rand 0.8.6",
+ "rand 0.8.8",
  "regex",
  "sha2 0.10.9",
  "unicode-segmentation",
@@ -4039,7 +4039,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "499049427ae23480696a1b728a292fec9fa554742ee26c0f35acbdade47801be"
 dependencies = [
- "rand 0.8.6",
+ "rand 0.8.8",
 ]
 
 [[package]]
@@ -4510,7 +4510,7 @@ dependencies = [
  "haima-core",
  "hex",
  "k256",
- "rand 0.8.6",
+ "rand 0.10.1",
  "serde",
  "serde_json",
  "sha3",
@@ -4533,7 +4533,7 @@ dependencies = [
  "haima-wallet",
  "hex",
  "k256",
- "rand 0.8.6",
+ "rand 0.10.1",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -5845,7 +5845,7 @@ dependencies = [
  "pin-project",
  "prost 0.13.5",
  "prost-types 0.13.5",
- "rand 0.8.6",
+ "rand 0.8.8",
  "roaring",
  "serde",
  "serde_json",
@@ -5874,7 +5874,7 @@ dependencies = [
  "getrandom 0.2.17",
  "half",
  "num-traits",
- "rand 0.8.6",
+ "rand 0.8.8",
 ]
 
 [[package]]
@@ -5904,7 +5904,7 @@ dependencies = [
  "object_store",
  "pin-project",
  "prost 0.13.5",
- "rand 0.8.6",
+ "rand 0.8.8",
  "roaring",
  "serde_json",
  "snafu",
@@ -5974,7 +5974,7 @@ dependencies = [
  "prost 0.13.5",
  "prost-build 0.13.5",
  "prost-types 0.13.5",
- "rand 0.8.6",
+ "rand 0.8.8",
  "seq-macro",
  "snafu",
  "tokio",
@@ -6059,7 +6059,7 @@ dependencies = [
  "object_store",
  "prost 0.13.5",
  "prost-build 0.13.5",
- "rand 0.8.6",
+ "rand 0.8.8",
  "rayon",
  "roaring",
  "serde",
@@ -6104,7 +6104,7 @@ dependencies = [
  "path_abs",
  "pin-project",
  "prost 0.13.5",
- "rand 0.8.6",
+ "rand 0.8.8",
  "shellexpand",
  "snafu",
  "tokio",
@@ -6131,7 +6131,7 @@ dependencies = [
  "lazy_static",
  "log",
  "num-traits",
- "rand 0.8.6",
+ "rand 0.8.8",
  "rayon",
  "tokio",
  "tracing",
@@ -6164,7 +6164,7 @@ dependencies = [
  "prost 0.13.5",
  "prost-build 0.13.5",
  "prost-types 0.13.5",
- "rand 0.8.6",
+ "rand 0.8.8",
  "rangemap",
  "roaring",
  "serde",
@@ -6602,7 +6602,7 @@ dependencies = [
  "async-trait",
  "autonomic-core",
  "chrono",
- "rand 0.8.6",
+ "rand 0.10.1",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -7269,7 +7269,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ffa00dec017b5b1a8b7cf5e2c008bfda1aa7e0697ac1508b491fdf2622fb4d8"
 dependencies = [
- "rand 0.8.6",
+ "rand 0.8.8",
 ]
 
 [[package]]
@@ -7519,7 +7519,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "rand 0.8.6",
+ "rand 0.8.8",
  "smallvec",
  "zeroize",
 ]
@@ -7635,7 +7635,7 @@ dependencies = [
  "parking_lot",
  "percent-encoding",
  "quick-xml",
- "rand 0.8.6",
+ "rand 0.8.8",
  "reqwest 0.12.28",
  "ring",
  "rustls-pemfile",
@@ -8175,7 +8175,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
 dependencies = [
  "phf_shared 0.11.3",
- "rand 0.8.6",
+ "rand 0.8.8",
 ]
 
 [[package]]
@@ -8883,9 +8883,9 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "rand"
-version = "0.8.6"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
+checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -8964,7 +8964,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
 dependencies = [
  "num-traits",
- "rand 0.8.6",
+ "rand 0.8.8",
 ]
 
 [[package]]
@@ -10336,7 +10336,7 @@ dependencies = [
  "chrono",
  "ed25519-dalek",
  "prost 0.14.4",
- "rand 0.8.6",
+ "rand 0.10.1",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -10511,7 +10511,7 @@ dependencies = [
  "memchr",
  "once_cell",
  "percent-encoding",
- "rand 0.8.6",
+ "rand 0.8.8",
  "rsa",
  "serde",
  "sha1",
@@ -10551,7 +10551,7 @@ dependencies = [
  "md-5",
  "memchr",
  "once_cell",
- "rand 0.8.6",
+ "rand 0.8.8",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -11554,7 +11554,7 @@ dependencies = [
  "indexmap 1.9.3",
  "pin-project",
  "pin-project-lite",
- "rand 0.8.6",
+ "rand 0.8.8",
  "slab",
  "tokio",
  "tokio-util",
