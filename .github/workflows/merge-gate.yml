@@ -28,6 +28,7 @@ permissions:
   contents: read
   checks: read
   statuses: read
+  actions: read   # resolve which workflow produced a check-run (advisory Copilot pin)
 
 jobs:
   gate:
@@ -45,15 +46,23 @@ jobs:
           # Conclusions that BLOCK a merge (a check that actually failed).
           # success / skipped / neutral do NOT block.
           BLOCKING='failure|cancelled|timed_out|action_required|startup_failure|stale'
-          # Advisory check-runs, matched by exact name, that never block. GitHub's Copilot reviewer
-          # is a third-party bot with a review quota: when the quota runs out its check-run
-          # concludes `failure` with no output, which says nothing about the code (life#1833,
-          # BRO-3201). Owner ruling 2026-10-19: treat it as advisory.
-          ADVISORY='["copilot-pull-request-reviewer"]'
+          # GitHub's Copilot reviewer is advisory and never blocks. It has a review quota: when the quota
+          # runs out its check-run concludes `failure` with no output, which says nothing about the code
+          # (life#1833, BRO-3201). Owner ruling 2026-10-19: treat it as advisory.
+          # The name alone is not enough, because any workflow job can call itself
+          # `copilot-pull-request-reviewer`. So a run is advisory only when its check suite also belongs
+          # to Copilot's own workflow run. That run has event `dynamic` and a path under `dynamic/`,
+          # which no file in .github/workflows can produce. If the lookup fails the set is empty and
+          # the run blocks.
+          COPILOT_NAME='copilot-pull-request-reviewer'
+          COPILOT_PATH='dynamic/agents/copilot-pull-request-reviewer'
           for i in $(seq 1 80); do   # up to ~40 min (Rust CI + macOS runners are slow)
             # All check-runs on this head SHA except this gate itself.
+            advisory_suites=$(gh api --paginate "repos/$REPO/actions/runs?head_sha=$SHA&event=dynamic" \
+                     --jq ".workflow_runs[] | select(.path == \"$COPILOT_PATH\") | .check_suite_id" \
+                   | jq -sc . || echo '[]')
             runs=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs" \
-                     --jq ".check_runs[] | select(.name != \"Merge Gate\") | select(.name as \$n | $ADVISORY | index(\$n) | not) | [.name, .status, (.conclusion // \"\")] | @tsv" \
+                     --jq ".check_runs[] | select(.name != \"Merge Gate\") | select((.name == \"$COPILOT_NAME\" and (.check_suite.id as \$s | $advisory_suites | index(\$s))) | not) | [.name, .status, (.conclusion // \"\")] | @tsv" \
                    || echo "")
             # Legacy commit statuses (belt-and-suspenders; most checks are check-runs).
             st_state=$(gh api "repos/$REPO/commits/$SHA/status" --jq '.state' 2>/dev/null || echo "unknown")
