@@ -45,10 +45,15 @@ jobs:
           # Conclusions that BLOCK a merge (a check that actually failed).
           # success / skipped / neutral do NOT block.
           BLOCKING='failure|cancelled|timed_out|action_required|startup_failure|stale'
+          # Advisory check-runs, matched by exact name, that never block. GitHub's Copilot reviewer
+          # is a third-party bot with a review quota: when the quota runs out its check-run
+          # concludes `failure` with no output, which says nothing about the code (life#1833,
+          # BRO-3201). Owner ruling 2026-10-19: treat it as advisory.
+          ADVISORY='["copilot-pull-request-reviewer"]'
           for i in $(seq 1 80); do   # up to ~40 min (Rust CI + macOS runners are slow)
             # All check-runs on this head SHA except this gate itself.
             runs=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs" \
-                     --jq '.check_runs[] | select(.name != "Merge Gate") | [.name, .status, (.conclusion // "")] | @tsv' \
+                     --jq ".check_runs[] | select(.name != \"Merge Gate\") | select(.name as \$n | $ADVISORY | index(\$n) | not) | [.name, .status, (.conclusion // \"\")] | @tsv" \
                    || echo "")
             # Legacy commit statuses (belt-and-suspenders; most checks are check-runs).
             st_state=$(gh api "repos/$REPO/commits/$SHA/status" --jq '.state' 2>/dev/null || echo "unknown")
