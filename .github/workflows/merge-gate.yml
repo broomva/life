@@ -28,6 +28,7 @@ permissions:
   contents: read
   checks: read
   statuses: read
+  actions: read   # resolve which workflow produced a check-run (advisory Copilot pin)
 
 jobs:
   gate:
@@ -45,10 +46,32 @@ jobs:
           # Conclusions that BLOCK a merge (a check that actually failed).
           # success / skipped / neutral do NOT block.
           BLOCKING='failure|cancelled|timed_out|action_required|startup_failure|stale'
+          # GitHub's Copilot reviewer is advisory and never blocks. It has a review quota: when the quota
+          # runs out its check-run concludes `failure` with no output, which says nothing about the code
+          # (life#1833, BRO-3201). Owner ruling 2026-10-19: treat it as advisory.
+          # The name alone is not enough, because any workflow job can call itself
+          # `copilot-pull-request-reviewer`. So a run is advisory only when its check suite also belongs
+          # to Copilot's own workflow run. That run has event `dynamic` and a path under `dynamic/`,
+          # which no file in .github/workflows can produce. If the lookup fails the set is empty and
+          # the run blocks.
+          COPILOT_NAME='copilot-pull-request-reviewer'
+          COPILOT_PATH='dynamic/agents/copilot-pull-request-reviewer'
+          # The gate leaves out its own check-runs by the same rule: the name `Merge Gate` and a check
+          # suite from this file. Another workflow can name a job `Merge Gate`, and its failure still
+          # blocks.
+          GATE_PATH='.github/workflows/merge-gate.yml'
           for i in $(seq 1 80); do   # up to ~40 min (Rust CI + macOS runners are slow)
-            # All check-runs on this head SHA except this gate itself.
+            # Workflow runs on this head SHA as (event, path, check suite). If the lookup fails, both
+            # suite sets are empty, and no run is left out.
+            wf_runs=$(gh api --paginate "repos/$REPO/actions/runs?head_sha=$SHA" \
+                        --jq '.workflow_runs[] | [.event, .path, (.check_suite_id | tostring)] | @tsv' \
+                      || echo "")
+            gate_suites=$(printf '%s\n' "$wf_runs" | awk -F'\t' -v p="$GATE_PATH" '$2 == p {print $3}' | jq -sc .)
+            advisory_suites=$(printf '%s\n' "$wf_runs" \
+                              | awk -F'\t' -v p="$COPILOT_PATH" '$1 == "dynamic" && $2 == p {print $3}' | jq -sc .)
+            # All check-runs on this head SHA except this gate's own and the advisory Copilot run.
             runs=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs" \
-                     --jq '.check_runs[] | select(.name != "Merge Gate") | [.name, .status, (.conclusion // "")] | @tsv' \
+                     --jq ".check_runs[] | select((.name == \"Merge Gate\" and (.check_suite.id as \$s | $gate_suites | index(\$s))) | not) | select((.name == \"$COPILOT_NAME\" and (.check_suite.id as \$s | $advisory_suites | index(\$s))) | not) | [.name, .status, (.conclusion // \"\")] | @tsv" \
                    || echo "")
             # Legacy commit statuses (belt-and-suspenders; most checks are check-runs).
             st_state=$(gh api "repos/$REPO/commits/$SHA/status" --jq '.state' 2>/dev/null || echo "unknown")
@@ -56,7 +79,7 @@ jobs:
             failed=$(printf '%s\n' "$runs" | awk -F'\t' -v b="$BLOCKING" 'NF>=3 && $3 ~ ("^(" b ")$"){print $1}')
             if [ -n "$failed" ] || [ "$st_state" = "failure" ] || [ "$st_state" = "error" ]; then
               echo "::error::Merge Gate FAILED — blocking checks:"
-              [ -n "$failed" ] && printf '  - %s\n' $failed
+              [ -n "$failed" ] && printf '%s\n' "$failed" | sed 's/^/  - /'   # one line per check; names hold spaces
               [ "$st_state" = "failure" ] || [ "$st_state" = "error" ] && echo "  - (legacy commit status: $st_state)"
               exit 1
             fi
