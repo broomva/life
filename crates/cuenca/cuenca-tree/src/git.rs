@@ -383,7 +383,15 @@ impl Repo {
             stderr: stderr.trim().to_string(),
         };
         match result {
-            Err(GitError::EndedEarly(_)) if !status.success() => return Err(failed()),
+            // Before git 2.44, cat-file with lazy fetching disabled dies on a blob a
+            // partial clone lacks ("could not fetch <oid> from promisor remote") instead
+            // of answering "<oid> missing". Either way nothing was fetched.
+            Err(GitError::EndedEarly(_)) if !status.success() => {
+                return Err(match promisor_miss(&stderr) {
+                    Some(oid) => GitError::Missing(oid),
+                    None => failed(),
+                });
+            }
             Err(e) => return Err(e),
             Ok(()) => {}
         }
@@ -393,6 +401,12 @@ impl Repo {
         written?;
         Ok(())
     }
+}
+
+/// The blob a partial clone refused to fetch, from git's "could not fetch <oid>" message.
+fn promisor_miss(stderr: &str) -> Option<GitOid> {
+    let rest = stderr.split("could not fetch ").nth(1)?;
+    GitOid::from_hex(rest.get(..40)?).ok()
 }
 
 /// Hash a blob's content as it streams and check it is the object git named.
