@@ -77,6 +77,10 @@ pub enum GitError {
     NoContent(GitOid),
     #[error("tree object: git built {git}, cuenca computed {ours}")]
     TreeMismatch { git: GitOid, ours: GitOid },
+    #[error(
+        "the object stored under {0} is not the canonical tree with that id (a corrupt or substituted object)"
+    )]
+    StoreMismatch(GitOid),
 }
 
 /// Environment variables that would point git at another repository or object store.
@@ -222,9 +226,11 @@ impl Repo {
             ruled_add(&mut ruled, path, &Entry::from_mode(*mode, *oid)?);
         }
         let wanted = unique(records.iter().map(|r| r.2));
-        self.cat_file_batch(&wanted, |oid, size, content| match ruled.get(&oid) {
-            None => hash_stream(oid, size, content),
-            Some(rules) => rules.check_stream(oid, size, content),
+        self.cat_file_batch("blob", &wanted, |oid, size, content| {
+            match ruled.get(&oid) {
+                None => hash_stream(oid, size, content),
+                Some(rules) => rules.check_stream(oid, size, content),
+            }
         })?;
 
         let mut entries = Vec::with_capacity(records.len());
@@ -234,8 +240,27 @@ impl Repo {
         let tree = Tree::from_entries(entries)?;
         let ours = tree.git_tree_id();
         if ours != root {
-            return Err(GitError::TreeMismatch { git: root, ours });
+            return Err(GitError::StoreMismatch(root));
         }
+        // The listing alone can hide a substituted tree object: git prints modes in
+        // canonical form, entries in stored order and a name containing `/` like a
+        // directory, and it does not re-hash subtrees it parses. So every tree object is
+        // read and must be, byte for byte, the canonical body cuenca computed for its id.
+        let objects = tree.git_objects();
+        let bodies: HashMap<GitOid, Vec<u8>> = objects.iter().map(|o| (o.oid, o.body())).collect();
+        let ids = unique(objects.iter().map(|o| o.oid));
+        self.cat_file_batch("tree", &ids, |oid, size, content| {
+            let expected = &bodies[&oid];
+            if size != expected.len() as u64 {
+                return Err(GitError::StoreMismatch(oid));
+            }
+            let mut stored = Vec::with_capacity(expected.len());
+            content.read_to_end(&mut stored)?;
+            if stored != *expected {
+                return Err(GitError::StoreMismatch(oid));
+            }
+            Ok(())
+        })?;
         Ok(tree)
     }
 
@@ -246,7 +271,7 @@ impl Repo {
         let mut out = Blobs::with_capacity(wanted.len());
         let (per_blob, total) = (self.max_blob_bytes, self.max_total_bytes);
         let mut loaded = 0u64;
-        self.cat_file_batch(&wanted, |oid, size, content| {
+        self.cat_file_batch("blob", &wanted, |oid, size, content| {
             if size > per_blob {
                 return Err(GitError::TooLarge {
                     oid,
@@ -271,8 +296,8 @@ impl Repo {
 
     /// Write `tree` into this repository and return its tree id.
     ///
-    /// Before anything is written, every blob the caller sent must hash to its id and
-    /// pass its content rules ([`check_content`]), and every blob the repository lacks
+    /// Before anything is written, every blob of the tree the caller sent must hash to its
+    /// id and pass its content rules ([`check_content`]), and every blob the repository lacks
     /// must have been sent. Missing blobs are stored with `hash-object`, and each missing
     /// directory is built by `git mktree`, which must lay it out as cuenca computed it.
     /// Finally the result is read back with [`Repo::read_tree`], which re-hashes every
@@ -364,10 +389,7 @@ impl Repo {
         let root = tree.git_tree_id();
         let back = self.read_tree(&root.to_hex())?;
         if back != *tree {
-            return Err(GitError::TreeMismatch {
-                git: back.git_tree_id(),
-                ours: root,
-            });
+            return Err(GitError::StoreMismatch(root));
         }
         Ok(root)
     }
@@ -393,6 +415,7 @@ impl Repo {
     /// gets the blob's size and a reader over exactly its content.
     fn cat_file_batch(
         &self,
+        kind: &str,
         oids: &[GitOid],
         mut each: impl FnMut(GitOid, u64, &mut dyn Read) -> Result<(), GitError>,
     ) -> Result<(), GitError> {
@@ -426,7 +449,7 @@ impl Repo {
                 let fields: Vec<&str> = header.trim_end().split(' ').collect();
                 match fields.as_slice() {
                     [id, "missing"] if *id == oid.to_hex() => return Err(GitError::Missing(*oid)),
-                    [id, "blob", size] if *id == oid.to_hex() => {
+                    [id, found, size] if *id == oid.to_hex() && *found == kind => {
                         let size: u64 = size
                             .parse()
                             .map_err(|_| GitError::Parse("cat-file size".into()))?;
@@ -545,11 +568,11 @@ struct Ruled<'a> {
 }
 
 fn ruled_add<'a>(ruled: &mut HashMap<GitOid, Ruled<'a>>, path: &'a RepoPath, entry: &Entry) {
-    let is_link = entry.mode() == Mode::Symlink;
-    let is_attrs = crate::path::is_gitattributes_alias(path.file_name());
-    if !is_link && !is_attrs {
+    if !crate::tree::has_content_rule(path, entry.mode()) {
         return;
     }
+    let is_link = entry.mode() == Mode::Symlink;
+    let is_attrs = crate::path::is_gitattributes_alias(path.file_name());
     let rules = ruled.entry(entry.oid()).or_default();
     if is_link && rules.link.is_none() {
         rules.link = Some(path);
@@ -562,10 +585,10 @@ fn ruled_add<'a>(ruled: &mut HashMap<GitOid, Ruled<'a>>, path: &'a RepoPath, ent
 impl Ruled<'_> {
     fn check(&self, content: &[u8]) -> Result<(), TreeError> {
         if let Some(path) = self.link {
-            check_content(path, &Entry::Symlink(GitOid::for_blob(b"")), content)?;
+            check_content(path, Mode::Symlink, content)?;
         }
         if let Some(path) = self.attrs {
-            check_content(path, &Entry::File(GitOid::for_blob(b"")), content)?;
+            check_content(path, Mode::File, content)?;
         }
         Ok(())
     }
@@ -575,9 +598,9 @@ impl Ruled<'_> {
         if let Some(path) = self.link
             && size > MAX_SYMLINK_TARGET as u64
         {
-            return Err(TreeError::SymlinkTargetTooLong {
+            return Err(TreeError::SymlinkTarget {
                 path: path.to_string(),
-                len: size as usize,
+                why: format!("the target is {size} bytes, over {MAX_SYMLINK_TARGET}"),
             }
             .into());
         }

@@ -43,8 +43,8 @@ pub enum TreeError {
         "{0:?} names .gitattributes (under some alias) but is not a regular file: git's fsck rejects a directory there, and a symlink is refused here too"
     )]
     GitattributesNotAFile(String),
-    #[error("symlink {path:?} has a {len}-byte target; a Mac cannot create one over 1023")]
-    SymlinkTargetTooLong { path: String, len: usize },
+    #[error("symlink {path:?} cannot be checked out as stored: {why}")]
+    SymlinkTarget { path: String, why: String },
     #[error(".gitattributes at {path:?} breaks git's fsck limits: {why}")]
     GitattributesContent { path: String, why: String },
     #[error("unsupported git mode {0}")]

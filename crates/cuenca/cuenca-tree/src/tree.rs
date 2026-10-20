@@ -36,6 +36,13 @@ pub struct TreeObject {
     pub children: Vec<(Mode, String, GitOid)>,
 }
 
+impl TreeObject {
+    /// The object's bytes as git stores them: the canonical tree body.
+    pub fn body(&self) -> Vec<u8> {
+        tree_body(&self.children)
+    }
+}
+
 impl Tree {
     pub fn new() -> Self {
         Self::default()
@@ -226,25 +233,42 @@ pub const MAX_GITATTRIBUTES_LINE: usize = 2048;
 /// `PATH_MAX` (1024) bytes or more.
 pub const MAX_SYMLINK_TARGET: usize = 1023;
 
-/// Whether [`check_content`] has a rule for this entry, so its content must be seen.
-pub fn has_content_rule(path: &RepoPath, entry: &Entry) -> bool {
-    entry.mode() == Mode::Symlink || is_gitattributes_alias(path.file_name())
+/// Whether [`check_content`] has a rule for content at `path` with `mode`, so the
+/// content must be seen.
+pub fn has_content_rule(path: &RepoPath, mode: Mode) -> bool {
+    mode == Mode::Symlink || is_gitattributes_alias(path.file_name())
 }
 
-/// Check one entry's content against the rules a tree of git ids cannot see:
+/// Check content at `path` with `mode` against the rules a tree of git ids cannot see:
 ///
-/// - a symlink's target is at most [`MAX_SYMLINK_TARGET`] bytes;
+/// - a symlink's target is non-empty, has no NUL byte and is at most
+///   [`MAX_SYMLINK_TARGET`] bytes, since `symlink(2)` takes a NUL-terminated string and a
+///   Mac refuses longer targets: otherwise no checkout holds the link as stored;
 /// - a `.gitattributes` is at most 100 MiB with every line shorter than 2048 bytes
 ///   (git's `fsck`, which scans up to the first NUL).
 ///
 /// The rules depend only on the content and the kind of path, so an acceptor checks
 /// each blob id once per kind, not once per path naming it.
-pub fn check_content(path: &RepoPath, entry: &Entry, content: &[u8]) -> Result<(), TreeError> {
-    if entry.mode() == Mode::Symlink && content.len() > MAX_SYMLINK_TARGET {
-        return Err(TreeError::SymlinkTargetTooLong {
-            path: path.to_string(),
-            len: content.len(),
-        });
+pub fn check_content(path: &RepoPath, mode: Mode, content: &[u8]) -> Result<(), TreeError> {
+    if mode == Mode::Symlink {
+        let why = if content.is_empty() {
+            Some("the target is empty".to_string())
+        } else if content.contains(&0) {
+            Some("the target contains a NUL byte".to_string())
+        } else if content.len() > MAX_SYMLINK_TARGET {
+            Some(format!(
+                "the target is {} bytes, over {MAX_SYMLINK_TARGET}",
+                content.len()
+            ))
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            return Err(TreeError::SymlinkTarget {
+                path: path.to_string(),
+                why,
+            });
+        }
     }
     if !is_gitattributes_alias(path.file_name()) {
         return Ok(());
@@ -426,33 +450,22 @@ mod tests {
     #[test]
     fn gitattributes_content_limits() {
         let path = p("x/.gitattributes");
-        assert!(check_content(&path, &Entry::file(b""), b"* text=auto\n").is_ok());
-        assert!(
-            check_content(
-                &path,
-                &Entry::file(b""),
-                &vec![b'a'; MAX_GITATTRIBUTES_LINE - 1]
-            )
-            .is_ok()
-        );
-        assert!(
-            check_content(
-                &path,
-                &Entry::file(b""),
-                &vec![b'a'; MAX_GITATTRIBUTES_LINE]
-            )
-            .is_err()
-        );
+        assert!(check_content(&path, Mode::File, b"* text=auto\n").is_ok());
+        assert!(check_content(&path, Mode::File, &vec![b'a'; MAX_GITATTRIBUTES_LINE - 1]).is_ok());
+        assert!(check_content(&path, Mode::File, &vec![b'a'; MAX_GITATTRIBUTES_LINE]).is_err());
         let mut after_nul = b"ok\0".to_vec();
         after_nul.extend(vec![b'a'; 5000]);
         assert!(
-            check_content(&path, &Entry::file(b""), &after_nul).is_ok(),
+            check_content(&path, Mode::File, &after_nul).is_ok(),
             "fsck stops at the first NUL"
         );
-        assert!(check_content(&p("long.txt"), &Entry::file(b""), &vec![b'a'; 5000]).is_ok());
-        let link = Entry::symlink(b"");
-        assert!(check_content(&p("l"), &link, &vec![b'a'; MAX_SYMLINK_TARGET]).is_ok());
-        assert!(check_content(&p("l"), &link, &vec![b'a'; MAX_SYMLINK_TARGET + 1]).is_err());
+        assert!(check_content(&p("long.txt"), Mode::File, &vec![b'a'; 5000]).is_ok());
+        let link = Mode::Symlink;
+        assert!(check_content(&p("l"), link, &vec![b'a'; MAX_SYMLINK_TARGET]).is_ok());
+        assert!(check_content(&p("l"), link, &vec![b'a'; MAX_SYMLINK_TARGET + 1]).is_err());
+        assert!(check_content(&p("l"), link, b"").is_err());
+        assert!(check_content(&p("l"), link, b"safe\0evil").is_err());
+        assert!(check_content(&p("f"), Mode::File, b"").is_ok());
     }
 
     #[test]

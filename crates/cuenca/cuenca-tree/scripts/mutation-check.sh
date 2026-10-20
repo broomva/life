@@ -66,7 +66,12 @@ mutate src/git.rs 'let back = self.read_tree(&root.to_hex())?;' 'let back = tree
 mutate src/git.rs 'rules.check(content)?;' '' --test git_bridge
 mutate src/git.rs 'None => hash_stream(oid, size, content),' 'None => Ok(()),' --test git_bridge
 mutate src/git.rs 'Some(rules) => rules.check_stream(oid, size, content),' 'Some(_) => Ok(()),' --test git_bridge
-mutate src/tree.rs 'if entry.mode() == Mode::Symlink && content.len() > MAX_SYMLINK_TARGET {' 'if false {' --lib
+mutate src/tree.rs '} else if content.len() > MAX_SYMLINK_TARGET {' '} else if false {' --lib
+mutate src/git.rs 'if stored != *expected {' 'if false {' --test git_bridge substitutes_the_listing
+mutate src/git.rs 'if ours != root {' 'if false {' --test git_bridge reading_a_tree_with_a_corrupt_subtree
+mutate src/tree.rs 'Some("the target is empty".to_string())' 'None' --lib
+mutate src/tree.rs 'Some("the target contains a NUL byte".to_string())' 'None' --lib
+mutate src/git.rs 'check_content(path, Mode::Symlink, content)?;' '' --test git_bridge
 mutate src/oid.rs 'Sha1::builder().safe_hash(false).build()' 'Sha1::builder().safe_hash(false).detect_collision(false).build()' --lib
 mutate src/path.rs 'pub const MAX_PATH_BYTES: usize = 1023;' 'pub const MAX_PATH_BYTES: usize = 4096;' --lib
 mutate src/oid.rs 'CollisionResult::Mitigated(_) | CollisionResult::Collision(_) => None,' 'CollisionResult::Mitigated(d) | CollisionResult::Collision(d) => Some(d.into()),' --lib
