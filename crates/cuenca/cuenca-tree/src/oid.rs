@@ -89,7 +89,7 @@ impl GitOid {
     /// is plain SHA-1, as git names objects; to accept untrusted content, use
     /// [`crate::BlobHasher`], which also runs SHA-1 collision detection as git does.
     pub fn for_object(kind: &str, body: &[u8]) -> Self {
-        let mut h = Sha1::builder().safe_hash(false).build();
+        let mut h = Sha1::builder().detect_collision(false).build();
         sha1_checked::Digest::update(&mut h, format!("{kind} {}\0", body.len()).as_bytes());
         sha1_checked::Digest::update(&mut h, body);
         Self((*h.try_finalize().hash()).into())
@@ -130,6 +130,8 @@ pub(crate) fn finish_checked(h: Sha1) -> Option<[u8; 20]> {
 mod tests {
     use super::*;
 
+    /// The detector on its own. No public collision survives git's `blob <len>` header,
+    /// so this and the `BlobHasher` test in entry.rs are the end-to-end evidence.
     #[test]
     fn collision_detection_fires_on_a_known_collision() {
         // The SHA-1 chosen-prefix collision from "SHA-1 is a Shambles" (2020).

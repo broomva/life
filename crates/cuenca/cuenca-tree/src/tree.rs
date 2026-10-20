@@ -222,10 +222,30 @@ pub const MAX_GITATTRIBUTES_BYTES: usize = 100 * 1024 * 1024;
 /// The longest `.gitattributes` line git's fsck parses, exclusive (`ATTR_MAX_LINE_LENGTH`).
 pub const MAX_GITATTRIBUTES_LINE: usize = 2048;
 
-/// Check content against the rules git applies to particular paths, which a tree of
-/// git ids cannot see: a `.gitattributes` must be at most 100 MiB with every line
-/// shorter than 2048 bytes (git's `fsck`, which scans up to the first NUL).
-pub fn check_content(path: &RepoPath, content: &[u8]) -> Result<(), TreeError> {
+/// The longest symlink target a Mac can check out: `symlink(2)` refuses a target of
+/// `PATH_MAX` (1024) bytes or more.
+pub const MAX_SYMLINK_TARGET: usize = 1023;
+
+/// Whether [`check_content`] has a rule for this entry, so its content must be seen.
+pub fn has_content_rule(path: &RepoPath, entry: &Entry) -> bool {
+    entry.mode() == Mode::Symlink || is_gitattributes_alias(path.file_name())
+}
+
+/// Check one entry's content against the rules a tree of git ids cannot see:
+///
+/// - a symlink's target is at most [`MAX_SYMLINK_TARGET`] bytes;
+/// - a `.gitattributes` is at most 100 MiB with every line shorter than 2048 bytes
+///   (git's `fsck`, which scans up to the first NUL).
+///
+/// The rules depend only on the content and the kind of path, so an acceptor checks
+/// each blob id once per kind, not once per path naming it.
+pub fn check_content(path: &RepoPath, entry: &Entry, content: &[u8]) -> Result<(), TreeError> {
+    if entry.mode() == Mode::Symlink && content.len() > MAX_SYMLINK_TARGET {
+        return Err(TreeError::SymlinkTargetTooLong {
+            path: path.to_string(),
+            len: content.len(),
+        });
+    }
     if !is_gitattributes_alias(path.file_name()) {
         return Ok(());
     }
@@ -406,16 +426,33 @@ mod tests {
     #[test]
     fn gitattributes_content_limits() {
         let path = p("x/.gitattributes");
-        assert!(check_content(&path, b"* text=auto\n").is_ok());
-        assert!(check_content(&path, &vec![b'a'; MAX_GITATTRIBUTES_LINE - 1]).is_ok());
-        assert!(check_content(&path, &vec![b'a'; MAX_GITATTRIBUTES_LINE]).is_err());
+        assert!(check_content(&path, &Entry::file(b""), b"* text=auto\n").is_ok());
+        assert!(
+            check_content(
+                &path,
+                &Entry::file(b""),
+                &vec![b'a'; MAX_GITATTRIBUTES_LINE - 1]
+            )
+            .is_ok()
+        );
+        assert!(
+            check_content(
+                &path,
+                &Entry::file(b""),
+                &vec![b'a'; MAX_GITATTRIBUTES_LINE]
+            )
+            .is_err()
+        );
         let mut after_nul = b"ok\0".to_vec();
         after_nul.extend(vec![b'a'; 5000]);
         assert!(
-            check_content(&path, &after_nul).is_ok(),
+            check_content(&path, &Entry::file(b""), &after_nul).is_ok(),
             "fsck stops at the first NUL"
         );
-        assert!(check_content(&p("long.txt"), &vec![b'a'; 5000]).is_ok());
+        assert!(check_content(&p("long.txt"), &Entry::file(b""), &vec![b'a'; 5000]).is_ok());
+        let link = Entry::symlink(b"");
+        assert!(check_content(&p("l"), &link, &vec![b'a'; MAX_SYMLINK_TARGET]).is_ok());
+        assert!(check_content(&p("l"), &link, &vec![b'a'; MAX_SYMLINK_TARGET + 1]).is_err());
     }
 
     #[test]

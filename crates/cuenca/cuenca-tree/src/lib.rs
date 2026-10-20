@@ -51,4 +51,7 @@ pub use entry::{Blob, BlobHasher, Entry, HashFailure, Mode};
 pub use error::{ChangesetError, PathError, TreeError};
 pub use oid::{ContentHash, GitOid};
 pub use path::{MAX_COMPONENT_BYTES, MAX_PATH_BYTES, RepoPath};
-pub use tree::{MAX_GITATTRIBUTES_BYTES, MAX_GITATTRIBUTES_LINE, Tree, TreeObject, check_content};
+pub use tree::{
+    MAX_GITATTRIBUTES_BYTES, MAX_GITATTRIBUTES_LINE, MAX_SYMLINK_TARGET, Tree, TreeObject,
+    check_content, has_content_rule,
+};

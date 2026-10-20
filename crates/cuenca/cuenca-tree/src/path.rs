@@ -190,9 +190,7 @@ fn is_ntfs_dot_generic(name: &[u8], needle: &[u8], short_prefix: &[u8]) -> bool 
 /// `.git` under every spelling a checkout on macOS or Windows resolves to the
 /// repository's own directory.
 fn is_git_dir_alias(component: &str) -> bool {
-    is_hfs_dot(component, "git")
-        || is_ntfs_dotgit(component.as_bytes())
-        || folds_to(component, ".git")
+    is_hfs_dot(component, "git") || is_ntfs_dotgit(component.as_bytes())
 }
 
 /// Whether `component`, with HFS-ignorable code points dropped, is `needle` once case

@@ -9,7 +9,8 @@ backup=$(mktemp -d)
 lock=$(git rev-parse --show-toplevel)/Cargo.lock
 cp "$lock" "$backup/Cargo.lock"
 restore() { [ -n "${current:-}" ] && cp "$backup/file" "$current"; current=; cp "$backup/Cargo.lock" "$lock"; }
-trap 'restore; rm -rf "$backup"' EXIT INT TERM
+trap 'restore; rm -rf "$backup"' EXIT
+trap 'exit 130' INT TERM
 
 # A mutant only counts as killed against a suite that passes unmutated.
 if ! cargo test -q -p cuenca-tree >"$backup/log" 2>&1; then
@@ -58,11 +59,15 @@ mutate src/git.rs 'Ok(blob) if blob.oid() == oid => Ok(()),' 'Ok(_) => Ok(()),' 
 mutate src/git.rs 'if let Some(empty) = dirs.iter().find(|d| !parents.contains(d.as_str()))' 'if let Some(empty) = dirs.iter().find(|_| false)' --test git_bridge
 mutate src/git.rs '"sha1" => Ok(()),' '_ => Ok(()),' --test git_bridge
 mutate src/git.rs 'return Err(GitError::PartialClone);' '' --test git_bridge
-mutate src/git.rs 'None => hash_stream(oid, size, stored),' 'None => Ok(()),' --test git_bridge
-mutate src/git.rs 'Some(path) => check_gitattributes(path, oid, size, stored),' 'Some(_) => Ok(()),' --test git_bridge
 mutate src/git.rs '[id, _, _] if *id == oid.to_hex() => return Err(GitError::WrongType(*oid)),' '' --test git_bridge
 mutate src/git.rs 'verify_bytes(*oid, content)?;' '' --test git_bridge
 mutate src/path.rs '|| folds_to(component, ".gitmodules")' '' --lib
+mutate src/git.rs 'let back = self.read_tree(&root.to_hex())?;' 'let back = tree.clone();' --test git_bridge
+mutate src/git.rs 'rules.check(content)?;' '' --test git_bridge
+mutate src/git.rs 'None => hash_stream(oid, size, content),' 'None => Ok(()),' --test git_bridge
+mutate src/git.rs 'Some(rules) => rules.check_stream(oid, size, content),' 'Some(_) => Ok(()),' --test git_bridge
+mutate src/tree.rs 'if entry.mode() == Mode::Symlink && content.len() > MAX_SYMLINK_TARGET {' 'if false {' --lib
+mutate src/oid.rs 'Sha1::builder().safe_hash(false).build()' 'Sha1::builder().safe_hash(false).detect_collision(false).build()' --lib
 mutate src/path.rs 'pub const MAX_PATH_BYTES: usize = 1023;' 'pub const MAX_PATH_BYTES: usize = 4096;' --lib
 mutate src/oid.rs 'CollisionResult::Mitigated(_) | CollisionResult::Collision(_) => None,' 'CollisionResult::Mitigated(d) | CollisionResult::Collision(d) => Some(d.into()),' --lib
 

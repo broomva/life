@@ -42,11 +42,13 @@ impl Blob {
 }
 
 /// Why hashing a stream did not yield a [`Blob`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum HashFailure {
     /// The stream held fewer or more bytes than announced.
+    #[error("expected {expected} bytes, saw {seen}")]
     WrongLength { expected: u64, seen: u64 },
     /// SHA-1 collision detection fired, as git's SHA-1DC would.
+    #[error("SHA-1 collision detected")]
     Collision,
 }
 
@@ -61,8 +63,14 @@ pub struct BlobHasher {
 impl BlobHasher {
     /// Start hashing a blob of `size` bytes; git's id covers the size up front.
     pub fn new(size: u64) -> Self {
+        Self::with_header(format!("blob {size}\0").as_bytes(), size)
+    }
+
+    /// The hasher with an arbitrary object header; `new` uses git's blob header. Kept
+    /// separate so a test can feed a known SHA-1 collision through the same path.
+    fn with_header(header: &[u8], size: u64) -> Self {
         let mut git = checked_sha1();
-        sha1_checked::Digest::update(&mut git, format!("blob {size}\0").as_bytes());
+        sha1_checked::Digest::update(&mut git, header);
         Self {
             git,
             sha256: Sha256::new(),
@@ -118,6 +126,8 @@ pub enum Entry {
 }
 
 impl Entry {
+    /// The entry for `content`, by plain SHA-1. For content the caller already trusts;
+    /// untrusted bytes go through [`Blob::of`] or [`BlobHasher`], which detect collisions.
     pub fn file(content: &[u8]) -> Self {
         Self::File(GitOid::for_blob(content))
     }
@@ -222,6 +232,14 @@ mod tests {
                 seen: 12
             })
         );
+    }
+
+    #[test]
+    fn the_blob_hasher_refuses_a_known_collision() {
+        let colliding = include_bytes!("../tests/data/sha-mbles-1.bin");
+        let mut h = BlobHasher::with_header(b"", colliding.len() as u64);
+        h.update(colliding);
+        assert_eq!(h.finish(), Err(HashFailure::Collision));
     }
 
     #[test]

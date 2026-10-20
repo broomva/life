@@ -709,10 +709,10 @@ fn forged_bytes_cannot_vouch_for_a_gitattributes_the_repository_has() {
     let mut forged = Blobs::new();
     forged.insert(oid, b"* text\n".to_vec());
     let err = Repo::open(w.path()).write_tree(&tree, &forged).unwrap_err();
-    assert!(
-        matches!(err, GitError::Tree(TreeError::GitattributesContent { .. })),
-        "{err}"
-    );
+    // The forged bytes are refused for not being what the id names, before anything
+    // is written; with no bytes sent, the read-back refuses the long line instead
+    // (`writing_checks_gitattributes_the_repository_already_has`).
+    assert!(matches!(err, GitError::Corrupt(o) if o == oid), "{err}");
 }
 
 /// Stratum C's round-3 cost attack: one large `.gitattributes` blob named at many
@@ -765,5 +765,147 @@ fn a_blob_id_that_is_a_tree_in_the_repository_is_refused() {
     let err = Repo::open(w.path())
         .write_tree(&tree, &Blobs::new())
         .unwrap_err();
+    assert!(matches!(err, GitError::WrongType(o) if o == sub), "{err}");
+}
+
+/// Plant a loose object: copy the object file of `from` to where `to` would live.
+fn plant(objects: &Path, from: &str, to: &str) {
+    let target = objects.join(&to[..2]).join(&to[2..]);
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    let _ = std::fs::remove_file(&target);
+    std::fs::copy(objects.join(&from[..2]).join(&from[2..]), target).unwrap();
+}
+
+/// Strata A, B and C's round-4 attack: the repository already holds, under the id of
+/// subtree `d`, the bytes of a different tree pointing at other content. The write must
+/// not certify it.
+#[test]
+fn a_corrupt_tree_already_in_the_store_fails_the_write() {
+    let w = Work::new();
+    let real = blob(&w, b"real\n");
+    let evil = blob(&w, b"evil\n");
+    let good_sub = mktree(&w, &format!("100644 blob {real}\ta.txt\n"), false);
+    let evil_sub = mktree(&w, &format!("100644 blob {evil}\ta.txt\n"), false);
+    std::fs::remove_file(
+        w.path()
+            .join(".git/objects")
+            .join(&good_sub[..2])
+            .join(&good_sub[2..]),
+    )
+    .unwrap();
+    plant(&w.path().join(".git/objects"), &evil_sub, &good_sub);
+    let tree =
+        Tree::from_entries([(RepoPath::new("d/a.txt").unwrap(), Entry::file(b"real\n"))]).unwrap();
+    let err = Repo::open(w.path())
+        .write_tree(&tree, &Blobs::new())
+        .unwrap_err();
+    assert!(matches!(err, GitError::TreeMismatch { .. }), "{err}");
+}
+
+/// The same substitution supplied through `objects/info/alternates`, with nothing
+/// corrupt in the repository's own store.
+#[test]
+fn a_substituted_tree_from_an_alternate_fails_the_write() {
+    let other = Work::new();
+    let real = blob(&other, b"real\n");
+    let evil = blob(&other, b"evil\n");
+    let good_sub = mktree(&other, &format!("100644 blob {real}\ta.txt\n"), false);
+    let evil_sub = mktree(&other, &format!("100644 blob {evil}\ta.txt\n"), false);
+    let objects = other.path().join(".git/objects");
+    std::fs::remove_file(objects.join(&good_sub[..2]).join(&good_sub[2..])).unwrap();
+    plant(&objects, &evil_sub, &good_sub);
+    let w = Work::new();
+    std::fs::write(
+        w.path().join(".git/objects/info/alternates"),
+        format!("{}\n", objects.display()),
+    )
+    .unwrap();
+    let tree =
+        Tree::from_entries([(RepoPath::new("d/a.txt").unwrap(), Entry::file(b"real\n"))]).unwrap();
+    let err = Repo::open(w.path())
+        .write_tree(&tree, &Blobs::new())
+        .unwrap_err();
+    assert!(matches!(err, GitError::TreeMismatch { .. }), "{err}");
+}
+
+/// The most common hostile case: an agent sends a new `.gitattributes` with a line git's
+/// fsck rejects. It is refused before anything is stored.
+#[test]
+fn a_new_long_line_gitattributes_is_refused_before_anything_is_written() {
+    let w = Work::new();
+    let long = format!("{}\n", "a".repeat(3000));
+    let tree = Tree::from_entries([
+        (
+            RepoPath::new("benign.txt").unwrap(),
+            Entry::file(b"benign\n"),
+        ),
+        (
+            RepoPath::new(".gitattributes").unwrap(),
+            Entry::file(long.as_bytes()),
+        ),
+    ])
+    .unwrap();
+    let mut blobs = Blobs::new();
+    blobs.insert(GitOid::for_blob(b"benign\n"), b"benign\n".to_vec());
+    blobs.insert(GitOid::for_blob(long.as_bytes()), long.into_bytes());
+    let before = git(w.path(), &["count-objects"]);
+    let err = Repo::open(w.path()).write_tree(&tree, &blobs).unwrap_err();
+    assert!(
+        matches!(err, GitError::Tree(TreeError::GitattributesContent { .. })),
+        "{err}"
+    );
+    assert_eq!(
+        git(w.path(), &["count-objects"]),
+        before,
+        "something was written"
+    );
+}
+
+/// Bytes the caller sends are checked against their ids even when the repository
+/// already has the blob, so "the bridge verifies what it is sent" holds without
+/// exception.
+#[test]
+fn forged_bytes_for_a_present_blob_are_refused() {
+    let w = Work::new();
+    blob(&w, b"real\n");
+    let tree = Tree::from_entries([(RepoPath::new("a").unwrap(), Entry::file(b"real\n"))]).unwrap();
+    let mut forged = Blobs::new();
+    forged.insert(GitOid::for_blob(b"real\n"), b"forged\n".to_vec());
+    let err = Repo::open(w.path()).write_tree(&tree, &forged).unwrap_err();
+    assert!(matches!(err, GitError::Corrupt(_)), "{err}");
+}
+
+#[test]
+fn a_symlink_target_a_mac_cannot_create_is_refused() {
+    let w = Work::new();
+    let target = "t/".repeat(600);
+    let t = tree_from_index(&w, &[("120000", "link", target.as_bytes())]);
+    let err = Repo::open(w.path()).read_tree(&t.to_hex()).unwrap_err();
+    assert!(
+        matches!(err, GitError::Tree(TreeError::SymlinkTargetTooLong { .. })),
+        "{err}"
+    );
+    let tree = Tree::from_entries([(
+        RepoPath::new("link").unwrap(),
+        Entry::symlink(target.as_bytes()),
+    )])
+    .unwrap();
+    let mut blobs = Blobs::new();
+    blobs.insert(GitOid::for_blob(target.as_bytes()), target.into_bytes());
+    let err = Repo::open(Work::new().path())
+        .write_tree(&tree, &blobs)
+        .unwrap_err();
+    assert!(
+        matches!(err, GitError::Tree(TreeError::SymlinkTargetTooLong { .. })),
+        "{err}"
+    );
+}
+
+#[test]
+fn reading_a_tree_id_as_a_blob_is_refused() {
+    let w = Work::new();
+    let a = blob(&w, b"a");
+    let sub = GitOid::from_hex(&mktree(&w, &format!("100644 blob {a}\tx\n"), false)).unwrap();
+    let err = Repo::open(w.path()).read_blobs([sub]).unwrap_err();
     assert!(matches!(err, GitError::WrongType(o) if o == sub), "{err}");
 }

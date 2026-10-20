@@ -1,12 +1,14 @@
 //! A bridge to a real git repository through git's plumbing commands.
 //!
 //! Reading lists a tree with `ls-tree -r -t -z --full-tree` and streams every blob through
-//! one `cat-file --batch`, hashing as it streams, so each blob is checked against the id
-//! git filed it under and a large blob is never held in memory. Writing stores blobs
-//! with `hash-object -w --no-filters`, each checked against its id first, and builds each
-//! directory git does not already have with `mktree -z`, so git, not this crate, lays out
-//! and sorts the tree objects; any difference from [`Tree::git_objects`] is an error.
-//! Content rules a tree of ids cannot see ([`check_content`]) are applied on both paths.
+//! one `cat-file --batch`, hashing as it streams (with SHA-1 collision detection), so
+//! each blob is checked against the id git filed it under and a large blob is never held
+//! in memory. Writing checks every blob it was sent before writing anything, stores the
+//! missing ones with `hash-object -w --no-filters`, builds each missing directory with
+//! `mktree -z` (so git, not this crate, lays out and sorts the tree objects), and then
+//! reads the result back, so nothing already in the store is trusted unread. Content
+//! rules a tree of ids cannot see ([`check_content`]) are applied on both paths, once
+//! per blob id.
 //!
 //! Needs git 2.25 or later (`rev-parse --show-object-format`).
 //!
@@ -19,14 +21,15 @@
 //! clone is reported missing rather than fetched over the network; with `LC_ALL=C`, so
 //! git's messages can be read; and without the environment variables that would
 //! redirect git to another repository, index or object store. A repository's own
-//! configuration (alternates, `core.worktree`) still applies; contents read through it
-//! are hash-checked, so it can hide objects but not change them.
+//! configuration (alternates, `core.worktree`) still applies; every object read through
+//! it is hash-checked, and a write is read back, so it can hide objects but not change
+//! what a read or write returns.
 
 use crate::entry::{Blob, BlobHasher, Entry, HashFailure, Mode};
 use crate::error::TreeError;
 use crate::oid::GitOid;
 use crate::path::RepoPath;
-use crate::tree::{MAX_GITATTRIBUTES_BYTES, Tree, check_content};
+use crate::tree::{MAX_GITATTRIBUTES_BYTES, MAX_SYMLINK_TARGET, Tree, check_content};
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
@@ -212,18 +215,16 @@ impl Repo {
             return Err(TreeError::EmptyDirectory(empty.to_string()).into());
         }
 
-        // A blob at a `.gitattributes` path is loaded and checked once, whatever the
-        // number of paths naming it.
-        let mut ruled: HashMap<GitOid, &RepoPath> = HashMap::new();
-        for (path, _, oid) in &records {
-            if crate::path::is_gitattributes_alias(path.file_name()) {
-                ruled.entry(*oid).or_insert(path);
-            }
+        // A blob with a content rule is loaded and checked once per kind of rule,
+        // whatever the number of paths naming it.
+        let mut ruled: HashMap<GitOid, Ruled> = HashMap::new();
+        for (path, mode, oid) in &records {
+            ruled_add(&mut ruled, path, &Entry::from_mode(*mode, *oid)?);
         }
         let wanted = unique(records.iter().map(|r| r.2));
         self.cat_file_batch(&wanted, |oid, size, content| match ruled.get(&oid) {
             None => hash_stream(oid, size, content),
-            Some(path) => check_gitattributes(path, oid, size, content),
+            Some(rules) => rules.check_stream(oid, size, content),
         })?;
 
         let mut entries = Vec::with_capacity(records.len());
@@ -270,14 +271,18 @@ impl Repo {
 
     /// Write `tree` into this repository and return its tree id.
     ///
-    /// Blobs the repository lacks are taken from `blobs` and must hash to their ids;
-    /// every `.gitattributes` must pass [`check_content`], read back from the repository
-    /// if it already has it. Each directory the repository lacks is built by
-    /// `git mktree` and must come out as cuenca computed it. Nothing is written into a
-    /// SHA-256 repository or a partial clone.
+    /// Before anything is written, every blob the caller sent must hash to its id and
+    /// pass its content rules ([`check_content`]), and every blob the repository lacks
+    /// must have been sent. Missing blobs are stored with `hash-object`, and each missing
+    /// directory is built by `git mktree`, which must lay it out as cuenca computed it.
+    /// Finally the result is read back with [`Repo::read_tree`], which re-hashes every
+    /// blob, recomputes every tree id from git's own listing and applies every rule, so a
+    /// corrupt or substituted object already in the store (loose, packed or through an
+    /// alternate) fails the write rather than landing. Nothing is written into a SHA-256
+    /// repository or a partial clone.
     pub fn write_tree(&self, tree: &Tree, blobs: &Blobs) -> Result<GitOid, GitError> {
         self.check_object_format()?;
-        if !self
+        let promisor = self
             .run(
                 &[
                     "config",
@@ -286,14 +291,26 @@ impl Repo {
                 ],
                 b"",
             )
-            .unwrap_or_default()
-            .is_empty()
-        {
+            .unwrap_or_default();
+        if !promisor.is_empty() {
             return Err(GitError::PartialClone);
         }
 
-        let objects = tree.git_objects();
+        let mut ruled: HashMap<GitOid, Ruled> = HashMap::new();
+        for (path, entry) in tree.entries() {
+            ruled_add(&mut ruled, path, entry);
+        }
         let blob_oids = unique(tree.entries().map(|(_, e)| e.oid()));
+        for oid in &blob_oids {
+            if let Some(content) = blobs.get(oid) {
+                verify_bytes(*oid, content)?;
+                if let Some(rules) = ruled.get(oid) {
+                    rules.check(content)?;
+                }
+            }
+        }
+
+        let objects = tree.git_objects();
         let tree_oids: Vec<GitOid> = objects.iter().map(|t| t.oid).collect();
         let present = self.present(
             &blob_oids
@@ -302,38 +319,24 @@ impl Repo {
                 .copied()
                 .collect::<Vec<_>>(),
         )?;
-        let mut ruled: HashMap<GitOid, &RepoPath> = HashMap::new();
-        for (path, entry) in tree.entries() {
-            if crate::path::is_gitattributes_alias(path.file_name()) {
-                ruled.entry(entry.oid()).or_insert(path);
+        for oid in &blob_oids {
+            match present.get(oid).map(String::as_str) {
+                Some("blob") => {}
+                Some(_) => return Err(GitError::WrongType(*oid)),
+                None if !blobs.contains_key(oid) => return Err(GitError::NoContent(*oid)),
+                None => {}
             }
         }
 
-        // Blobs the repository has: its own bytes are what will land, so those are
-        // re-hashed (a corrupt object store is caught here) and, at a `.gitattributes`
-        // path, checked; bytes the caller sent for them are ignored. cat-file refuses an
-        // id that names something other than a blob (WrongType).
-        let (have, lack): (Vec<GitOid>, Vec<GitOid>) =
-            blob_oids.iter().partition(|o| present.contains_key(o));
-
-        self.cat_file_batch(&have, |oid, size, stored| match ruled.get(&oid) {
-            Some(path) => check_gitattributes(path, oid, size, stored),
-            None => hash_stream(oid, size, stored),
-        })?;
-
-        // Blobs it lacks come from the caller and must hash to their ids first.
-        for oid in &lack {
-            let content = blobs.get(oid).ok_or(GitError::NoContent(*oid))?;
-            verify_bytes(*oid, content)?;
-            if let Some(path) = ruled.get(oid) {
-                check_content(path, content)?;
-            }
-            let out = self.run(&["hash-object", "-w", "--no-filters", "--stdin"], content)?;
+        for oid in blob_oids.iter().filter(|o| !present.contains_key(o)) {
+            let out = self.run(
+                &["hash-object", "-w", "--no-filters", "--stdin"],
+                &blobs[oid],
+            )?;
             if GitOid::from_hex(String::from_utf8_lossy(&out).trim())? != *oid {
                 return Err(GitError::Corrupt(*oid));
             }
         }
-
         for object in &objects {
             match present.get(&object.oid).map(String::as_str) {
                 Some("tree") => continue,
@@ -357,7 +360,16 @@ impl Repo {
                 });
             }
         }
-        Ok(tree.git_tree_id())
+
+        let root = tree.git_tree_id();
+        let back = self.read_tree(&root.to_hex())?;
+        if back != *tree {
+            return Err(GitError::TreeMismatch {
+                git: back.git_tree_id(),
+                ours: root,
+            });
+        }
+        Ok(root)
     }
 
     /// The type of each of `oids` the repository already has.
@@ -425,6 +437,9 @@ impl Repo {
                         let mut newline = [0u8; 1];
                         if out.read(&mut newline)? == 0 {
                             return Err(GitError::EndedEarly("cat-file --batch".into()));
+                        }
+                        if newline[0] != b'\n' {
+                            return Err(GitError::Parse("cat-file separator".into()));
                         }
                     }
                     [id, _, _] if *id == oid.to_hex() => return Err(GitError::WrongType(*oid)),
@@ -521,22 +536,63 @@ fn read_checked(
     Ok(bytes)
 }
 
-/// Load a blob found at a `.gitattributes` path and apply git fsck's limits to it.
-fn check_gitattributes(
-    path: &RepoPath,
-    oid: GitOid,
-    size: u64,
-    content: &mut dyn Read,
-) -> Result<(), GitError> {
-    if size > MAX_GITATTRIBUTES_BYTES as u64 {
-        return Err(TreeError::GitattributesContent {
-            path: path.to_string(),
-            why: format!("{size} bytes, over {MAX_GITATTRIBUTES_BYTES}"),
-        }
-        .into());
+/// The content rules that apply to one blob id: the first path naming it as a
+/// symlink and the first naming it as a `.gitattributes`.
+#[derive(Default)]
+struct Ruled<'a> {
+    link: Option<&'a RepoPath>,
+    attrs: Option<&'a RepoPath>,
+}
+
+fn ruled_add<'a>(ruled: &mut HashMap<GitOid, Ruled<'a>>, path: &'a RepoPath, entry: &Entry) {
+    let is_link = entry.mode() == Mode::Symlink;
+    let is_attrs = crate::path::is_gitattributes_alias(path.file_name());
+    if !is_link && !is_attrs {
+        return;
     }
-    let bytes = read_checked(oid, size, content, MAX_GITATTRIBUTES_BYTES as u64)?;
-    Ok(check_content(path, &bytes)?)
+    let rules = ruled.entry(entry.oid()).or_default();
+    if is_link && rules.link.is_none() {
+        rules.link = Some(path);
+    }
+    if is_attrs && rules.attrs.is_none() {
+        rules.attrs = Some(path);
+    }
+}
+
+impl Ruled<'_> {
+    fn check(&self, content: &[u8]) -> Result<(), TreeError> {
+        if let Some(path) = self.link {
+            check_content(path, &Entry::Symlink(GitOid::for_blob(b"")), content)?;
+        }
+        if let Some(path) = self.attrs {
+            check_content(path, &Entry::File(GitOid::for_blob(b"")), content)?;
+        }
+        Ok(())
+    }
+
+    /// Check a blob as it streams from git, refusing by size before loading it.
+    fn check_stream(&self, oid: GitOid, size: u64, content: &mut dyn Read) -> Result<(), GitError> {
+        if let Some(path) = self.link
+            && size > MAX_SYMLINK_TARGET as u64
+        {
+            return Err(TreeError::SymlinkTargetTooLong {
+                path: path.to_string(),
+                len: size as usize,
+            }
+            .into());
+        }
+        if let Some(path) = self.attrs
+            && size > MAX_GITATTRIBUTES_BYTES as u64
+        {
+            return Err(TreeError::GitattributesContent {
+                path: path.to_string(),
+                why: format!("{size} bytes, over {MAX_GITATTRIBUTES_BYTES}"),
+            }
+            .into());
+        }
+        let bytes = read_checked(oid, size, content, MAX_GITATTRIBUTES_BYTES as u64)?;
+        Ok(self.check(&bytes)?)
+    }
 }
 
 fn unique(oids: impl IntoIterator<Item = GitOid>) -> Vec<GitOid> {
