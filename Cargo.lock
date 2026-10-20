@@ -2870,6 +2870,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "cuenca-tree"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
