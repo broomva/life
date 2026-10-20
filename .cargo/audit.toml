@@ -10,8 +10,16 @@
 # RUSTSEC-2026-0098 / -0099 / -0104 / -0258 removed 2026-09-27: lifegw's kms-aws now uses the AWS SDK's
 #   `default-https-client` (hyper 1 + rustls 0.23) instead of the legacy `rustls` feature, so hyper 0.14, h2 0.3,
 #   rustls 0.21 and rustls-webpki 0.101 are gone from Cargo.lock entirely.
+# RUSTSEC-2026-0381 — webpki-roots, distrusted emSign intermediates (2026-10-19). Cargo.lock now has the
+#   patched webpki-roots 1.0.10 (and rustls-webpki 0.103.16, webpki-root-certs 1.0.10 for -0382/-0383, BRO-3245).
+#   What still matches is webpki-roots 0.26.11, a semver-trick shim whose only content is a re-export of
+#   webpki-roots 1 (`[dependencies.parent] package = "webpki-roots", version = "1"`), so its roots are the
+#   patched 1.0.10 ones; the advisory matches it by version only. Reached through tonic 0.12 ← google-cloud-gax
+#   ← google-cloud-kms ← lifegw (optional GCP KMS feature). cargo-deny's advisory check passes and still guards
+#   webpki-roots 1.x. Remove when tonic / google-cloud-kms stop requiring webpki-roots 0.26.
 [advisories]
 ignore = [
+    "RUSTSEC-2026-0381",
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0384",
     "RUSTSEC-2024-0436",
