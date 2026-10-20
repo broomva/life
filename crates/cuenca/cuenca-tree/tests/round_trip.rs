@@ -12,15 +12,16 @@
 //!    directory built by `git mktree` agreeing with cuenca;
 //! 5. a checkout of that tree puts the modelled files on disk: kinds, executable bits,
 //!    contents and link targets;
-//! 6. diffing git's two trees gives the same changeset.
+//! 6. git's own diff of its two trees (`git diff-tree`) lists exactly the changeset's
+//!    ops, and cuenca's diff of the trees read from git gives the same changeset.
 
 #![cfg(unix)]
 
 mod common;
 
 use common::{Kind, Work};
-use cuenca_tree::Changeset;
 use cuenca_tree::git::Repo;
+use cuenca_tree::{Changeset, GitOid, Op};
 
 struct Placement {
     name: &'static str,
@@ -168,6 +169,58 @@ fn act(w: &mut Work, op: &str, i: usize) {
     }
 }
 
+/// git's own diff of two trees, as (path, Some((mode, oid))) for a put and (path, None)
+/// for a delete, sorted by path.
+fn git_diff(
+    dir: &std::path::Path,
+    t0: GitOid,
+    t1: GitOid,
+) -> Vec<(String, Option<(String, String)>)> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args([
+            "diff-tree",
+            "-r",
+            "--no-renames",
+            "--raw",
+            "-z",
+            &t0.to_hex(),
+            &t1.to_hex(),
+        ])
+        .output()
+        .expect("git diff-tree runs");
+    assert!(out.status.success());
+    let mut fields = out.stdout.split(|b| *b == 0).filter(|f| !f.is_empty());
+    let mut ops = Vec::new();
+    while let (Some(meta), Some(path)) = (fields.next(), fields.next()) {
+        let meta = String::from_utf8(meta.to_vec()).expect("ascii");
+        let parts: Vec<&str> = meta.trim_start_matches(':').split(' ').collect();
+        let path = String::from_utf8(path.to_vec()).expect("utf-8");
+        let put = (parts[4] != "D").then(|| (parts[1].to_string(), parts[3].to_string()));
+        ops.push((path, put));
+    }
+    ops.sort();
+    ops
+}
+
+fn ours_as_diff(change: &Changeset) -> Vec<(String, Option<(String, String)>)> {
+    let mut ops: Vec<_> = change
+        .ops
+        .iter()
+        .map(|op| match op {
+            Op::Put { path, entry } => (
+                path.to_string(),
+                Some((entry.mode().as_str().to_string(), entry.oid().to_hex())),
+            ),
+            Op::Delete { path } => (path.to_string(), None),
+            _ => unreachable!("only puts and deletes exist"),
+        })
+        .collect();
+    ops.sort();
+    ops
+}
+
 fn check<T: PartialEq + std::fmt::Debug>(what: &str, ours: T, git: T) -> Result<(), String> {
     if ours == git {
         Ok(())
@@ -222,7 +275,12 @@ fn run_case(op: &str, i: usize) -> Result<(), String> {
     // 5. What git checks out is what the model holds.
     fresh.check_out_and_compare(t1, &w.model)?;
 
-    // 6. Diffing git's own trees gives the same changeset.
+    // 6. git's diff lists exactly our ops, and our diff of git's trees is our changeset.
+    check(
+        "ops against git diff-tree",
+        ours_as_diff(&change),
+        git_diff(w.path(), t0, t1),
+    )?;
     let target_read = repo
         .read_tree(&t1.to_hex())
         .map_err(|e| format!("read result: {e}"))?;

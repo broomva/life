@@ -40,6 +40,10 @@ macro_rules! hex_id {
             pub fn as_bytes(&self) -> &[u8; $len] {
                 &self.0
             }
+
+            pub fn from_bytes(bytes: [u8; $len]) -> Self {
+                Self(bytes)
+            }
         }
 
         impl fmt::Display for $name {

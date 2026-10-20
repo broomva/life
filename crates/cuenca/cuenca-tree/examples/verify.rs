@@ -1,7 +1,7 @@
 //! Read a real repository's tree through the bridge and check that cuenca's tree id is
 //! git's: `cargo run --release -p cuenca-tree --example verify -- <repo> [treeish]`.
 
-use cuenca_tree::Entry;
+use cuenca_tree::Mode;
 use cuenca_tree::git::Repo;
 use std::process::ExitCode;
 use std::time::Instant;
@@ -25,18 +25,18 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let (mut files, mut execs, mut links, mut gitlinks, mut bytes) = (0, 0, 0, 0, 0u64);
+    let (mut files, mut execs, mut links, mut bytes) = (0, 0, 0, 0u64);
     for (_, entry) in tree.entries() {
-        match entry {
-            Entry::File(b) => (files, bytes) = (files + 1, bytes + b.size),
-            Entry::Executable(b) => (execs, bytes) = (execs + 1, bytes + b.size),
-            Entry::Symlink(b) => (links, bytes) = (links + 1, bytes + b.size),
-            Entry::Gitlink(_) => gitlinks += 1,
+        match entry.mode() {
+            Mode::Executable => execs += 1,
+            Mode::Symlink => links += 1,
+            _ => files += 1,
         }
+        bytes += entry.blob().size;
     }
     let ours = tree.git_tree_id();
     println!(
-        "{path} {treeish}: {} entries ({files} files, {execs} executables, {links} symlinks, {gitlinks} gitlinks), {:.1} MiB, {:.2} s",
+        "{path} {treeish}: {} entries ({files} files, {execs} executables, {links} symlinks), {:.1} MiB, {:.2} s",
         tree.len(),
         bytes as f64 / 1_048_576.0,
         started.elapsed().as_secs_f64()

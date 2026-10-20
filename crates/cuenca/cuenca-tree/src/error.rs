@@ -3,11 +3,16 @@ use thiserror::Error;
 
 /// A path that cannot be a repository path.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum PathError {
     #[error("path is empty")]
     Empty,
+    #[error("path or component is {0} bytes, over the limit")]
+    TooLong(usize),
     #[error("path {0:?} contains a NUL byte")]
     Nul(String),
+    #[error("path {0:?} contains a backslash")]
+    Backslash(String),
     #[error("path {0:?} starts or ends with '/'")]
     Slash(String),
     #[error("path {0:?} has an empty, '.' or '..' component")]
@@ -20,6 +25,7 @@ pub enum PathError {
 
 /// A set of entries that cannot form a tree.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum TreeError {
     #[error(transparent)]
     Path(#[from] PathError),
@@ -29,17 +35,26 @@ pub enum TreeError {
     FileDirConflict { file: String, inside: String },
     #[error("{a:?} and {b:?} collide on a case- or normalisation-insensitive filesystem")]
     Collision { a: String, b: String },
+    #[error("{0:?} is a symlink named .gitmodules, which git refuses to check out")]
+    SymlinkedGitmodules(String),
+    #[error("blob {0} is claimed with two different SHA-256 or sizes")]
+    InconsistentBlob(GitOid),
     #[error("unsupported git mode {0}")]
     UnsupportedMode(String),
+    #[error("git tree has an empty directory {0:?}, which a checkout cannot hold")]
+    EmptyDirectory(String),
     #[error("bad object id {0:?}")]
     BadOid(String),
 }
 
 /// A changeset that cannot be built or applied.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum ChangesetError {
     #[error(transparent)]
     Tree(#[from] TreeError),
+    #[error("changeset format {0} is not supported (this build reads format 1)")]
+    Format(u32),
     #[error("changeset is based on tree {expected}, but the tree given is {actual}")]
     BaseMismatch { expected: GitOid, actual: GitOid },
     #[error("changeset should produce tree {expected}, but produced {actual}")]
@@ -48,6 +63,6 @@ pub enum ChangesetError {
     NotCanonical(String),
     #[error("delete of {0:?}, which the base does not have")]
     DeleteMissing(String),
-    #[error("put of {0:?} changes nothing")]
+    #[error("put of {0:?} changes nothing in git")]
     NoOpPut(String),
 }

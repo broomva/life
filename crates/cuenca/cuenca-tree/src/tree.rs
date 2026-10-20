@@ -1,19 +1,26 @@
 use crate::entry::{Entry, Mode};
 use crate::error::TreeError;
-use crate::oid::GitOid;
-use crate::path::{RepoPath, fold_key};
-use serde::{Deserialize, Serialize};
+use crate::oid::{ContentHash, GitOid};
+use crate::path::{RepoPath, fold_component, is_gitmodules_alias};
+use serde::de::{MapAccess, Visitor};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
+use std::collections::hash_map::Entry as Slot;
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 
-/// A validated tree: every path is a [`RepoPath`], no path is both a file and a
-/// directory, and no two names collide on a case- or normalisation-insensitive
-/// filesystem. Directories are implicit, so an empty directory cannot exist.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(
-    try_from = "BTreeMap<RepoPath, Entry>",
-    into = "BTreeMap<RepoPath, Entry>"
-)]
+/// A validated tree. Every path is a [`RepoPath`], and:
+///
+/// - no path is both a file and a directory;
+/// - no two names in one directory collide once case and Unicode normalisation are
+///   folded, since a checkout on APFS could not hold both;
+/// - no symlink is named `.gitmodules` under any alias git refuses;
+/// - each git blob id is claimed with one SHA-256 and size.
+///
+/// Directories are implicit, so an empty directory cannot exist. Validation and
+/// [`Tree::git_objects`] are linear in the total length of the paths.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Tree {
     entries: BTreeMap<RepoPath, Entry>,
 }
@@ -21,8 +28,6 @@ pub struct Tree {
 /// One git tree object, as [`Tree::git_objects`] builds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeObject {
-    /// The directory, `""` for the root.
-    pub dir: String,
     pub oid: GitOid,
     /// The children as `(mode, name, oid)`, in git's order.
     pub children: Vec<(Mode, String, GitOid)>,
@@ -73,33 +78,78 @@ impl Tree {
         self.entries.is_empty()
     }
 
-    /// Check that no path is both a file and a directory, and that no two names (files
-    /// or directories) collide once case and Unicode normalisation are folded, since a
-    /// checkout on APFS could not hold both.
+    /// Check the invariants listed on [`Tree`].
     pub fn validate(&self) -> Result<(), TreeError> {
-        let mut folded: HashMap<String, &str> = HashMap::new();
-        for path in self.entries.keys() {
-            for dir in path.ancestors() {
-                if self.entries.contains_key(dir) {
-                    return Err(TreeError::FileDirConflict {
-                        file: dir.to_string(),
-                        inside: path.to_string(),
-                    });
+        struct Seen<'a> {
+            id: usize,
+            name: &'a str,
+            prefix: &'a str,
+            is_file: bool,
+            first_path: &'a str,
+        }
+        // Each directory or file is a node, keyed by its parent node and its folded name.
+        let mut nodes: HashMap<(usize, String), Seen> = HashMap::new();
+        let mut next_id = 1;
+        let mut blobs: HashMap<GitOid, (ContentHash, u64)> = HashMap::new();
+
+        for (path, entry) in &self.entries {
+            let blob = entry.blob();
+            match blobs.entry(blob.oid) {
+                Slot::Occupied(seen) if *seen.get() != (blob.sha256, blob.size) => {
+                    return Err(TreeError::InconsistentBlob(blob.oid));
+                }
+                Slot::Occupied(_) => {}
+                Slot::Vacant(slot) => {
+                    slot.insert((blob.sha256, blob.size));
                 }
             }
-            for name in path.ancestors().chain(std::iter::once(path.as_str())) {
-                match folded.get(&fold_key(name)) {
-                    Some(seen) if *seen != name => {
+            if entry.mode() == Mode::Symlink && is_gitmodules_alias(path.file_name()) {
+                return Err(TreeError::SymlinkedGitmodules(path.to_string()));
+            }
+
+            let full = path.as_str();
+            let count = path.components().count();
+            let (mut parent, mut start) = (0, 0);
+            for (i, name) in path.components().enumerate() {
+                let end = start + name.len();
+                let prefix = &full[..end];
+                let is_file = i + 1 == count;
+                match nodes.get(&(parent, fold_component(name))) {
+                    Some(seen) if seen.name != name => {
                         return Err(TreeError::Collision {
-                            a: seen.to_string(),
-                            b: name.to_string(),
+                            a: seen.prefix.to_string(),
+                            b: prefix.to_string(),
                         });
                     }
-                    Some(_) => {}
+                    Some(seen) if seen.is_file => {
+                        return Err(TreeError::FileDirConflict {
+                            file: seen.prefix.to_string(),
+                            inside: full.to_string(),
+                        });
+                    }
+                    Some(seen) if is_file => {
+                        return Err(TreeError::FileDirConflict {
+                            file: full.to_string(),
+                            inside: seen.first_path.to_string(),
+                        });
+                    }
+                    Some(seen) => parent = seen.id,
                     None => {
-                        folded.insert(fold_key(name), name);
+                        nodes.insert(
+                            (parent, fold_component(name)),
+                            Seen {
+                                id: next_id,
+                                name,
+                                prefix,
+                                is_file,
+                                first_path: full,
+                            },
+                        );
+                        parent = next_id;
+                        next_id += 1;
                     }
                 }
+                start = end + 1;
             }
         }
         Ok(())
@@ -116,48 +166,58 @@ impl Tree {
     /// Every git tree object of this tree, each directory after the directories inside
     /// it, so the root comes last.
     pub fn git_objects(&self) -> Vec<TreeObject> {
-        let mut dirs: BTreeMap<String, Vec<(Mode, String, GitOid)>> = BTreeMap::new();
-        dirs.insert(String::new(), Vec::new());
+        struct Dir<'a> {
+            name: &'a str,
+            parent: usize,
+            files: Vec<(Mode, &'a str, GitOid)>,
+            subdirs: HashMap<&'a str, usize>,
+        }
+        let mut arena = vec![Dir {
+            name: "",
+            parent: 0,
+            files: Vec::new(),
+            subdirs: HashMap::new(),
+        }];
         for (path, entry) in &self.entries {
-            for dir in path.ancestors() {
-                dirs.entry(dir.to_string()).or_default();
+            let (dir, file) = path.split_last();
+            let mut at = 0;
+            if !dir.is_empty() {
+                for name in dir.split('/') {
+                    at = match arena[at].subdirs.get(name) {
+                        Some(&child) => child,
+                        None => {
+                            let child = arena.len();
+                            arena.push(Dir {
+                                name,
+                                parent: at,
+                                files: Vec::new(),
+                                subdirs: HashMap::new(),
+                            });
+                            arena[at].subdirs.insert(name, child);
+                            child
+                        }
+                    };
+                }
             }
-            let (dir, name) = path.split_last();
-            dirs.get_mut(dir).expect("ancestors were inserted").push((
-                entry.mode(),
-                name.to_string(),
-                entry.oid(),
-            ));
+            arena[at].files.push((entry.mode(), file, entry.oid()));
         }
 
-        let mut order: Vec<String> = dirs.keys().cloned().collect();
-        order.sort_by_key(|d| std::cmp::Reverse(depth(d)));
-
-        let mut objects = Vec::with_capacity(order.len());
-        for dir in order {
-            let mut children = dirs.remove(&dir).expect("each directory is visited once");
+        // A directory is always created after its parent, so walking the arena
+        // backwards visits every directory after the directories inside it.
+        let mut child_trees: Vec<Vec<(Mode, String, GitOid)>> = vec![Vec::new(); arena.len()];
+        let mut objects = Vec::with_capacity(arena.len());
+        for idx in (0..arena.len()).rev() {
+            let dir = &arena[idx];
+            let mut children = std::mem::take(&mut child_trees[idx]);
+            children.extend(dir.files.iter().map(|(m, n, o)| (*m, n.to_string(), *o)));
             children.sort_by(git_name_cmp);
             let oid = GitOid::for_object("tree", &tree_body(&children));
-            if !dir.is_empty() {
-                let (parent, name) = match dir.rfind('/') {
-                    Some(i) => (&dir[..i], &dir[i + 1..]),
-                    None => ("", dir.as_str()),
-                };
-                dirs.get_mut(parent)
-                    .expect("a parent is shallower, so not yet visited")
-                    .push((Mode::Tree, name.to_string(), oid));
+            if idx != 0 {
+                child_trees[dir.parent].push((Mode::Tree, dir.name.to_string(), oid));
             }
-            objects.push(TreeObject { dir, oid, children });
+            objects.push(TreeObject { oid, children });
         }
         objects
-    }
-}
-
-fn depth(dir: &str) -> usize {
-    if dir.is_empty() {
-        0
-    } else {
-        dir.matches('/').count() + 1
     }
 }
 
@@ -190,22 +250,47 @@ fn tree_body(children: &[(Mode, String, GitOid)]) -> Vec<u8> {
     body
 }
 
-impl TryFrom<BTreeMap<RepoPath, Entry>> for Tree {
-    type Error = TreeError;
-    fn try_from(entries: BTreeMap<RepoPath, Entry>) -> Result<Self, TreeError> {
-        Self::from_map(entries)
+impl Serialize for Tree {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut map = s.serialize_map(Some(self.entries.len()))?;
+        for (path, entry) in &self.entries {
+            map.serialize_entry(path, entry)?;
+        }
+        map.end()
     }
 }
 
-impl From<Tree> for BTreeMap<RepoPath, Entry> {
-    fn from(tree: Tree) -> Self {
-        tree.entries
+/// Deserializing refuses a path given twice (JSON would otherwise keep the last) and
+/// re-validates the whole tree.
+impl<'de> Deserialize<'de> for Tree {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct TreeVisitor;
+        impl<'de> Visitor<'de> for TreeVisitor {
+            type Value = Tree;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a map from repository paths to entries")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Tree, A::Error> {
+                let mut entries = BTreeMap::new();
+                while let Some((path, entry)) = access.next_entry::<RepoPath, Entry>()? {
+                    if entries.contains_key(&path) {
+                        return Err(serde::de::Error::custom(TreeError::Duplicate(
+                            path.to_string(),
+                        )));
+                    }
+                    entries.insert(path, entry);
+                }
+                Tree::from_map(entries).map_err(serde::de::Error::custom)
+            }
+        }
+        d.deserialize_map(TreeVisitor)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entry::Blob;
 
     fn p(s: &str) -> RepoPath {
         RepoPath::new(s).unwrap()
@@ -239,12 +324,42 @@ mod tests {
             ["A", "a/x"],
             ["caf\u{e9}.txt", "cafe\u{301}.txt"],
             ["d/\u{c9}/x", "d/e\u{301}/y"],
+            ["straße", "strasse"],
+            ["ſ/x", "s"],
+            ["ﬁle", "file"],
+            ["aς", "aσ"],
+            ["µ", "μ"],
         ] {
             assert!(
                 matches!(tree(&pair), Err(TreeError::Collision { .. })),
                 "{pair:?}"
             );
         }
+        assert!(
+            tree(&["a/x", "b/x", "a/y"]).is_ok(),
+            "the same name in two directories is fine"
+        );
+    }
+
+    #[test]
+    fn rejects_symlinked_gitmodules() {
+        let t = Tree::from_entries([(p("sub/.GITMODULES"), Entry::symlink(b"x"))]);
+        assert_eq!(
+            t,
+            Err(TreeError::SymlinkedGitmodules("sub/.GITMODULES".into()))
+        );
+        assert!(Tree::from_entries([(p(".gitmodules"), Entry::file(b"x"))]).is_ok());
+    }
+
+    #[test]
+    fn rejects_one_oid_with_two_claims() {
+        let real = Blob::of(b"real");
+        let forged = Blob {
+            sha256: Blob::of(b"evil").sha256,
+            ..real
+        };
+        let t = Tree::from_entries([(p("a"), Entry::File(real)), (p("b"), Entry::File(forged))]);
+        assert_eq!(t, Err(TreeError::InconsistentBlob(real.oid)));
     }
 
     #[test]
@@ -266,7 +381,20 @@ mod tests {
     }
 
     #[test]
-    fn serde_revalidates() {
+    fn deepest_allowed_path_validates_fast() {
+        let deep = vec!["a"; 2048].join("/");
+        let started = std::time::Instant::now();
+        let t = tree(&[&deep]).unwrap();
+        assert_eq!(t.git_objects().len(), 2048);
+        assert!(
+            started.elapsed().as_secs() < 2,
+            "took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn serde_revalidates_and_refuses_duplicate_keys() {
         let t = tree(&["a/b", "c"]).unwrap();
         let json = serde_json::to_string(&t).unwrap();
         assert_eq!(serde_json::from_str::<Tree>(&json).unwrap(), t);
@@ -274,6 +402,12 @@ mod tests {
         assert!(
             serde_json::from_str::<Tree>(&bad).is_err(),
             "collision must not deserialize"
+        );
+        let e = serde_json::to_string(&Entry::file(b"x")).unwrap();
+        let dup = format!("{{\"a\":{e},\"a\":{e}}}");
+        assert!(
+            serde_json::from_str::<Tree>(&dup).is_err(),
+            "a duplicate key must not deserialize"
         );
     }
 }

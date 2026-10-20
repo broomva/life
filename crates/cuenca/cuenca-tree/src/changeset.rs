@@ -1,15 +1,20 @@
 use crate::entry::Entry;
-use crate::error::ChangesetError;
+use crate::error::{ChangesetError, TreeError};
 use crate::oid::GitOid;
 use crate::path::RepoPath;
 use crate::tree::Tree;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::HashMap;
+
+/// The changeset format this build writes and reads.
+pub const FORMAT: u32 = 1;
 
 /// One change to one path. A rename is a delete of the old path and a put of the new
 /// one, as in git, which has no rename object.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+#[non_exhaustive]
 pub enum Op {
     Put { path: RepoPath, entry: Entry },
     Delete { path: RepoPath },
@@ -34,10 +39,23 @@ impl Op {
 /// A change from one tree to another. It names both trees by git tree id, so whoever
 /// applies it can check that it starts from the tree they hold and ends where it says.
 ///
-/// Ops are canonical: sorted by path, at most one per path, and each one changes
-/// something. Two changesets between the same trees are therefore equal.
+/// Ops are canonical: sorted by path, at most one per path, and each one changes what
+/// git sees (mode or blob id). Two changesets between the same trees are therefore
+/// equal.
+///
+/// A blob's SHA-256 and size in a put are claims (see [`crate::Blob`]); applying
+/// refuses a claim that disagrees with the base's claim for the same blob id, and the
+/// receiver of the content verifies the rest.
+///
+/// Canonical order is not a safe order for writing to a filesystem: with a base symlink
+/// `d` and a put of `D/x`, byte order puts `D/x` first, and on a case-insensitive disk
+/// writing it would follow the link. Whoever materialises a changeset deletes first and
+/// never writes through a symlink.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Changeset {
+    /// The format version, [`FORMAT`].
+    pub format: u32,
     pub base: GitOid,
     pub target: GitOid,
     pub ops: Vec<Op>,
@@ -48,6 +66,7 @@ impl Changeset {
     pub fn new(base: &Tree, mut ops: Vec<Op>) -> Result<Self, ChangesetError> {
         ops.sort_by(|a, b| a.path().cmp(b.path()));
         let mut change = Self {
+            format: FORMAT,
             base: base.git_tree_id(),
             target: GitOid::empty_tree(),
             ops,
@@ -80,13 +99,14 @@ impl Changeset {
                 Ordering::Equal => {
                     let (_, before) = old.next().expect("peeked");
                     let (path, after) = new.next().expect("peeked");
-                    if before != after {
+                    if before.git_identity() != after.git_identity() {
                         ops.push(Op::put(path.clone(), *after));
                     }
                 }
             }
         }
         Self {
+            format: FORMAT,
             base: base.git_tree_id(),
             target: target.git_tree_id(),
             ops,
@@ -96,6 +116,9 @@ impl Changeset {
     /// Apply to `base`, checking that it is the tree this changeset starts from, that the
     /// ops are canonical, and that the result is the tree it names as its target.
     pub fn apply(&self, base: &Tree) -> Result<Tree, ChangesetError> {
+        if self.format != FORMAT {
+            return Err(ChangesetError::Format(self.format));
+        }
         let actual = base.git_tree_id();
         if actual != self.base {
             return Err(ChangesetError::BaseMismatch {
@@ -116,6 +139,8 @@ impl Changeset {
 
     fn apply_ops(&self, base: &Tree) -> Result<Tree, ChangesetError> {
         let mut entries = base.map().clone();
+        let claims: HashMap<GitOid, &crate::Blob> =
+            base.entries().map(|(_, e)| (e.oid(), e.blob())).collect();
         let mut previous: Option<&RepoPath> = None;
         for op in &self.ops {
             if previous.is_some_and(|p| p >= op.path()) {
@@ -124,7 +149,14 @@ impl Changeset {
             previous = Some(op.path());
             match op {
                 Op::Put { path, entry } => {
-                    if entries.insert(path.clone(), *entry) == Some(*entry) {
+                    if claims
+                        .get(&entry.oid())
+                        .is_some_and(|claimed| *claimed != entry.blob())
+                    {
+                        return Err(TreeError::InconsistentBlob(entry.oid()).into());
+                    }
+                    let before = entries.insert(path.clone(), *entry);
+                    if before.is_some_and(|b| b.git_identity() == entry.git_identity()) {
                         return Err(ChangesetError::NoOpPut(path.to_string()));
                     }
                 }
@@ -249,6 +281,49 @@ mod tests {
             err,
             Err(ChangesetError::Tree(TreeError::FileDirConflict { .. }))
         ));
+    }
+
+    #[test]
+    fn refuses_a_forged_claim_on_a_blob_the_base_has() {
+        // Stratum A's reproduction: same git id as the base's a.txt, forged SHA-256 and
+        // size, target equal to base.
+        let base = base();
+        let real = *base.get("a.txt").unwrap().blob();
+        let forged = crate::Blob {
+            sha256: crate::Blob::of(b"other").sha256,
+            size: 0,
+            ..real
+        };
+        let change = Changeset {
+            format: FORMAT,
+            base: base.git_tree_id(),
+            target: base.git_tree_id(),
+            ops: vec![Op::put(p("a.txt"), Entry::File(forged))],
+        };
+        assert_eq!(
+            change.apply(&base),
+            Err(TreeError::InconsistentBlob(real.oid).into())
+        );
+        // The same blob id, honestly claimed, at the same mode is a no-op.
+        let noop = Changeset {
+            ops: vec![Op::put(p("a.txt"), Entry::File(real))],
+            ..change
+        };
+        assert_eq!(
+            noop.apply(&base),
+            Err(ChangesetError::NoOpPut("a.txt".into()))
+        );
+    }
+
+    #[test]
+    fn refuses_other_formats_and_unknown_fields() {
+        let base = base();
+        let mut change = Changeset::new(&base, vec![Op::delete(p("link"))]).unwrap();
+        let json = serde_json::to_string(&change).unwrap();
+        let extra = json.replacen('{', "{\"extra\":1,", 1);
+        assert!(serde_json::from_str::<Changeset>(&extra).is_err());
+        change.format = 2;
+        assert_eq!(change.apply(&base), Err(ChangesetError::Format(2)));
     }
 
     #[test]

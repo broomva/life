@@ -1,12 +1,19 @@
 use crate::error::TreeError;
 use crate::oid::{ContentHash, GitOid};
 use serde::{Deserialize, Serialize};
+use sha1::{Digest as _, Sha1};
+use sha2::Sha256;
 
 /// A blob's identity: its git id, the SHA-256 Lago stores it under, and its size.
 ///
-/// Both hashes are kept so the authority can bind content to a changeset without
-/// relying on SHA-1 alone.
+/// Only the git id is covered by a tree id. The SHA-256 and size are claims derived
+/// from the content: whoever receives the content checks them with [`Blob::matches`]
+/// (the git bridge does this for every blob it reads or writes), and a [`Tree`] refuses
+/// one git id claimed with two different SHA-256 or sizes.
+///
+/// [`Tree`]: crate::Tree
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Blob {
     pub oid: GitOid,
     pub sha256: ContentHash,
@@ -15,11 +22,9 @@ pub struct Blob {
 
 impl Blob {
     pub fn of(content: &[u8]) -> Self {
-        Self {
-            oid: GitOid::for_blob(content),
-            sha256: ContentHash::of(content),
-            size: content.len() as u64,
-        }
+        let mut h = BlobHasher::new(content.len() as u64);
+        h.update(content);
+        h.finish()
     }
 
     /// Whether `content` is this blob, by both hashes and the size.
@@ -28,9 +33,55 @@ impl Blob {
     }
 }
 
+/// Hashes a blob's content as it streams, so a large blob is never held in memory.
+pub struct BlobHasher {
+    git: Sha1,
+    sha256: Sha256,
+    expected: u64,
+    seen: u64,
+}
+
+impl BlobHasher {
+    /// Start hashing a blob of `size` bytes; git's id covers the size up front.
+    pub fn new(size: u64) -> Self {
+        let mut git = Sha1::new();
+        git.update(format!("blob {size}\0").as_bytes());
+        Self {
+            git,
+            sha256: Sha256::new(),
+            expected: size,
+            seen: 0,
+        }
+    }
+
+    pub fn update(&mut self, chunk: &[u8]) {
+        self.git.update(chunk);
+        self.sha256.update(chunk);
+        self.seen += chunk.len() as u64;
+    }
+
+    /// The blob, or `None` if the content was not the size given to [`BlobHasher::new`].
+    pub fn try_finish(self) -> Option<Blob> {
+        (self.seen == self.expected).then(|| Blob {
+            oid: GitOid::from_bytes(self.git.finalize().into()),
+            sha256: ContentHash::from_bytes(self.sha256.finalize().into()),
+            size: self.seen,
+        })
+    }
+
+    fn finish(self) -> Blob {
+        self.try_finish()
+            .expect("Blob::of passes the content's own length")
+    }
+}
+
 /// One path's entry. The variant is the git mode, so a kind change is a change of entry.
+///
+/// The kinds are the spec's pinned set (section 3): regular file, executable and
+/// symlink; directories are implicit. Submodules (mode `160000`) are refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[non_exhaustive]
 pub enum Entry {
     /// A regular file, git mode `100644`.
     File(Blob),
@@ -38,8 +89,6 @@ pub enum Entry {
     Executable(Blob),
     /// A symbolic link, git mode `120000`. The blob is the link's target.
     Symlink(Blob),
-    /// A submodule commit, git mode `160000`. It has no content in this repository.
-    Gitlink(GitOid),
 }
 
 impl Entry {
@@ -60,23 +109,24 @@ impl Entry {
             Self::File(_) => Mode::File,
             Self::Executable(_) => Mode::Executable,
             Self::Symlink(_) => Mode::Symlink,
-            Self::Gitlink(_) => Mode::Gitlink,
+        }
+    }
+
+    pub fn blob(&self) -> &Blob {
+        match self {
+            Self::File(b) | Self::Executable(b) | Self::Symlink(b) => b,
         }
     }
 
     /// The id git's tree records for this entry.
     pub fn oid(&self) -> GitOid {
-        match self {
-            Self::File(b) | Self::Executable(b) | Self::Symlink(b) => b.oid,
-            Self::Gitlink(commit) => *commit,
-        }
+        self.blob().oid
     }
 
-    pub fn blob(&self) -> Option<&Blob> {
-        match self {
-            Self::File(b) | Self::Executable(b) | Self::Symlink(b) => Some(b),
-            Self::Gitlink(_) => None,
-        }
+    /// What git sees of this entry: its mode and id. Two entries with the same identity
+    /// are the same entry to git.
+    pub fn git_identity(&self) -> (Mode, GitOid) {
+        (self.mode(), self.oid())
     }
 
     /// Build an entry from a git mode and the blob it names.
@@ -85,20 +135,18 @@ impl Entry {
             Mode::File => Ok(Self::File(blob)),
             Mode::Executable => Ok(Self::Executable(blob)),
             Mode::Symlink => Ok(Self::Symlink(blob)),
-            Mode::Gitlink | Mode::Tree => {
-                Err(TreeError::UnsupportedMode(mode.as_str().to_string()))
-            }
+            Mode::Tree => Err(TreeError::UnsupportedMode(mode.as_str().to_string())),
         }
     }
 }
 
-/// The git modes a tree entry can have.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// The git modes a tree entry can have here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum Mode {
     File,
     Executable,
     Symlink,
-    Gitlink,
     Tree,
 }
 
@@ -109,7 +157,6 @@ impl Mode {
             Self::File => "100644",
             Self::Executable => "100755",
             Self::Symlink => "120000",
-            Self::Gitlink => "160000",
             Self::Tree => "40000",
         }
     }
@@ -118,21 +165,47 @@ impl Mode {
     pub fn object_type(&self) -> &'static str {
         match self {
             Self::File | Self::Executable | Self::Symlink => "blob",
-            Self::Gitlink => "commit",
             Self::Tree => "tree",
         }
     }
 
-    /// Parse a mode as `git ls-tree` prints it. Legacy modes such as `100664` are refused,
-    /// since rebuilding them would not round-trip through a checkout.
+    /// Parse a mode as `git ls-tree` prints it. Submodules (`160000`) are refused, as
+    /// the spec's format has no submodules. (`ls-tree` already prints legacy modes such
+    /// as `100664` as `100644`, and git computes the tree id from what it stores, so a
+    /// stored legacy mode surfaces as a tree id mismatch.)
     pub fn parse(s: &str) -> Result<Self, TreeError> {
         match s {
             "100644" => Ok(Self::File),
             "100755" => Ok(Self::Executable),
             "120000" => Ok(Self::Symlink),
-            "160000" => Ok(Self::Gitlink),
             "040000" | "40000" => Ok(Self::Tree),
+            "160000" => Err(TreeError::UnsupportedMode("160000 (submodule)".into())),
             other => Err(TreeError::UnsupportedMode(other.to_string())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn streaming_hash_equals_one_shot() {
+        let content = b"hello\nworld\n";
+        let mut h = BlobHasher::new(content.len() as u64);
+        h.update(&content[..3]);
+        h.update(&content[3..]);
+        assert_eq!(h.try_finish(), Some(Blob::of(content)));
+        let mut short = BlobHasher::new(99);
+        short.update(content);
+        assert_eq!(short.try_finish(), None);
+    }
+
+    #[test]
+    fn submodules_are_refused() {
+        assert!(matches!(
+            Mode::parse("160000"),
+            Err(TreeError::UnsupportedMode(_))
+        ));
     }
 }
