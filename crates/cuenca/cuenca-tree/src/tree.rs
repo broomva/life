@@ -1,5 +1,5 @@
 use crate::entry::{Entry, Mode};
-use crate::error::TreeError;
+use crate::error::{SymlinkProblem, TreeError};
 use crate::oid::GitOid;
 use crate::path::{RepoPath, fold_component, is_gitattributes_alias, is_gitmodules_alias};
 use serde::de::{MapAccess, Visitor};
@@ -251,22 +251,19 @@ pub fn has_content_rule(path: &RepoPath, mode: Mode) -> bool {
 /// each blob id once per kind, not once per path naming it.
 pub fn check_content(path: &RepoPath, mode: Mode, content: &[u8]) -> Result<(), TreeError> {
     if mode == Mode::Symlink {
-        let why = if content.is_empty() {
-            Some("the target is empty".to_string())
+        let problem = if content.is_empty() {
+            Some(SymlinkProblem::Empty)
         } else if content.contains(&0) {
-            Some("the target contains a NUL byte".to_string())
+            Some(SymlinkProblem::Nul)
         } else if content.len() > MAX_SYMLINK_TARGET {
-            Some(format!(
-                "the target is {} bytes, over {MAX_SYMLINK_TARGET}",
-                content.len()
-            ))
+            Some(SymlinkProblem::TooLong(content.len()))
         } else {
             None
         };
-        if let Some(why) = why {
+        if let Some(problem) = problem {
             return Err(TreeError::SymlinkTarget {
                 path: path.to_string(),
-                why,
+                problem,
             });
         }
     }

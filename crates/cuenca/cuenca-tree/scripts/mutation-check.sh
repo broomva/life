@@ -57,20 +57,23 @@ mutate src/git.rs '.env("GIT_NO_LAZY_FETCH", "1")' '' --test git_bridge
 mutate src/git.rs 'Some(blob) if blob.oid() == oid => Ok(()),' 'Some(_) => Ok(()),' --test git_bridge
 mutate src/git.rs 'Ok(blob) if blob.oid() == oid => Ok(()),' 'Ok(_) => Ok(()),' --test git_bridge
 mutate src/git.rs 'if let Some(empty) = dirs.iter().find(|d| !parents.contains(d.as_str()))' 'if let Some(empty) = dirs.iter().find(|_| false)' --test git_bridge
-mutate src/git.rs '"sha1" => Ok(()),' '_ => Ok(()),' --test git_bridge
+mutate src/git.rs '"sha1" => {}' '_ => {}' --test git_bridge
 mutate src/git.rs 'return Err(GitError::PartialClone);' '' --test git_bridge
 mutate src/git.rs '[id, _, _] if *id == oid.to_hex() => return Err(GitError::WrongType(*oid)),' '' --test git_bridge
 mutate src/git.rs 'verify_bytes(*oid, content)?;' '' --test git_bridge
 mutate src/path.rs '|| folds_to(component, ".gitmodules")' '' --lib
-mutate src/git.rs 'let back = self.read_tree(&root.to_hex())?;' 'let back = tree.clone();' --test git_bridge
+mutate src/git.rs 'self.read_tree(&root.to_hex())?;' '' --test git_bridge
+mutate src/git.rs 'return Err(GitError::Alternates);' '' --test git_bridge
+mutate src/git.rs 'ruled[&oid].check_stream(oid, size, content)' 'Ok(())' --test git_bridge
+mutate src/git.rs 'return Err(GitError::NonCanonical { stored: root, ours });' '' --test git_bridge
 mutate src/git.rs 'rules.check(content)?;' '' --test git_bridge
 mutate src/git.rs 'None => hash_stream(oid, size, content),' 'None => Ok(()),' --test git_bridge
 mutate src/git.rs 'Some(rules) => rules.check_stream(oid, size, content),' 'Some(_) => Ok(()),' --test git_bridge
 mutate src/tree.rs '} else if content.len() > MAX_SYMLINK_TARGET {' '} else if false {' --lib
 mutate src/git.rs 'if stored != *expected {' 'if false {' --test git_bridge substitutes_the_listing
 mutate src/git.rs 'if ours != root {' 'if false {' --test git_bridge reading_a_tree_with_a_corrupt_subtree
-mutate src/tree.rs 'Some("the target is empty".to_string())' 'None' --lib
-mutate src/tree.rs 'Some("the target contains a NUL byte".to_string())' 'None' --lib
+mutate src/tree.rs 'Some(SymlinkProblem::Empty)' 'None' --lib
+mutate src/tree.rs 'Some(SymlinkProblem::Nul)' 'None' --lib
 mutate src/git.rs 'check_content(path, Mode::Symlink, content)?;' '' --test git_bridge
 mutate src/oid.rs 'Sha1::builder().safe_hash(false).build()' 'Sha1::builder().safe_hash(false).detect_collision(false).build()' --lib
 mutate src/path.rs 'pub const MAX_PATH_BYTES: usize = 1023;' 'pub const MAX_PATH_BYTES: usize = 4096;' --lib

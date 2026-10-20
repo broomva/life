@@ -799,13 +799,19 @@ fn a_corrupt_tree_already_in_the_store_fails_the_write() {
     let err = Repo::open(w.path())
         .write_tree(&tree, &Blobs::new())
         .unwrap_err();
-    assert!(matches!(err, GitError::StoreMismatch(_)), "{err}");
+    assert!(
+        matches!(
+            err,
+            GitError::StoreMismatch(_) | GitError::NonCanonical { .. }
+        ),
+        "{err}"
+    );
 }
 
-/// The same substitution supplied through `objects/info/alternates`, with nothing
-/// corrupt in the repository's own store.
+/// The same substitution supplied through `objects/info/alternates`: a second store can
+/// hold a different copy under the same id, so a repository borrowing objects is refused.
 #[test]
-fn a_substituted_tree_from_an_alternate_fails_the_write() {
+fn a_repository_with_alternates_is_refused() {
     let other = Work::new();
     let real = blob(&other, b"real\n");
     let evil = blob(&other, b"evil\n");
@@ -825,7 +831,9 @@ fn a_substituted_tree_from_an_alternate_fails_the_write() {
     let err = Repo::open(w.path())
         .write_tree(&tree, &Blobs::new())
         .unwrap_err();
-    assert!(matches!(err, GitError::StoreMismatch(_)), "{err}");
+    assert!(matches!(err, GitError::Alternates), "{err}");
+    let err = Repo::open(w.path()).read_tree("HEAD").unwrap_err();
+    assert!(matches!(err, GitError::Alternates), "{err}");
 }
 
 /// The most common hostile case: an agent sends a new `.gitattributes` with a line git's
@@ -1014,14 +1022,21 @@ fn substitutes_the_listing_normalises_are_refused() {
                 store
             };
             let repo = Repo::open(w.path());
+            let refused = |e: &GitError| {
+                if through_alternate {
+                    matches!(e, GitError::Alternates)
+                } else {
+                    matches!(e, GitError::StoreMismatch(_))
+                }
+            };
             let err = repo.write_tree(tree, &Blobs::new()).unwrap_err();
             assert!(
-                matches!(err, GitError::StoreMismatch(_)),
+                refused(&err),
                 "{what} (alternate: {through_alternate}): write gave {err}"
             );
             let err = repo.read_tree(&tree.git_tree_id().to_hex()).unwrap_err();
             assert!(
-                matches!(err, GitError::StoreMismatch(_)),
+                refused(&err),
                 "{what} (alternate: {through_alternate}): read gave {err}"
             );
         }
@@ -1041,7 +1056,13 @@ fn reading_a_tree_with_a_corrupt_subtree_is_refused() {
     std::fs::remove_file(objects.join(&good_sub[..2]).join(&good_sub[2..])).unwrap();
     plant(&objects, &evil_sub, &good_sub);
     let err = Repo::open(w.path()).read_tree(&root).unwrap_err();
-    assert!(matches!(err, GitError::StoreMismatch(_)), "{err}");
+    assert!(
+        matches!(
+            err,
+            GitError::StoreMismatch(_) | GitError::NonCanonical { .. }
+        ),
+        "{err}"
+    );
 }
 
 /// Strata A and C's round-5 attack: a symlink target `symlink(2)` cannot hold (empty, or
@@ -1076,4 +1097,37 @@ fn symlink_targets_no_checkout_can_hold_are_refused() {
             "{target:?}: something was written"
         );
     }
+}
+
+/// An honestly hashed tree with a legacy `100664` mode (old git history) is refused,
+/// and named as non-canonical rather than as tampering.
+#[test]
+fn a_legacy_mode_tree_is_named_non_canonical() {
+    let w = Work::new();
+    let a = GitOid::from_hex(&blob(&w, b"a\n")).unwrap();
+    let legacy = literal_tree(&w, &raw_entry("100664", "a", &a));
+    let err = Repo::open(w.path()).read_tree(&legacy).unwrap_err();
+    assert!(matches!(err, GitError::NonCanonical { .. }), "{err}");
+}
+
+/// Stratum B's round-6 case: the store already has the empty blob, and the caller
+/// sends nothing for it; a symlink to it is still refused before anything is written.
+#[test]
+fn a_present_blob_failing_a_content_rule_stores_nothing() {
+    let w = Work::new();
+    blob(&w, b"");
+    let tree = Tree::from_entries([(RepoPath::new("l").unwrap(), Entry::symlink(b""))]).unwrap();
+    let before = git(w.path(), &["count-objects"]);
+    let err = Repo::open(w.path())
+        .write_tree(&tree, &Blobs::new())
+        .unwrap_err();
+    assert!(
+        matches!(err, GitError::Tree(TreeError::SymlinkTarget { .. })),
+        "{err}"
+    );
+    assert_eq!(
+        git(w.path(), &["count-objects"]),
+        before,
+        "something was written"
+    );
 }

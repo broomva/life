@@ -48,7 +48,7 @@ mod tree;
 
 pub use changeset::{Changeset, FORMAT, Op};
 pub use entry::{Blob, BlobHasher, Entry, HashFailure, Mode};
-pub use error::{ChangesetError, PathError, TreeError};
+pub use error::{ChangesetError, PathError, SymlinkProblem, TreeError};
 pub use oid::{ContentHash, GitOid};
 pub use path::{MAX_COMPONENT_BYTES, MAX_PATH_BYTES, RepoPath};
 pub use tree::{

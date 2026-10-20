@@ -23,6 +23,18 @@ pub enum PathError {
     NotUtf8,
 }
 
+/// Why a symlink's target cannot be checked out as stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum SymlinkProblem {
+    #[error("the target is empty")]
+    Empty,
+    #[error("the target contains a NUL byte")]
+    Nul,
+    #[error("the target is {0} bytes, over 1023")]
+    TooLong(usize),
+}
+
 /// A set of entries that cannot form a tree.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
@@ -43,8 +55,11 @@ pub enum TreeError {
         "{0:?} names .gitattributes (under some alias) but is not a regular file: git's fsck rejects a directory there, and a symlink is refused here too"
     )]
     GitattributesNotAFile(String),
-    #[error("symlink {path:?} cannot be checked out as stored: {why}")]
-    SymlinkTarget { path: String, why: String },
+    #[error("symlink {path:?} cannot be checked out as stored: {problem}")]
+    SymlinkTarget {
+        path: String,
+        problem: SymlinkProblem,
+    },
     #[error(".gitattributes at {path:?} breaks git's fsck limits: {why}")]
     GitattributesContent { path: String, why: String },
     #[error("unsupported git mode {0}")]

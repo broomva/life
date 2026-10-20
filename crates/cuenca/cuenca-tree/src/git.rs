@@ -6,7 +6,9 @@
 //! in memory. Writing checks every blob it was sent before writing anything, stores the
 //! missing ones with `hash-object -w --no-filters`, builds each missing directory with
 //! `mktree -z` (so git, not this crate, lays out and sorts the tree objects), and then
-//! reads the result back, so nothing already in the store is trusted unread. Content
+//! reads the result back, so nothing already in the store is trusted unread. Every tree
+//! object read is compared byte for byte with the canonical body for its id, since git's
+//! listing normalises modes, order and names and git does not re-hash subtrees. Content
 //! rules a tree of ids cannot see ([`check_content`]) are applied on both paths, once
 //! per blob id.
 //!
@@ -26,7 +28,7 @@
 //! what a read or write returns.
 
 use crate::entry::{Blob, BlobHasher, Entry, HashFailure, Mode};
-use crate::error::TreeError;
+use crate::error::{SymlinkProblem, TreeError};
 use crate::oid::GitOid;
 use crate::path::RepoPath;
 use crate::tree::{MAX_GITATTRIBUTES_BYTES, MAX_SYMLINK_TARGET, Tree, check_content};
@@ -81,6 +83,14 @@ pub enum GitError {
         "the object stored under {0} is not the canonical tree with that id (a corrupt or substituted object)"
     )]
     StoreMismatch(GitOid),
+    #[error(
+        "tree {stored} rebuilds as {ours}: it is stored in a form cuenca does not produce (a legacy mode or other non-canonical encoding), or substituted"
+    )]
+    NonCanonical { stored: GitOid, ours: GitOid },
+    #[error(
+        "the repository borrows objects from another store (objects/info/alternates), which this bridge does not trust"
+    )]
+    Alternates,
 }
 
 /// Environment variables that would point git at another repository or object store.
@@ -159,13 +169,29 @@ impl Repo {
         Ok(output.stdout)
     }
 
-    /// Refuse a repository whose object ids are not SHA-1.
-    fn check_object_format(&self) -> Result<(), GitError> {
+    /// Refuse a repository this bridge cannot vouch for: one whose object ids are not
+    /// SHA-1, or one that borrows objects from another store. Within a store, every read
+    /// is checked against the id it asked for; a second store could hold a different
+    /// copy under the same id, and which copy git serves depends on the process.
+    fn check_repository(&self) -> Result<(), GitError> {
         let out = self.run(&["rev-parse", "--show-object-format"], b"")?;
         match String::from_utf8_lossy(&out).trim() {
-            "sha1" => Ok(()),
-            other => Err(GitError::UnsupportedObjectFormat(other.to_string())),
+            "sha1" => {}
+            other => return Err(GitError::UnsupportedObjectFormat(other.to_string())),
         }
+        for name in ["objects/info/alternates", "objects/info/http-alternates"] {
+            let out = self.run(
+                &["rev-parse", "--path-format=absolute", "--git-path", name],
+                b"",
+            )?;
+            let path = PathBuf::from(String::from_utf8_lossy(&out).trim());
+            if std::fs::read(&path)
+                .is_ok_and(|bytes| bytes.iter().any(|b| !b.is_ascii_whitespace()))
+            {
+                return Err(GitError::Alternates);
+            }
+        }
+        Ok(())
     }
 
     /// The tree id `treeish` names.
@@ -179,7 +205,7 @@ impl Repo {
     /// Read the tree `treeish` names, hashing every blob from its bytes, and check that
     /// the tree id cuenca computes for it is the one git holds.
     pub fn read_tree(&self, treeish: &str) -> Result<Tree, GitError> {
-        self.check_object_format()?;
+        self.check_repository()?;
         let root = self.resolve_tree(treeish)?;
         let listing = self.run(
             &["ls-tree", "-r", "-t", "-z", "--full-tree", &root.to_hex()],
@@ -240,7 +266,7 @@ impl Repo {
         let tree = Tree::from_entries(entries)?;
         let ours = tree.git_tree_id();
         if ours != root {
-            return Err(GitError::StoreMismatch(root));
+            return Err(GitError::NonCanonical { stored: root, ours });
         }
         // The listing alone can hide a substituted tree object: git prints modes in
         // canonical form, entries in stored order and a name containing `/` like a
@@ -301,12 +327,19 @@ impl Repo {
     /// must have been sent. Missing blobs are stored with `hash-object`, and each missing
     /// directory is built by `git mktree`, which must lay it out as cuenca computed it.
     /// Finally the result is read back with [`Repo::read_tree`], which re-hashes every
-    /// blob, recomputes every tree id from git's own listing and applies every rule, so a
-    /// corrupt or substituted object already in the store (loose, packed or through an
-    /// alternate) fails the write rather than landing. Nothing is written into a SHA-256
-    /// repository or a partial clone.
+    /// blob, byte-checks every tree object against its canonical body and applies every
+    /// rule, so an object in the store that is not what its id names fails the write
+    /// rather than landing. Nothing is written into a SHA-256 repository, a partial clone
+    /// or a repository with alternates.
+    ///
+    /// Trust boundary: the store itself must be written only by git's own hashing
+    /// writes (`hash-object`, `mktree`, `index-pack --strict`, `fetch`). A writer that
+    /// can place objects in the store directly can keep two different copies of one id
+    /// in two packs, and which one a given git process serves is not something any reader
+    /// can control. Untrusted content enters only through this method or a strict
+    /// `index-pack` into a store the authority owns (spec section 2a).
     pub fn write_tree(&self, tree: &Tree, blobs: &Blobs) -> Result<GitOid, GitError> {
-        self.check_object_format()?;
+        self.check_repository()?;
         let promisor = self
             .run(
                 &[
@@ -353,6 +386,17 @@ impl Repo {
             }
         }
 
+        // Content rules for blobs the store already has and the caller did not send are
+        // checked here too, so a refused write stores nothing.
+        let unsent: Vec<GitOid> = ruled
+            .keys()
+            .filter(|o| present.contains_key(*o) && !blobs.contains_key(*o))
+            .copied()
+            .collect();
+        self.cat_file_batch("blob", &unsent, |oid, size, content| {
+            ruled[&oid].check_stream(oid, size, content)
+        })?;
+
         for oid in blob_oids.iter().filter(|o| !present.contains_key(o)) {
             let out = self.run(
                 &["hash-object", "-w", "--no-filters", "--stdin"],
@@ -386,11 +430,10 @@ impl Repo {
             }
         }
 
+        // The read-back re-hashes every blob and byte-checks every tree object against the
+        // canonical body for its id, so it returns this tree or an error.
         let root = tree.git_tree_id();
-        let back = self.read_tree(&root.to_hex())?;
-        if back != *tree {
-            return Err(GitError::StoreMismatch(root));
-        }
+        self.read_tree(&root.to_hex())?;
         Ok(root)
     }
 
@@ -411,8 +454,9 @@ impl Repo {
         Ok(present)
     }
 
-    /// Stream each blob in `oids` through one `git cat-file --batch`, in order. `each`
-    /// gets the blob's size and a reader over exactly its content.
+    /// Stream each object in `oids`, all of type `kind`, through one
+    /// `git cat-file --batch`, in order. `each` gets the object's size and a reader over
+    /// exactly its content.
     fn cat_file_batch(
         &self,
         kind: &str,
@@ -600,7 +644,7 @@ impl Ruled<'_> {
         {
             return Err(TreeError::SymlinkTarget {
                 path: path.to_string(),
-                why: format!("the target is {size} bytes, over {MAX_SYMLINK_TARGET}"),
+                problem: SymlinkProblem::TooLong(size as usize),
             }
             .into());
         }
