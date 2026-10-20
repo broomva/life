@@ -55,6 +55,8 @@ members = [
     "crates/lago/lago-store",
     "crates/lago/lago-substrate-proto",
     "crates/lago/lagod",
+    # Cuenca — the agent-native change plane
+    "crates/cuenca/cuenca-tree",
     # Autonomic — homeostasis
     "crates/autonomic/autonomic-api-schema",
     "crates/autonomic/autonomic-api",

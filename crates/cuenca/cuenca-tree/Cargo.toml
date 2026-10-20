@@ -1,0 +1,23 @@
+[package]
+name = "cuenca-tree"
+description = "Git-isomorphic trees and changesets for Cuenca, the agent-native change plane"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+sha1-checked = "0.10"
+sha2.workspace = true
+thiserror.workspace = true
+unicase = "=2.10.0"
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
