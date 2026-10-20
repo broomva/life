@@ -45,7 +45,8 @@ impl Op {
 /// A put names content by git id only. Whoever accepts a changeset must hold or
 /// receive the content of every put's blob and check it hashes to that id (the git
 /// bridge does, on every write); the SHA-256 Lago stores it under is derived from those
-/// verified bytes, never taken from the sender.
+/// verified bytes, never taken from the sender. It also applies [`crate::check_content`]
+/// to every blob at a `.gitattributes` path, which no tree of ids can check.
 ///
 /// Canonical order is not a safe order for writing to a filesystem: with a base symlink
 /// `d` and a put of `D/x`, byte order puts `D/x` first, and on a case-insensitive disk

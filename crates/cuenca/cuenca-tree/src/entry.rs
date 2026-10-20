@@ -1,7 +1,9 @@
 use crate::error::TreeError;
 use crate::oid::{ContentHash, GitOid};
+use crate::oid::{checked_sha1, finish_checked};
 use serde::{Deserialize, Serialize};
-use sha1::{Digest as _, Sha1};
+use sha1_checked::Sha1;
+use sha2::Digest as _;
 use sha2::Sha256;
 
 /// What hashing a blob's content yields: its git id, the SHA-256 Lago stores it under,
@@ -13,18 +15,39 @@ use sha2::Sha256;
 /// bytes it verified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Blob {
-    pub oid: GitOid,
-    pub sha256: ContentHash,
-    pub size: u64,
+    oid: GitOid,
+    sha256: ContentHash,
+    size: u64,
 }
 
 impl Blob {
-    pub fn of(content: &[u8]) -> Self {
+    /// Hash `content`, or `None` if SHA-1 collision detection fires on it.
+    pub fn of(content: &[u8]) -> Option<Self> {
         let mut h = BlobHasher::new(content.len() as u64);
         h.update(content);
-        h.try_finish()
-            .expect("the hasher was given the content's own length")
+        h.finish().ok()
     }
+
+    pub fn oid(&self) -> GitOid {
+        self.oid
+    }
+
+    pub fn sha256(&self) -> ContentHash {
+        self.sha256
+    }
+
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+}
+
+/// Why hashing a stream did not yield a [`Blob`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashFailure {
+    /// The stream held fewer or more bytes than announced.
+    WrongLength { expected: u64, seen: u64 },
+    /// SHA-1 collision detection fired, as git's SHA-1DC would.
+    Collision,
 }
 
 /// Hashes a blob's content as it streams, so a large blob is never held in memory.
@@ -38,8 +61,8 @@ pub struct BlobHasher {
 impl BlobHasher {
     /// Start hashing a blob of `size` bytes; git's id covers the size up front.
     pub fn new(size: u64) -> Self {
-        let mut git = Sha1::new();
-        git.update(format!("blob {size}\0").as_bytes());
+        let mut git = checked_sha1();
+        sha1_checked::Digest::update(&mut git, format!("blob {size}\0").as_bytes());
         Self {
             git,
             sha256: Sha256::new(),
@@ -49,7 +72,7 @@ impl BlobHasher {
     }
 
     pub fn update(&mut self, chunk: &[u8]) {
-        self.git.update(chunk);
+        sha1_checked::Digest::update(&mut self.git, chunk);
         self.sha256.update(chunk);
         self.seen += chunk.len() as u64;
     }
@@ -59,10 +82,18 @@ impl BlobHasher {
         self.seen
     }
 
-    /// The blob, or `None` if the content was not the size given to [`BlobHasher::new`].
-    pub fn try_finish(self) -> Option<Blob> {
-        (self.seen == self.expected).then(|| Blob {
-            oid: GitOid::from_bytes(self.git.finalize().into()),
+    /// The blob, unless the content was not the size given to [`BlobHasher::new`] or
+    /// SHA-1 collision detection fired.
+    pub fn finish(self) -> Result<Blob, HashFailure> {
+        if self.seen != self.expected {
+            return Err(HashFailure::WrongLength {
+                expected: self.expected,
+                seen: self.seen,
+            });
+        }
+        let oid = finish_checked(self.git).ok_or(HashFailure::Collision)?;
+        Ok(Blob {
+            oid: GitOid::from_bytes(oid),
             sha256: ContentHash::from_bytes(self.sha256.finalize().into()),
             size: self.seen,
         })
@@ -180,11 +211,17 @@ mod tests {
         let mut h = BlobHasher::new(content.len() as u64);
         h.update(&content[..3]);
         h.update(&content[3..]);
-        assert_eq!(h.try_finish(), Some(Blob::of(content)));
-        assert_eq!(Blob::of(content).oid, GitOid::for_blob(content));
+        assert_eq!(h.finish().ok(), Blob::of(content));
+        assert_eq!(Blob::of(content).unwrap().oid(), GitOid::for_blob(content));
         let mut short = BlobHasher::new(99);
         short.update(content);
-        assert_eq!(short.try_finish(), None);
+        assert_eq!(
+            short.finish(),
+            Err(HashFailure::WrongLength {
+                expected: 99,
+                seen: 12
+            })
+        );
     }
 
     #[test]

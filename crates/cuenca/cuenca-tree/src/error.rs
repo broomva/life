@@ -40,7 +40,7 @@ pub enum TreeError {
     )]
     Gitmodules(String),
     #[error(
-        "{0:?} names .gitattributes (under some alias) but is not a regular file, which git's fsck refuses"
+        "{0:?} names .gitattributes (under some alias) but is not a regular file: git's fsck rejects a directory there, and a symlink is refused here too"
     )]
     GitattributesNotAFile(String),
     #[error(".gitattributes at {path:?} breaks git's fsck limits: {why}")]

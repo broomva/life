@@ -6,7 +6,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 backup=$(mktemp -d)
-restore() { [ -n "${current:-}" ] && cp "$backup/file" "$current"; current=; }
+lock=$(git rev-parse --show-toplevel)/Cargo.lock
+cp "$lock" "$backup/Cargo.lock"
+restore() { [ -n "${current:-}" ] && cp "$backup/file" "$current"; current=; cp "$backup/Cargo.lock" "$lock"; }
 trap 'restore; rm -rf "$backup"' EXIT INT TERM
 
 # A mutant only counts as killed against a suite that passes unmutated.
@@ -51,11 +53,17 @@ mutate src/tree.rs '.find(|l| l.len() >= MAX_GITATTRIBUTES_LINE)' '.find(|l| l.l
 mutate src/changeset.rs 'if actual != self.target {' 'if false {' --lib
 mutate src/git.rs '.env("GIT_NO_REPLACE_OBJECTS", "1")' '' --test git_bridge
 mutate src/git.rs '.env("GIT_NO_LAZY_FETCH", "1")' '' --test git_bridge
-mutate src/git.rs 'if GitOid::for_blob(&bytes) != oid {' 'if false {' --test git_bridge
-mutate src/git.rs 'Some(blob) if blob.oid == oid => Ok(()),' 'Some(_) => Ok(()),' --test git_bridge
+mutate src/git.rs 'Some(blob) if blob.oid() == oid => Ok(()),' 'Some(_) => Ok(()),' --test git_bridge
+mutate src/git.rs 'Ok(blob) if blob.oid() == oid => Ok(()),' 'Ok(_) => Ok(()),' --test git_bridge
 mutate src/git.rs 'if let Some(empty) = dirs.iter().find(|d| !parents.contains(d.as_str()))' 'if let Some(empty) = dirs.iter().find(|_| false)' --test git_bridge
 mutate src/git.rs '"sha1" => Ok(()),' '_ => Ok(()),' --test git_bridge
 mutate src/git.rs 'return Err(GitError::PartialClone);' '' --test git_bridge
-mutate src/git.rs 'if GitOid::for_blob(content) != *oid {' 'if false {' --test git_bridge
+mutate src/git.rs 'None => hash_stream(oid, size, stored),' 'None => Ok(()),' --test git_bridge
+mutate src/git.rs 'Some(path) => check_gitattributes(path, oid, size, stored),' 'Some(_) => Ok(()),' --test git_bridge
+mutate src/git.rs '[id, _, _] if *id == oid.to_hex() => return Err(GitError::WrongType(*oid)),' '' --test git_bridge
+mutate src/git.rs 'verify_bytes(*oid, content)?;' '' --test git_bridge
+mutate src/path.rs '|| folds_to(component, ".gitmodules")' '' --lib
+mutate src/path.rs 'pub const MAX_PATH_BYTES: usize = 1023;' 'pub const MAX_PATH_BYTES: usize = 4096;' --lib
+mutate src/oid.rs 'CollisionResult::Mitigated(_) | CollisionResult::Collision(_) => None,' 'CollisionResult::Mitigated(d) | CollisionResult::Collision(d) => Some(d.into()),' --lib
 
 exit $survived

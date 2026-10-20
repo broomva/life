@@ -1,9 +1,9 @@
 //! Git-isomorphic trees and changesets for Cuenca, the agent-native change plane.
 //!
 //! A [`Tree`] is a flat map from a validated [`RepoPath`] to an [`Entry`]. Each entry
-//! carries what git needs to rebuild the identical tree object (its kind and git blob
-//! id) plus the SHA-256 of its content, the key Lago's blob store uses. Directories are
-//! implicit, as in git.
+//! is exactly what git's tree records, its mode and its blob's git id, so a tree is
+//! identified by its git tree id. Directories are implicit, as in git. Lago stores
+//! content under its SHA-256, which [`BlobHasher`] derives from verified bytes.
 //!
 //! A [`Changeset`] names the tree it applies to and the tree it produces, both as git
 //! tree ids, so any party can check it without trusting the sender:
@@ -47,7 +47,7 @@ mod path;
 mod tree;
 
 pub use changeset::{Changeset, FORMAT, Op};
-pub use entry::{Blob, BlobHasher, Entry, Mode};
+pub use entry::{Blob, BlobHasher, Entry, HashFailure, Mode};
 pub use error::{ChangesetError, PathError, TreeError};
 pub use oid::{ContentHash, GitOid};
 pub use path::{MAX_COMPONENT_BYTES, MAX_PATH_BYTES, RepoPath};

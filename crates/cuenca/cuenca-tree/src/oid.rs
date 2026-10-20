@@ -1,6 +1,7 @@
 use crate::error::TreeError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use sha1::{Digest as _, Sha1};
+use sha1_checked::{CollisionResult, Sha1};
+use sha2::Digest as _;
 use sha2::Sha256;
 use std::fmt;
 
@@ -84,12 +85,14 @@ impl GitOid {
         Self::for_object("tree", b"")
     }
 
-    /// The id git gives an object of `kind` ("blob", "tree", ...) with this body.
+    /// The id git gives an object of `kind` ("blob", "tree", ...) with this body. This
+    /// is plain SHA-1, as git names objects; to accept untrusted content, use
+    /// [`crate::BlobHasher`], which also runs SHA-1 collision detection as git does.
     pub fn for_object(kind: &str, body: &[u8]) -> Self {
-        let mut h = Sha1::new();
-        h.update(format!("{kind} {}\0", body.len()).as_bytes());
-        h.update(body);
-        Self(h.finalize().into())
+        let mut h = Sha1::builder().safe_hash(false).build();
+        sha1_checked::Digest::update(&mut h, format!("{kind} {}\0", body.len()).as_bytes());
+        sha1_checked::Digest::update(&mut h, body);
+        Self((*h.try_finalize().hash()).into())
     }
 
     /// The id git gives a blob with this content.
@@ -109,9 +112,34 @@ impl ContentHash {
     }
 }
 
+/// A SHA-1 hasher with git's collision detection (SHA-1DC). With `safe_hash` off, the
+/// digest of colliding input is still plain SHA-1, but the result is flagged.
+pub(crate) fn checked_sha1() -> Sha1 {
+    Sha1::builder().safe_hash(false).build()
+}
+
+/// The digest, or `None` if collision detection fired.
+pub(crate) fn finish_checked(h: Sha1) -> Option<[u8; 20]> {
+    match h.try_finalize() {
+        CollisionResult::Ok(digest) => Some(digest.into()),
+        CollisionResult::Mitigated(_) | CollisionResult::Collision(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collision_detection_fires_on_a_known_collision() {
+        // The SHA-1 chosen-prefix collision from "SHA-1 is a Shambles" (2020).
+        let mut h = checked_sha1();
+        sha1_checked::Digest::update(&mut h, include_bytes!("../tests/data/sha-mbles-1.bin"));
+        assert_eq!(finish_checked(h), None);
+        let mut ok = checked_sha1();
+        sha1_checked::Digest::update(&mut ok, b"hello\n");
+        assert!(finish_checked(ok).is_some());
+    }
 
     #[test]
     fn known_git_ids() {

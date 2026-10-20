@@ -17,8 +17,9 @@ use std::fmt;
 ///   folded, since a checkout on APFS could not hold both;
 /// - no component is `.gitmodules` under any alias (the format has no submodules, and
 ///   git's `verify_path` and `fsck` refuse or reject such entries);
-/// - a `.gitattributes` alias is only ever a regular or executable file, which git's
-///   `fsck` requires (its content limits are checked by [`check_content`]).
+/// - a `.gitattributes` alias is only ever a regular or executable file: git's `fsck`
+///   rejects a directory there (and only reports a symlink, which is refused here as
+///   well); its content limits are checked by [`check_content`].
 ///
 /// Directories are implicit, so an empty directory cannot exist. Validation and
 /// [`Tree::git_objects`] are linear in the total length of the paths.
@@ -378,6 +379,7 @@ mod tests {
             (".gitmodules/x", Entry::symlink(b"x")),
             ("a/.gitmodules/b", Entry::file(b"x")),
             ("gitmod~1:/x", Entry::symlink(b"x")),
+            (".gitmodule\u{17F}", Entry::symlink(b"x")),
         ] {
             let t = Tree::from_entries([(p(path), entry)]);
             assert_eq!(t, Err(TreeError::Gitmodules(path.into())), "{path:?}");
@@ -390,6 +392,7 @@ mod tests {
         for (path, entry) in [
             (".gitattributes/x", Entry::file(b"x")),
             (".GITATTRIBUTES", Entry::symlink(b"x")),
+            (".gitattribute\u{17F}/x", Entry::file(b"x")),
         ] {
             let t = Tree::from_entries([(p(path), entry)]);
             assert_eq!(
@@ -435,10 +438,10 @@ mod tests {
 
     #[test]
     fn deepest_allowed_path_validates_fast() {
-        let deep = vec!["a"; 2048].join("/");
+        let deep = vec!["a"; 512].join("/");
         let started = std::time::Instant::now();
         let t = tree(&[&deep]).unwrap();
-        assert_eq!(t.git_objects().len(), 2048);
+        assert_eq!(t.git_objects().len(), 512);
         assert!(
             started.elapsed().as_secs() < 2,
             "took {:?}",

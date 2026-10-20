@@ -5,15 +5,17 @@ use std::fmt;
 use unicase::UniCase;
 use unicode_normalization::UnicodeNormalization;
 
-/// The longest path accepted, in bytes (Linux's `PATH_MAX`).
-pub const MAX_PATH_BYTES: usize = 4096;
+/// The longest path accepted, in bytes: macOS's `PATH_MAX` is 1024 including the NUL,
+/// and a longer path cannot be checked out on a Mac.
+pub const MAX_PATH_BYTES: usize = 1023;
 /// The longest component accepted, in bytes: APFS and ext4 both stop at 255.
 pub const MAX_COMPONENT_BYTES: usize = 255;
 
 /// A path inside a repository: UTF-8, `/`-separated, relative, at most
 /// [`MAX_PATH_BYTES`] long with components of at most [`MAX_COMPONENT_BYTES`], with no
-/// empty, `.` or `..` component, no backslash, and no component git refuses to check out
-/// on macOS or Windows (`.git` under any alias; see [`RepoPath::new`]).
+/// empty, `.` or `..` component, no backslash, and no `.git` alias git refuses with
+/// `core.protectHFS` and `core.protectNTFS` on (see [`RepoPath::new`]). Windows-only
+/// names (`CON`, `a:b`, trailing dots) are not refused; Windows is not a target.
 ///
 /// Ordering is byte order of the UTF-8 string, which is the canonical order of a
 /// changeset's ops. Git's own tree order is per directory and is applied separately
@@ -188,7 +190,20 @@ fn is_ntfs_dot_generic(name: &[u8], needle: &[u8], short_prefix: &[u8]) -> bool 
 /// `.git` under every spelling a checkout on macOS or Windows resolves to the
 /// repository's own directory.
 fn is_git_dir_alias(component: &str) -> bool {
-    is_hfs_dot(component, "git") || is_ntfs_dotgit(component.as_bytes())
+    is_hfs_dot(component, "git")
+        || is_ntfs_dotgit(component.as_bytes())
+        || folds_to(component, ".git")
+}
+
+/// Whether `component`, with HFS-ignorable code points dropped, is `needle` once case
+/// and normalisation are folded as APFS folds them: `.gitmoduleſ` is `.gitmodules` on a
+/// Mac, though git's ASCII-only checks do not see it.
+fn folds_to(component: &str, needle: &str) -> bool {
+    let visible: String = component
+        .chars()
+        .filter(|c| !is_hfs_ignorable(*c))
+        .collect();
+    fold_component(&visible) == fold_component(needle)
 }
 
 /// `.gitmodules` under every spelling git's `verify_path` and `fsck` recognise
@@ -196,6 +211,7 @@ fn is_git_dir_alias(component: &str) -> bool {
 pub(crate) fn is_gitmodules_alias(component: &str) -> bool {
     is_hfs_dot(component, "gitmodules")
         || is_ntfs_dot_generic(component.as_bytes(), b"gitmodules", b"gi7eba")
+        || folds_to(component, ".gitmodules")
 }
 
 /// `.gitattributes` under every spelling git's `fsck` recognises
@@ -203,6 +219,7 @@ pub(crate) fn is_gitmodules_alias(component: &str) -> bool {
 pub(crate) fn is_gitattributes_alias(component: &str) -> bool {
     is_hfs_dot(component, "gitattributes")
         || is_ntfs_dot_generic(component.as_bytes(), b"gitattributes", b"gi7d29")
+        || folds_to(component, ".gitattributes")
 }
 
 impl fmt::Display for RepoPath {
@@ -298,11 +315,11 @@ mod tests {
     fn enforces_length_limits() {
         assert!(RepoPath::new("a".repeat(MAX_COMPONENT_BYTES)).is_ok());
         assert_eq!(RepoPath::new("a".repeat(256)), Err(PathError::TooLong(256)));
-        let deep = vec!["a"; 2049].join("/");
-        assert_eq!(
-            RepoPath::new(deep.clone()),
-            Err(PathError::TooLong(deep.len()))
-        );
+        let deep = vec!["a"; 512].join("/");
+        assert_eq!(deep.len(), 1023);
+        assert!(RepoPath::new(deep.clone()).is_ok());
+        let over = format!("{deep}b");
+        assert_eq!(RepoPath::new(over.clone()), Err(PathError::TooLong(1024)));
     }
 
     #[test]
@@ -316,9 +333,11 @@ mod tests {
             "GITMOD~4",
             "gi7eba~9",
             ".g\u{200D}itmodules",
+            ".gitmodule\u{17F}",
         ] {
             assert!(is_gitmodules_alias(name), "{name:?}");
         }
+        assert!(is_gitattributes_alias(".gitattribute\u{17F}"));
         for name in [".gitmodulesx", "gitmod~5", "gitmodules", "gi7eba~0"] {
             assert!(!is_gitmodules_alias(name), "{name:?}");
         }
@@ -355,9 +374,13 @@ mod tests {
             ("ϰ", "κ"),
             ("ϱ", "ρ"),
             ("ϵ", "ε"),
+            ("ﬃ", "ffi"),
+            ("ﬄ", "ffl"),
         ] {
             assert_eq!(fold_component(a), fold_component(b), "{a:?} vs {b:?}");
         }
         assert_ne!(fold_component("a"), fold_component("b"));
+        // unicase 2.9.0 folded three-character ligatures backwards; 2.10.0 is pinned.
+        assert_ne!(fold_component("ﬃ"), fold_component("iff"));
     }
 }

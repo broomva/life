@@ -690,4 +690,80 @@ fn a_corrupt_loose_object_is_detected() {
     let repo = Repo::open(w.path());
     assert!(matches!(repo.read_tree(&t), Err(GitError::Corrupt(o)) if o == real));
     assert!(matches!(repo.read_blobs([real]), Err(GitError::Corrupt(o)) if o == real));
+    // Writing a tree that names it must not trust the object store either.
+    let tree = Tree::from_entries([(RepoPath::new("a.txt").unwrap(), Entry::File(real))]).unwrap();
+    let err = repo.write_tree(&tree, &Blobs::new()).unwrap_err();
+    assert!(matches!(err, GitError::Corrupt(o) if o == real), "{err}");
+}
+
+/// Strata B and C's round-3 attack: the repository holds a blob with a 3000-byte line;
+/// the tree names it at a `.gitattributes` path, and the caller sends benign bytes for
+/// that id. The repository's own bytes are what would land, so they are what is checked.
+#[test]
+fn forged_bytes_cannot_vouch_for_a_gitattributes_the_repository_has() {
+    let w = Work::new();
+    let long = format!("{}\n", "a".repeat(3000));
+    let oid = GitOid::from_hex(&blob(&w, long.as_bytes())).unwrap();
+    let tree =
+        Tree::from_entries([(RepoPath::new(".gitattributes").unwrap(), Entry::File(oid))]).unwrap();
+    let mut forged = Blobs::new();
+    forged.insert(oid, b"* text\n".to_vec());
+    let err = Repo::open(w.path()).write_tree(&tree, &forged).unwrap_err();
+    assert!(
+        matches!(err, GitError::Tree(TreeError::GitattributesContent { .. })),
+        "{err}"
+    );
+}
+
+/// Stratum C's round-3 cost attack: one large `.gitattributes` blob named at many
+/// paths is loaded and checked once, not once per path. The write goes into the
+/// repository that already holds the trees, so it times the checks alone: building
+/// 10,000 new directories costs one `git mktree` each (about 90 s), which is the
+/// documented price of having git lay out every tree.
+#[test]
+fn many_gitattributes_paths_over_one_blob_are_checked_once() {
+    let w = Work::new();
+    let content = "* text\n".repeat(400_000);
+    let oid = blob(&w, content.as_bytes());
+    let index: String = (0..10_000)
+        .map(|i| format!("100644 {oid}\td{i}/.gitattributes\n"))
+        .collect();
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(w.path())
+        .args(["update-index", "--index-info"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(index.as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+    let root = git(w.path(), &["write-tree"]);
+    let repo = Repo::open(w.path());
+    let started = std::time::Instant::now();
+    let tree = repo.read_tree(&root).unwrap();
+    let read = started.elapsed();
+    let started = std::time::Instant::now();
+    repo.write_tree(&tree, &Blobs::new()).unwrap();
+    let wrote = started.elapsed();
+    assert!(
+        read.as_secs() < 5 && wrote.as_secs() < 5,
+        "read {read:?}, write {wrote:?}"
+    );
+}
+
+#[test]
+fn a_blob_id_that_is_a_tree_in_the_repository_is_refused() {
+    let w = Work::new();
+    let a = blob(&w, b"a");
+    let sub = GitOid::from_hex(&mktree(&w, &format!("100644 blob {a}\tx\n"), false)).unwrap();
+    let tree = Tree::from_entries([(RepoPath::new("f").unwrap(), Entry::File(sub))]).unwrap();
+    let err = Repo::open(w.path())
+        .write_tree(&tree, &Blobs::new())
+        .unwrap_err();
+    assert!(matches!(err, GitError::WrongType(o) if o == sub), "{err}");
 }
