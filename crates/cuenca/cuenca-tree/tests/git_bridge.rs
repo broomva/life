@@ -1131,3 +1131,30 @@ fn a_present_blob_failing_a_content_rule_stores_nothing() {
         "something was written"
     );
 }
+
+/// Stratum C's round-7 case: git honours an alternates line of only spaces as a relative
+/// path, so any content at all in the file is refused; an empty file is not a second
+/// store. Every reading method checks, not only read_tree and write_tree.
+#[test]
+fn any_alternates_content_is_refused_by_every_reader() {
+    let w = Work::new();
+    let a = GitOid::from_hex(&blob(&w, b"a\n")).unwrap();
+    let t = tree_from_index(&w, &[("100644", "a", b"a\n")]);
+    let file = w.path().join(".git/objects/info/alternates");
+    std::fs::write(&file, "").unwrap();
+    assert!(
+        Repo::open(w.path()).read_tree(&t.to_hex()).is_ok(),
+        "an empty alternates file is no second store"
+    );
+    std::fs::write(&file, " \n").unwrap();
+    let repo = Repo::open(w.path());
+    assert!(matches!(
+        repo.read_tree(&t.to_hex()),
+        Err(GitError::Alternates)
+    ));
+    assert!(matches!(
+        repo.resolve_tree(&t.to_hex()),
+        Err(GitError::Alternates)
+    ));
+    assert!(matches!(repo.read_blobs([a]), Err(GitError::Alternates)));
+}

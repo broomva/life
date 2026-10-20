@@ -31,7 +31,7 @@ pub enum SymlinkProblem {
     Empty,
     #[error("the target contains a NUL byte")]
     Nul,
-    #[error("the target is {0} bytes, over 1023")]
+    #[error("the target is {0} bytes, over {max}", max = crate::tree::MAX_SYMLINK_TARGET)]
     TooLong(usize),
 }
 

@@ -63,7 +63,8 @@ mutate src/git.rs '[id, _, _] if *id == oid.to_hex() => return Err(GitError::Wro
 mutate src/git.rs 'verify_bytes(*oid, content)?;' '' --test git_bridge
 mutate src/path.rs '|| folds_to(component, ".gitmodules")' '' --lib
 mutate src/git.rs 'self.read_tree(&root.to_hex())?;' '' --test git_bridge
-mutate src/git.rs 'return Err(GitError::Alternates);' '' --test git_bridge
+mutate src/git.rs 'Ok(_) => return Err(GitError::Alternates),' 'Ok(_) => {}' --test git_bridge
+mutate src/git.rs 'Ok(bytes) if bytes.is_empty() => {}' 'Ok(bytes) if bytes.iter().all(|b| b.is_ascii_whitespace()) => {}' --test git_bridge
 mutate src/git.rs 'ruled[&oid].check_stream(oid, size, content)' 'Ok(())' --test git_bridge
 mutate src/git.rs 'return Err(GitError::NonCanonical { stored: root, ours });' '' --test git_bridge
 mutate src/git.rs 'rules.check(content)?;' '' --test git_bridge

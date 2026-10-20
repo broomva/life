@@ -14,18 +14,26 @@
 //!
 //! Needs git 2.25 or later (`rev-parse --show-object-format`).
 //!
-//! Scope: SHA-1 repositories with UTF-8 paths. A SHA-256 repository is refused before
-//! anything is written; a non-UTF-8 path, a submodule or an empty directory is refused
-//! on read; writing into a partial clone is refused.
+//! Scope: SHA-1 repositories with UTF-8 paths and no alternates. A SHA-256 repository
+//! or one that borrows objects from another store (`objects/info/alternates` or
+//! `http-alternates`) is refused by every reading and writing method; a non-UTF-8 path,
+//! a submodule or an empty directory is refused on read; writing into a partial clone
+//! is refused.
 //!
 //! Every command runs with `GIT_NO_REPLACE_OBJECTS=1`, so a `refs/replace/` entry cannot
 //! substitute an object; with `GIT_NO_LAZY_FETCH=1`, so a blob missing from a partial
 //! clone is reported missing rather than fetched over the network; with `LC_ALL=C`, so
 //! git's messages can be read; and without the environment variables that would
-//! redirect git to another repository, index or object store. A repository's own
-//! configuration (alternates, `core.worktree`) still applies; every object read through
-//! it is hash-checked, and a write is read back, so it can hide objects but not change
-//! what a read or write returns.
+//! redirect git to another repository, index or object store.
+//!
+//! Trust boundary: every object a read returns was hashed from the bytes git served to
+//! that read, and a write is read back. What no reader can rule out is a store that
+//! someone writes into directly: two copies of one id in two packs can be served
+//! differently to different git processes. So the store must be written only by git's
+//! own hashing writes (`hash-object`, `mktree`, `index-pack --strict`, `fetch`), and
+//! untrusted content enters only through [`Repo::write_tree`] or a strict `index-pack`
+//! into a store the authority owns (spec section 2a). Reading an agent's own store
+//! tells the reader what that agent's git serves, nothing more.
 
 use crate::entry::{Blob, BlobHasher, Entry, HashFailure, Mode};
 use crate::error::{SymlinkProblem, TreeError};
@@ -34,6 +42,7 @@ use crate::path::RepoPath;
 use crate::tree::{MAX_GITATTRIBUTES_BYTES, MAX_SYMLINK_TARGET, Tree, check_content};
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use thiserror::Error;
@@ -88,7 +97,7 @@ pub enum GitError {
     )]
     NonCanonical { stored: GitOid, ours: GitOid },
     #[error(
-        "the repository borrows objects from another store (objects/info/alternates), which this bridge does not trust"
+        "the repository borrows objects from another store (objects/info/alternates or http-alternates), which this bridge does not trust"
     )]
     Alternates,
 }
@@ -179,16 +188,29 @@ impl Repo {
             "sha1" => {}
             other => return Err(GitError::UnsupportedObjectFormat(other.to_string())),
         }
+        // The common git directory, from raw bytes (a non-UTF-8 path must not turn into
+        // a path that does not exist), relative to the repository path unless absolute.
+        // `--git-common-dir` predates every git this bridge supports, unlike
+        // `--path-format`.
+        let out = self.run(&["rev-parse", "--git-common-dir"], b"")?;
+        let line = out.strip_suffix(b"\n").unwrap_or(&out);
+        if line.is_empty() || line.contains(&b'\n') {
+            return Err(GitError::Parse("rev-parse --git-common-dir".into()));
+        }
+        let common = std::path::Path::new(std::ffi::OsStr::from_bytes(line));
+        let common = if common.is_absolute() {
+            common.to_path_buf()
+        } else {
+            self.path.join(common)
+        };
         for name in ["objects/info/alternates", "objects/info/http-alternates"] {
-            let out = self.run(
-                &["rev-parse", "--path-format=absolute", "--git-path", name],
-                b"",
-            )?;
-            let path = PathBuf::from(String::from_utf8_lossy(&out).trim());
-            if std::fs::read(&path)
-                .is_ok_and(|bytes| bytes.iter().any(|b| !b.is_ascii_whitespace()))
-            {
-                return Err(GitError::Alternates);
+            // Any content at all is refused: git honours a line of only spaces as a
+            // relative path, and only a missing file proves there is no second store.
+            match std::fs::read(common.join(name)) {
+                Ok(bytes) if bytes.is_empty() => {}
+                Ok(_) => return Err(GitError::Alternates),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(GitError::Io(e)),
             }
         }
         Ok(())
@@ -196,6 +218,11 @@ impl Repo {
 
     /// The tree id `treeish` names.
     pub fn resolve_tree(&self, treeish: &str) -> Result<GitOid, GitError> {
+        self.check_repository()?;
+        self.resolve_tree_checked(treeish)
+    }
+
+    fn resolve_tree_checked(&self, treeish: &str) -> Result<GitOid, GitError> {
         let spec = format!("{treeish}^{{tree}}");
         let out = self.run(&["rev-parse", "--verify", "--end-of-options", &spec], b"")?;
         let hex = String::from_utf8_lossy(&out).trim().to_string();
@@ -206,7 +233,7 @@ impl Repo {
     /// the tree id cuenca computes for it is the one git holds.
     pub fn read_tree(&self, treeish: &str) -> Result<Tree, GitError> {
         self.check_repository()?;
-        let root = self.resolve_tree(treeish)?;
+        let root = self.resolve_tree_checked(treeish)?;
         let listing = self.run(
             &["ls-tree", "-r", "-t", "-z", "--full-tree", &root.to_hex()],
             b"",
@@ -293,6 +320,7 @@ impl Repo {
     /// The content of each blob in `oids`, each checked against its id, within this
     /// repository's memory limits ([`Repo::with_memory_limits`]).
     pub fn read_blobs(&self, oids: impl IntoIterator<Item = GitOid>) -> Result<Blobs, GitError> {
+        self.check_repository()?;
         let wanted = unique(oids);
         let mut out = Blobs::with_capacity(wanted.len());
         let (per_blob, total) = (self.max_blob_bytes, self.max_total_bytes);
