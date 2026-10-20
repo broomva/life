@@ -4,16 +4,14 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest as _, Sha1};
 use sha2::Sha256;
 
-/// A blob's identity: its git id, the SHA-256 Lago stores it under, and its size.
+/// What hashing a blob's content yields: its git id, the SHA-256 Lago stores it under,
+/// and its size.
 ///
-/// Only the git id is covered by a tree id. The SHA-256 and size are claims derived
-/// from the content: whoever receives the content checks them with [`Blob::matches`]
-/// (the git bridge does this for every blob it reads or writes), and a [`Tree`] refuses
-/// one git id claimed with two different SHA-256 or sizes.
-///
-/// [`Tree`]: crate::Tree
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// A `Blob` is only ever computed from content ([`Blob::of`], [`BlobHasher`]); it is not
+/// part of any wire format, so it cannot arrive as a claim. Trees and changesets name
+/// content by git id alone, and whoever stores content derives the SHA-256 from the
+/// bytes it verified.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Blob {
     pub oid: GitOid,
     pub sha256: ContentHash,
@@ -24,12 +22,8 @@ impl Blob {
     pub fn of(content: &[u8]) -> Self {
         let mut h = BlobHasher::new(content.len() as u64);
         h.update(content);
-        h.finish()
-    }
-
-    /// Whether `content` is this blob, by both hashes and the size.
-    pub fn matches(&self, content: &[u8]) -> bool {
-        *self == Self::of(content)
+        h.try_finish()
+            .expect("the hasher was given the content's own length")
     }
 }
 
@@ -60,6 +54,11 @@ impl BlobHasher {
         self.seen += chunk.len() as u64;
     }
 
+    /// The bytes seen so far.
+    pub fn seen(&self) -> u64 {
+        self.seen
+    }
+
     /// The blob, or `None` if the content was not the size given to [`BlobHasher::new`].
     pub fn try_finish(self) -> Option<Blob> {
         (self.seen == self.expected).then(|| Blob {
@@ -68,40 +67,36 @@ impl BlobHasher {
             size: self.seen,
         })
     }
-
-    fn finish(self) -> Blob {
-        self.try_finish()
-            .expect("Blob::of passes the content's own length")
-    }
 }
 
-/// One path's entry. The variant is the git mode, so a kind change is a change of entry.
+/// One path's entry: its git mode and the git id of its content. That is exactly what
+/// git's tree records, so two entries are equal exactly when git sees them as equal.
 ///
 /// The kinds are the spec's pinned set (section 3): regular file, executable and
 /// symlink; directories are implicit. Submodules (mode `160000`) are refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Entry {
     /// A regular file, git mode `100644`.
-    File(Blob),
+    File(GitOid),
     /// An executable file, git mode `100755`.
-    Executable(Blob),
+    Executable(GitOid),
     /// A symbolic link, git mode `120000`. The blob is the link's target.
-    Symlink(Blob),
+    Symlink(GitOid),
 }
 
 impl Entry {
     pub fn file(content: &[u8]) -> Self {
-        Self::File(Blob::of(content))
+        Self::File(GitOid::for_blob(content))
     }
 
     pub fn executable(content: &[u8]) -> Self {
-        Self::Executable(Blob::of(content))
+        Self::Executable(GitOid::for_blob(content))
     }
 
     pub fn symlink(target: &[u8]) -> Self {
-        Self::Symlink(Blob::of(target))
+        Self::Symlink(GitOid::for_blob(target))
     }
 
     pub fn mode(&self) -> Mode {
@@ -112,29 +107,19 @@ impl Entry {
         }
     }
 
-    pub fn blob(&self) -> &Blob {
+    /// The git id of the entry's content.
+    pub fn oid(&self) -> GitOid {
         match self {
-            Self::File(b) | Self::Executable(b) | Self::Symlink(b) => b,
+            Self::File(oid) | Self::Executable(oid) | Self::Symlink(oid) => *oid,
         }
     }
 
-    /// The id git's tree records for this entry.
-    pub fn oid(&self) -> GitOid {
-        self.blob().oid
-    }
-
-    /// What git sees of this entry: its mode and id. Two entries with the same identity
-    /// are the same entry to git.
-    pub fn git_identity(&self) -> (Mode, GitOid) {
-        (self.mode(), self.oid())
-    }
-
-    /// Build an entry from a git mode and the blob it names.
-    pub fn from_mode(mode: Mode, blob: Blob) -> Result<Self, TreeError> {
+    /// Build an entry from a git mode and the blob id it names.
+    pub fn from_mode(mode: Mode, oid: GitOid) -> Result<Self, TreeError> {
         match mode {
-            Mode::File => Ok(Self::File(blob)),
-            Mode::Executable => Ok(Self::Executable(blob)),
-            Mode::Symlink => Ok(Self::Symlink(blob)),
+            Mode::File => Ok(Self::File(oid)),
+            Mode::Executable => Ok(Self::Executable(oid)),
+            Mode::Symlink => Ok(Self::Symlink(oid)),
             Mode::Tree => Err(TreeError::UnsupportedMode(mode.as_str().to_string())),
         }
     }
@@ -196,9 +181,16 @@ mod tests {
         h.update(&content[..3]);
         h.update(&content[3..]);
         assert_eq!(h.try_finish(), Some(Blob::of(content)));
+        assert_eq!(Blob::of(content).oid, GitOid::for_blob(content));
         let mut short = BlobHasher::new(99);
         short.update(content);
         assert_eq!(short.try_finish(), None);
+    }
+
+    #[test]
+    fn entries_serialize_as_git_identity_only() {
+        let json = serde_json::to_string(&Entry::file(b"x")).unwrap();
+        assert_eq!(json, format!("{{\"file\":\"{}\"}}", GitOid::for_blob(b"x")));
     }
 
     #[test]

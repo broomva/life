@@ -191,10 +191,18 @@ fn is_git_dir_alias(component: &str) -> bool {
     is_hfs_dot(component, "git") || is_ntfs_dotgit(component.as_bytes())
 }
 
-/// `.gitmodules` under every spelling git refuses as a symlink (`verify_path`).
+/// `.gitmodules` under every spelling git's `verify_path` and `fsck` recognise
+/// (`is_hfs_dotgitmodules`, `is_ntfs_dotgitmodules`), checked on one component.
 pub(crate) fn is_gitmodules_alias(component: &str) -> bool {
     is_hfs_dot(component, "gitmodules")
         || is_ntfs_dot_generic(component.as_bytes(), b"gitmodules", b"gi7eba")
+}
+
+/// `.gitattributes` under every spelling git's `fsck` recognises
+/// (`is_hfs_dotgitattributes`, `is_ntfs_dotgitattributes`), checked on one component.
+pub(crate) fn is_gitattributes_alias(component: &str) -> bool {
+    is_hfs_dot(component, "gitattributes")
+        || is_ntfs_dot_generic(component.as_bytes(), b"gitattributes", b"gi7d29")
 }
 
 impl fmt::Display for RepoPath {

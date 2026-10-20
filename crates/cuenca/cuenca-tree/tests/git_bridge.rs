@@ -1,5 +1,5 @@
-//! The git bridge against trees a working directory cannot produce, against git and
-//! APFS as oracles for the path rules, and against the repository this crate is in.
+//! The git bridge against trees a working directory cannot produce; git, `git fsck` and
+//! APFS as oracles for the path rules; and the repository this crate is checked out in.
 
 #![cfg(unix)]
 
@@ -7,26 +7,29 @@ mod common;
 
 use common::{Work, git};
 use cuenca_tree::git::{Blobs, GitError, Repo};
-use cuenca_tree::{Blob, Entry, GitOid, RepoPath, Tree, TreeError};
+use cuenca_tree::{Entry, GitOid, RepoPath, Tree, TreeError};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Store `content` as a blob and return its id.
-fn blob(w: &Work, content: &str) -> String {
+fn blob(w: &Work, content: &[u8]) -> String {
     let file = w.path().join(".blob");
     std::fs::write(&file, content).unwrap();
     git(w.path(), &["hash-object", "-w", "--no-filters", ".blob"])
 }
 
+/// One index entry: mode, path and content (a commit id, for mode `160000`).
+type IndexEntry<'a> = (&'a str, &'a str, &'a [u8]);
+
 /// Stage entries straight into the index, bypassing the filesystem (which on macOS
 /// could not hold a case collision), and write the tree. git on macOS precomposes argv
 /// to NFC (`core.precomposeunicode`), which would turn a decomposed name into its
 /// composed twin before it reached the index, so that is switched off.
-fn tree_from_index(w: &Work, entries: &[(&str, &str, &str)]) -> GitOid {
+fn tree_from_index(w: &Work, entries: &[IndexEntry]) -> GitOid {
     for (mode, path, content) in entries {
         let oid = if *mode == "160000" {
-            content.to_string()
+            String::from_utf8(content.to_vec()).unwrap()
         } else {
             blob(w, content)
         };
@@ -36,6 +39,8 @@ fn tree_from_index(w: &Work, entries: &[(&str, &str, &str)]) -> GitOid {
             &[
                 "-c",
                 "core.precomposeunicode=false",
+                "-c",
+                "core.protectNTFS=false",
                 "update-index",
                 "--add",
                 "--cacheinfo",
@@ -46,9 +51,12 @@ fn tree_from_index(w: &Work, entries: &[(&str, &str, &str)]) -> GitOid {
     GitOid::from_hex(&git(w.path(), &["write-tree"])).unwrap()
 }
 
-/// Whether git, with both of its checkout protections on, accepts `path` into the index.
+/// Whether git, with both of its checkout protections on, accepts `path` with `mode`
+/// into an index of its own (so earlier probes cannot conflict with this one).
 fn git_accepts(w: &Work, mode: &str, path: &str) -> bool {
     let oid = GitOid::for_blob(b"x").to_hex();
+    let index = tempfile::NamedTempFile::new().unwrap();
+    std::fs::remove_file(index.path()).unwrap();
     let status = Command::new("git")
         .arg("-C")
         .arg(w.path())
@@ -66,12 +74,24 @@ fn git_accepts(w: &Work, mode: &str, path: &str) -> bool {
             "--cacheinfo",
             &format!("{mode},{oid},{path}"),
         ])
+        .env("GIT_INDEX_FILE", index.path())
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .stderr(Stdio::null())
         .status()
         .unwrap();
     status.success()
+}
+
+/// What cuenca says about one entry at `path`: Ok, or the error.
+fn cuenca(mode: &str, path: &str) -> Result<(), TreeError> {
+    let path = RepoPath::new(path)?;
+    let entry = if mode == "120000" {
+        Entry::symlink(b"x")
+    } else {
+        Entry::file(b"x")
+    };
+    Tree::from_entries([(path, entry)]).map(|_| ())
 }
 
 fn mktree(w: &Work, lines: &str, missing: bool) -> String {
@@ -101,8 +121,54 @@ fn mktree(w: &Work, lines: &str, missing: bool) -> String {
         .to_string()
 }
 
-/// Path names on which cuenca claims parity with git's `verify_path`: refused by one
-/// exactly when refused by the other.
+/// A deterministic stream of path names built from the characters git's `.git` and
+/// `.gitmodules` rules care about.
+fn fuzz_paths(n: usize, seed: u64) -> Vec<String> {
+    let pieces = [
+        ".",
+        "g",
+        "G",
+        "i",
+        "I",
+        "t",
+        "T",
+        "~",
+        "1",
+        "4",
+        "9",
+        " ",
+        ":",
+        "\u{200C}",
+        "\u{FEFF}",
+        "modules",
+        "MODULES",
+        "gi7eba",
+        "gitmod",
+        "attributes",
+        "gi7d29",
+        "/",
+        "a",
+        "x",
+    ];
+    let mut state = seed;
+    let mut next = move || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (state >> 33) as usize
+    };
+    (0..n)
+        .map(|_| {
+            let len = 1 + next() % 7;
+            (0..len)
+                .map(|_| pieces[next() % pieces.len()])
+                .collect::<String>()
+        })
+        .filter(|p| RepoPath::new(p.clone()).is_ok() || !p.contains('/'))
+        .collect()
+}
+
+/// Path names on which cuenca claims exact parity with git's `verify_path` for files.
 const PATH_CORPUS: &[&str] = &[
     ".git",
     ".GIT",
@@ -148,78 +214,178 @@ fn git_dir_rules_match_gits_own() {
     assert!(disagreements.is_empty(), "{}", disagreements.join("\n"));
 }
 
+/// A seeded fuzz over files and symlinks, multi-component paths included: whatever git
+/// refuses, cuenca refuses; whatever cuenca refuses that git accepts is one of its
+/// deliberate extra rules (no `.gitmodules` anywhere, `.gitattributes` only as a file,
+/// which `git fsck` enforces even where `verify_path` does not).
 #[test]
-fn symlinked_gitmodules_rules_match_gits_own() {
+fn path_rules_cover_gits_own_under_fuzz() {
     let w = Work::new();
-    let mut disagreements = Vec::new();
-    for name in [
-        ".gitmodules",
-        ".GITMODULES",
-        ".gitmodules.",
-        "gitmod~1",
-        "GITMOD~4",
-        "gi7eba~9",
-        ".gitmodulesx",
-        "gitmod~5",
-        "modules",
-    ] {
-        let tree = Tree::from_entries([(RepoPath::new(name).unwrap(), Entry::symlink(b"target"))]);
-        let ours = tree.is_ok();
-        let theirs = git_accepts(&w, "120000", name);
-        if ours != theirs {
-            disagreements.push(format!("{name:?}: cuenca {ours}, git {theirs}"));
+    let mut problems = Vec::new();
+    let paths = fuzz_paths(700, 0x5eed);
+    for mode in ["100644", "120000"] {
+        for path in &paths {
+            let theirs = git_accepts(&w, mode, path);
+            match (cuenca(mode, path), theirs) {
+                (Ok(()), false) => {
+                    problems.push(format!("{mode} {path:?}: cuenca accepts, git refuses"))
+                }
+                (Err(TreeError::Gitmodules(_) | TreeError::GitattributesNotAFile(_)), true) => {}
+                (Err(e), true) => problems.push(format!(
+                    "{mode} {path:?}: cuenca refuses ({e}), git accepts"
+                )),
+                _ => {}
+            }
         }
     }
-    assert!(disagreements.is_empty(), "{}", disagreements.join("\n"));
+    assert!(
+        paths.len() > 400,
+        "the fuzz produced only {} paths",
+        paths.len()
+    );
+    assert!(
+        problems.is_empty(),
+        "{} problems:\n{}",
+        problems.len(),
+        problems.join("\n")
+    );
 }
 
-/// On a case-insensitive APFS volume, the filesystem itself is the oracle: if creating
-/// one name makes the other resolve, cuenca must refuse to hold both.
+/// `git fsck` as the oracle for trees git's index would accept but its object checks
+/// reject (as GitHub does on push): every one must be refused when read.
+#[test]
+fn trees_git_fsck_rejects_are_refused() {
+    let long_line = format!("{}\n", "a".repeat(3000));
+    let cases: [(&str, &[IndexEntry]); 4] = [
+        (
+            "a .gitmodules directory",
+            &[("100644", ".gitmodules/x", b"x")],
+        ),
+        (
+            "a .gitattributes directory",
+            &[("100644", "a/.gitattributes/x", b"x")],
+        ),
+        (
+            "a .gitattributes with a 3000-byte line",
+            &[("100644", ".gitattributes", long_line.as_bytes())],
+        ),
+        (
+            "a .gitmodules file",
+            &[(
+                "100644",
+                ".gitmodules",
+                b"[submodule \"x\"]\n\tpath = x\n\turl = -oProxy\n",
+            )],
+        ),
+    ];
+    for (what, entries) in cases {
+        let w = Work::new();
+        let tree = tree_from_index(&w, entries);
+        let commit = git(
+            w.path(),
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit-tree",
+                &tree.to_hex(),
+                "-m",
+                "x",
+            ],
+        );
+        git(w.path(), &["update-ref", "refs/heads/main", &commit]);
+        let fsck = Command::new("git")
+            .arg("-C")
+            .arg(w.path())
+            .args(["fsck", "--no-dangling"])
+            .output()
+            .unwrap();
+        assert!(
+            !fsck.status.success(),
+            "{what}: expected git fsck to reject it"
+        );
+        assert!(
+            Repo::open(w.path()).read_tree(&tree.to_hex()).is_err(),
+            "{what}: cuenca read it"
+        );
+    }
+}
+
+/// On a case-insensitive APFS volume, the filesystem itself is the oracle. For every
+/// BMP code point and the cased astral blocks, create `x<c>` and probe its variants
+/// (upper, lower, upper-then-lower, NFC, NFD): APFS resolves a variant exactly when
+/// cuenca refuses to hold both names.
 #[cfg(target_os = "macos")]
 #[test]
-fn fold_collisions_match_apfs() {
+fn fold_collisions_match_apfs_across_unicode() {
+    use unicode_normalization::UnicodeNormalization;
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("probe"), "").unwrap();
     if !dir.path().join("PROBE").exists() {
         eprintln!("skipped: the temp volume is case-sensitive");
         return;
     }
-    let pairs = [
-        ("README", "readme"),
-        ("caf\u{e9}", "cafe\u{301}"),
-        ("straße", "strasse"),
-        ("aς", "aσ"),
-        ("ΑΣ", "ασ"),
-        ("ﬁ", "fi"),
-        ("ϐ", "β"),
-        ("ſ", "s"),
-        ("µ", "μ"),
-        ("ϑ", "θ"),
-        ("ϰ", "κ"),
-        ("ϱ", "ρ"),
-        ("ϵ", "ε"),
-        ("a", "b"),
-        ("e", "\u{e9}"),
-        ("i", "ı"),
+    let astral = [
+        0x10400..0x10450,
+        0x104B0..0x10500,
+        0x10570..0x105C0,
+        0x10C80..0x10D00,
+        0x118A0..0x11900,
+        0x16E40..0x16EA0,
+        0x1E900..0x1E960,
     ];
+    let chars = (0x21u32..0x10000)
+        .chain(astral.into_iter().flatten())
+        .filter_map(char::from_u32);
     let mut disagreements = Vec::new();
-    for (i, (a, b)) in pairs.iter().enumerate() {
-        let sub = dir.path().join(format!("p{i}"));
-        std::fs::create_dir(&sub).unwrap();
-        std::fs::write(sub.join(a), "").unwrap();
-        let apfs_collides = sub.join(b).exists();
-        let tree = Tree::from_entries([
-            (RepoPath::new(*a).unwrap(), Entry::file(b"1")),
-            (RepoPath::new(*b).unwrap(), Entry::file(b"2")),
-        ]);
-        let cuenca_collides = matches!(tree, Err(TreeError::Collision { .. }));
-        if apfs_collides != cuenca_collides {
-            disagreements.push(format!(
-                "{a:?}/{b:?}: APFS {apfs_collides}, cuenca {cuenca_collides}"
-            ));
+    let mut probed = 0;
+    for c in chars {
+        let name = format!("x{c}");
+        if RepoPath::new(name.clone()).is_err() {
+            continue;
         }
+        let file = dir.path().join(&name);
+        if std::fs::write(&file, "").is_err() {
+            continue;
+        }
+        let variants = [
+            name.to_uppercase(),
+            name.to_lowercase(),
+            name.to_uppercase().to_lowercase(),
+            name.to_lowercase().to_uppercase(),
+            name.nfc().collect::<String>(),
+            name.nfd().collect::<String>(),
+        ];
+        for v in variants.iter().filter(|v| **v != name) {
+            if RepoPath::new(v.clone()).is_err() {
+                continue;
+            }
+            probed += 1;
+            let apfs = dir.path().join(v).exists();
+            let ours = matches!(
+                Tree::from_entries([
+                    (RepoPath::new(name.clone()).unwrap(), Entry::file(b"1")),
+                    (RepoPath::new(v.clone()).unwrap(), Entry::file(b"2"))
+                ]),
+                Err(TreeError::Collision { .. })
+            );
+            if apfs != ours {
+                disagreements.push(format!(
+                    "{name:?}/{v:?} (U+{:04X}): APFS {apfs}, cuenca {ours}",
+                    c as u32
+                ));
+            }
+        }
+        std::fs::remove_file(&file).unwrap();
     }
-    assert!(disagreements.is_empty(), "{}", disagreements.join("\n"));
+    assert!(probed > 2000, "only {probed} pairs probed");
+    assert!(
+        disagreements.is_empty(),
+        "{} disagreements:\n{}",
+        disagreements.len(),
+        disagreements.join("\n")
+    );
 }
 
 #[test]
@@ -227,7 +393,7 @@ fn a_case_collision_in_git_is_refused() {
     let w = Work::new();
     let t = tree_from_index(
         &w,
-        &[("100644", "README.md", "a"), ("100644", "readme.md", "b")],
+        &[("100644", "README.md", b"a"), ("100644", "readme.md", b"b")],
     );
     let err = Repo::open(w.path()).read_tree(&t.to_hex()).unwrap_err();
     assert!(
@@ -241,7 +407,10 @@ fn a_normalisation_collision_in_git_is_refused() {
     let w = Work::new();
     let t = tree_from_index(
         &w,
-        &[("100644", "caf\u{e9}", "a"), ("100644", "cafe\u{301}", "b")],
+        &[
+            ("100644", "caf\u{e9}", b"a"),
+            ("100644", "cafe\u{301}", b"b"),
+        ],
     );
     let err = Repo::open(w.path()).read_tree(&t.to_hex()).unwrap_err();
     assert!(
@@ -253,10 +422,10 @@ fn a_normalisation_collision_in_git_is_refused() {
 #[test]
 fn a_submodule_is_refused() {
     let w = Work::new();
-    let commit = "1111111111111111111111111111111111111111";
+    let commit = b"1111111111111111111111111111111111111111";
     let t = tree_from_index(
         &w,
-        &[("160000", "vendor/sub", commit), ("100644", "a.txt", "a")],
+        &[("160000", "vendor/sub", commit), ("100644", "a.txt", b"a")],
     );
     let err = Repo::open(w.path()).read_tree(&t.to_hex()).unwrap_err();
     assert!(
@@ -266,19 +435,24 @@ fn a_submodule_is_refused() {
 }
 
 #[test]
-fn an_empty_directory_is_refused() {
+fn an_empty_directory_is_refused_by_its_own_name() {
     let w = Work::new();
     let empty = mktree(&w, "", false);
     assert_eq!(empty, GitOid::empty_tree().to_hex());
-    let a = blob(&w, "a");
+    let a = blob(&w, b"a");
+    let inner = mktree(
+        &w,
+        &format!("040000 tree {empty}\tleaf\n100644 blob {a}\tkeep\n"),
+        false,
+    );
     let root = mktree(
         &w,
-        &format!("040000 tree {empty}\tempty\n100644 blob {a}\ta.txt\n"),
+        &format!("040000 tree {inner}\touter\n100644 blob {a}\ta.txt\n"),
         false,
     );
     let err = Repo::open(w.path()).read_tree(&root).unwrap_err();
     assert!(
-        matches!(err, GitError::Tree(TreeError::EmptyDirectory(ref d)) if d == "empty"),
+        matches!(err, GitError::Tree(TreeError::EmptyDirectory(ref d)) if d == "outer/leaf"),
         "{err}"
     );
 }
@@ -286,8 +460,8 @@ fn an_empty_directory_is_refused() {
 #[test]
 fn replace_refs_cannot_swap_a_blob() {
     let w = Work::new();
-    let t = tree_from_index(&w, &[("100644", "a.txt", "original")]);
-    let evil = blob(&w, "replaced");
+    let t = tree_from_index(&w, &[("100644", "a.txt", b"original")]);
+    let evil = blob(&w, b"replaced");
     let original = GitOid::for_blob(b"original").to_hex();
     git(w.path(), &["replace", &original, &evil]);
     assert_eq!(
@@ -304,39 +478,68 @@ fn replace_refs_cannot_swap_a_blob() {
 }
 
 #[test]
-fn writing_refuses_content_that_does_not_match_its_entry() {
+fn writing_refuses_content_that_does_not_match_its_id() {
     let tree = Tree::from_entries([(RepoPath::new("a").unwrap(), Entry::file(b"real"))]).unwrap();
     let mut blobs = Blobs::new();
     blobs.insert(GitOid::for_blob(b"real"), b"forged".to_vec());
     let w = Work::new();
     let err = Repo::open(w.path()).write_tree(&tree, &blobs).unwrap_err();
     assert!(matches!(err, GitError::Corrupt(_)), "{err}");
+    let forged = GitOid::for_blob(b"forged").to_hex();
+    let stored = Command::new("git")
+        .arg("-C")
+        .arg(w.path())
+        .args(["cat-file", "-e", &forged])
+        .status()
+        .unwrap();
+    assert!(
+        !stored.success(),
+        "the forged content was written before being refused"
+    );
     let err = Repo::open(w.path())
         .write_tree(&tree, &Default::default())
         .unwrap_err();
     assert!(matches!(err, GitError::NoContent(_)), "{err}");
 }
 
-/// Stratum B's attack: the repository already holds an old, vulnerable blob; the entry
-/// names it by git id but claims the SHA-256 and size of the current content.
+/// The repository already holds a blob with a 3000-byte line; naming it at a
+/// `.gitattributes` path must still be refused, which means reading it back.
 #[test]
-fn writing_verifies_blobs_the_repository_already_has() {
+fn writing_checks_gitattributes_the_repository_already_has() {
     let w = Work::new();
-    blob(&w, "vulnerable old content");
-    let current = Blob::of(b"fixed content");
-    let forged = Blob {
-        oid: GitOid::for_blob(b"vulnerable old content"),
-        ..current
-    };
-    let tree =
-        Tree::from_entries([(RepoPath::new("auth.rs").unwrap(), Entry::File(forged))]).unwrap();
+    let long = format!("{}\n", "a".repeat(3000));
+    blob(&w, long.as_bytes());
+    let tree = Tree::from_entries([(
+        RepoPath::new("src/.gitattributes").unwrap(),
+        Entry::file(long.as_bytes()),
+    )])
+    .unwrap();
     let err = Repo::open(w.path())
         .write_tree(&tree, &Blobs::new())
         .unwrap_err();
     assert!(
-        matches!(err, GitError::Corrupt(oid) if oid == forged.oid),
+        matches!(err, GitError::Tree(TreeError::GitattributesContent { .. })),
         "{err}"
     );
+}
+
+#[test]
+fn a_sha256_repository_is_refused_before_anything_is_written() {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q", "--object-format=sha256"]);
+    let count = || git(dir.path(), &["count-objects"]);
+    let before = count();
+    let tree = Tree::from_entries([(RepoPath::new("a").unwrap(), Entry::file(b"a"))]).unwrap();
+    let mut blobs = Blobs::new();
+    blobs.insert(GitOid::for_blob(b"a"), b"a".to_vec());
+    let err = Repo::open(dir.path())
+        .write_tree(&tree, &blobs)
+        .unwrap_err();
+    assert!(
+        matches!(err, GitError::UnsupportedObjectFormat(ref f) if f == "sha256"),
+        "{err}"
+    );
+    assert_eq!(count(), before, "an object was written");
 }
 
 #[test]
@@ -360,10 +563,30 @@ fn a_blob_missing_from_the_object_store_is_reported() {
     );
 }
 
-/// A real `blob:none` partial clone of a local repository: reading must report the blob
-/// missing and must not fetch it, so the clone still lacks it afterwards.
 #[test]
-fn a_partial_clone_is_not_fetched_from() {
+fn reading_blobs_keeps_to_its_memory_limits() {
+    let w = Work::new();
+    let oids: Vec<GitOid> = (0..4)
+        .map(|i| GitOid::from_hex(&blob(&w, &vec![b'a' + i; 1000])).unwrap())
+        .collect();
+    let repo = Repo::open(w.path()).with_memory_limits(1000, 2500);
+    assert!(matches!(
+        repo.read_blobs(oids.clone()),
+        Err(GitError::TotalTooLarge { limit: 2500 })
+    ));
+    let small = Repo::open(w.path()).with_memory_limits(999, u64::MAX);
+    assert!(matches!(
+        small.read_blobs(oids.clone()),
+        Err(GitError::TooLarge { .. })
+    ));
+    assert_eq!(Repo::open(w.path()).read_blobs(oids).unwrap().len(), 4);
+}
+
+/// A real `blob:none` partial clone of a local repository: reading must report the blob
+/// missing and must not fetch it, so the clone still lacks it afterwards; writing into
+/// it is refused.
+#[test]
+fn a_partial_clone_is_not_fetched_from_or_written_into() {
     let src = Work::new();
     std::fs::write(src.path().join("a.txt"), "content only the source has").unwrap();
     git(src.path(), &["add", "a.txt"]);
@@ -407,6 +630,14 @@ fn a_partial_clone_is_not_fetched_from() {
         .status()
         .unwrap();
     assert!(!still_absent.success(), "the blob was fetched");
+
+    let tree = Tree::from_entries([(RepoPath::new("b").unwrap(), Entry::file(b"b"))]).unwrap();
+    let mut blobs = Blobs::new();
+    blobs.insert(GitOid::for_blob(b"b"), b"b".to_vec());
+    assert!(matches!(
+        Repo::open(&clone).write_tree(&tree, &blobs),
+        Err(GitError::PartialClone)
+    ));
 }
 
 /// The repository this crate is checked out in: its HEAD tree, read through the bridge,
@@ -450,12 +681,10 @@ fn a_corrupt_loose_object_is_detected() {
     let w = Work::new();
     let real = GitOid::for_blob(b"real\n");
     let t = mktree(&w, &format!("100644 blob {real}\ta.txt\n"), true);
-    let evil = blob(&w, "evil\n");
+    let evil = blob(&w, b"evil\n");
     let objects = w.path().join(".git/objects");
-    let (from, to) = (
-        objects.join(&evil[..2]).join(&evil[2..]),
-        objects.join(&real.to_hex()[..2]).join(&real.to_hex()[2..]),
-    );
+    let from = objects.join(&evil[..2]).join(&evil[2..]);
+    let to = objects.join(&real.to_hex()[..2]).join(&real.to_hex()[2..]);
     std::fs::create_dir_all(to.parent().unwrap()).unwrap();
     std::fs::copy(from, to).unwrap();
     let repo = Repo::open(w.path());

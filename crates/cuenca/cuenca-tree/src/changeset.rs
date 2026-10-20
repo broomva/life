@@ -1,11 +1,10 @@
 use crate::entry::Entry;
-use crate::error::{ChangesetError, TreeError};
+use crate::error::ChangesetError;
 use crate::oid::GitOid;
 use crate::path::RepoPath;
 use crate::tree::Tree;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
 /// The changeset format this build writes and reads.
 pub const FORMAT: u32 = 1;
@@ -43,9 +42,10 @@ impl Op {
 /// git sees (mode or blob id). Two changesets between the same trees are therefore
 /// equal.
 ///
-/// A blob's SHA-256 and size in a put are claims (see [`crate::Blob`]); applying
-/// refuses a claim that disagrees with the base's claim for the same blob id, and the
-/// receiver of the content verifies the rest.
+/// A put names content by git id only. Whoever accepts a changeset must hold or
+/// receive the content of every put's blob and check it hashes to that id (the git
+/// bridge does, on every write); the SHA-256 Lago stores it under is derived from those
+/// verified bytes, never taken from the sender.
 ///
 /// Canonical order is not a safe order for writing to a filesystem: with a base symlink
 /// `d` and a put of `D/x`, byte order puts `D/x` first, and on a case-insensitive disk
@@ -99,7 +99,7 @@ impl Changeset {
                 Ordering::Equal => {
                     let (_, before) = old.next().expect("peeked");
                     let (path, after) = new.next().expect("peeked");
-                    if before.git_identity() != after.git_identity() {
+                    if before != after {
                         ops.push(Op::put(path.clone(), *after));
                     }
                 }
@@ -139,8 +139,7 @@ impl Changeset {
 
     fn apply_ops(&self, base: &Tree) -> Result<Tree, ChangesetError> {
         let mut entries = base.map().clone();
-        let claims: HashMap<GitOid, &crate::Blob> =
-            base.entries().map(|(_, e)| (e.oid(), e.blob())).collect();
+
         let mut previous: Option<&RepoPath> = None;
         for op in &self.ops {
             if previous.is_some_and(|p| p >= op.path()) {
@@ -149,14 +148,7 @@ impl Changeset {
             previous = Some(op.path());
             match op {
                 Op::Put { path, entry } => {
-                    if claims
-                        .get(&entry.oid())
-                        .is_some_and(|claimed| *claimed != entry.blob())
-                    {
-                        return Err(TreeError::InconsistentBlob(entry.oid()).into());
-                    }
-                    let before = entries.insert(path.clone(), *entry);
-                    if before.is_some_and(|b| b.git_identity() == entry.git_identity()) {
+                    if entries.insert(path.clone(), *entry) == Some(*entry) {
                         return Err(ChangesetError::NoOpPut(path.to_string()));
                     }
                 }
@@ -281,38 +273,6 @@ mod tests {
             err,
             Err(ChangesetError::Tree(TreeError::FileDirConflict { .. }))
         ));
-    }
-
-    #[test]
-    fn refuses_a_forged_claim_on_a_blob_the_base_has() {
-        // Stratum A's reproduction: same git id as the base's a.txt, forged SHA-256 and
-        // size, target equal to base.
-        let base = base();
-        let real = *base.get("a.txt").unwrap().blob();
-        let forged = crate::Blob {
-            sha256: crate::Blob::of(b"other").sha256,
-            size: 0,
-            ..real
-        };
-        let change = Changeset {
-            format: FORMAT,
-            base: base.git_tree_id(),
-            target: base.git_tree_id(),
-            ops: vec![Op::put(p("a.txt"), Entry::File(forged))],
-        };
-        assert_eq!(
-            change.apply(&base),
-            Err(TreeError::InconsistentBlob(real.oid).into())
-        );
-        // The same blob id, honestly claimed, at the same mode is a no-op.
-        let noop = Changeset {
-            ops: vec![Op::put(p("a.txt"), Entry::File(real))],
-            ..change
-        };
-        assert_eq!(
-            noop.apply(&base),
-            Err(ChangesetError::NoOpPut("a.txt".into()))
-        );
     }
 
     #[test]

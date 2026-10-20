@@ -1,12 +1,12 @@
 use crate::entry::{Entry, Mode};
 use crate::error::TreeError;
-use crate::oid::{ContentHash, GitOid};
-use crate::path::{RepoPath, fold_component, is_gitmodules_alias};
+use crate::oid::GitOid;
+use crate::path::{RepoPath, fold_component, is_gitattributes_alias, is_gitmodules_alias};
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
-use std::collections::hash_map::Entry as Slot;
+
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
@@ -15,8 +15,10 @@ use std::fmt;
 /// - no path is both a file and a directory;
 /// - no two names in one directory collide once case and Unicode normalisation are
 ///   folded, since a checkout on APFS could not hold both;
-/// - no symlink is named `.gitmodules` under any alias git refuses;
-/// - each git blob id is claimed with one SHA-256 and size.
+/// - no component is `.gitmodules` under any alias (the format has no submodules, and
+///   git's `verify_path` and `fsck` refuse or reject such entries);
+/// - a `.gitattributes` alias is only ever a regular or executable file, which git's
+///   `fsck` requires (its content limits are checked by [`check_content`]).
 ///
 /// Directories are implicit, so an empty directory cannot exist. Validation and
 /// [`Tree::git_objects`] are linear in the total length of the paths.
@@ -90,25 +92,18 @@ impl Tree {
         // Each directory or file is a node, keyed by its parent node and its folded name.
         let mut nodes: HashMap<(usize, String), Seen> = HashMap::new();
         let mut next_id = 1;
-        let mut blobs: HashMap<GitOid, (ContentHash, u64)> = HashMap::new();
-
         for (path, entry) in &self.entries {
-            let blob = entry.blob();
-            match blobs.entry(blob.oid) {
-                Slot::Occupied(seen) if *seen.get() != (blob.sha256, blob.size) => {
-                    return Err(TreeError::InconsistentBlob(blob.oid));
-                }
-                Slot::Occupied(_) => {}
-                Slot::Vacant(slot) => {
-                    slot.insert((blob.sha256, blob.size));
-                }
-            }
-            if entry.mode() == Mode::Symlink && is_gitmodules_alias(path.file_name()) {
-                return Err(TreeError::SymlinkedGitmodules(path.to_string()));
-            }
-
-            let full = path.as_str();
             let count = path.components().count();
+            for (i, name) in path.components().enumerate() {
+                if is_gitmodules_alias(name) {
+                    return Err(TreeError::Gitmodules(path.to_string()));
+                }
+                let is_dir = i + 1 < count;
+                if is_gitattributes_alias(name) && (is_dir || entry.mode() == Mode::Symlink) {
+                    return Err(TreeError::GitattributesNotAFile(path.to_string()));
+                }
+            }
+            let full = path.as_str();
             let (mut parent, mut start) = (0, 0);
             for (i, name) in path.components().enumerate() {
                 let end = start + name.len();
@@ -221,6 +216,41 @@ impl Tree {
     }
 }
 
+/// The largest `.gitattributes` git's fsck parses (`ATTR_MAX_FILE_SIZE`).
+pub const MAX_GITATTRIBUTES_BYTES: usize = 100 * 1024 * 1024;
+/// The longest `.gitattributes` line git's fsck parses, exclusive (`ATTR_MAX_LINE_LENGTH`).
+pub const MAX_GITATTRIBUTES_LINE: usize = 2048;
+
+/// Check content against the rules git applies to particular paths, which a tree of
+/// git ids cannot see: a `.gitattributes` must be at most 100 MiB with every line
+/// shorter than 2048 bytes (git's `fsck`, which scans up to the first NUL).
+pub fn check_content(path: &RepoPath, content: &[u8]) -> Result<(), TreeError> {
+    if !is_gitattributes_alias(path.file_name()) {
+        return Ok(());
+    }
+    let bad = |why: String| TreeError::GitattributesContent {
+        path: path.to_string(),
+        why,
+    };
+    if content.len() > MAX_GITATTRIBUTES_BYTES {
+        return Err(bad(format!(
+            "{} bytes, over {MAX_GITATTRIBUTES_BYTES}",
+            content.len()
+        )));
+    }
+    let scanned = content.split(|b| *b == 0).next().unwrap_or_default();
+    if let Some(line) = scanned
+        .split(|b| *b == b'\n')
+        .find(|l| l.len() >= MAX_GITATTRIBUTES_LINE)
+    {
+        return Err(bad(format!(
+            "a line of {} bytes, at or over {MAX_GITATTRIBUTES_LINE}",
+            line.len()
+        )));
+    }
+    Ok(())
+}
+
 /// Git's order for entries of one tree: by name bytes, where a tree's name is compared
 /// as if it ended in `/` (git's `base_name_compare`).
 fn git_name_cmp(a: &(Mode, String, GitOid), b: &(Mode, String, GitOid)) -> Ordering {
@@ -290,7 +320,6 @@ impl<'de> Deserialize<'de> for Tree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entry::Blob;
 
     fn p(s: &str) -> RepoPath {
         RepoPath::new(s).unwrap()
@@ -342,24 +371,48 @@ mod tests {
     }
 
     #[test]
-    fn rejects_symlinked_gitmodules() {
-        let t = Tree::from_entries([(p("sub/.GITMODULES"), Entry::symlink(b"x"))]);
-        assert_eq!(
-            t,
-            Err(TreeError::SymlinkedGitmodules("sub/.GITMODULES".into()))
-        );
-        assert!(Tree::from_entries([(p(".gitmodules"), Entry::file(b"x"))]).is_ok());
+    fn refuses_gitmodules_anywhere() {
+        for (path, entry) in [
+            ("sub/.GITMODULES", Entry::symlink(b"x")),
+            (".gitmodules", Entry::file(b"x")),
+            (".gitmodules/x", Entry::symlink(b"x")),
+            ("a/.gitmodules/b", Entry::file(b"x")),
+            ("gitmod~1:/x", Entry::symlink(b"x")),
+        ] {
+            let t = Tree::from_entries([(p(path), entry)]);
+            assert_eq!(t, Err(TreeError::Gitmodules(path.into())), "{path:?}");
+        }
     }
 
     #[test]
-    fn rejects_one_oid_with_two_claims() {
-        let real = Blob::of(b"real");
-        let forged = Blob {
-            sha256: Blob::of(b"evil").sha256,
-            ..real
-        };
-        let t = Tree::from_entries([(p("a"), Entry::File(real)), (p("b"), Entry::File(forged))]);
-        assert_eq!(t, Err(TreeError::InconsistentBlob(real.oid)));
+    fn gitattributes_must_be_a_file() {
+        assert!(Tree::from_entries([(p("a/.gitattributes"), Entry::file(b"* text"))]).is_ok());
+        for (path, entry) in [
+            (".gitattributes/x", Entry::file(b"x")),
+            (".GITATTRIBUTES", Entry::symlink(b"x")),
+        ] {
+            let t = Tree::from_entries([(p(path), entry)]);
+            assert_eq!(
+                t,
+                Err(TreeError::GitattributesNotAFile(path.into())),
+                "{path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn gitattributes_content_limits() {
+        let path = p("x/.gitattributes");
+        assert!(check_content(&path, b"* text=auto\n").is_ok());
+        assert!(check_content(&path, &vec![b'a'; MAX_GITATTRIBUTES_LINE - 1]).is_ok());
+        assert!(check_content(&path, &vec![b'a'; MAX_GITATTRIBUTES_LINE]).is_err());
+        let mut after_nul = b"ok\0".to_vec();
+        after_nul.extend(vec![b'a'; 5000]);
+        assert!(
+            check_content(&path, &after_nul).is_ok(),
+            "fsck stops at the first NUL"
+        );
+        assert!(check_content(&p("long.txt"), &vec![b'a'; 5000]).is_ok());
     }
 
     #[test]

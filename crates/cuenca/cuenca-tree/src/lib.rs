@@ -27,9 +27,10 @@
 //! Trees and changesets arrive from agents, so every constructor and every
 //! deserializer validates: path rules (git's own `.git` rules for macOS and Windows,
 //! length limits, no backslash), names that would collide on APFS under full Unicode
-//! case folding, symlinked `.gitmodules`, and one SHA-256 and size per blob id. A
-//! blob's SHA-256 and size are claims until its content is checked with
-//! [`Blob::matches`]; the git bridge checks every blob it reads or writes.
+//! case folding, no `.gitmodules` anywhere and `.gitattributes` only as a file. Entries
+//! name content by git id alone, so a changeset makes no claim about content beyond
+//! that id; whoever accepts it checks the content it receives hashes to the id (the git
+//! bridge does) and derives the SHA-256 Lago stores it under from those bytes.
 //!
 //! # Scope
 //!
@@ -50,4 +51,4 @@ pub use entry::{Blob, BlobHasher, Entry, Mode};
 pub use error::{ChangesetError, PathError, TreeError};
 pub use oid::{ContentHash, GitOid};
 pub use path::{MAX_COMPONENT_BYTES, MAX_PATH_BYTES, RepoPath};
-pub use tree::{Tree, TreeObject};
+pub use tree::{MAX_GITATTRIBUTES_BYTES, MAX_GITATTRIBUTES_LINE, Tree, TreeObject, check_content};

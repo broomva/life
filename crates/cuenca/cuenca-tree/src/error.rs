@@ -35,10 +35,16 @@ pub enum TreeError {
     FileDirConflict { file: String, inside: String },
     #[error("{a:?} and {b:?} collide on a case- or normalisation-insensitive filesystem")]
     Collision { a: String, b: String },
-    #[error("{0:?} is a symlink named .gitmodules, which git refuses to check out")]
-    SymlinkedGitmodules(String),
-    #[error("blob {0} is claimed with two different SHA-256 or sizes")]
-    InconsistentBlob(GitOid),
+    #[error(
+        "{0:?} names .gitmodules (under some alias); the format has no submodules, and git refuses or fscks such entries"
+    )]
+    Gitmodules(String),
+    #[error(
+        "{0:?} names .gitattributes (under some alias) but is not a regular file, which git's fsck refuses"
+    )]
+    GitattributesNotAFile(String),
+    #[error(".gitattributes at {path:?} breaks git's fsck limits: {why}")]
+    GitattributesContent { path: String, why: String },
     #[error("unsupported git mode {0}")]
     UnsupportedMode(String),
     #[error("git tree has an empty directory {0:?}, which a checkout cannot hold")]

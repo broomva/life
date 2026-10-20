@@ -28,6 +28,8 @@ PY
   then echo "ANCHOR MISSING  $file: $old"; survived=1; restore; return; fi
   if cargo test -q -p cuenca-tree "$@" >"$backup/log" 2>&1; then
     echo "SURVIVED  $file: $old"; survived=1
+  elif grep -qE '^error\[E[0-9]+\]|could not compile|failed to select a version' "$backup/log"; then
+    echo "NO BUILD  $file: $old (a mutant that does not build proves nothing)"; survived=1
   else
     echo "killed    $file: $old"
   fi
@@ -39,17 +41,21 @@ mutate src/entry.rs 'Self::Tree => "40000",' 'Self::Tree => "040000",' --test ro
 mutate src/path.rs 'UniCase::unicode(decomposed)
         .to_folded_case()' 'decomposed
         .to_lowercase()' --lib
+mutate Cargo.toml 'unicase = "=2.10.0"' 'unicase = "=2.9.0"' --test git_bridge fold_collisions_match_apfs
 mutate src/path.rs "        if c == b':' {
             return true;" "        if c == b':' {
             return false;" --lib
-mutate src/tree.rs 'if entry.mode() == Mode::Symlink && is_gitmodules_alias(path.file_name())' 'if false' --lib
-mutate src/tree.rs 'Slot::Occupied(seen) if *seen.get() != (blob.sha256, blob.size) =>' 'Slot::Occupied(seen) if false && *seen.get() != (blob.sha256, blob.size) =>' --lib
+mutate src/tree.rs 'if is_gitmodules_alias(name) {' 'if false {' --test git_bridge
+mutate src/tree.rs 'if is_gitattributes_alias(name) && (is_dir || entry.mode() == Mode::Symlink) {' 'if false {' --test git_bridge
+mutate src/tree.rs '.find(|l| l.len() >= MAX_GITATTRIBUTES_LINE)' '.find(|l| l.len() > 4 * MAX_GITATTRIBUTES_LINE)' --lib
 mutate src/changeset.rs 'if actual != self.target {' 'if false {' --lib
-mutate src/changeset.rs '.is_some_and(|claimed| *claimed != entry.blob())' '.is_some_and(|claimed| false && *claimed != entry.blob())' --lib
 mutate src/git.rs '.env("GIT_NO_REPLACE_OBJECTS", "1")' '' --test git_bridge
 mutate src/git.rs '.env("GIT_NO_LAZY_FETCH", "1")' '' --test git_bridge
-mutate src/git.rs 'if hash_stream(oid, size, content)? != claims[&oid] {' 'if false {' --test git_bridge
 mutate src/git.rs 'if GitOid::for_blob(&bytes) != oid {' 'if false {' --test git_bridge
-mutate src/git.rs 'if let Some(empty) = dirs.iter().find(|d| !has_files.contains(d.as_str()))' 'if let Some(empty) = dirs.iter().find(|_| false)' --test git_bridge
+mutate src/git.rs 'Some(blob) if blob.oid == oid => Ok(()),' 'Some(_) => Ok(()),' --test git_bridge
+mutate src/git.rs 'if let Some(empty) = dirs.iter().find(|d| !parents.contains(d.as_str()))' 'if let Some(empty) = dirs.iter().find(|_| false)' --test git_bridge
+mutate src/git.rs '"sha1" => Ok(()),' '_ => Ok(()),' --test git_bridge
+mutate src/git.rs 'return Err(GitError::PartialClone);' '' --test git_bridge
+mutate src/git.rs 'if GitOid::for_blob(content) != *oid {' 'if false {' --test git_bridge
 
 exit $survived
