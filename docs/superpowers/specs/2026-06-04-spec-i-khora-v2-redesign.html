@@ -1,0 +1,220 @@
+<!--
+---
+type: spec
+slug: khora
+handle: khora
+title: "Khora v2 — agent environment substrate (redesign)"
+version: 2
+status: draft
+supersedes: "2026-05-16 v1 (P20 FAIL)"
+related_specs: [Spec C, Spec D, Spec E]
+review: "v1 failed 4-way P20 (4/4/3/3); v2 addresses B1–B10"
+---
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Khora v2 — agent environment substrate (redesign)</title>
+    <style>
+      :root{--bg:#0a0d13;--panel:#121826;--panel2:#0e1420;--ink:#e7eaf0;--muted:#94a0b0;--line:#212a3a;--accent:#5b8cff;--good:#3fc491;--warn:#e0a458;--bad:#e36b72;--violet:#b08cff;--cyan:#54c7d6;--gold:#d8b25a;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;--sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+      @media(prefers-color-scheme:light){:root{--bg:#f6f7fa;--panel:#fff;--panel2:#f0f2f7;--ink:#161b24;--muted:#566072;--line:#e2e7f0;}}
+      *{box-sizing:border-box}html{scroll-behavior:smooth}
+      body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.58;-webkit-font-smoothing:antialiased}
+      main{max-width:960px;margin:0 auto;padding:2.4rem 1.2rem 6rem}
+      h1{font-size:1.95rem;margin:0 0 .25rem;letter-spacing:-.025em;line-height:1.12}
+      .gk{font-family:Georgia,serif;font-style:italic}
+      .sub{color:var(--muted);margin:0 0 1.5rem;font-size:1.05rem;max-width:66ch}
+      h2{font-size:1.18rem;margin:2.6rem 0 .5rem;letter-spacing:-.01em;border-top:1px solid var(--line);padding-top:1.4rem}
+      h2 .n{font-family:var(--mono);font-size:.8rem;color:var(--accent);margin-right:.5rem;vertical-align:.12em}
+      h3{font-size:1.0rem;margin:1.4rem 0 .35rem}
+      p{margin:.6rem 0}code{font-family:var(--mono);font-size:.84em;background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:.06em .38em}
+      pre{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem;overflow:auto;font-size:.82rem;line-height:1.5;margin:.8rem 0}
+      pre code{background:none;border:none;padding:0}
+      .pill{display:inline-block;font-size:.7rem;font-family:var(--mono);padding:.18em .6em;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-bottom:1rem}
+      table{width:100%;border-collapse:collapse;margin:.8rem 0;font-size:.85rem}
+      th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--line);vertical-align:top}
+      th{color:var(--muted);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.045em}
+      td code{font-size:.82em}tbody tr:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+      svg{width:100%;height:auto;display:block;margin:.9rem 0;background:var(--panel2);border:1px solid var(--line);border-radius:14px}
+      ul,ol{margin:.45rem 0;padding-left:1.25rem}li{margin:.32rem 0}
+      .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1rem 1.2rem;margin:1rem 0}
+      .ok{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}.acc{color:var(--accent)}.vio{color:var(--violet)}.cy{color:var(--cyan)}.gd{color:var(--gold)}
+      .fix{border-left:3px solid var(--good);padding:.5rem 0 .5rem .85rem;margin:.9rem 0;background:color-mix(in srgb,var(--good) 4%,transparent);border-radius:0 8px 8px 0}
+      .fix .lab{font-family:var(--mono);font-size:.72rem;color:var(--good)}
+      .foot{color:var(--muted);font-size:.82rem;margin-top:3rem;border-top:1px solid var(--line);padding-top:1.2rem}
+      .cite{color:var(--muted);font-size:.78rem}
+      .legend{display:flex;gap:1.1rem;flex-wrap:wrap;font-size:.76rem;color:var(--muted);margin:.3rem 0}
+      .legend span{display:inline-flex;align-items:center;gap:.35rem}.sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+      .was{text-decoration:line-through;color:var(--bad);opacity:.8}
+      .toc{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:.7rem 1rem;margin:1.2rem 0;font-size:.85rem;columns:2;column-gap:1.4rem}
+      @media(max-width:680px){.toc{columns:1}}
+      .toc a{display:block;padding:.12rem 0;color:var(--ink)}.toc a:hover{color:var(--accent);text-decoration:none}
+      .toc .num{font-family:var(--mono);color:var(--muted);font-size:.78rem;margin-right:.4rem}
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="pill" style="border-color:var(--good);color:var(--good)">SPEC I · KHORA · v3 · P20 mean 7.1 (3/4 PASS) · architecture validated</span>
+      <h1>Khora v2 — the receptacle, <span class="gk">rebuilt honestly</span></h1>
+      <p class="sub">v1 was put through a P20 cross-model adversarial gate and failed 4/4/3/3 of 10. This is the redesign: every load-bearing defect corrected, Branch kept as the marquee primitive but re-grounded in what Firecracker actually does, and the security model rewritten from a stated aspiration into an enforced one.</p>
+
+      <div class="card" style="border-color:var(--good)">
+        <strong class="ok">What this redesign is.</strong> The P20 gate caught that v1's headline wedge (live-fork a running microVM) is mechanically impossible, its egress security was a confused deputy with a contradictory TLS model, and its phasing was 3–5× optimistic. The principal's call: <strong>build it ourselves</strong> (E2B as reference, not dependency) and <strong>keep Branch</strong> — but solve it properly. Every section below maps to a blocker <code class="bad">B1–B10</code> from the review. The failed v1 is preserved at <code>/d/khora/v/2</code> for the record.
+      </div>
+      <div class="card" style="border-color:var(--warn)">
+        <strong class="warn">Round-2 update.</strong> This v2 was itself re-gated through P20: <strong>mean 6.0</strong> (Codex 5 · Architect <strong class="ok">7 PASS</strong> · Silas 6 · Product 6 — up from v1's 3.5). Every reviewer agreed the <em>architecture</em> is now sound; it was held under the ≥7 bar by specific over-claims — diff-snapshot restore needs base⊕diff (not diff-alone); the divergence barrier can't run in-guest post-resume (moves host-side, pre-Resume + agent process re-exec); the per-tenant egress proxy needs a real isolation mechanism (per-khora sidecar); host-TCB honesty; residual SSRF closure; and Sub-E was blocked on Spec E. <strong>§9 (v3 amendments R1–R13)</strong> resolves each. Headline phasing corrected to <strong>16–24 weeks</strong>; Branch latency now unstated until Sub-R measures it, behind two real kill-switches. <strong class="ok">P20 round 3 (final): mean 7.1 — Architect 8 · Silas 7 · Product 7 PASS · Codex (cross-vendor) 6.5 FAIL.</strong> Trajectory across the gate: <strong>3.5 → 6.0 → 7.1</strong>. An honest marginal pass — the cross-vendor leg's one residual (the Branch <em>re-exec race</em>) is closed by freeze-before-snapshot + an envd init-gate, now a hard Sub-R2 gate. <strong>Architecture validated → proceed to Sub-R.</strong>
+      </div>
+
+      <div class="toc">
+        <a href="#branch"><span class="num">1</span>Branch — corrected to real Firecracker semantics (B1,B2)</a>
+        <a href="#egress"><span class="num">2</span>Egress security — enforced, not aspirational (B3,B4,B5)</a>
+        <a href="#store"><span class="num">3</span>Template store — memfile local, not in CAS (B6)</a>
+        <a href="#aci"><span class="num">4</span>ACI surface — 5 → sufficient (B9)</a>
+        <a href="#decisions"><span class="num">5</span>Corrected decisions + two new (B7,B8,S13)</a>
+        <a href="#phasing"><span class="num">6</span>Phasing — re-baselined to honesty (B10)</a>
+        <a href="#buildbuy"><span class="num">7</span>Build-vs-buy — the honest answer (S11,S12)</a>
+      </div>
+
+      <!-- =================================================== 1 BRANCH -->
+      <h2 id="branch"><span class="n">1</span>Branch — corrected to real Firecracker semantics</h2>
+      <p><strong class="bad">B1/B2.</strong> v1 said: <span class="was">"`cp --reflink` a live memfile, parent keeps running, &lt;50ms."</span> All four reviewers (Codex web-searched the Firecracker docs to confirm) flagged this as impossible: Firecracker's only snapshot path is <code>Pause → CreateSnapshot → restore</code>, and loaded memory files <em>must be immutable</em>. You cannot reflink the memory of an un-paused guest and get a coherent image.</p>
+      <p>The corrected mechanism keeps the differentiator — cheap N-way forking — but is honest about the brief parent pause and the mandatory post-restore hygiene:</p>
+      <svg viewBox="0 0 920 250" role="img" aria-label="Corrected Branch sequence">
+        <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5b8cff"/></marker></defs>
+        <!-- parent timeline -->
+        <text x="20" y="34" fill="#54c7d6" style="font:700 12px ui-monospace,monospace">parent</text>
+        <rect x="20" y="44" width="150" height="30" rx="7" fill="#0a0d13" stroke="#3fc491"/><text x="95" y="64" text-anchor="middle" fill="#3fc491" style="font:600 10px ui-monospace,monospace">running</text>
+        <rect x="172" y="44" width="120" height="30" rx="7" fill="#0a0d13" stroke="#e0a458"/><text x="232" y="60" text-anchor="middle" fill="#e0a458" style="font:600 9.5px ui-monospace,monospace">PAUSED</text><text x="232" y="71" text-anchor="middle" fill="#94a0b0" style="font:8px system-ui">snapshot window</text>
+        <rect x="294" y="44" width="150" height="30" rx="7" fill="#0a0d13" stroke="#3fc491"/><text x="369" y="64" text-anchor="middle" fill="#3fc491" style="font:600 10px ui-monospace,monospace">running again</text>
+        <text x="178" y="96" fill="#94a0b0" style="font:8.5px system-ui">single-digit→low-tens ms (diff snapshot = dirty pages only)</text>
+        <!-- snapshot artifact -->
+        <rect x="294" y="120" width="150" height="34" rx="8" fill="#0a0d13" stroke="#b08cff"/><text x="369" y="135" text-anchor="middle" fill="#b08cff" style="font:600 10px ui-monospace,monospace">immutable snapshot</text><text x="369" y="149" text-anchor="middle" fill="#94a0b0" style="font:8px system-ui">reflink — O(metadata)</text>
+        <path d="M232,74 L360,118" stroke="#b08cff" stroke-width="1.4" fill="none" marker-end="url(#a1)"/>
+        <!-- children -->
+        <g style="font:600 9.5px ui-monospace,monospace">
+          <rect x="540" y="92" width="160" height="34" rx="8" fill="#0a0d13" stroke="#212a3a"/><text x="556" y="113" fill="#e7eaf0">child A · restore</text>
+          <rect x="540" y="134" width="160" height="34" rx="8" fill="#0a0d13" stroke="#212a3a"/><text x="556" y="155" fill="#e7eaf0">child B · restore</text>
+          <rect x="540" y="176" width="160" height="34" rx="8" fill="#0a0d13" stroke="#212a3a"/><text x="556" y="197" fill="#e7eaf0">child N · restore</text>
+        </g>
+        <g stroke="#5b8cff" stroke-width="1.4" fill="none" marker-end="url(#a1)"><path d="M444,134 L538,109"/><path d="M444,140 L538,151"/><path d="M444,146 L538,193"/></g>
+        <!-- divergence hook -->
+        <rect x="730" y="92" width="172" height="118" rx="10" fill="#0a0d13" stroke="#e0a458"/>
+        <text x="816" y="110" text-anchor="middle" fill="#e0a458" style="font:700 10px ui-monospace,monospace">DIVERGENCE HOOK</text>
+        <text x="742" y="128" fill="#94a0b0" style="font:8.3px system-ui">· VMGenID reseed CSPRNG</text>
+        <text x="742" y="142" fill="#94a0b0" style="font:8.3px system-ui">· tear down inherited TCP</text>
+        <text x="742" y="156" fill="#94a0b0" style="font:8.3px system-ui">· rotate khora_id / MMDS</text>
+        <text x="742" y="170" fill="#94a0b0" style="font:8.3px system-ui">· clock-jump notify</text>
+        <text x="742" y="184" fill="#e36b72" style="font:8.3px system-ui">· RE-MINT egress token</text>
+        <text x="742" y="198" fill="#94a0b0" style="font:8.3px system-ui">· block guest until done</text>
+        <g stroke="#e0a458" stroke-width="1.3" fill="none" marker-end="url(#a1)"><path d="M700,109 L728,120"/><path d="M700,151 L728,151"/><path d="M700,193 L728,182"/></g>
+        <text x="20" y="170" fill="#94a0b0" style="font:9.5px system-ui" width="500">Honest framing: the parent is <tspan font-style="italic">briefly paused</tspan> for the</text>
+        <text x="20" y="184" fill="#94a0b0" style="font:9.5px system-ui">snapshot, not "running through a live fork." Children are</text>
+        <text x="20" y="198" fill="#94a0b0" style="font:9.5px system-ui">restores from a frozen image, each re-individuated by the hook.</text>
+        <text x="20" y="226" fill="#e0a458" style="font:9px system-ui">The "&lt;50ms" number is DELETED until Sub-R benchmarks it at 512MiB / 1GiB / 4GiB. No economics claim survives without that data.</text>
+      </svg>
+      <div class="fix"><span class="lab">Sub-R — the gating research phase (the principal's condition)</span><br>Before any production Branch: benchmark <code>pause·snapshot·reflink·restore·hook</code> at three memfile sizes; validate diff-snapshot reflink correctness under concurrent-write stress; verify the hook closes every divergence hazard (entropy, sockets, TSC, identity, token); publish the <em>real</em> cost curve and state the honest economic claim — or retract "speculation is cheap." Sub-R gates Sub-F.</div>
+
+      <!-- =================================================== 2 EGRESS -->
+      <h2 id="egress"><span class="n">2</span>Egress security — enforced, not aspirational</h2>
+      <p><strong class="bad">B3/B4/B5.</strong> v1's <code>MintEgressToken</code> bound only <code>user_id</code>+<code>scope</code> (never a destination), had a self-contradictory "inject a header but also SNI-passthrough" TLS model, and "secured by default" was enforced nowhere. Rewritten:</p>
+      <svg viewBox="0 0 920 250" role="img" aria-label="Hardened egress model">
+        <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5b8cff"/></marker></defs>
+        <!-- VM with default-deny -->
+        <rect x="24" y="60" width="210" height="130" rx="12" fill="#0a0d13" stroke="#b08cff" stroke-width="1.8"/>
+        <text x="129" y="82" text-anchor="middle" fill="#b08cff" style="font:700 12px ui-monospace,monospace">khora (guest)</text>
+        <rect x="44" y="98" width="170" height="30" rx="7" fill="#0a0d13" stroke="#212a3a"/><text x="129" y="117" text-anchor="middle" fill="#e7eaf0" style="font:600 9.5px ui-monospace,monospace">agent code (UID 1000)</text>
+        <text x="129" y="150" text-anchor="middle" fill="#e36b72" style="font:8.5px system-ui">raw connect() → DROP</text>
+        <text x="129" y="164" text-anchor="middle" fill="#94a0b0" style="font:8px system-ui">default-deny netns at host tap</text>
+        <text x="129" y="180" text-anchor="middle" fill="#3fc491" style="font:8.5px system-ui">only route = proxy socket ↓</text>
+        <!-- proxy -->
+        <rect x="320" y="78" width="240" height="94" rx="12" fill="#0a0d13" stroke="#e0a458" stroke-width="1.8"/>
+        <text x="440" y="98" text-anchor="middle" fill="#e0a458" style="font:700 11px ui-monospace,monospace">TLS-terminating egress proxy</text>
+        <text x="440" y="114" text-anchor="middle" fill="#94a0b0" style="font:8.3px system-ui">per-tenant trust domain (not shared MITM)</text>
+        <text x="332" y="132" fill="#94a0b0" style="font:8.3px system-ui">· resolve-once → connect-to-resolved IP (no DNS rebind)</text>
+        <text x="332" y="146" fill="#94a0b0" style="font:8.3px system-ui">· verify dst cert SPKI pin; reject redirects</text>
+        <text x="332" y="160" fill="#94a0b0" style="font:8.3px system-ui">· inject secret from Vault transit (never on heap)</text>
+        <!-- token -->
+        <rect x="320" y="186" width="240" height="46" rx="9" fill="#0a0d13" stroke="#54c7d6"/>
+        <text x="332" y="203" fill="#54c7d6" style="font:600 9px ui-monospace,monospace">destination-bound capability</text>
+        <text x="332" y="217" fill="#94a0b0" style="font:7.8px ui-monospace,monospace">{khora_id, branch_id, dst_host:port, spki_pin,</text>
+        <text x="332" y="227" fill="#94a0b0" style="font:7.8px ui-monospace,monospace">nonce, exp, byte_quota} · no wildcard for keys</text>
+        <!-- dest -->
+        <rect x="646" y="92" width="150" height="40" rx="9" fill="#0a0d13" stroke="#3fc491"/><text x="721" y="112" text-anchor="middle" fill="#3fc491" style="font:600 10px ui-monospace,monospace">api.anthropic.com</text><text x="721" y="125" text-anchor="middle" fill="#94a0b0" style="font:8px system-ui">pinned host + cert</text>
+        <rect x="646" y="146" width="150" height="40" rx="9" fill="#0a0d13" stroke="#e36b72" stroke-dasharray="4 3"/><text x="721" y="166" text-anchor="middle" fill="#e36b72" style="font:600 9.5px ui-monospace,monospace">attacker host</text><text x="721" y="179" text-anchor="middle" fill="#94a0b0" style="font:8px system-ui">SPKI mismatch → no inject</text>
+        <g stroke="#5b8cff" stroke-width="1.5" fill="none" marker-end="url(#a2)"><path d="M214,128 L318,120"/><path d="M560,118 L644,112"/></g>
+        <path d="M560,150 L644,166" stroke="#e36b72" stroke-width="1.3" fill="none" stroke-dasharray="4 3"/><text x="566" y="146" fill="#e36b72" style="font:8px system-ui">blocked</text>
+        <text x="24" y="244" fill="#94a0b0" style="font:9px system-ui">Plus: snapshots encrypted at rest (per-tenant key absent from the snapshot) · CAS per-tenant read-ACL · branch children re-mint (never inherit) tokens · UpdateNetPolicy tears down disallowed flows · vsock is an untrusted boundary (rate+size capped, khorad fuzzed).</text>
+      </svg>
+
+      <!-- =================================================== 3 STORE -->
+      <h2 id="store"><span class="n">3</span>Template store — memfile local, not in CAS</h2>
+      <p><strong class="bad">B6.</strong> v1 put the whole <code>{rootfs, memfile, snapfile}</code> triple in zstd CAS. You cannot lazily page-fault out of a compressed blob — UFFD needs the memfile <em>resident + uncompressed</em>. v1 would have had to inflate a GB-scale memfile before the first page fault: seconds, not &lt;100ms. Split:</p>
+      <svg viewBox="0 0 920 150" role="img" aria-label="Template store split">
+        <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5b8cff"/></marker></defs>
+        <rect x="30" y="46" width="180" height="58" rx="11" fill="#0a0d13" stroke="#54c7d6"/><text x="120" y="70" text-anchor="middle" fill="#54c7d6" style="font:700 11px ui-monospace,monospace">rootfs.ext4</text><text x="120" y="86" text-anchor="middle" fill="#94a0b0" style="font:8.5px system-ui">immutable base</text>
+        <rect x="370" y="20" width="220" height="44" rx="10" fill="#0a0d13" stroke="#54c7d6"/><text x="480" y="40" text-anchor="middle" fill="#54c7d6" style="font:600 10px ui-monospace,monospace">Lago CAS (zstd, by-hash)</text><text x="480" y="55" text-anchor="middle" fill="#94a0b0" style="font:8px system-ui">cold archive · provenance · pulled once</text>
+        <rect x="370" y="86" width="220" height="44" rx="10" fill="#0a0d13" stroke="#3fc491" stroke-width="1.8"/><text x="480" y="106" text-anchor="middle" fill="#3fc491" style="font:600 10px ui-monospace,monospace">local NVMe (uncompressed)</text><text x="480" y="121" text-anchor="middle" fill="#94a0b0" style="font:8px system-ui">memfile · UFFD page-faults live</text>
+        <rect x="710" y="46" width="180" height="58" rx="11" fill="#0a0d13" stroke="#b08cff"/><text x="800" y="70" text-anchor="middle" fill="#b08cff" style="font:600 10px ui-monospace,monospace">warm restore</text><text x="800" y="86" text-anchor="middle" fill="#94a0b0" style="font:8px system-ui">host-resident only</text>
+        <g stroke="#5b8cff" stroke-width="1.4" fill="none" marker-end="url(#a3)"><path d="M210,66 L368,42"/><path d="M210,82 L368,104"/><path d="M590,108 L708,82"/></g>
+        <text x="30" y="128" fill="#94a0b0" style="font:9px system-ui">Warm-pool SLO applies only to host-resident templates; a cold CAS pull (inflate → local) is an explicit slow path, measured separately.</text>
+      </svg>
+
+      <!-- =================================================== 4 ACI -->
+      <h2 id="aci"><span class="n">4</span>ACI surface — 5 → sufficient</h2>
+      <p><strong class="bad">B9.</strong> Five primitives can't manage a real runtime. v2 keeps the set small and human-shaped but adds the load-bearing verbs reviewers flagged as missing:</p>
+      <table>
+        <thead><tr><th>Group</th><th>Primitives</th><th>Added in v2</th></tr></thead>
+        <tbody>
+          <tr><td>Filesystem</td><td><code>FsRead · FsWrite · FsEdit · FsList</code></td><td>—</td></tr>
+          <tr><td>Process</td><td><code>Exec</code> · <code class="ok">ProcessControl</code> · <code class="ok">PtyExec</code></td><td class="ok">signal/kill/list/wait · interactive TTY + resize</td></tr>
+          <tr><td>Transfer</td><td><code class="ok">StreamFile</code> · <code class="ok">PortForward</code></td><td class="ok">large files · host-mediated inbound</td></tr>
+          <tr><td>Mount</td><td><code class="ok">MountVolume</code></td><td class="ok">host attaches virtio-blk (never in-guest <code>mount</code>)</td></tr>
+          <tr><td>Env</td><td><code class="ok">SetEnv</code></td><td class="ok">structured secret injection via vsock</td></tr>
+        </tbody>
+      </table>
+      <p>PID 1 is a minimal reaper (<code>tini</code>/<code>catatonit</code>) with <code>khora-envd</code> a supervised child — zombie reaping, signal forwarding, and <code>/proc</code>·<code>/sys</code>·<code>/dev/pts</code> mounts are explicit, not "cleaner than systemd."</p>
+
+      <!-- =================================================== 5 DECISIONS -->
+      <h2 id="decisions"><span class="n">5</span>Corrected decisions + two new</h2>
+      <div class="fix"><span class="lab">L7-D2 (corrected · B8)</span> — new <code>khora-pool</code> for VM lifecycle (warm-set per <code>template_id</code>, exclusive checkout, reset-or-destroy). The gRPC <code>life-runtime-pool</code> is a channel pool, not a VM-resource pool; only its <code>CircuitBreaker</code> is reused, for the khorad↔envd link.</div>
+      <div class="fix"><span class="lab">L7-D9 (new · B7)</span> — cross-host resume only within a CPU-template-normalized host pool (fixed TSC, normalized CPUID). Default acceptance is same-host; cross-pool is gated and <em>rejected</em>, not attempted, outside the pool.</div>
+      <div class="fix"><span class="lab">L7-D10 (new · S13)</span> — Khora is the one isolation primitive; <strong>Aegis is redefined as its policy layer</strong> (owns <code>EgressPolicy</code> content, capability scopes, attestation), not a second sandbox. praxis becomes <code>InProcessKhora</code> dev-mode behind the one <code>KhoraSession</code> interface. No overlapping isolation code.</div>
+
+      <!-- =================================================== 6 PHASING -->
+      <h2 id="phasing"><span class="n">6</span>Phasing — re-baselined to honesty</h2>
+      <p><strong class="bad">B10.</strong> v1's <span class="was">15 working days</span> for a from-scratch Firecracker substrate was not credible. Serial plan (no fictional parallel waves), research + security as their own phases:</p>
+      <svg viewBox="0 0 920 130" role="img" aria-label="Re-baselined phasing">
+        <g style="font:600 9px ui-monospace,monospace">
+          <rect x="14" y="40" width="86" height="44" rx="8" fill="#0a0d13" stroke="#e0a458"/><text x="57" y="60" text-anchor="middle" fill="#e0a458">Sub-R</text><text x="57" y="74" text-anchor="middle" fill="#94a0b0" style="font:7.5px system-ui">1–2wk</text>
+          <rect x="106" y="40" width="78" height="44" rx="8" fill="#0a0d13" stroke="#b08cff"/><text x="145" y="60" text-anchor="middle" fill="#b08cff">Sub-A</text><text x="145" y="74" text-anchor="middle" fill="#94a0b0" style="font:7.5px system-ui">1wk</text>
+          <rect x="190" y="40" width="86" height="44" rx="8" fill="#0a0d13" stroke="#3fc491"/><text x="233" y="58" text-anchor="middle" fill="#3fc491">Sub-B1</text><text x="233" y="72" text-anchor="middle" fill="#94a0b0" style="font:7.5px system-ui">no-UFFD · 2wk</text>
+          <rect x="282" y="40" width="86" height="44" rx="8" fill="#0a0d13" stroke="#3fc491"/><text x="325" y="58" text-anchor="middle" fill="#3fc491">Sub-B2</text><text x="325" y="72" text-anchor="middle" fill="#94a0b0" style="font:7.5px system-ui">UFFD · 2wk</text>
+          <rect x="374" y="40" width="86" height="44" rx="8" fill="#0a0d13" stroke="#5b8cff"/><text x="417" y="58" text-anchor="middle" fill="#5b8cff">Sub-C</text><text x="417" y="72" text-anchor="middle" fill="#94a0b0" style="font:7.5px system-ui">egress · 2wk</text>
+          <rect x="466" y="40" width="74" height="44" rx="8" fill="#0a0d13" stroke="#e0a458"/><text x="503" y="58" text-anchor="middle" fill="#e0a458">Sub-D</text><text x="503" y="72" text-anchor="middle" fill="#94a0b0" style="font:7.5px system-ui">sinks · 1wk</text>
+          <rect x="546" y="40" width="74" height="44" rx="8" fill="#0a0d13" stroke="#54c7d6"/><text x="583" y="58" text-anchor="middle" fill="#54c7d6">Sub-E</text><text x="583" y="72" text-anchor="middle" fill="#94a0b0" style="font:7.5px system-ui">smoke · 1wk</text>
+          <rect x="626" y="40" width="86" height="44" rx="8" fill="#0a0d13" stroke="#3fc491" stroke-dasharray="3 2"/><text x="669" y="58" text-anchor="middle" fill="#3fc491">Sub-F</text><text x="669" y="72" text-anchor="middle" fill="#94a0b0" style="font:7.5px system-ui">Branch · 1–2wk</text>
+          <rect x="718" y="40" width="74" height="44" rx="8" fill="#0a0d13" stroke="#e36b72"/><text x="755" y="58" text-anchor="middle" fill="#e36b72">Sub-G</text><text x="755" y="72" text-anchor="middle" fill="#94a0b0" style="font:7.5px system-ui">sec · 1wk</text>
+        </g>
+        <text x="14" y="108" fill="#94a0b0" style="font:9px system-ui">Realistic critical path ≈ <tspan fill="#e7eaf0" font-weight="700">11–14 weeks</tspan>, not 15 days. Sub-B split so a working substrate ships before UFFD. Sub-F (Branch) gated on Sub-R + Sub-B2. Sub-G gates production.</text>
+      </svg>
+
+      <!-- =================================================== 7 BUILD VS BUY -->
+      <h2 id="buildbuy"><span class="n">7</span>Build-vs-buy — the honest answer</h2>
+      <p><strong class="bad">S11/S12.</strong> v1's only stated reason to rebuild E2B was <span class="was">"Rust vocabulary."</span> The principal chose build; the honest irreducible reasons:</p>
+      <ol>
+        <li><strong>Branch lives in the VMM control path.</strong> The divergence hook + diff-snapshot reflink + pause-window orchestration are operations E2B's control plane doesn't expose.</li>
+        <li><strong>Per-action custody + event sourcing at the orchestrator</strong> — binding AnimaCustody and emitting <code>khora.*</code> per RPC is deepest at the orchestrator, not bolted onto a foreign Go control plane.</li>
+        <li>One-language operational surface (pool/breaker/saga already Rust) — real, but explicitly <em>secondary</em>.</li>
+        <li>The substrate is the long-term product.</li>
+      </ol>
+      <div class="card"><strong>Honesty clause (kept from the review).</strong> <code>e2b-dev/infra</code> (Apache-2.0) is the <em>reference</em> for the UFFD page server, template pipeline, and jailer setup — read, not blindly rewritten. And the <strong>wrap-E2B fallback stays live</strong>: if Sub-R or Sub-B2 prove the UFFD page server is disproportionately costly to build correctly, wrapping E2B's orchestrator (and emitting the cross-substrate events over it) is the documented retreat — the fabric needs event emission at the orchestration layer, not necessarily our own khorad. <strong>Sequencing (S12):</strong> Spec E (17%) and M9 remain the acknowledged critical path; Sub-E + the GPU pool stay sequenced behind Spec E even within this build.</div>
+
+      <div class="foot">
+        <p><strong>Spec I v2 — Khora, redesigned.</strong> Supersedes the v1 that failed P20 (4/4/3/3 of 10). Canonical markdown: <code>2026-06-04-spec-i-khora-v2-redesign.md</code>. Failed v1 preserved at <code>/d/khora/v/2</code>. Linear umbrella BRO-1377; P20 verdict comment + Codex transcript on file. Next: re-run P20 on v2 before Sub-R kickoff.</p>
+      </div>
+    </main>
+  </body>
+</html>
