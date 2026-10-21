@@ -903,3 +903,24 @@ fn a_symlink_target_too_long_to_check_out_is_refused_unread() {
         other => panic!("expected a refusal of the target, got {other:?}"),
     }
 }
+
+#[test]
+fn a_file_that_became_a_directory_under_a_directory_rule_is_an_ordinary_deletion() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "build", b"a file\n");
+    let base = snapshot_with(
+        dir.path(),
+        &Tree::new(),
+        &mut StatCache::new(),
+        &only(&ForkIgnore::parse("").unwrap()),
+    )
+    .unwrap();
+    write(dir.path(), ".forkignore", b"build/\n");
+    fs::remove_file(dir.path().join("build")).unwrap();
+    write(dir.path(), "build/out.o", b"object\n");
+    // The rule names `build` as a directory; the base held it as a file, which is gone.
+    let snap = snapshot(dir.path(), &base.tree, &mut StatCache::new()).unwrap();
+    assert!(snap.dropped.is_empty());
+    let paths: Vec<&str> = snap.tree.entries().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(paths, [".forkignore"]);
+}

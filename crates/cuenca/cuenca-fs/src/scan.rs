@@ -87,11 +87,6 @@ pub struct Skipped {
     pub reason: &'static str,
 }
 
-/// Snapshot `root` against `base`, with the rules of `root/.forkignore` (or the defaults
-/// when there is none). The snapshot obeys exactly the `.forkignore` it records: if the
-/// file changes between parsing and the end of the scan, it fails as unstable. On success
-/// `cache` holds this scan's stats; on failure it is left as it was.
-///
 /// What a snapshot may do besides the default.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SnapshotOptions<'a> {
@@ -102,6 +97,11 @@ pub struct SnapshotOptions<'a> {
     pub drop_ignored: bool,
 }
 
+/// Snapshot `root` against `base`, with the rules of `root/.forkignore` (or the defaults
+/// when there is none). The snapshot obeys exactly the `.forkignore` it records: if the
+/// file changes between parsing and the end of the scan, it fails as unstable. On success
+/// `cache` holds this scan's stats; on failure it is left as it was.
+///
 /// A snapshot never holds a path the rules name (spec section 2a). If the base holds one
 /// that the walk found the rules naming (the rules changed, or an import tracked it),
 /// leaving it out would delete it from the fork, so the snapshot fails loudly with
@@ -202,8 +202,9 @@ fn scan(
     let mut found = Vec::new();
     let mut skipped = Vec::new();
     let mut queue: Vec<ToRead> = Vec::new();
-    // Every path the rules left out, as the walk met it.
-    let mut ignored_seen: HashSet<String> = HashSet::new();
+    // Every path the rules left out, as the walk met it, by kind.
+    let mut ignored_dirs: HashSet<String> = HashSet::new();
+    let mut ignored_files: HashSet<String> = HashSet::new();
     let mut hashed = 0;
     // Depth first, so the directories held open are about one chain of ancestors.
     let mut pending: Vec<Pending> = Vec::new();
@@ -246,11 +247,16 @@ fn scan(
             // The rules come first, so they can leave out a name no tree could hold.
             if ignore.is_ignored(&rel, kind == FileType::Directory) {
                 if let Some(name) = os.to_str() {
-                    ignored_seen.insert(if prefix.is_empty() {
+                    let rel = if prefix.is_empty() {
                         name.to_string()
                     } else {
                         format!("{prefix}/{name}")
-                    });
+                    };
+                    if kind == FileType::Directory {
+                        ignored_dirs.insert(rel);
+                    } else {
+                        ignored_files.insert(rel);
+                    }
                 }
                 continue;
             }
@@ -328,16 +334,17 @@ fn scan(
     }
     hashed += read_all(&mut queue, &mut found)?;
 
-    // A base path the walk left out because the rules named it (or one of its
-    // directories). One that is simply gone, or changed kind, is an ordinary deletion.
+    // A base path the walk left out because the rules named it as a file, or named one of
+    // its directories as a directory. One that is simply gone, or whose name the rules
+    // name only as another kind, is an ordinary deletion.
     let dropped: Vec<String> = base
         .entries()
         .map(|(path, _)| path.as_str())
         .filter(|path| {
-            ignored_seen.contains(*path)
+            ignored_files.contains(*path)
                 || path
                     .match_indices('/')
-                    .any(|(i, _)| ignored_seen.contains(&path[..i]))
+                    .any(|(i, _)| ignored_dirs.contains(&path[..i]))
         })
         .map(str::to_string)
         .collect();

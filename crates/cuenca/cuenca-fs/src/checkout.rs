@@ -16,7 +16,7 @@ use cuenca_tree::{
     TreeError, check_content, has_content_rule,
 };
 use rayon::prelude::*;
-use rustix::fs::{AtFlags, CWD, Dir, OFlags, mkdirat, openat, statat, symlinkat, unlinkat};
+use rustix::fs::{AtFlags, CWD, Dir, OFlags, mkdirat, openat, symlinkat, unlinkat};
 use rustix::io::Errno;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::{CString, OsStr};
@@ -179,7 +179,7 @@ impl BlobSource for CheckoutSource {
 fn gone(e: &io::Error) -> bool {
     matches!(
         e.kind(),
-        io::ErrorKind::NotFound | io::ErrorKind::InvalidInput
+        io::ErrorKind::NotFound | io::ErrorKind::InvalidInput | io::ErrorKind::NotADirectory
     ) || e.raw_os_error() == Some(libc::ELOOP)
 }
 
@@ -208,10 +208,15 @@ pub struct Checkout {
 
 /// Materialise `tree` into `dest`: a missing directory, which is created, or an empty
 /// one. `dest` is the caller's path and is resolved as given (on macOS `/tmp` is itself a
-/// link); everything under it is reached without following a link. Others who can write
-/// `dest` can still put content in it while the checkout runs, which its first snapshot
-/// sees (a checkout leaves no stat cache, so that snapshot reads every file), but they
-/// cannot redirect a write outside it. Files are
+/// link); everything under it is reached without following a link.
+///
+/// **Precondition: `dest` is the caller's alone until this returns.** A checkout writes
+/// the tree it is given into a directory nobody else is changing; it does not referee
+/// concurrent writers of `dest` or of its parent, and what such a writer leaves there is
+/// for the next snapshot (which, with no stat cache, reads every file) to see. One thing
+/// holds whatever others do: no write, mode change or link the checkout makes lands
+/// outside `dest`. The authority's materialiser meets the precondition by checking out
+/// into a private staging directory and renaming it into place. Files are
 /// cloned from `source` where the disk supports it (APFS `clonefile`, a Linux reflink)
 /// and copied otherwise; modes are git's (`0644`, `0755`), whatever the source's are.
 /// Symlinks are created last. On error the destination is left partly written and should
@@ -263,14 +268,13 @@ pub fn checkout(tree: &Tree, dest: &Path, source: &dyn BlobSource) -> Result<Che
                 entries
                     .iter()
                     .map(|(path, entry)| {
-                        let (cloned, id) = write_file(&at, dest, path, *entry, source)?;
-                        Ok((*path, cloned, id))
+                        let cloned = write_file(&at, dest, path, *entry, source)?;
+                        Ok((*path, cloned))
                     })
                     .collect::<Result<Vec<_>>>()
             })
             .collect::<Result<_>>()
     })?;
-    let mut link_ids = Vec::new();
     for (path, oid) in links {
         let abs = dest.join(path.as_str());
         let target = match source.fetch(oid).map_err(FsError::io(&abs))? {
@@ -289,57 +293,15 @@ pub fn checkout(tree: &Tree, dest: &Path, source: &dyn BlobSource) -> Result<Che
         verify(oid, &target)?;
         let (parent, name) = split(path.as_str());
         let at = open_under(&root, dest, parent)?;
-        symlinkat(OsStr::from_bytes(&target), &at, name).map_err(errno(abs.clone()))?;
-        let st = statat(&at, name, AtFlags::SYMLINK_NOFOLLOW).map_err(errno(abs))?;
-        link_ids.push((path, dev_ino(&st)));
+        symlinkat(OsStr::from_bytes(&target), &at, name).map_err(errno(abs))?;
     }
-    // Every name still holds what this checkout put there, or the checkout fails: a file
-    // another writer swapped in meanwhile is reported, not passed off as the tree's.
-    let file_ids = written.iter().flatten().map(|(path, _, id)| (*path, *id));
-    verify_written(&root, dest, file_ids.chain(link_ids))?;
-    let cloned = written.iter().flatten().filter(|(_, c, _)| *c).count();
+    let cloned = written.iter().flatten().filter(|(_, c)| *c).count();
     let copied = written.iter().flatten().count() - cloned;
     Ok(Checkout { cloned, copied })
 }
 
-#[allow(clippy::unnecessary_cast)] // the field types differ between platforms
-fn dev_ino(st: &rustix::fs::Stat) -> (u64, u64) {
-    (st.st_dev as u64, st.st_ino as u64)
-}
-
-/// Check that each path names the inode the checkout wrote there.
-fn verify_written<'a>(
-    root: &OwnedFd,
-    dest: &Path,
-    written: impl Iterator<Item = (&'a RepoPath, (u64, u64))>,
-) -> Result<()> {
-    type Names<'a> = Vec<(&'a str, (u64, u64))>;
-    let mut by_dir: BTreeMap<&str, Names> = BTreeMap::new();
-    for (path, id) in written {
-        let (dir, name) = split(path.as_str());
-        by_dir.entry(dir).or_default().push((name, id));
-    }
-    for (dir, names) in by_dir {
-        let at = open_under(root, dest, dir)?;
-        for (name, id) in names {
-            let now = match statat(&at, name, AtFlags::SYMLINK_NOFOLLOW) {
-                Ok(st) => Some(dev_ino(&st)),
-                Err(Errno::NOENT) => None,
-                Err(e) => return Err(FsError::io(dest.join(dir).join(name))(e.into())),
-            };
-            if now != Some(id) {
-                return Err(FsError::Destination {
-                    path: dest.join(dir).join(name),
-                    why: "another file was put in place of one the checkout wrote",
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
-/// A file written: its path, whether it was cloned, and its device and inode.
-type Written<'a> = (&'a RepoPath, bool, (u64, u64));
+/// A file written, and whether it was cloned.
+type Written<'a> = (&'a RepoPath, bool);
 
 /// `a/b/c` → (`a/b`, `c`); `c` → (``, `c`).
 fn split(path: &str) -> (&str, &str) {
@@ -437,7 +399,7 @@ fn write_file(
     path: &RepoPath,
     entry: Entry,
     source: &dyn BlobSource,
-) -> Result<(bool, (u64, u64))> {
+) -> Result<bool> {
     let abs = dest.join(path.as_str());
     let name = CString::new(path.file_name()).expect("a repository path has no NUL");
     let oid = entry.oid();
@@ -486,12 +448,11 @@ fn write_file(
     } else {
         0o644
     };
-    let meta = file.metadata().map_err(FsError::io(&abs))?;
-    if Stamp::of(&meta).permissions() != mode {
+    if Stamp::of(&file.metadata().map_err(FsError::io(&abs))?).permissions() != mode {
         file.set_permissions(fs::Permissions::from_mode(mode))
             .map_err(FsError::io(&abs))?;
     }
-    Ok((cloned, (meta.dev(), meta.ino())))
+    Ok(cloned)
 }
 
 /// A file a clone just created by `name` (macOS gives back no descriptor), opened again
@@ -636,34 +597,6 @@ fn clone_or_copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<(bool
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_name_that_no_longer_holds_what_was_written_fails_the_checkout() {
-        let out = tempfile::tempdir().unwrap();
-        let dest = out.path().join("dest");
-        fs::create_dir_all(dest.join("d")).unwrap();
-        fs::write(dest.join("d/f"), b"ours\n").unwrap();
-        let root = prepare_for_test(&dest);
-        let path = RepoPath::new("d/f").unwrap();
-        let id = |p: &Path| {
-            let m = fs::symlink_metadata(p).unwrap();
-            (m.dev(), m.ino())
-        };
-        let ours = id(&dest.join("d/f"));
-        assert!(verify_written(&root, &dest, [(&path, ours)].into_iter()).is_ok());
-        // Swapped for another file (made first, so it cannot reuse the inode number).
-        fs::write(dest.join("d/g"), b"theirs\n").unwrap();
-        fs::rename(dest.join("d/g"), dest.join("d/f")).unwrap();
-        assert!(matches!(
-            verify_written(&root, &dest, [(&path, ours)].into_iter()),
-            Err(FsError::Destination { .. })
-        ));
-        fs::remove_file(dest.join("d/f")).unwrap();
-        assert!(matches!(
-            verify_written(&root, &dest, [(&path, ours)].into_iter()),
-            Err(FsError::Destination { .. })
-        ));
-    }
 
     #[test]
     fn a_hard_link_put_in_a_clones_place_is_refused() {
