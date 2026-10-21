@@ -6,8 +6,8 @@
 //! snapshot (spec section 2): no change notification is trusted to say what changed. A
 //! [`StatCache`] makes the scan cheap, by hashing only files whose stat changed since
 //! the cache recorded them. A path the location's [`ForkIgnore`] names never enters a
-//! snapshot unless the base already holds it; as in git, the rules decide what is added,
-//! and a path already tracked is read like any other.
+//! snapshot, even one the base held: that one is dropped and reported in
+//! [`Snapshot::dropped`].
 //!
 //! ```no_run
 //! use cuenca_fs::{StatCache, checkout, snapshot, CheckoutSource};
@@ -54,8 +54,8 @@
 //!
 //! A checkout leaves no stat cache: what it wrote is read by its first snapshot, which
 //! builds one. Content a source hands over is checked before it is written: bytes in
-//! memory and files offered without a stamp ([`ObjectDir`]) are hashed, and a file
-//! offered with a stamp ([`CheckoutSource`], from its stat cache) is cloned only while its
+//! memory and files ([`ObjectDir`], any other source) are hashed, and only a file this
+//! crate's [`CheckoutSource`] vouches for by its stat cache is cloned unhashed, while its
 //! stat is that stamp, checked again after cloning. A clone also carries its source's
 //! extended attributes, which no tree records.
 
@@ -66,7 +66,7 @@ mod ignore;
 mod scan;
 
 pub use cache::{RACY_MARGIN, Stamp, StatCache};
-pub use checkout::{BlobSource, Checkout, CheckoutSource, Fetched, ObjectDir, checkout};
+pub use checkout::{BlobSource, Checkout, CheckoutSource, Fetched, ObjectDir, Vouched, checkout};
 pub use error::FsError;
 pub use ignore::{DEFAULT_FORKIGNORE, FORKIGNORE, ForkIgnore};
 pub use scan::{Content, MAX_FILE_BYTES, NewBlob, Skipped, Snapshot, snapshot, snapshot_with};

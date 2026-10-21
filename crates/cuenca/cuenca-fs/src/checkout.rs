@@ -21,7 +21,7 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write as _};
 use std::os::fd::OwnedFd;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 /// How many files a checkout writes at once. Clones on one APFS volume contend: on a
@@ -38,14 +38,21 @@ pub trait BlobSource: Sync {
 /// A blob's content, as a source hands it over.
 #[derive(Debug)]
 pub enum Fetched {
-    /// An open regular file holding the blob, which a checkout clones (or copies, where
-    /// the disk cannot clone). With a `stamp`, the source vouches for the content by that
-    /// stat (a stat cache recorded it when the content was hashed). Without one, the
-    /// checkout hashes the file before cloning it. Either way it checks the file's stat
-    /// after cloning, and fails if the file changed while it was cloned.
-    File { file: File, stamp: Option<Stamp> },
+    /// An open regular file holding the blob, which a checkout hashes and then clones (or
+    /// copies, where the disk cannot clone), failing if the file changed in between.
+    File(File),
     /// The content in memory. A checkout hashes it before writing it.
     Bytes(Vec<u8>),
+    /// A file a checkout's own stat cache vouches for, cloned without hashing. Only this
+    /// crate makes one ([`CheckoutSource`]): another source cannot vouch for content.
+    Vouched(Vouched),
+}
+
+/// An open file and the stat under which a [`StatCache`] recorded its content.
+#[derive(Debug)]
+pub struct Vouched {
+    file: File,
+    stamp: Stamp,
 }
 
 impl<T: BlobSource + ?Sized> BlobSource for &T {
@@ -83,7 +90,7 @@ impl BlobSource for ObjectDir {
         let Some(file) = open_regular(&self.dir.join(&hex[..2]).join(&hex[2..]))? else {
             return Ok(None);
         };
-        Ok(Some(Fetched::File { file, stamp: None }))
+        Ok(Some(Fetched::File(file)))
     }
 }
 
@@ -131,10 +138,10 @@ impl BlobSource for CheckoutSource {
             if let Some(file) = open_regular(&self.root.join(path))?
                 && Stamp::of(&file.metadata()?) == *stamp
             {
-                return Ok(Some(Fetched::File {
+                return Ok(Some(Fetched::Vouched(Vouched {
                     file,
-                    stamp: Some(*stamp),
-                }));
+                    stamp: *stamp,
+                })));
             }
         }
         for (path, entry) in paths {
@@ -259,7 +266,7 @@ pub fn checkout(tree: &Tree, dest: &Path, source: &dyn BlobSource) -> Result<Che
         let target = match source.fetch(oid).map_err(FsError::io(&abs))? {
             None => return Err(FsError::MissingBlob(oid)),
             Some(Fetched::Bytes(bytes)) => bytes,
-            Some(Fetched::File { file, .. }) => {
+            Some(Fetched::File(file) | Fetched::Vouched(Vouched { file, .. })) => {
                 let mut bytes = Vec::new();
                 file.take(MAX_FILE_BYTES + 1)
                     .read_to_end(&mut bytes)
@@ -366,8 +373,8 @@ fn verify(oid: GitOid, content: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Write one regular file by its name in its directory `root`; true if it was cloned. A
-/// clone carries the source's mode, so the mode is set only where it is not already git's.
+/// Write one regular file by its name in its directory `root`; true if it was cloned.
+/// The mode is set through a descriptor for the file this call created, never by name.
 fn write_file(
     root: &OwnedFd,
     dest: &Path,
@@ -378,32 +385,36 @@ fn write_file(
     let abs = dest.join(path.as_str());
     let name = CString::new(path.file_name()).expect("a repository path has no NUL");
     let oid = entry.oid();
-    let cloned = match source.fetch(oid).map_err(FsError::io(&abs))? {
+    let (cloned, written) = match source.fetch(oid).map_err(FsError::io(&abs))? {
         None => return Err(FsError::MissingBlob(oid)),
-        Some(Fetched::File { file, stamp }) => {
-            let stamp = match stamp {
-                Some(stamp) => stamp,
-                None => verify_file(oid, &file, &abs)?,
+        Some(fetched @ (Fetched::File(_) | Fetched::Vouched(_))) => {
+            let (file, stamp) = match fetched {
+                Fetched::Vouched(Vouched { file, stamp }) => (file, stamp),
+                Fetched::File(file) => {
+                    let stamp = verify_file(oid, &file, &abs)?;
+                    (file, stamp)
+                }
+                Fetched::Bytes(_) => unreachable!("matched above"),
             };
-            let cloned = clone_or_copy(&file, root, &name).map_err(FsError::io(&abs))?;
+            let (cloned, written) = clone_or_copy(&file, root, &name).map_err(FsError::io(&abs))?;
             let now = Stamp::of(&file.metadata().map_err(FsError::io(&abs))?);
             if now != stamp {
                 unlinkat(root, &*name, AtFlags::empty()).map_err(errno(abs.clone()))?;
                 return Err(FsError::SourceChanged(abs));
             }
-            cloned
+            (cloned, written)
         }
         Some(Fetched::Bytes(bytes)) => {
             verify(oid, &bytes)?;
             let mut file = create(root, &name).map_err(FsError::io(&abs))?;
             file.write_all(&bytes).map_err(FsError::io(&abs))?;
-            false
+            (false, Some(file))
         }
     };
-    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-    let file = File::from(
-        openat(root, &*name, flags, rustix::fs::Mode::empty()).map_err(errno(abs.clone()))?,
-    );
+    let file = match written {
+        Some(file) => file,
+        None => reopen_alone(root, &name, &abs)?,
+    };
     let mode = if matches!(entry, Entry::Executable(_)) {
         0o755
     } else {
@@ -416,17 +427,39 @@ fn write_file(
     Ok(cloned)
 }
 
+/// A file a clone just created by `name` (macOS gives back no descriptor), opened again
+/// and refused unless it has no other name: a hard link put in its place, to a file
+/// outside the destination, is not ours to change.
+fn reopen_alone(root: &OwnedFd, name: &CString, abs: &Path) -> Result<File> {
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let file = File::from(
+        openat(root, &**name, flags, rustix::fs::Mode::empty()).map_err(errno(abs.into()))?,
+    );
+    let meta = file.metadata().map_err(FsError::io(abs))?;
+    if !meta.is_file() || meta.nlink() != 1 {
+        return Err(FsError::Destination {
+            path: abs.into(),
+            why: "another file was put in its place during the checkout",
+        });
+    }
+    Ok(file)
+}
+
 /// Hash an open file that came without a stamp and return the stamp it was hashed under,
 /// or fail if it is not the blob `oid`.
 fn verify_file(oid: GitOid, file: &File, abs: &Path) -> Result<Stamp> {
     let stamp = Stamp::of(&file.metadata().map_err(FsError::io(abs))?);
     let mut hasher = cuenca_tree::BlobHasher::new(stamp.size());
-    let mut reader = file.take(stamp.size() + 1);
     let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        match reader.read(&mut buf) {
+    let mut at = 0u64;
+    // Positional reads: the file's shared offset is never relied on.
+    while at <= stamp.size() {
+        match file.read_at(&mut buf, at) {
             Ok(0) => break,
-            Ok(n) => hasher.update(&buf[..n]),
+            Ok(n) => {
+                hasher.update(&buf[..n]);
+                at += n as u64;
+            }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
             Err(e) => return Err(FsError::io(abs)(e)),
         }
@@ -457,30 +490,39 @@ fn create(root: &OwnedFd, name: &CString) -> io::Result<File> {
 }
 
 #[cfg_attr(target_os = "linux", allow(dead_code))]
-fn copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<bool> {
+fn copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<(bool, Option<File>)> {
     let mut dst = create(root, name)?;
     copy_from_start(src, &mut dst)?;
-    Ok(false)
+    Ok((false, Some(dst)))
 }
 
-/// Copy all of `src`, whatever its offset (it may just have been hashed).
+/// Copy all of `src` with positional reads, whatever its shared offset.
 fn copy_from_start(src: &File, dst: &mut File) -> io::Result<u64> {
-    use std::io::{Seek as _, SeekFrom};
-    let mut src = src;
-    src.seek(SeekFrom::Start(0))?;
-    io::copy(&mut src, dst)
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut at = 0u64;
+    loop {
+        match src.read_at(&mut buf, at) {
+            Ok(0) => return Ok(at),
+            Ok(n) => {
+                dst.write_all(&buf[..n])?;
+                at += n as u64;
+            }
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
 }
 
-/// Clone `src` to `name` under `root`; true if cloned, false if the disk cannot clone and
-/// the content was copied.
+/// Clone `src` to `name` under `root`: true if cloned, false if the disk cannot clone and
+/// the content was copied, with the descriptor of the new file where there is one.
 #[cfg(target_os = "macos")]
-fn clone_or_copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<bool> {
+fn clone_or_copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<(bool, Option<File>)> {
     use std::os::fd::AsRawFd;
     // SAFETY: both descriptors are open for the duration of the call and `name` is a
     // NUL-terminated string that outlives it; `fclonefileat` reads only these.
     let rc = unsafe { libc::fclonefileat(src.as_raw_fd(), root.as_raw_fd(), name.as_ptr(), 0) };
     if rc == 0 {
-        return Ok(true);
+        return Ok((true, None));
     }
     let err = io::Error::last_os_error();
     match err.raw_os_error() {
@@ -490,26 +532,100 @@ fn clone_or_copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<bool>
 }
 
 #[cfg(target_os = "linux")]
-fn clone_or_copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<bool> {
+fn clone_or_copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<(bool, Option<File>)> {
     let mut dst = create(root, name)?;
     match rustix::fs::ioctl_ficlone(&dst, src) {
-        Ok(()) => Ok(true),
+        Ok(()) => Ok((true, Some(dst))),
         Err(Errno::OPNOTSUPP | Errno::XDEV | Errno::INVAL | Errno::NOTTY | Errno::BADF) => {
             copy_from_start(src, &mut dst)?;
-            Ok(false)
+            Ok((false, Some(dst)))
         }
         Err(e) => Err(e.into()),
     }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn clone_or_copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<bool> {
+fn clone_or_copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<(bool, Option<File>)> {
     copy(src, root, name)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_hard_link_put_in_a_clones_place_is_refused() {
+        let out = tempfile::tempdir().unwrap();
+        let dest = out.path().join("dest");
+        fs::create_dir(&dest).unwrap();
+        let secret = out.path().join("secret");
+        fs::write(&secret, b"key\n").unwrap();
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::hard_link(&secret, dest.join("f")).unwrap();
+        fs::write(dest.join("g"), b"ours\n").unwrap();
+        let root = prepare_for_test(&dest);
+        let name = CString::new("f").unwrap();
+        assert!(matches!(
+            reopen_alone(&root, &name, &dest.join("f")),
+            Err(FsError::Destination { .. })
+        ));
+        let mode = fs::metadata(&secret).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the outside file is untouched");
+        assert!(reopen_alone(&root, &CString::new("g").unwrap(), &dest.join("g")).is_ok());
+    }
+
+    #[test]
+    fn a_vouched_file_that_changed_while_cloned_is_refused() {
+        let out = tempfile::tempdir().unwrap();
+        let src = out.path().join("src");
+        let other = out.path().join("other");
+        fs::write(&src, b"content\n").unwrap();
+        fs::write(&other, b"other\n").unwrap();
+        // The stamp the cache recorded is not the file's any more.
+        struct Stale(PathBuf, Stamp);
+        impl BlobSource for Stale {
+            fn fetch(&self, _: GitOid) -> io::Result<Option<Fetched>> {
+                Ok(Some(Fetched::Vouched(Vouched {
+                    file: File::open(&self.0)?,
+                    stamp: self.1,
+                })))
+            }
+        }
+        let source = Stale(src, Stamp::of(&fs::metadata(&other).unwrap()));
+        let tree =
+            Tree::from_entries([(RepoPath::new("a.txt").unwrap(), Entry::file(b"content\n"))])
+                .unwrap();
+        let dest = out.path().join("fork");
+        assert!(matches!(
+            checkout(&tree, &dest, &source),
+            Err(FsError::SourceChanged(_))
+        ));
+        assert!(!dest.join("a.txt").exists(), "the clone is removed");
+    }
+
+    #[test]
+    fn hashing_and_copying_ignore_the_shared_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f");
+        fs::write(&path, b"0123456789").unwrap();
+        let mut file = File::open(&path).unwrap();
+        let mut skip = [0u8; 4];
+        file.read_exact(&mut skip).unwrap();
+        assert!(verify_file(GitOid::for_blob(b"0123456789"), &file, &path).is_ok());
+        let mut out = File::create(dir.path().join("g")).unwrap();
+        copy_from_start(&file, &mut out).unwrap();
+        assert_eq!(fs::read(dir.path().join("g")).unwrap(), b"0123456789");
+    }
+
+    fn prepare_for_test(dest: &Path) -> OwnedFd {
+        openat(
+            CWD,
+            dest,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        )
+        .unwrap()
+    }
 
     #[test]
     fn a_link_inside_the_destination_is_never_followed() {

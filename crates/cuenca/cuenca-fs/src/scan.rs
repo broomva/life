@@ -48,6 +48,10 @@ pub struct Snapshot {
     /// Entries left out that are not content (sockets, FIFOs, devices) or whose name git
     /// reserves, other than `.git` itself, which is always left out silently.
     pub skipped: Vec<Skipped>,
+    /// Paths of the base that the rules now name, which the tree therefore leaves out
+    /// and the changeset deletes. The files stay on disk; a caller should say so before
+    /// publishing, since every other checkout of the fork loses them.
+    pub dropped: Vec<String>,
     /// How many files were read, as opposed to taken from the stat cache.
     pub hashed: usize,
 }
@@ -88,15 +92,19 @@ pub struct Skipped {
 /// file changes between parsing and the end of the scan, it fails as unstable. On success
 /// `cache` holds this scan's stats; on failure it is left as it was.
 ///
-/// As in git, the rules decide what enters, not what leaves: a path the base already
-/// holds is read like any other even if the rules now name it, so an edit or a deletion
-/// of it is seen. A path the base does not hold never enters if the rules name it.
+/// A snapshot never holds a path the rules name (spec section 2a), whatever the base
+/// holds: such a base path is left out of the tree, deleted by the changeset and listed
+/// in [`Snapshot::dropped`].
 pub fn snapshot(root: &Path, base: &Tree, cache: &mut StatCache) -> Result<Snapshot> {
     let dir = open_dir(root)?;
     let (rules, parsed) = ForkIgnore::load(&dir, root)?;
     let (snap, next) = scan(dir, root, base, cache, &rules)?;
-    let eligible = !rules.excludes(FORKIGNORE) || base.get(FORKIGNORE).is_some();
-    rules_held(eligible, parsed.as_deref(), &snap.tree, root)?;
+    rules_held(
+        !rules.excludes(FORKIGNORE),
+        parsed.as_deref(),
+        &snap.tree,
+        root,
+    )?;
     rules_unchanged(root, parsed.as_deref())?;
     *cache = next;
     Ok(snap)
@@ -149,8 +157,6 @@ struct Found {
 
 /// A directory the walk listed and has still to open, from its parent's descriptor.
 struct Pending {
-    /// Under a directory the rules name, where only what the base holds is read.
-    tracked_only: bool,
     parent: Arc<OwnedFd>,
     name: CString,
     dev_ino: (u64, u64),
@@ -182,31 +188,18 @@ fn scan(
     let mut hashed = 0;
     // Depth first, so the directories held open are about one chain of ancestors.
     let mut pending: Vec<Pending> = Vec::new();
-    // Every directory of a path the base holds, so the walk can follow tracked paths
-    // under a directory the rules name.
-    let mut tracked_dirs: HashSet<&str> = HashSet::new();
-    for (path, _) in base.entries() {
-        let s = path.as_str();
-        let mut end = 0;
-        while let Some(i) = s[end..].find('/') {
-            end += i;
-            tracked_dirs.insert(&s[..end]);
-            end += 1;
-        }
-    }
     let mut next_dir = Some((
         Arc::new(root_fd),
-        false,
         String::new(),
         PathBuf::new(),
         root.to_path_buf(),
     ));
     loop {
-        let (dir, tracked_only, prefix, rel_dir, abs_dir) = match next_dir.take() {
+        let (dir, prefix, rel_dir, abs_dir) = match next_dir.take() {
             Some(dir) => dir,
             None => match pending.pop() {
                 Some(p) => match open_child(&p)? {
-                    Some(fd) => (fd, p.tracked_only, p.prefix, p.rel, p.abs),
+                    Some(fd) => (fd, p.prefix, p.rel, p.abs),
                     // Removed since it was listed, as a build tool's temporary directory is.
                     None => continue,
                 },
@@ -231,30 +224,18 @@ fn scan(
                 Err(e) => return Err(FsError::io(&abs)(e.into())),
             };
             let kind = FileType::from_raw_mode(st.st_mode);
-            let is_dir = kind == FileType::Directory;
-            // The rules come first, so they can leave out a name no tree could hold. What
-            // they name is read only if the base holds it (git's tracked-file rule).
-            let ignored = tracked_only || ignore.is_ignored(&rel, is_dir);
-            let name = match os.to_str() {
-                Some(name) => name,
-                None if ignored => continue,
-                None => return Err(FsError::NotUtf8(abs)),
+            // The rules come first, so they can leave out a name no tree could hold.
+            if ignore.is_ignored(&rel, kind == FileType::Directory) {
+                continue;
+            }
+            let Some(name) = os.to_str() else {
+                return Err(FsError::NotUtf8(abs));
             };
             let rel_str = if prefix.is_empty() {
                 name.to_string()
             } else {
                 format!("{prefix}/{name}")
             };
-            if ignored {
-                let tracked = if is_dir {
-                    tracked_dirs.contains(rel_str.as_str())
-                } else {
-                    base.get(&rel_str).is_some()
-                };
-                if !tracked {
-                    continue;
-                }
-            }
             let path = match RepoPath::new(rel_str.as_str()) {
                 Ok(path) => path,
                 Err(PathError::GitDir(_)) => {
@@ -268,7 +249,6 @@ fn scan(
             };
             match kind {
                 FileType::Directory => pending.push(Pending {
-                    tracked_only: ignored,
                     parent: Arc::clone(&dir),
                     name: raw.to_owned(),
                     dev_ino: dev_ino(&st),
@@ -322,6 +302,12 @@ fn scan(
     }
     hashed += read_all(&mut queue, &mut found)?;
 
+    let dropped = base
+        .entries()
+        .map(|(path, _)| path.as_str())
+        .filter(|path| ignore.excludes(path))
+        .map(str::to_string)
+        .collect();
     let mut next = StatCache::new();
     for f in &found {
         if let Some(stamp) = f.stamp {
@@ -350,6 +336,7 @@ fn scan(
         changeset,
         new_blobs,
         skipped,
+        dropped,
         hashed,
     };
     Ok((snap, next))
@@ -600,7 +587,6 @@ mod tests {
         fs::remove_dir(dir.path().join("a")).unwrap();
         std::os::unix::fs::symlink(outside.path(), dir.path().join("a")).unwrap();
         let mut pending = Pending {
-            tracked_only: false,
             parent: Arc::new(open_dir(dir.path()).unwrap()),
             name: CString::new("a").unwrap(),
             dev_ino: dev_ino(&st),
@@ -644,7 +630,6 @@ mod tests {
         fs::rename(dir.path().join("a"), outside.path().join("a")).unwrap();
         std::os::unix::fs::symlink(outside.path().join("a"), dir.path().join("a")).unwrap();
         let pending = Pending {
-            tracked_only: false,
             parent: Arc::new(open_dir(dir.path()).unwrap()),
             name: CString::new("a").unwrap(),
             dev_ino: dev_ino(&st),

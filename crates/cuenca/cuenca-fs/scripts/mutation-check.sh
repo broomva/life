@@ -44,16 +44,12 @@ mutate src/ignore.rs 'Errno::NOENT) => return Ok((Self::defaults(), None)),' 'Er
 mutate src/ignore.rs 'let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;' 'let flags = OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC;' --lib symlink_or_a_directory
 mutate src/ignore.rs 'if !file.metadata().map_err(FsError::io(&path))?.is_file() {' 'if false {' --lib symlink_or_a_directory
 mutate src/ignore.rs 'if self.is_ignored(&path[..end], true) {' 'if false {' --lib excludes
-mutate src/scan.rs 'let ignored = tracked_only || ignore.is_ignored(&rel, is_dir);' 'let ignored = tracked_only;' --test fs forkignore
+mutate src/scan.rs 'if ignore.is_ignored(&rel, kind == FileType::Directory) {' 'if false {' --test fs forkignore
 mutate src/scan.rs 'if held != parsed.map(GitOid::for_blob) {' 'if false {' --lib rules_that_changed
 mutate src/scan.rs 'if after.as_deref() != parsed {' 'if false {' --lib rules_changed_after
-# tracked paths under the rules (git's rule)
-mutate src/scan.rs 'let ignored = tracked_only || ignore.is_ignored(&rel, is_dir);' 'let ignored = ignore.is_ignored(&rel, is_dir);' --test fs stay_tracked
-mutate src/scan.rs 'tracked_dirs.contains(rel_str.as_str())' 'true' --test fs never_entered
-mutate src/scan.rs 'base.get(&rel_str).is_some()' 'true' --test fs stay_tracked
-mutate src/scan.rs '                if !tracked {
-                    continue;
-                }' '' --test fs stay_tracked
+# base paths the rules name are dropped, and reported
+mutate src/scan.rs '.filter(|path| ignore.excludes(path))' '.filter(|_| false)' --test fs dropped_and_reported
+
 # what a snapshot holds
 mutate src/scan.rs 'if bytes == b"." || bytes == b".." || bytes == b".git" {' 'if bytes == b"." || bytes == b".." {' --test fs git_state
 mutate src/scan.rs '                    skipped.push(Skipped {
@@ -94,8 +90,9 @@ mutate src/checkout.rs '    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFl
 mutate src/checkout.rs 'if !matches!(item.file_name().to_bytes(), b"." | b"..") {' 'if false {' --test fs non_empty
 mutate src/checkout.rs 'verify(oid, &bytes)?;' '' --test fs wrong_or_missing
 mutate src/checkout.rs 'verify(oid, &target)?;' '' --test fs wrong_or_missing
-mutate src/checkout.rs 'if now != stamp {' 'if false {' --test fs source_changed
-mutate src/checkout.rs 'None => verify_file(oid, &file, &abs)?,' 'None => Stamp::of(&file.metadata().map_err(FsError::io(&abs))?),' --test fs corrupt_object
+mutate src/checkout.rs 'if now != stamp {' 'if false {' --lib vouched_file_that_changed
+mutate src/checkout.rs 'let stamp = verify_file(oid, &file, &abs)?;' 'let stamp = Stamp::of(&file.metadata().map_err(FsError::io(&abs))?);' --test fs corrupt_object
+mutate src/checkout.rs 'if !meta.is_file() || meta.nlink() != 1 {' 'if !meta.is_file() {' --lib hard_link
 mutate src/checkout.rs '&& Stamp::of(&file.metadata()?) == *stamp' '&& true' --test fs edited_since
 mutate src/checkout.rs 'if Blob::of(&content).map(|b| b.oid()) == Some(oid) {' 'if true {' --test fs edited_since
 mutate src/checkout.rs '.permissions() != mode {' '.permissions() == u32::MAX {' --test fs every_source

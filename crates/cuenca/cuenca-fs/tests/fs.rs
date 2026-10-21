@@ -4,7 +4,7 @@ use cuenca_fs::{
     BlobSource, CheckoutSource, Content, DEFAULT_FORKIGNORE, Fetched, ForkIgnore, FsError,
     ObjectDir, StatCache, checkout, snapshot, snapshot_with,
 };
-use cuenca_tree::{Entry, GitOid, Tree};
+use cuenca_tree::{Entry, GitOid, Op, Tree};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io;
@@ -158,6 +158,10 @@ fn snapshot_checkout_snapshot_is_the_same_tree_from_every_source() {
         let dest = out.path().join("fork");
         let done = checkout(&snap.tree, &dest, &*source).unwrap();
         assert_eq!(done.cloned + done.copied, 7, "{name}");
+        // A file source clones on APFS, so a regression to copying shows here.
+        if cfg!(target_os = "macos") && name != "memory" {
+            assert_eq!(done.cloned, 7, "{name}");
+        }
         let again = snapshot(&dest, &snap.tree, &mut StatCache::new()).unwrap();
         assert_eq!(again.tree.git_tree_id(), id, "{name}");
         assert!(again.is_clean(), "{name}");
@@ -562,49 +566,9 @@ fn a_file_over_the_blob_limit_fails_the_snapshot() {
     }
 }
 
-/// A source whose file no longer has the stamp it offered it under.
-struct Moved {
-    path: std::path::PathBuf,
-    stamp: cuenca_fs::Stamp,
-}
-
-impl BlobSource for Moved {
-    fn fetch(&self, _: GitOid) -> io::Result<Option<Fetched>> {
-        Ok(Some(Fetched::File {
-            file: File::open(&self.path)?,
-            stamp: Some(self.stamp),
-        }))
-    }
-}
-
 #[test]
-fn a_clone_whose_source_changed_is_refused() {
-    let src = tempfile::tempdir().unwrap();
-    write(src.path(), "a.txt", b"content\n");
-    write(src.path(), "other", b"other\n");
-    let snap = snapshot_with(
-        src.path(),
-        &Tree::new(),
-        &mut StatCache::new(),
-        &ForkIgnore::parse("other").unwrap(),
-    )
-    .unwrap();
-    let source = Moved {
-        path: src.path().join("a.txt"),
-        stamp: cuenca_fs::Stamp::of(&fs::symlink_metadata(src.path().join("other")).unwrap()),
-    };
-    let out = tempfile::tempdir().unwrap();
-    let dest = out.path().join("fork");
-    assert!(matches!(
-        checkout(&snap.tree, &dest, &source),
-        Err(FsError::SourceChanged(_))
-    ));
-    assert!(!dest.join("a.txt").exists(), "the clone is removed");
-}
-
-#[test]
-fn ignored_paths_the_base_holds_stay_tracked() {
-    // A tree that holds paths the defaults ignore (imported, or from rules that kept them).
+fn ignored_paths_the_base_holds_are_dropped_and_reported() {
+    // A tree that holds paths the defaults name (imported, or from rules that kept them).
     let src = tempfile::tempdir().unwrap();
     write(src.path(), "src/lib.rs", b"pub fn f() {}\n");
     write(src.path(), "src/target/mod.rs", b"// tracked\n");
@@ -618,40 +582,31 @@ fn ignored_paths_the_base_holds_stay_tracked() {
     let out = tempfile::tempdir().unwrap();
     let dest = out.path().join("fork");
     checkout(&base.tree, &dest, &memory_of(&base)).unwrap();
+    // No .forkignore, so the defaults name both: the snapshot holds neither, deletes
+    // both, and says so; the files stay on disk.
+    write(&dest, "src/target/mod.rs", b"// edited, host-local now\n");
     let mut cache = StatCache::new();
-    let ops = |snap: &cuenca_fs::Snapshot| -> Vec<String> {
+    let snap = snapshot(&dest, &base.tree, &mut cache).unwrap();
+    let paths: Vec<&str> = snap.tree.entries().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(paths, ["src/lib.rs"]);
+    assert_eq!(
+        snap.dropped,
+        ["node_modules/vendored/index.js", "src/target/mod.rs"]
+    );
+    assert!(
         snap.changeset
             .ops
             .iter()
-            .map(|o| o.path().to_string())
-            .collect()
-    };
-    // No .forkignore, so the defaults name both; the base holds them, so they are read.
-    let snap = snapshot(&dest, &base.tree, &mut cache).unwrap();
-    assert!(snap.is_clean(), "{:?}", snap.changeset.ops);
-    assert_eq!(snap.tree.git_tree_id(), base.tree.git_tree_id());
-    // An edit and a deletion of a tracked, ignored path are seen.
-    write(&dest, "src/target/mod.rs", b"// edited\n");
-    fs::remove_file(dest.join("node_modules/vendored/index.js")).unwrap();
-    let snap = snapshot(&dest, &base.tree, &mut cache).unwrap();
-    assert_eq!(
-        ops(&snap),
-        ["node_modules/vendored/index.js", "src/target/mod.rs"]
+            .all(|op| matches!(op, Op::Delete { .. }))
     );
-    // Nothing the rules name enters unless the base holds it.
-    write(&dest, "node_modules/vendored/new.js", b"new\n");
-    write(&dest, "src/target/debug/app", b"build output\n");
-    write(&dest, "target/x", b"x\n");
-    let again = snapshot(&dest, &base.tree, &mut cache).unwrap();
-    assert_eq!(ops(&again), ops(&snap));
-    // The tree it gives can be forked from the location it describes.
-    let fork = out.path().join("fork2");
-    checkout(
-        &again.tree,
-        &fork,
-        &CheckoutSource::new(&dest, &again.tree, &cache),
-    )
-    .unwrap();
+    assert!(
+        snap.new_blobs.is_empty(),
+        "no content of an ignored path is published"
+    );
+    assert!(dest.join("src/target/mod.rs").exists());
+    // Against a base without them, nothing is reported.
+    let again = snapshot(&dest, &snap.tree, &mut cache).unwrap();
+    assert!(again.is_clean() && again.dropped.is_empty());
 }
 
 #[test]

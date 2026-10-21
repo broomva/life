@@ -91,8 +91,8 @@ impl ForkIgnore {
 
     /// Whether the rules name the file at `path`: the file is ignored, or one of its
     /// directories is (a later `!` rule cannot bring back a path under an ignored
-    /// directory, as in git). A snapshot leaves such a path out unless its base already
-    /// holds it.
+    /// directory, as in git). This is what the walk leaves out, since it does not enter
+    /// an ignored directory.
     pub fn excludes(&self, path: &str) -> bool {
         let mut end = 0;
         while let Some(i) = path[end..].find('/') {
