@@ -90,13 +90,49 @@ async fn authenticate(
     mut request: Request,
     next: Next,
 ) -> Response {
+    let Ok(_permit) = a.requests.clone().try_acquire_owned() else {
+        return ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "busy",
+            "too many requests in flight; send it again",
+        )
+        .into_response();
+    };
     match a.authenticate(bearer(request.headers()), source).await {
         Ok(caller) => {
             request.extensions_mut().insert(caller);
-            next.run(request).await
+            // Past the deadline the answer is lost, not the write: a store call that
+            // started still commits, and the client's retry is answered as a retry.
+            match tokio::time::timeout(a.limits.deadline, next.run(request)).await {
+                Ok(response) => response,
+                Err(_) => timed_out(),
+            }
         }
         Err(e) => ApiError::from(e).into_response(),
     }
+}
+
+fn timed_out() -> Response {
+    ApiError::new(
+        StatusCode::REQUEST_TIMEOUT,
+        "timeout",
+        "the request took too long; send it again",
+    )
+    .into_response()
+}
+
+/// Room for a write of `bytes`, kept until the returned guard is dropped; 507 when it
+/// would dip into the free-space reserve ([`Authority::reserve`]).
+fn room(a: &Arc<Authority>, bytes: u64) -> ApiResult<crate::authority::Reservation> {
+    a.reserve(bytes)
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::INSUFFICIENT_STORAGE,
+                "insufficient_storage",
+                "the authority keeps its free-space reserve; ask the owner",
+            )
+        })
 }
 
 /// An error answer: a status and `{"error": code, "message": ..}`, plus fields some
@@ -326,6 +362,7 @@ struct CreateFork {
 }
 
 async fn create_fork(State(a): Shared, Extension(c): Me, body: axum::body::Bytes) -> ApiResult {
+    let _room = room(&a, body.len() as u64)?;
     let req: CreateFork = json_body(&body)?;
     let fork = parse(&req.fork, ForkName::new)?;
     let location = parse(&req.location, LocationName::new)?;
@@ -412,6 +449,7 @@ async fn publish(
     body: axum::body::Bytes,
 ) -> ApiResult {
     let name = parse(&fork, ForkName::new)?;
+    let _room = room(&a, body.len() as u64)?;
     let req: Publish = json_body(&body)?;
     blocking(&a, move |a| {
         let state = writable_fork(a, &c, &name)?;
@@ -443,6 +481,7 @@ async fn landing(
     body: axum::body::Bytes,
 ) -> ApiResult {
     let name = parse(&fork, ForkName::new)?;
+    let _room = room(&a, body.len() as u64)?;
     let req: Landing = json_body(&body)?;
     let id = parse(&req.changeset, ChangesetId::from_hex)?;
     blocking(&a, move |a| {
@@ -487,18 +526,20 @@ async fn upload_blob(
         }
         .into());
     }
-    let Some(reservation) = a.reserve(size).map_err(ApiError::internal)? else {
-        return Err(ApiError::new(
-            StatusCode::INSUFFICIENT_STORAGE,
-            "insufficient_storage",
-            "the authority keeps its free-space reserve; ask the owner",
-        ));
-    };
+    let reservation = room(&a, size)?;
     let staged = tempfile::NamedTempFile::new_in(&a.staging).map_err(ApiError::internal)?;
     let mut file = tokio::fs::File::from_std(staged.reopen().map_err(ApiError::internal)?);
     let mut hasher = BlobHasher::new(size);
     let mut stream = body.into_data_stream();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let Ok(next) = tokio::time::timeout(a.limits.body_idle, stream.next()).await else {
+            return Err(ApiError::new(
+                StatusCode::REQUEST_TIMEOUT,
+                "timeout",
+                "the body stalled; send it again",
+            ));
+        };
+        let Some(chunk) = next else { break };
         let chunk =
             chunk.map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, "bad_body", e.to_string()))?;
         hasher.update(&chunk);

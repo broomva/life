@@ -197,9 +197,13 @@ fn handle(a: &Authority, req: AdminRequest) -> Result<Value, String> {
             Ok(json!({ "key": record, "token": token }))
         }
         AdminRequest::KeyRevoke { principal } => {
-            // The log first: once it records the revocation, the key is refused
-            // whatever happens to the keys file.
-            let offset = a.store.revoke(&principal).map_err(|e| s(&e))?;
+            // In memory first: the key is refused from the next request on, even if
+            // the disk is full and nothing below can be written. Then the log, which
+            // makes it permanent; then the keys file.
+            a.ban(&principal);
+            let offset = a.store.revoke(&principal).map_err(|e| {
+                format!("{principal} is refused until this authority restarts; the log could not record the revocation: {e}")
+            })?;
             let had_key = a.keys.remove(&principal).map_err(|e| s(&e))?;
             Ok(json!({ "offset": offset, "had_key": had_key }))
         }

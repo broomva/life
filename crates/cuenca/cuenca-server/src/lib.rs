@@ -32,7 +32,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub use authority::{AuthError, Authority, Caller, DEFAULT_MIN_FREE};
+pub use authority::{AuthError, Authority, Caller, DEFAULT_MIN_FREE, Limits};
 pub use identity::{Peer, Tailscale, Whois, WhoisFuture};
 pub use keys::{Grant, KeyError, KeyRecord, KeyRing, PrincipalKind};
 
@@ -92,14 +92,22 @@ pub async fn serve_http(
     .await
 }
 
+/// Open the authority's state as `config` says: its directory and its free-space
+/// reserve.
+pub fn open_authority(config: &Config, whois: Arc<dyn Whois>) -> std::io::Result<Authority> {
+    let authority = Authority::open(&config.state, whois)?;
+    authority.set_min_free(config.min_free);
+    Ok(authority)
+}
+
 /// Run the authority: check the bind address, open the state, then serve the agent
 /// API and the admin socket until either stops or the process gets Ctrl-C.
 pub async fn run(config: Config) -> anyhow::Result<()> {
     check_bind(config.bind, config.unsafe_bind).map_err(anyhow::Error::msg)?;
     let whois: Arc<dyn Whois> = Arc::new(Tailscale::new(&config.tailscale));
-    let state = config.state.clone();
+    let opened = config.clone();
     let authority =
-        Arc::new(tokio::task::spawn_blocking(move || Authority::open(&state, whois)).await??);
+        Arc::new(tokio::task::spawn_blocking(move || open_authority(&opened, whois)).await??);
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
     let admin = admin::bind(&config.admin_socket)?;
     tracing::info!(bind = %config.bind, admin = %config.admin_socket.display(), "cuenca authority up");

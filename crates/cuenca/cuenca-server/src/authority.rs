@@ -30,6 +30,12 @@ pub struct Authority {
     in_flight: Mutex<u64>,
     /// Blobs each principal has sent the bytes of (see [`Authority::check_puts`]).
     possessed: Mutex<HashMap<PrincipalName, HashSet<GitOid>>>,
+    /// Principals revoked by this process, refused before any record of it is
+    /// written ([`Authority::ban`]).
+    banned: Mutex<HashSet<PrincipalName>>,
+    pub(crate) limits: Limits,
+    /// One permit per request in flight ([`Limits::requests`]).
+    pub(crate) requests: Arc<tokio::sync::Semaphore>,
 }
 
 /// An authenticated request's principal, on the node Tailscale named.
@@ -69,6 +75,11 @@ impl Authority {
     /// Open the authority's state in `dir`: the store in `dir/store`, the keys file
     /// `dir/keys.json`, staging in `dir/staging`.
     pub fn open(dir: &Path, whois: Arc<dyn Whois>) -> std::io::Result<Self> {
+        Self::open_with(dir, whois, Limits::default())
+    }
+
+    /// [`Authority::open`] with other [`Limits`].
+    pub fn open_with(dir: &Path, whois: Arc<dyn Whois>, limits: Limits) -> std::io::Result<Self> {
         std::fs::create_dir_all(dir)?;
         let store = Store::open(dir.join("store")).map_err(std::io::Error::other)?;
         let keys = KeyRing::open(dir.join("keys.json"))?;
@@ -87,6 +98,9 @@ impl Authority {
             possessed: Mutex::new(HashMap::new()),
             min_free: AtomicU64::new(DEFAULT_MIN_FREE),
             in_flight: Mutex::new(0),
+            banned: Mutex::new(HashSet::new()),
+            requests: Arc::new(tokio::sync::Semaphore::new(limits.requests)),
+            limits,
         })
     }
 
@@ -113,6 +127,14 @@ impl Authority {
     ) -> Result<Caller, AuthError> {
         let token = token.ok_or(AuthError::NoToken)?;
         let key = self.keys.verify(token).ok_or(AuthError::BadKey)?;
+        if self
+            .banned
+            .lock()
+            .expect("ban lock")
+            .contains(&key.principal)
+        {
+            return Err(AuthError::Revoked(key.principal.to_string()));
+        }
         if self
             .store
             .revoked(&key.principal)
@@ -163,8 +185,31 @@ impl Authority {
     }
 }
 
-/// Free space uploads leave on the state's filesystem by default: the log's own writes
-/// need room, and no principal's uploads may take it.
+/// Bounds on the agent API's requests. A request past any of them is dropped, and a
+/// client sends it again: every write is idempotent.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    /// Requests served at once; one more is answered 503.
+    pub requests: usize,
+    /// Longest a request may take, body included; past it, 408. A blob upload must
+    /// move at least `MAX_BLOB_BYTES` in this time.
+    pub deadline: std::time::Duration,
+    /// Longest an upload's body may go without a byte; past it, 408.
+    pub body_idle: std::time::Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            requests: 64,
+            deadline: std::time::Duration::from_secs(600),
+            body_idle: std::time::Duration::from_secs(30),
+        }
+    }
+}
+
+/// Free space agent writes (uploads, drafts, forks, intents) leave on the state's
+/// filesystem by default, for the owner's acts and the log's own small writes.
 pub const DEFAULT_MIN_FREE: u64 = 2 * 1024 * 1024 * 1024;
 
 /// Most blobs remembered per principal; past it the record starts over, and the client
@@ -172,6 +217,11 @@ pub const DEFAULT_MIN_FREE: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_POSSESSED: usize = 1 << 20;
 
 impl Authority {
+    /// The free space agent writes must leave.
+    pub fn min_free(&self) -> u64 {
+        self.min_free.load(Ordering::Relaxed)
+    }
+
     /// Set the free space an upload must leave ([`DEFAULT_MIN_FREE`]).
     pub fn set_min_free(&self, bytes: u64) {
         self.min_free.store(bytes, Ordering::Relaxed);
@@ -206,6 +256,16 @@ impl Authority {
             authority: self.clone(),
             bytes: need,
         }))
+    }
+
+    /// Refuse `principal` from now on, in this process: the part of revocation that
+    /// needs no write, so it holds even when the disk is full. The admin socket's
+    /// `key_revoke` does this first, then records the revocation in the log.
+    pub fn ban(&self, principal: &PrincipalName) {
+        self.banned
+            .lock()
+            .expect("ban lock")
+            .insert(principal.clone());
     }
 
     /// Remember that `principal` sent the bytes of `oid`, verified.

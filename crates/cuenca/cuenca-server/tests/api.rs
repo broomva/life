@@ -843,14 +843,22 @@ fn uploads_in_flight_hold_their_room() {
     };
     let first = open_upload(100 * MIB);
     std::thread::sleep(std::time::Duration::from_millis(300));
+    // The first bytes of the answer, or "" if none came within 2 s (the server is
+    // waiting for the body: the upload passed the room check).
     let probe = |size: u64| {
         let mut tcp = open_upload(size);
         tcp.set_read_timeout(Some(std::time::Duration::from_secs(2)))
             .unwrap();
         let mut answer = [0u8; 12];
         use std::io::Read;
-        let n = tcp.read(&mut answer).unwrap_or(0);
-        String::from_utf8_lossy(&answer[..n]).to_string()
+        match tcp.read(&mut answer) {
+            Ok(n) => String::from_utf8_lossy(&answer[..n]).to_string(),
+            Err(e) => {
+                let quiet = [std::io::ErrorKind::WouldBlock, std::io::ErrorKind::TimedOut];
+                assert!(quiet.contains(&e.kind()), "{e}");
+                String::new()
+            }
+        }
     };
     assert!(
         probe(100 * MIB).contains("507"),
@@ -859,5 +867,164 @@ fn uploads_in_flight_hold_their_room() {
     drop(first);
     std::thread::sleep(std::time::Duration::from_millis(300));
     // Its room is back: the same upload now passes the check and waits for its body.
-    assert!(!probe(100 * MIB).contains("507"), "the room came back");
+    assert_eq!(
+        probe(100 * MIB),
+        "",
+        "the room came back: the upload waits for its body"
+    );
+}
+
+/// Revocation's first step needs no write: a banned principal is refused at once, with
+/// nothing yet in the log (as when the disk is full).
+#[test]
+fn a_ban_refuses_at_once_without_a_write() {
+    let c = Cast::new();
+    let s = &c.s;
+    s.whois.node(NA);
+    assert_eq!(s.get(&c.a1, "/v1/whoami").status(), 200);
+    let len = s.authority.store().len().unwrap();
+    s.authority.ban(&"a1".parse_name());
+    assert_eq!(s.get(&c.a1, "/v1/whoami").status(), 401);
+    assert_eq!(s.authority.store().len().unwrap(), len);
+    assert!(
+        s.authority
+            .store()
+            .revoked(&"a1".parse_name())
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// Every agent write keeps the free-space reserve, not only uploads.
+#[test]
+fn every_write_keeps_the_free_space_reserve() {
+    let c = Cast::new();
+    let s = &c.s;
+    s.whois.node(NA);
+    let head = s.fork_head(&c.a1, "f1");
+    let cs = s.write(&c.a1, &head, &[("README", b"two\n")]);
+    let len = s.authority.store().len().unwrap();
+    s.authority.set_min_free(u64::MAX / 2);
+    assert_eq!(s.publish(&c.a1, "f1", 1, &cs).status(), 507);
+    let r = s.post(
+        &c.a1,
+        "/v1/forks",
+        json!({ "fork": "f9", "location": "l1" }),
+    );
+    assert_eq!(r.status(), 507);
+    let id = cuenca_core::ChangesetId::of(&cs).to_hex();
+    let r = s.post(
+        &c.a1,
+        "/v1/forks/f1/landing",
+        json!({ "epoch": 1, "changeset": id }),
+    );
+    assert_eq!(r.status(), 507);
+    assert_eq!(s.authority.store().len().unwrap(), len, "nothing appended");
+    s.authority.set_min_free(0);
+    assert_eq!(s.publish(&c.a1, "f1", 1, &cs).status(), 200);
+}
+
+/// `--min-free` reaches the authority.
+#[test]
+fn the_configured_reserve_is_applied() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = cuenca_server::Config {
+        state: dir.path().join("state"),
+        bind: "100.64.0.1:1".parse().unwrap(),
+        admin_socket: dir.path().join("admin.sock"),
+        unsafe_bind: false,
+        tailscale: "tailscale".into(),
+        min_free: 12_345,
+    };
+    let whois: std::sync::Arc<dyn cuenca_server::Whois> = std::sync::Arc::new(Never);
+    let a = cuenca_server::open_authority(&config, whois).unwrap();
+    assert_eq!(a.min_free(), 12_345);
+}
+
+fn send_partial(s: &Server, request_head: String) -> std::net::TcpStream {
+    use std::io::Write;
+    let addr = s.url.trim_start_matches("http://");
+    let mut tcp = std::net::TcpStream::connect(addr).unwrap();
+    tcp.write_all(request_head.as_bytes()).unwrap();
+    tcp.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .unwrap();
+    tcp
+}
+
+fn status_of(tcp: &mut std::net::TcpStream) -> String {
+    use std::io::Read;
+    let mut answer = [0u8; 12];
+    let n = tcp.read(&mut answer).unwrap_or(0);
+    String::from_utf8_lossy(&answer[..n]).to_string()
+}
+
+fn stalled_upload(s: &Server, token: &str) -> std::net::TcpStream {
+    send_partial(
+        s,
+        format!(
+            "PUT /v1/blobs/{} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token}\r\n\
+             Content-Length: 10\r\n\r\nx",
+            "1".repeat(40)
+        ),
+    )
+}
+
+/// A stalled upload body is dropped after the idle limit, and its room is given back.
+#[test]
+fn a_stalled_upload_is_dropped_and_its_room_returned() {
+    let s = Server::start_with(cuenca_server::Limits {
+        body_idle: std::time::Duration::from_millis(300),
+        ..Default::default()
+    });
+    let a1 = s.mint("a1", Agent, NA, grant(&[], &[]));
+    s.whois.node(NA);
+    let mut tcp = stalled_upload(&s, &a1);
+    let started = std::time::Instant::now();
+    assert!(status_of(&mut tcp).contains("408"));
+    assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    // Nothing is held: a 1 MiB upload (2 MiB of room) fits in 3 MiB above the reserve.
+    s.authority
+        .set_min_free(s.authority.free_bytes().unwrap() - 3 * 1024 * 1024);
+    let big = vec![7u8; 1024 * 1024];
+    assert_eq!(s.put_blob(&a1, &big), cuenca_tree::GitOid::for_blob(&big));
+}
+
+/// Requests in flight are bounded; one more is answered 503, and the slot comes back.
+#[test]
+fn requests_in_flight_are_bounded() {
+    let s = Server::start_with(cuenca_server::Limits {
+        requests: 2,
+        body_idle: std::time::Duration::from_secs(60),
+        ..Default::default()
+    });
+    let a1 = s.mint("a1", Agent, NA, grant(&[], &[]));
+    s.whois.node(NA);
+    let held = [stalled_upload(&s, &a1), stalled_upload(&s, &a1)];
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(s.get(&a1, "/v1/whoami").status(), 503);
+    drop(held);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(s.get(&a1, "/v1/whoami").status(), 200);
+}
+
+/// A request is bounded in time, its body included.
+#[test]
+fn a_request_past_its_deadline_is_answered_408() {
+    let s = Server::start_with(cuenca_server::Limits {
+        deadline: std::time::Duration::from_millis(500),
+        ..Default::default()
+    });
+    s.add_location("l1");
+    let a1 = s.mint("a1", Agent, NA, grant(&["l1"], &[]));
+    s.whois.node(NA);
+    let mut tcp = send_partial(
+        &s,
+        format!(
+            "POST /v1/forks HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {a1}\r\n\
+             Content-Type: application/json\r\nContent-Length: 100\r\n\r\n{{\"fork\""
+        ),
+    );
+    let started = std::time::Instant::now();
+    assert!(status_of(&mut tcp).contains("408"));
+    assert!(started.elapsed() < std::time::Duration::from_secs(3));
 }

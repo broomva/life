@@ -109,7 +109,7 @@ mutate src/lib.rs 'o[0] == 100 && (o[1] & 0xc0) == 64' 'o[0] == 100' --lib
 mutate src/lib.rs 's[0] == 0xfd7a && s[1] == 0x115c && s[2] == 0xa1e0' 's[0] == 0xfd7a' --lib
 # Owner acts: revocation goes to the log, a revoked name is not minted again, the
 # socket is private.
-mutate src/admin.rs 'let offset = a.store.revoke(&principal).map_err(|e| s(&e))?;' 'let offset = 0;' --test api
+mutate src/admin.rs 'let offset = a.store.revoke(&principal).map_err(|e| {' 'let offset = Ok::<u64, cuenca_core::CoreError>(0).map_err(|e| {' --test api
 mutate src/admin.rs 'if a.store.revoked(&principal).map_err(|e| s(&e))?.is_some() {' 'if false {' --test api
 mutate src/admin.rs 'std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;' '' --test api
 mutate src/admin.rs 'if mode & 0o022 != 0 {' 'if false {' --test api
@@ -121,5 +121,25 @@ mutate src/identity.rs '    let Some(entry) = in_netmap else {
     };' '    let Some(entry) = in_netmap else {
         return Ok(Some(Peer { node, serves_routes: false }));
     };' --lib
+
+# Revocation refuses in memory first; requests are bounded in number and time.
+mutate src/authority.rs '            .contains(&key.principal)
+        {' '            .contains(&key.principal)
+            && false
+        {' --test api
+mutate src/http.rs 'a.requests.clone().try_acquire_owned()' 'Ok::<(), ()>(())' --test api
+mutate src/http.rs 'match tokio::time::timeout(a.limits.deadline, next.run(request)).await {
+                Ok(response) => response,
+                Err(_) => timed_out(),
+            }' 'next.run(request).await' --test api
+mutate src/http.rs 'let Ok(next) = tokio::time::timeout(a.limits.body_idle, stream.next()).await else {' 'let Some(next) = Some(stream.next().await) else {' --test api
+# Every write keeps the reserve, and the configured reserve is applied.
+mutate src/http.rs '    let _room = room(&a, body.len() as u64)?;
+    let req: Publish' '    let req: Publish' --test api
+mutate src/http.rs '    let _room = room(&a, body.len() as u64)?;
+    let req: CreateFork' '    let req: CreateFork' --test api
+mutate src/http.rs '    let _room = room(&a, body.len() as u64)?;
+    let req: Landing' '    let req: Landing' --test api
+mutate src/lib.rs 'authority.set_min_free(config.min_free);' '' --test api
 
 exit $survived
