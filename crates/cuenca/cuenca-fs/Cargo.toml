@@ -15,11 +15,12 @@ cuenca-tree = { path = "../cuenca-tree" }
 ignore = "0.4"
 libc = "0.2"
 rayon = "1"
-rustix = { version = "1", features = ["fs", "process"] }
+rustix = { version = "1", features = ["fs"] }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+rustix = { version = "1", features = ["fs", "process"] }
 tempfile.workspace = true

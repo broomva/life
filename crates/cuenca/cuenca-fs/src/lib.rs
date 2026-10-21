@@ -5,8 +5,9 @@
 //! git. A [`snapshot`] is always a full-tree scan of the directory against its last
 //! snapshot (spec section 2): no change notification is trusted to say what changed. A
 //! [`StatCache`] makes the scan cheap, by hashing only files whose stat changed since
-//! the cache recorded them. Paths the location's [`ForkIgnore`] names never enter a
-//! snapshot.
+//! the cache recorded them. A path the location's [`ForkIgnore`] names never enters a
+//! snapshot unless the base already holds it; as in git, the rules decide what is added,
+//! and a path already tracked is read like any other.
 //!
 //! ```no_run
 //! use cuenca_fs::{StatCache, checkout, snapshot, CheckoutSource};
@@ -17,7 +18,7 @@
 //! // Publish snap.changeset and snap.new_blobs, then fork it elsewhere:
 //! let source = CheckoutSource::new("/work/site", &snap.tree, &cache);
 //! let fork = checkout(&snap.tree, "/work/site-fork".as_ref(), &source)?;
-//! assert_eq!(fork.cache.len(), cache.len());
+//! println!("{} cloned, {} copied", fork.cloned, fork.copied);
 //! # Ok(()) }
 //! ```
 //!
@@ -32,14 +33,14 @@
 //! word: a name that is not UTF-8 or that the path rules refuse, two names that collide
 //! on a case-insensitive disk, an unreadable file, or a file that keeps changing while it
 //! is read. Sockets, FIFOs and devices are not content; they are left out and listed in
-//! [`Snapshot::skipped`]. A path of the base that the rules leave out keeps its base
-//! entry: the snapshot did not look at it, so it does not claim it changed.
+//! [`Snapshot::skipped`]. A snapshot taken while files move between directories may miss
+//! a moved file until the next snapshot; nothing on disk is lost.
 //!
-//! The walk reaches everything relative to open directory descriptors, opens no file
-//! through a link and a directory only if it is the inode the listing saw, so a directory
-//! swapped for a symlink mid-scan cannot lead it outside the root. A checkout writes
-//! relative to one descriptor for its destination, which must be the caller's own and
-//! writable by no one else.
+//! The walk reaches everything relative to open directory descriptors and opens nothing
+//! through a link, and a directory only if it is the inode the listing saw, so a
+//! directory swapped for a symlink mid-scan cannot lead it outside the root. A checkout
+//! opens every directory under its destination one component at a time without following
+//! a link, so it cannot be led out either, whatever others may write there.
 //!
 //! # Trust
 //!
@@ -51,12 +52,13 @@
 //! location on a network filesystem whose server clock runs more than the margin behind
 //! weakens this rule.
 //!
-//! A checkout's new cache vouches only for what was verified: content handed over in
-//! memory, which is hashed before it is written, and clones of files a source vouched for
-//! by stat ([`CheckoutSource`], whose stat the checkout re-checks after cloning). A file
-//! cloned from [`ObjectDir`], the authority's blob store, is taken on the store's word
-//! (it verified every blob at ingest) and is left out of the new cache, so the first
-//! snapshot of the checkout reads it.
+//! A checkout's new cache vouches for a file only if its content was verified and its
+//! stat is settled: a clone of a file a source vouched for by stat ([`CheckoutSource`],
+//! re-checked after cloning) keeps that file's old modification time, and any write into
+//! it during the checkout would give it a new one. Copies, content written from memory,
+//! and clones from [`ObjectDir`] (the authority's blob store, whose blobs were verified at
+//! ingest and are taken on its word) are left out, so the checkout's first snapshot reads
+//! them. A clone also carries its source's extended attributes, which no tree records.
 
 mod cache;
 mod checkout;

@@ -157,13 +157,19 @@ fn snapshot_checkout_snapshot_is_the_same_tree_from_every_source() {
         let out = tempfile::tempdir().unwrap();
         let dest = out.path().join("fork");
         let done = checkout(&snap.tree, &dest, &*source).unwrap();
+        let (done_vouched, done_copied) = (done.cache.len(), done.copied);
         let mut fork_cache = done.cache;
         let again = snapshot(&dest, &snap.tree, &mut fork_cache).unwrap();
         assert_eq!(again.tree.git_tree_id(), id, "{name}");
         assert!(again.is_clean(), "{name}");
-        // What the checkout verified it vouches for; the object store's files it does not.
-        let unverified = if name == "objects" { 7 } else { 0 };
-        assert_eq!(again.hashed, unverified, "{name}");
+        // The checkout vouches only for settled clones of files the source vouched for;
+        // the first snapshot reads everything else.
+        assert_eq!(again.hashed, 7 - done_vouched, "{name}");
+        if name == "checkout" && done_copied == 0 {
+            assert_eq!(done_vouched, 7, "every clone of a vouched, settled source");
+        } else if name != "checkout" {
+            assert_eq!(done_vouched, 0, "{name}: copies and unverified clones");
+        }
         assert_eq!(git_tree_id(&dest), id.to_hex(), "{name}");
         let mode = fs::metadata(dest.join("bin/run.sh"))
             .unwrap()
@@ -607,7 +613,7 @@ fn a_clone_whose_source_changed_is_refused() {
 }
 
 #[test]
-fn ignored_paths_of_the_base_are_carried_not_deleted() {
+fn ignored_paths_the_base_holds_stay_tracked() {
     // A tree that holds paths the defaults ignore (imported, or from rules that kept them).
     let src = tempfile::tempdir().unwrap();
     write(src.path(), "src/lib.rs", b"pub fn f() {}\n");
@@ -624,23 +630,58 @@ fn ignored_paths_of_the_base_are_carried_not_deleted() {
     let mut cache = checkout(&base.tree, &dest, &memory_of(&base))
         .unwrap()
         .cache;
-    // No .forkignore: the defaults ignore both, and the snapshot carries them.
+    let ops = |snap: &cuenca_fs::Snapshot| -> Vec<String> {
+        snap.changeset
+            .ops
+            .iter()
+            .map(|o| o.path().to_string())
+            .collect()
+    };
+    // No .forkignore, so the defaults name both; the base holds them, so they are read.
     let snap = snapshot(&dest, &base.tree, &mut cache).unwrap();
     assert!(snap.is_clean(), "{:?}", snap.changeset.ops);
     assert_eq!(snap.tree.git_tree_id(), base.tree.git_tree_id());
-    // Editing an ignored file changes nothing the snapshot claims.
-    write(&dest, "src/target/mod.rs", b"// edited, host-local now\n");
-    assert!(snapshot(&dest, &base.tree, &mut cache).unwrap().is_clean());
-    // A deletion outside the ignored paths is still seen.
-    fs::remove_file(dest.join("src/lib.rs")).unwrap();
-    let ops: Vec<String> = snapshot(&dest, &base.tree, &mut cache)
-        .unwrap()
-        .changeset
-        .ops
-        .iter()
-        .map(|o| o.path().to_string())
-        .collect();
-    assert_eq!(ops, ["src/lib.rs"]);
+    // An edit and a deletion of a tracked, ignored path are seen.
+    write(&dest, "src/target/mod.rs", b"// edited\n");
+    fs::remove_file(dest.join("node_modules/vendored/index.js")).unwrap();
+    let snap = snapshot(&dest, &base.tree, &mut cache).unwrap();
+    assert_eq!(
+        ops(&snap),
+        ["node_modules/vendored/index.js", "src/target/mod.rs"]
+    );
+    // Nothing the rules name enters unless the base holds it.
+    write(&dest, "node_modules/vendored/new.js", b"new\n");
+    write(&dest, "src/target/debug/app", b"build output\n");
+    write(&dest, "target/x", b"x\n");
+    let again = snapshot(&dest, &base.tree, &mut cache).unwrap();
+    assert_eq!(ops(&again), ops(&snap));
+    // The tree it gives can be forked from the location it describes.
+    let fork = out.path().join("fork2");
+    checkout(
+        &again.tree,
+        &fork,
+        &CheckoutSource::new(&dest, &again.tree, &cache),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_kind_change_under_a_directory_rule_does_not_wedge_snapshots() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "out/a.txt", b"a\n");
+    let base = snapshot_with(
+        dir.path(),
+        &Tree::new(),
+        &mut StatCache::new(),
+        &ForkIgnore::parse("").unwrap(),
+    )
+    .unwrap();
+    write(dir.path(), ".forkignore", b"out/\n");
+    fs::remove_dir_all(dir.path().join("out")).unwrap();
+    write(dir.path(), "out", b"now a file\n");
+    let snap = snapshot(dir.path(), &base.tree, &mut StatCache::new()).unwrap();
+    let paths: Vec<&str> = snap.tree.entries().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(paths, [".forkignore", "out"]);
 }
 
 #[test]
@@ -661,9 +702,10 @@ fn a_checkout_source_serves_files_too_new_to_be_cached() {
     let mut fork_cache = done.cache;
     let again = snapshot(&dest, &snap.tree, &mut fork_cache).unwrap();
     assert!(again.is_clean());
+    assert_eq!(again.tree.git_tree_id(), snap.tree.git_tree_id());
     assert_eq!(
-        again.hashed, 0,
-        "bytes read and hashed by the source are vouched for"
+        again.hashed, 7,
+        "written now from memory, so not settled: the first snapshot reads them"
     );
 }
 
@@ -684,10 +726,11 @@ fn a_checkout_source_tries_every_path_with_the_content() {
     )
     .unwrap();
     assert_eq!(fs::read(out.path().join("fork/a")).unwrap(), b"same\n");
-    // Both from the intact `b`, offered as a file the source vouches for (cloned or, on a
-    // disk that cannot clone, copied), so the new cache vouches for both.
+    // Both from the intact `b`, offered as a file the source vouches for. The new cache
+    // vouches for exactly the clones, which keep the source's settled stat; a copy, on a
+    // disk that cannot clone, is new.
     assert_eq!(done.cloned + done.copied, 2);
-    assert_eq!(done.cache.len(), 2);
+    assert_eq!(done.cache.len(), done.cloned);
 }
 
 #[test]
@@ -702,6 +745,8 @@ fn a_corrupt_object_is_not_vouched_for() {
         &format!("{}/{}", &hex[..2], &hex[2..]),
         b"TRUNC",
     );
+    // Settled, as an object ingested long ago is: only the source's word is missing.
+    age(objects.path());
     let out = tempfile::tempdir().unwrap();
     let dest = out.path().join("fork");
     let mut cache = checkout(&snap.tree, &dest, &ObjectDir::new(objects.path()))
@@ -727,7 +772,7 @@ fn forkignore_rules_can_leave_out_a_name_no_tree_holds() {
 }
 
 #[test]
-fn checkout_refuses_a_destination_it_does_not_own_alone() {
+fn checkout_refuses_a_destination_that_is_a_link_or_a_file() {
     let out = tempfile::tempdir().unwrap();
     let tree = Tree::new();
     let empty = Memory(HashMap::new());
@@ -740,15 +785,10 @@ fn checkout_refuses_a_destination_it_does_not_own_alone() {
             ..
         })
     ));
+    // Containment does not rest on the destination's permissions.
     fs::create_dir(out.path().join("shared")).unwrap();
-    set_mode(out.path(), "shared", 0o775);
-    assert!(matches!(
-        checkout(&tree, &out.path().join("shared"), &empty),
-        Err(FsError::Destination {
-            why: "group or others can write it",
-            ..
-        })
-    ));
+    set_mode(out.path(), "shared", 0o777);
+    assert!(checkout(&tree, &out.path().join("shared"), &empty).is_ok());
     write(out.path(), "file", b"x");
     assert!(matches!(
         checkout(&tree, &out.path().join("file"), &empty),
@@ -757,4 +797,24 @@ fn checkout_refuses_a_destination_it_does_not_own_alone() {
             ..
         })
     ));
+}
+
+#[test]
+fn an_ignored_directory_is_never_entered() {
+    if rustix::process::geteuid().is_root() {
+        return; // root enters everything
+    }
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "src/a.rs", b"a\n");
+    write(dir.path(), "node_modules/pkg/index.js", b"x\n");
+    set_mode(dir.path(), "node_modules", 0o000);
+    let snap = snapshot(dir.path(), &Tree::new(), &mut StatCache::new());
+    set_mode(dir.path(), "node_modules", 0o755);
+    let paths: Vec<String> = snap
+        .unwrap()
+        .tree
+        .entries()
+        .map(|(p, _)| p.to_string())
+        .collect();
+    assert_eq!(paths, ["src/a.rs"]);
 }

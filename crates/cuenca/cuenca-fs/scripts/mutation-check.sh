@@ -44,9 +44,16 @@ mutate src/ignore.rs 'Errno::NOENT) => return Ok((Self::defaults(), None)),' 'Er
 mutate src/ignore.rs 'let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;' 'let flags = OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC;' --lib symlink_or_a_directory
 mutate src/ignore.rs 'if !file.metadata().map_err(FsError::io(&path))?.is_file() {' 'if false {' --lib symlink_or_a_directory
 mutate src/ignore.rs 'if self.is_ignored(&path[..end], true) {' 'if false {' --lib excludes
-mutate src/scan.rs 'if ignore.is_ignored(&rel, kind == FileType::Directory) {' 'if false {' --test fs forkignore
+mutate src/scan.rs 'let ignored = tracked_only || ignore.is_ignored(&rel, is_dir);' 'let ignored = tracked_only;' --test fs forkignore
 mutate src/scan.rs 'if held != parsed.map(GitOid::for_blob) {' 'if false {' --lib rules_that_changed
-mutate src/scan.rs '.filter(|(path, _)| ignore.excludes(path.as_str()) && !walked.contains(path.as_str()))' '.filter(|_| false)' --test fs carried
+mutate src/scan.rs 'if after.as_deref() != parsed {' 'if false {' --lib rules_changed_after
+# tracked paths under the rules (git's rule)
+mutate src/scan.rs 'let ignored = tracked_only || ignore.is_ignored(&rel, is_dir);' 'let ignored = ignore.is_ignored(&rel, is_dir);' --test fs stay_tracked
+mutate src/scan.rs 'tracked_dirs.contains(rel_str.as_str())' 'true' --test fs never_entered
+mutate src/scan.rs 'base.get(&rel_str).is_some()' 'true' --test fs stay_tracked
+mutate src/scan.rs '                if !tracked {
+                    continue;
+                }' '' --test fs stay_tracked
 # what a snapshot holds
 mutate src/scan.rs 'if bytes == b"." || bytes == b".." || bytes == b".git" {' 'if bytes == b"." || bytes == b".." {' --test fs git_state
 mutate src/scan.rs '                    skipped.push(Skipped {
@@ -59,30 +66,37 @@ mutate src/scan.rs 'let entry = if stamp.is_executable() {' 'let entry = if fals
 mutate src/scan.rs 'if stamp.size() > MAX_FILE_BYTES {' 'if false {' --test fs blob_limit
 mutate src/scan.rs 'check_content(&path, Mode::File, &content)?;' '' --test fs gitattributes
 mutate src/scan.rs 'if !known.insert(oid) {' 'if false {' --test fs new_blobs
+mutate src/scan.rs '            Err(Errno::LOOP) => None,
+            Err(Errno::NOENT) => return Ok(None),' '            Err(Errno::LOOP) => None,' --lib removed_after_the_listing
 # never leaving the root
+mutate src/scan.rs 'let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;' 'let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;' --lib renamed_out_of_the_root
 mutate src/scan.rs 'if dev_ino(&fstat(&fd).map_err(errno(&p.abs))?) != p.dev_ino {' 'if false {' --lib swapped_for_a_symlink
 mutate src/scan.rs 'let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;' 'let flags = OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC;' --lib replaced_by_a_symlink
 mutate src/scan.rs 'if after != stamp {' 'if false {' --lib stale_stamp
 # the stat cache
 mutate src/scan.rs 'match cache.lookup(path.as_str(), &stamp) {' 'match None::<Entry> {' --test fs stat_cache
 mutate src/scan.rs 'next.record(f.path.to_string(), stamp, f.entry, started);' '' --test fs stat_cache
-mutate src/scan.rs '    rules_held(&rules, parsed.as_deref(), &snap.tree, root)?;
-    *cache = next;' '    rules_held(&rules, parsed.as_deref(), &snap.tree, root)?;' --test fs stat_cache
+mutate src/scan.rs '    rules_unchanged(root, parsed.as_deref())?;
+    *cache = next;' '    rules_unchanged(root, parsed.as_deref())?;' --test fs stat_cache
 mutate src/cache.rs '.filter(|c| c.stamp == *stamp)' '.filter(|_| true)' --test fs stat_cache
 mutate src/cache.rs 'ctime: (meta.ctime(), meta.ctime_nsec()),' 'ctime: (0, 0),' --lib raw_stat
 mutate src/cache.rs 'ctime: (st.st_ctime as i64, st.st_ctime_nsec as i64),' 'ctime: (0, 0),' --test fs stat_cache
 mutate src/cache.rs 'let at = at.saturating_sub(RACY_MARGIN);' '' --test fs just_now
 # checkout
-mutate src/checkout.rs 'let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;' 'let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;' --test fs own_alone
-mutate src/checkout.rs 'if st.st_mode as u32 & 0o022 != 0 {' 'if false {' --test fs own_alone
+mutate src/checkout.rs '    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let fd = match openat(CWD, dest, flags' '    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
+    let fd = match openat(CWD, dest, flags' --test fs link_or_a_file
+mutate src/checkout.rs '    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut at' '    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
+    let mut at' --lib inside_the_destination
 mutate src/checkout.rs 'if !matches!(item.file_name().to_bytes(), b"." | b"..") {' 'if false {' --test fs non_empty
 mutate src/checkout.rs 'verify(oid, &bytes)?;' '' --test fs wrong_or_missing
 mutate src/checkout.rs 'verify(oid, &target)?;' '' --test fs wrong_or_missing
 mutate src/checkout.rs 'if now != stamp {' 'if false {' --test fs source_changed
 mutate src/checkout.rs '(cloned, stamp.is_some())' '(cloned, true)' --test fs corrupt_object
+mutate src/checkout.rs 'cache.record(w.path, w.stamp, w.entry, started);' 'cache.record(w.path, w.stamp, w.entry, started + std::time::Duration::from_secs(3600));' --test fs every_source
 mutate src/checkout.rs '&& Stamp::of(&file.metadata()?) == *stamp' '&& true' --test fs edited_since
 mutate src/checkout.rs 'if Blob::of(&content).map(|b| b.oid()) == Some(oid) {' 'if true {' --test fs edited_since
 mutate src/checkout.rs 'if stamp.permissions() != mode {' 'if false {' --test fs every_source
-mutate src/checkout.rs 'if !stamp.settled(started) {' 'if false {' --test fs every_source
 
 exit $survived

@@ -3,6 +3,9 @@
 //! source checkout, and snapshot the result.
 //!
 //! cargo run --release -p cuenca-fs --example fork_bench -- <src> <dest>
+//!
+//! The disk figure is the change in the used blocks of the filesystem holding `<dest>`,
+//! so run it on a volume nothing else writes to (a fresh APFS sparse image).
 
 use cuenca_fs::{CheckoutSource, StatCache, checkout, snapshot};
 use cuenca_tree::Tree;
@@ -31,6 +34,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         warm.hashed,
         warm.is_clean()
     );
+    let used = || -> std::io::Result<u64> {
+        let parent = dest.parent().unwrap_or(dest);
+        let st = rustix::fs::statvfs(parent)?;
+        Ok((st.f_blocks - st.f_bfree) * st.f_frsize)
+    };
+    let tree_bytes: u64 = snap.new_blobs.iter().map(|b| b.size).sum();
+    let before = used()?;
     let t = Instant::now();
     let done = checkout(
         &snap.tree,
@@ -42,6 +52,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         t.elapsed().as_secs_f64(),
         done.cloned,
         done.copied
+    );
+    let grew = used()?.saturating_sub(before);
+    println!(
+        "disk             {:>8} KiB more for {} KiB of content ({:.2}%)",
+        grew / 1024,
+        tree_bytes / 1024,
+        100.0 * grew as f64 / tree_bytes as f64
     );
     let mut fork_cache = done.cache;
     let t = Instant::now();

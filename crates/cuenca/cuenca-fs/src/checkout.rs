@@ -1,20 +1,21 @@
 //! Checkout: materialise a tree into a directory, cloning where the disk can.
 //!
-//! Everything is written relative to one descriptor for the destination, opened without
-//! following a link, so no path above it is resolved again. The destination must belong
-//! to the caller and be writable by no one else, and every directory the checkout makes is
-//! `0755`, so no other user can put a link inside it while the checkout runs. Content is
-//! cloned from an open source file, never from a path, so what is cloned is the file whose
-//! stat was checked.
+//! Nothing is reached by a path that could be re-resolved. The destination is opened once
+//! without following a link, every directory under it is opened one component at a time
+//! from its parent without following a link, and each file is created by its single name
+//! in its directory. So a link that appears inside the destination while the checkout runs
+//! fails the checkout instead of leading it out, whatever the destination's permissions or
+//! ACLs allow others. Content is cloned from an open source file, never from a path, so
+//! what is cloned is the file whose stat was checked.
 
 use crate::cache::{Stamp, StatCache};
 use crate::error::{FsError, Result};
 use crate::scan::MAX_FILE_BYTES;
 use cuenca_tree::{Blob, Entry, GitOid, Mode, RepoPath, Tree, TreeError, check_content};
 use rayon::prelude::*;
-use rustix::fs::{AtFlags, CWD, Dir, OFlags, fstat, mkdirat, openat, symlinkat, unlinkat};
+use rustix::fs::{AtFlags, CWD, Dir, OFlags, mkdirat, openat, symlinkat, unlinkat};
 use rustix::io::Errno;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::{CString, OsStr};
 use std::fs::{self, File};
 use std::io::{self, Read, Write as _};
@@ -22,12 +23,7 @@ use std::os::fd::OwnedFd;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
-
-/// How far before the checkout started the files it writes are dated, so that every
-/// one of them is settled (see [`crate::RACY_MARGIN`]) and the checkout's first snapshot
-/// reads nothing.
-const BACKDATE: Duration = Duration::from_secs(10);
+use std::time::SystemTime;
 
 /// How many files a checkout writes at once. Clones on one APFS volume contend: on a
 /// 10,844-file tree, 1 to 4 threads took 0.9 to 1.0 s and 14 threads 2.8 s (a volume
@@ -192,9 +188,11 @@ fn open_regular(path: &Path) -> io::Result<Option<File>> {
 /// What a checkout wrote.
 #[derive(Debug)]
 pub struct Checkout {
-    /// The new checkout's stat cache. It vouches for every file whose content was
-    /// verified (hashed bytes, or a clone of a file the source vouched for), so the
-    /// checkout's first snapshot reads only the rest.
+    /// The new checkout's stat cache. It vouches for a file only if its content was
+    /// verified (a clone of a file the source vouched for by stat) and its stat is settled
+    /// (see [`crate::RACY_MARGIN`]): a clone keeps its source's old modification time,
+    /// and any write into the file during the checkout gives it a new one. Copies and
+    /// content written from memory are new, so the checkout's first snapshot reads them.
     pub cache: StatCache,
     /// Files cloned copy-on-write.
     pub cloned: usize,
@@ -202,8 +200,9 @@ pub struct Checkout {
     pub copied: usize,
 }
 
-/// Materialise `tree` into `dest`: a missing directory, which is created, or an empty one
-/// that belongs to the caller and that neither group nor others can write. Files are
+/// Materialise `tree` into `dest`: a missing directory, which is created, or an empty
+/// one. Others who can write `dest` can still put content in it while the checkout runs,
+/// which its first snapshot sees, but they cannot redirect a write outside it. Files are
 /// cloned from `source` where the disk supports it (APFS `clonefile`, a Linux reflink)
 /// and copied otherwise; modes are git's (`0644`, `0755`), whatever the source's are.
 /// Symlinks are created last. On error the destination is left partly written and should
@@ -223,13 +222,21 @@ pub fn checkout(tree: &Tree, dest: &Path, source: &dyn BlobSource) -> Result<Che
     }
     // Sorted, so a parent comes before its children.
     for dir in dirs {
-        mkdirat(&root, dir, dir_mode()).map_err(errno(dest.join(dir)))?;
+        let (parent, name) = split(dir);
+        let at = open_under(&root, dest, parent)?;
+        mkdirat(&at, name, dir_mode()).map_err(errno(dest.join(dir)))?;
     }
-    let mut files = Vec::new();
+    // Grouped by directory, so each worker opens a directory once for all its files.
+    let mut files: BTreeMap<&str, Vec<(&RepoPath, Entry)>> = BTreeMap::new();
     let mut links = Vec::new();
     for (path, entry) in tree.entries() {
         match entry {
-            Entry::File(_) | Entry::Executable(_) => files.push((path, *entry)),
+            Entry::File(_) | Entry::Executable(_) => {
+                files
+                    .entry(split(path.as_str()).0)
+                    .or_default()
+                    .push((path, *entry));
+            }
             Entry::Symlink(oid) => links.push((path, *oid)),
             other => {
                 return Err(TreeError::UnsupportedMode(other.mode().as_str().into()).into());
@@ -240,10 +247,16 @@ pub fn checkout(tree: &Tree, dest: &Path, source: &dyn BlobSource) -> Result<Che
         .num_threads(WRITERS)
         .build()
         .map_err(|e| FsError::io(dest)(io::Error::other(e)))?;
-    let written: Vec<Written> = pool.install(|| {
+    let written: Vec<Vec<Written>> = pool.install(|| {
         files
             .par_iter()
-            .map(|(path, entry)| write_file(&root, dest, path, *entry, source, started))
+            .map(|(dir, entries)| {
+                let at = open_under(&root, dest, dir)?;
+                entries
+                    .iter()
+                    .map(|(path, entry)| write_file(&at, dest, path, *entry, source))
+                    .collect::<Result<Vec<_>>>()
+            })
             .collect::<Result<_>>()
     })?;
     for (path, oid) in links {
@@ -261,19 +274,20 @@ pub fn checkout(tree: &Tree, dest: &Path, source: &dyn BlobSource) -> Result<Che
         };
         verify(oid, &target)?;
         check_content(path, Mode::Symlink, &target)?;
-        symlinkat(OsStr::from_bytes(&target), &root, path.as_str()).map_err(errno(abs))?;
+        let (parent, name) = split(path.as_str());
+        let at = open_under(&root, dest, parent)?;
+        symlinkat(OsStr::from_bytes(&target), &at, name).map_err(errno(abs))?;
     }
-    let now = SystemTime::now();
     let mut cache = StatCache::new();
     let (mut cloned, mut copied) = (0, 0);
-    for w in written {
+    for w in written.into_iter().flatten() {
         if w.cloned {
             cloned += 1;
         } else {
             copied += 1;
         }
         if w.vouched {
-            cache.record(w.path, w.stamp, w.entry, now);
+            cache.record(w.path, w.stamp, w.entry, started);
         }
     }
     Ok(Checkout {
@@ -291,6 +305,37 @@ struct Written {
     vouched: bool,
 }
 
+/// `a/b/c` → (`a/b`, `c`); `c` → (``, `c`).
+fn split(path: &str) -> (&str, &str) {
+    match path.rfind('/') {
+        Some(i) => (&path[..i], &path[i + 1..]),
+        None => ("", path),
+    }
+}
+
+/// The directory `rel` under `root`, opened one component at a time without following a
+/// link, so a link put anywhere on the way fails the open.
+fn open_under(root: &OwnedFd, dest: &Path, rel: &str) -> Result<OwnedFd> {
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut at = openat(root, ".", flags, rustix::fs::Mode::empty()).map_err(errno(dest.into()))?;
+    if rel.is_empty() {
+        return Ok(at);
+    }
+    for name in rel.split('/') {
+        at = match openat(&at, name, flags, rustix::fs::Mode::empty()) {
+            Ok(fd) => fd,
+            Err(Errno::LOOP | Errno::NOTDIR) => {
+                return Err(FsError::Destination {
+                    path: dest.join(rel),
+                    why: "a symlink appeared inside it during the checkout",
+                });
+            }
+            Err(e) => return Err(FsError::io(dest.join(rel))(e.into())),
+        };
+    }
+    Ok(at)
+}
+
 fn dir_mode() -> rustix::fs::Mode {
     use rustix::fs::Mode as M;
     M::RWXU | M::RGRP | M::XGRP | M::ROTH | M::XOTH
@@ -300,8 +345,8 @@ fn errno(path: PathBuf) -> impl Fn(Errno) -> FsError {
     move |e| FsError::io(path.clone())(e.into())
 }
 
-/// The destination, open, after checking it is a directory of the caller's own that no
-/// one else can write and that holds nothing.
+/// The destination, open, after checking it is a directory, not a link, that holds
+/// nothing.
 fn prepare(dest: &Path) -> Result<OwnedFd> {
     let refuse = |why| FsError::Destination {
         path: dest.into(),
@@ -326,14 +371,6 @@ fn prepare(dest: &Path) -> Result<OwnedFd> {
         Err(Errno::LOOP | Errno::NOTDIR) => return Err(refuse("it is a symlink")),
         Err(e) => return Err(FsError::io(dest)(e.into())),
     };
-    let st = fstat(&fd).map_err(errno(dest.into()))?;
-    if st.st_uid != rustix::process::geteuid().as_raw() {
-        return Err(refuse("it belongs to another user"));
-    }
-    #[allow(clippy::unnecessary_cast)] // the field type differs between platforms
-    if st.st_mode as u32 & 0o022 != 0 {
-        return Err(refuse("group or others can write it"));
-    }
     for item in Dir::read_from(&fd).map_err(errno(dest.into()))? {
         let item = item.map_err(errno(dest.into()))?;
         if !matches!(item.file_name().to_bytes(), b"." | b"..") {
@@ -356,19 +393,17 @@ fn verify(oid: GitOid, content: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Write one regular file under `root`. A clone carries the source's mode and
-/// modification time, so the mode is set and the file backdated only where they are not
-/// already right.
+/// Write one regular file by its name in its directory `root`. A clone carries the
+/// source's mode, so the mode is set only where it is not already git's.
 fn write_file(
     root: &OwnedFd,
     dest: &Path,
     path: &RepoPath,
     entry: Entry,
     source: &dyn BlobSource,
-    started: SystemTime,
 ) -> Result<Written> {
     let abs = dest.join(path.as_str());
-    let name = CString::new(path.as_str()).expect("a repository path has no NUL");
+    let name = CString::new(path.file_name()).expect("a repository path has no NUL");
     let oid = entry.oid();
     let (cloned, vouched) = match source.fetch(oid).map_err(FsError::io(&abs))? {
         None => return Err(FsError::MissingBlob(oid)),
@@ -387,6 +422,7 @@ fn write_file(
             verify(oid, &bytes)?;
             let mut file = create(root, &name).map_err(FsError::io(&abs))?;
             file.write_all(&bytes).map_err(FsError::io(&abs))?;
+            // Verified, but written now: the cache leaves it out until it settles.
             (false, true)
         }
     };
@@ -400,20 +436,10 @@ fn write_file(
         0o644
     };
     let mut stamp = Stamp::of(&file.metadata().map_err(FsError::io(&abs))?);
-    let mut touched = false;
     if stamp.permissions() != mode {
+        // A mode change moves the change time only, never the modification time.
         file.set_permissions(fs::Permissions::from_mode(mode))
             .map_err(FsError::io(&abs))?;
-        touched = true;
-    }
-    if !stamp.settled(started) {
-        let dated = started
-            .checked_sub(BACKDATE)
-            .unwrap_or(SystemTime::UNIX_EPOCH);
-        file.set_modified(dated).map_err(FsError::io(&abs))?;
-        touched = true;
-    }
-    if touched {
         stamp = Stamp::of(&file.metadata().map_err(FsError::io(&abs))?);
     }
     Ok(Written {
@@ -474,4 +500,34 @@ fn clone_or_copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<bool>
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn clone_or_copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<bool> {
     copy(src, root, name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_link_inside_the_destination_is_never_followed() {
+        let out = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let dest = out.path().join("dest");
+        fs::create_dir_all(dest.join("a")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), dest.join("a/b")).unwrap();
+        let root = openat(
+            CWD,
+            &dest,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        )
+        .unwrap();
+        assert!(open_under(&root, &dest, "a").is_ok());
+        assert!(matches!(
+            open_under(&root, &dest, "a/b"),
+            Err(FsError::Destination { .. })
+        ));
+        assert!(matches!(
+            open_under(&root, &dest, "a/b/c"),
+            Err(FsError::Destination { .. })
+        ));
+    }
 }
