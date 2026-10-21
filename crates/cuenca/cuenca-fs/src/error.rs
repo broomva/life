@@ -24,7 +24,9 @@ pub enum FsError {
     #[error("{0}: the file kept changing while it was read; snapshot again once it settles")]
     Unstable(PathBuf),
     #[error(
-        "the base holds paths the rules name, which this snapshot would delete from the fork: {0:?}; snapshot with `snapshot_dropping` to accept that"
+        "the base holds {} path(s) the rules name, which this snapshot would delete from the fork (first: {:?}); set SnapshotOptions::drop_ignored to accept that",
+        .0.len(),
+        &.0[..(.0.len().min(5))]
     )]
     Ignored(Vec<String>),
     #[error("the files cannot form a tree: {0}")]

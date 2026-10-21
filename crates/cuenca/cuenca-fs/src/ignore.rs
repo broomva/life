@@ -30,6 +30,7 @@ target
 /// A parsed `.forkignore`, in gitignore syntax. Only the file at the root counts; a
 /// directory it names is not descended into, so, as in git, a later `!` rule cannot
 /// bring back a path under it.
+#[derive(Debug)]
 pub struct ForkIgnore {
     matcher: Gitignore,
 }

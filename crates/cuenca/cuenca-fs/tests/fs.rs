@@ -2,7 +2,7 @@
 
 use cuenca_fs::{
     BlobSource, CheckoutSource, Content, DEFAULT_FORKIGNORE, Fetched, ForkIgnore, FsError,
-    ObjectDir, StatCache, checkout, snapshot, snapshot_with,
+    ObjectDir, SnapshotOptions, StatCache, checkout, snapshot, snapshot_with,
 };
 use cuenca_tree::{Entry, GitOid, Op, Tree};
 use std::collections::HashMap;
@@ -84,6 +84,14 @@ fn git_tree_id(root: &Path) -> String {
     let id = git(&["write-tree"]);
     fs::remove_dir_all(root.join(".git")).unwrap();
     id
+}
+
+/// Snapshot options with only these rules.
+fn only(rules: &ForkIgnore) -> SnapshotOptions<'_> {
+    SnapshotOptions {
+        rules: Some(rules),
+        ..Default::default()
+    }
 }
 
 /// A source that holds blobs in memory.
@@ -523,7 +531,13 @@ fn explicit_rules_override_the_location_file() {
     write(dir.path(), ".forkignore", b"");
     write(dir.path(), "x.tmp", b"x\n");
     let rules = ForkIgnore::parse("*.tmp\n").unwrap();
-    let snap = snapshot_with(dir.path(), &Tree::new(), &mut StatCache::new(), &rules).unwrap();
+    let snap = snapshot_with(
+        dir.path(),
+        &Tree::new(),
+        &mut StatCache::new(),
+        &only(&rules),
+    )
+    .unwrap();
     assert!(snap.tree.get("x.tmp").is_none());
 }
 
@@ -572,13 +586,20 @@ fn a_base_holding_ignored_paths_is_refused_unless_the_drop_is_accepted() {
     let src = tempfile::tempdir().unwrap();
     write(src.path(), "src/lib.rs", b"pub fn f() {}\n");
     write(src.path(), "src/target/mod.rs", b"// tracked\n");
+    write(src.path(), ".env", b"VITE_MODE=dev\n");
     write(
         src.path(),
         "node_modules/vendored/index.js",
         b"module.exports = 1;\n",
     );
     let keep_all = ForkIgnore::parse("").unwrap();
-    let base = snapshot_with(src.path(), &Tree::new(), &mut StatCache::new(), &keep_all).unwrap();
+    let base = snapshot_with(
+        src.path(),
+        &Tree::new(),
+        &mut StatCache::new(),
+        &only(&keep_all),
+    )
+    .unwrap();
     let out = tempfile::tempdir().unwrap();
     let dest = out.path().join("fork");
     checkout(&base.tree, &dest, &memory_of(&base)).unwrap();
@@ -589,17 +610,34 @@ fn a_base_holding_ignored_paths_is_refused_unless_the_drop_is_accepted() {
     match snapshot(&dest, &base.tree, &mut cache) {
         Err(FsError::Ignored(paths)) => assert_eq!(
             paths,
-            ["node_modules/vendored/index.js", "src/target/mod.rs"]
+            [
+                ".env",
+                "node_modules/vendored/index.js",
+                "src/target/mod.rs"
+            ]
         ),
         other => panic!("expected a refusal naming the paths, got {other:?}"),
     }
     // Accepted explicitly: the snapshot holds neither, deletes both, and says so.
-    let snap = cuenca_fs::snapshot_dropping(&dest, &base.tree, &mut cache).unwrap();
+    let snap = snapshot_with(
+        &dest,
+        &base.tree,
+        &mut cache,
+        &SnapshotOptions {
+            drop_ignored: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let paths: Vec<&str> = snap.tree.entries().map(|(p, _)| p.as_str()).collect();
     assert_eq!(paths, ["src/lib.rs"]);
     assert_eq!(
         snap.dropped,
-        ["node_modules/vendored/index.js", "src/target/mod.rs"]
+        [
+            ".env",
+            "node_modules/vendored/index.js",
+            "src/target/mod.rs"
+        ]
     );
     assert!(
         snap.changeset
@@ -625,15 +663,21 @@ fn a_kind_change_under_a_directory_rule_does_not_wedge_snapshots() {
         dir.path(),
         &Tree::new(),
         &mut StatCache::new(),
-        &ForkIgnore::parse("").unwrap(),
+        &only(&ForkIgnore::parse("").unwrap()),
     )
     .unwrap();
     write(dir.path(), ".forkignore", b"out/\n");
     fs::remove_dir_all(dir.path().join("out")).unwrap();
     write(dir.path(), "out", b"now a file\n");
-    let snap = cuenca_fs::snapshot_dropping(dir.path(), &base.tree, &mut StatCache::new()).unwrap();
+    // `out` is now a file the rule `out/` does not name, so `out/a.txt` is simply gone:
+    // an ordinary deletion, not a path the rules dropped.
+    let snap = snapshot(dir.path(), &base.tree, &mut StatCache::new()).unwrap();
     let paths: Vec<&str> = snap.tree.entries().map(|(p, _)| p.as_str()).collect();
     assert_eq!(paths, [".forkignore", "out"]);
+    assert!(snap.dropped.is_empty());
+    assert!(snap.changeset.ops.contains(&Op::delete(
+        cuenca_tree::RepoPath::new("out/a.txt").unwrap()
+    )));
 }
 
 #[test]
@@ -846,12 +890,16 @@ fn a_symlink_target_too_long_to_check_out_is_refused_unread() {
         &vec![b'a'; 4096],
     );
     let out = tempfile::tempdir().unwrap();
-    assert!(matches!(
-        checkout(
-            &tree,
-            &out.path().join("fork"),
-            &ObjectDir::new(objects.path())
+    // Read only up to one byte past the longest target, so that is the length reported.
+    match checkout(
+        &tree,
+        &out.path().join("fork"),
+        &ObjectDir::new(objects.path()),
+    ) {
+        Err(FsError::Tree(cuenca_tree::TreeError::SymlinkTarget { problem, .. })) => assert_eq!(
+            problem,
+            cuenca_tree::SymlinkProblem::TooLong(cuenca_tree::MAX_SYMLINK_TARGET + 1)
         ),
-        Err(FsError::Tree(cuenca_tree::TreeError::SymlinkTarget { .. }))
-    ));
+        other => panic!("expected a refusal of the target, got {other:?}"),
+    }
 }

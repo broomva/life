@@ -49,8 +49,8 @@ pub struct Snapshot {
     /// reserves, other than `.git` itself, which is always left out silently.
     pub skipped: Vec<Skipped>,
     /// Paths of the base that the rules name, which the tree therefore leaves out and the
-    /// changeset deletes. Only [`snapshot_dropping`] gives any; [`snapshot`] refuses with
-    /// [`FsError::Ignored`] instead. Whatever is at those paths on disk is left as it is.
+    /// changeset deletes. Only [`SnapshotOptions::drop_ignored`] gives any; otherwise the
+    /// snapshot refuses with [`FsError::Ignored`]. Whatever is on disk is left as it is.
     pub dropped: Vec<String>,
     /// How many files were read, as opposed to taken from the stat cache.
     pub hashed: usize,
@@ -92,29 +92,41 @@ pub struct Skipped {
 /// file changes between parsing and the end of the scan, it fails as unstable. On success
 /// `cache` holds this scan's stats; on failure it is left as it was.
 ///
+/// What a snapshot may do besides the default.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SnapshotOptions<'a> {
+    /// Rules to use instead of `root/.forkignore`.
+    pub rules: Option<&'a ForkIgnore>,
+    /// Accept that base paths the rules name are left out of the tree and deleted by the
+    /// changeset (listed in [`Snapshot::dropped`]), instead of refusing the snapshot.
+    pub drop_ignored: bool,
+}
+
 /// A snapshot never holds a path the rules name (spec section 2a). If the base holds one
-/// (the rules changed, or an import tracked it), leaving it out would delete it from the
-/// fork, so the snapshot fails loudly with [`FsError::Ignored`] naming the paths, and
-/// nothing is published; [`snapshot_dropping`] is the explicit way to accept the drop.
+/// that the walk found the rules naming (the rules changed, or an import tracked it),
+/// leaving it out would delete it from the fork, so the snapshot fails loudly with
+/// [`FsError::Ignored`] naming the paths, and nothing is published;
+/// [`SnapshotOptions::drop_ignored`] is the explicit way to accept the drop.
 pub fn snapshot(root: &Path, base: &Tree, cache: &mut StatCache) -> Result<Snapshot> {
-    snapshot_rooted(root, base, cache, false)
+    snapshot_with(root, base, cache, &SnapshotOptions::default())
 }
 
-/// [`snapshot`], accepting that base paths the rules name are left out of the tree and
-/// deleted by the changeset; they are listed in [`Snapshot::dropped`].
-pub fn snapshot_dropping(root: &Path, base: &Tree, cache: &mut StatCache) -> Result<Snapshot> {
-    snapshot_rooted(root, base, cache, true)
-}
-
-fn snapshot_rooted(
+/// [`snapshot`] with [`SnapshotOptions`]. With explicit rules, `root/.forkignore` is
+/// neither read nor checked.
+pub fn snapshot_with(
     root: &Path,
     base: &Tree,
     cache: &mut StatCache,
-    drop_ignored: bool,
+    options: &SnapshotOptions,
 ) -> Result<Snapshot> {
     let dir = open_dir(root)?;
+    if let Some(rules) = options.rules {
+        let (snap, next) = scan(dir, root, base, cache, rules, options.drop_ignored)?;
+        *cache = next;
+        return Ok(snap);
+    }
     let (rules, parsed) = ForkIgnore::load(&dir, root)?;
-    let (snap, next) = scan(dir, root, base, cache, &rules, drop_ignored)?;
+    let (snap, next) = scan(dir, root, base, cache, &rules, options.drop_ignored)?;
     rules_held(
         !rules.excludes(FORKIGNORE),
         parsed.as_deref(),
@@ -149,19 +161,6 @@ fn rules_held(eligible: bool, parsed: Option<&[u8]>, tree: &Tree, root: &Path) -
         return Err(FsError::Unstable(root.join(FORKIGNORE)));
     }
     Ok(())
-}
-
-/// [`snapshot`] with explicit ignore rules, whatever `root/.forkignore` says; it refuses
-/// a base that holds paths those rules name, as [`snapshot`] does.
-pub fn snapshot_with(
-    root: &Path,
-    base: &Tree,
-    cache: &mut StatCache,
-    ignore: &ForkIgnore,
-) -> Result<Snapshot> {
-    let (snap, next) = scan(open_dir(root)?, root, base, cache, ignore, false)?;
-    *cache = next;
-    Ok(snap)
 }
 
 struct Found {
@@ -203,6 +202,8 @@ fn scan(
     let mut found = Vec::new();
     let mut skipped = Vec::new();
     let mut queue: Vec<ToRead> = Vec::new();
+    // Every path the rules left out, as the walk met it.
+    let mut ignored_seen: HashSet<String> = HashSet::new();
     let mut hashed = 0;
     // Depth first, so the directories held open are about one chain of ancestors.
     let mut pending: Vec<Pending> = Vec::new();
@@ -244,6 +245,13 @@ fn scan(
             let kind = FileType::from_raw_mode(st.st_mode);
             // The rules come first, so they can leave out a name no tree could hold.
             if ignore.is_ignored(&rel, kind == FileType::Directory) {
+                if let Some(name) = os.to_str() {
+                    ignored_seen.insert(if prefix.is_empty() {
+                        name.to_string()
+                    } else {
+                        format!("{prefix}/{name}")
+                    });
+                }
                 continue;
             }
             let Some(name) = os.to_str() else {
@@ -320,10 +328,17 @@ fn scan(
     }
     hashed += read_all(&mut queue, &mut found)?;
 
+    // A base path the walk left out because the rules named it (or one of its
+    // directories). One that is simply gone, or changed kind, is an ordinary deletion.
     let dropped: Vec<String> = base
         .entries()
         .map(|(path, _)| path.as_str())
-        .filter(|path| ignore.excludes(path))
+        .filter(|path| {
+            ignored_seen.contains(*path)
+                || path
+                    .match_indices('/')
+                    .any(|(i, _)| ignored_seen.contains(&path[..i]))
+        })
         .map(str::to_string)
         .collect();
     if !dropped.is_empty() && !drop_ignored {

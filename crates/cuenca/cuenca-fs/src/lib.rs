@@ -7,7 +7,7 @@
 //! [`StatCache`] makes the scan cheap, by hashing only files whose stat changed since
 //! the cache recorded them. A path the location's [`ForkIgnore`] names never enters a
 //! snapshot; if the base holds one, [`snapshot`] fails loudly rather than delete it, and
-//! [`snapshot_dropping`] is the explicit way to drop it.
+//! [`SnapshotOptions::drop_ignored`] is the explicit way to drop it.
 //!
 //! ```no_run
 //! use cuenca_fs::{StatCache, checkout, snapshot, CheckoutSource};
@@ -70,5 +70,5 @@ pub use checkout::{BlobSource, Checkout, CheckoutSource, Fetched, ObjectDir, Vou
 pub use error::FsError;
 pub use ignore::{DEFAULT_FORKIGNORE, FORKIGNORE, ForkIgnore};
 pub use scan::{
-    Content, MAX_FILE_BYTES, NewBlob, Skipped, Snapshot, snapshot, snapshot_dropping, snapshot_with,
+    Content, MAX_FILE_BYTES, NewBlob, Skipped, Snapshot, SnapshotOptions, snapshot, snapshot_with,
 };

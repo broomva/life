@@ -52,7 +52,6 @@ mutate src/scan.rs 'if ignore.is_ignored(&rel, kind == FileType::Directory) {' '
 mutate src/scan.rs 'if held != parsed.map(GitOid::for_blob) {' 'if false {' --lib rules_that_changed
 mutate src/scan.rs 'if after.as_deref() != parsed {' 'if false {' --lib rules_changed_after
 # base paths the rules name are dropped, and reported
-mutate src/scan.rs '.filter(|path| ignore.excludes(path))' '.filter(|_| false)' --test fs refused_unless
 
 # what a snapshot holds
 mutate src/scan.rs 'if bytes == b"." || bytes == b".." || bytes == b".git" {' 'if bytes == b"." || bytes == b".." {' --test fs git_state
@@ -105,5 +104,11 @@ mutate src/scan.rs 'if !dropped.is_empty() && !drop_ignored {' 'if false {' --te
 mutate src/checkout.rs 'Fetched::Vouched(v) if v.oid == oid => (v.file, v.stamp),' 'Fetched::Vouched(v) if true => (v.file, v.stamp),' --test fs its_own_blob
 mutate src/checkout.rs 'if has_content_rule(path, entry.mode()) {' 'if false {' --test fs refused_at_checkout
 mutate src/checkout.rs 'check_content(path, entry.mode(), &bytes)?;' '' --test fs refused_at_checkout
+
+mutate src/checkout.rs 'if now != Some(id) {' 'if false {' --lib no_longer_holds
+mutate src/checkout.rs 'file.take(MAX_SYMLINK_TARGET as u64 + 1)' 'file.take(MAX_FILE_BYTES + 1)' --test fs refused_unread
+mutate src/scan.rs '            ignored_seen.contains(*path)
+                || path' '            false
+                || path' --test fs refused_unless
 
 exit $survived
