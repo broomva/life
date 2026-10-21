@@ -2883,6 +2883,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "cuenca-server"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "cuenca-core",
+ "cuenca-tree",
+ "futures-util",
+ "hex",
+ "rand 0.8.8",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "cuenca-tree"
 version = "0.3.0"
 dependencies = [

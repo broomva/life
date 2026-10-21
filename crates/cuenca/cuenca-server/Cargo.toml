@@ -1,0 +1,36 @@
+[package]
+name = "cuenca-server"
+description = "The Cuenca authority: an HTTP API on the tailnet over cuenca-core, per-principal keys, node identity, and a local admin socket"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "cuenca-server"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+clap.workspace = true
+cuenca-core = { path = "../cuenca-core" }
+cuenca-tree = { path = "../cuenca-tree" }
+futures-util.workspace = true
+hex.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "process"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+reqwest = { workspace = true, features = ["blocking", "json"] }
