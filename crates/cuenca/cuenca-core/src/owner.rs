@@ -91,8 +91,9 @@ const HASHED_PREFIX_BYTES: usize = 80;
 /// gets a sibling of its own. The name is `<parent>-from-<node>-e<epoch>`, the node
 /// lowercased for readability only (node ids are alphanumeric, so the name still
 /// parses back to `parent` and `epoch` uniquely). When that would not fit in a fork
-/// name, it is `<first 80 bytes of parent>-from.<32 hex>`, the hex taken from the
-/// SHA-256 of the parent's whole name and the epoch. The two shapes cannot coincide
+/// name, it is `<first 80 bytes of parent>-from.<32 hex>`, the hex the first 128 bits
+/// of the SHA-256 of the parent's whole name and the epoch: unique short of a hash
+/// collision, which the rules refuse rather than mix. The two shapes cannot coincide
 /// (one ends in `-e<digits>`, the other in `.<hex>`), and fork creation refuses any
 /// name containing `-from` ([`crate::CoreError::ReservedName`]), so a sibling's name is
 /// never taken by anything else.
@@ -176,5 +177,13 @@ mod tests {
         let s = sibling_name(&long, 1, &nodes[2]);
         assert!(s.as_str().starts_with(&"f".repeat(80)) && s.as_str().contains("-from."));
         assert_ne!(s, sibling_name(&long, 2, &nodes[2]));
+        // The parent's name and the epoch are hashed apart: "x..x1" at epoch 2 is not
+        // "x..x" at epoch 12.
+        let one = ForkName::new(format!("{}1", "x".repeat(99))).unwrap();
+        let other = ForkName::new("x".repeat(99)).unwrap();
+        assert_ne!(
+            sibling_name(&one, 2, &nodes[2]),
+            sibling_name(&other, 12, &nodes[2])
+        );
     }
 }

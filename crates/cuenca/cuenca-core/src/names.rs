@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Longest location, fork or principal name, in bytes: room for a sibling fork's
-/// name (`<fork>-from-<node>`), well under any filesystem's 255.
+/// name (`<fork>-from-<node>-e<epoch>`), well under any filesystem's 255.
 pub const MAX_NAME_BYTES: usize = 128;
 
 const NAME_RULE: &str =

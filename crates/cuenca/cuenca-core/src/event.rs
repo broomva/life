@@ -71,7 +71,7 @@ pub enum Event {
         changeset: Changeset,
     },
     /// A draft written under a stale epoch of `fork` by the holder of that epoch, kept
-    /// as a draft of the sibling fork `sibling` (`<fork>-from-<node>`), which this
+    /// as a draft of the sibling fork `sibling` ([`crate::sibling_name`]), which this
     /// event creates if it does not exist yet. Never dropped, never merged into `fork`.
     DraftFenced {
         fork: ForkName,

@@ -51,7 +51,7 @@ pub struct BlobInfo {
 pub struct Published {
     pub id: ChangesetId,
     /// Where the draft is: the fork asked for, or, for a publish under a stale epoch,
-    /// its sibling fork `<fork>-from-<node>`.
+    /// a sibling fork ([`crate::sibling_name`]); use this name, do not derive it.
     pub fork: ForkName,
     /// The epoch the draft was written under on `fork`: the writer's own, or 1 on a
     /// sibling (where the writer is the first holder). Further drafts to `fork` go
@@ -289,6 +289,11 @@ impl Store {
     /// is refused as `NotAtBase`, like any stale publish. A retry of a draft the fork
     /// accepted, sent after the fork was taken over, is a stale publish: it is kept in
     /// the sibling as well (a copy, nothing lost).
+    ///
+    /// A fork is one chain of drafts, and so is a sibling: two divergent stale drafts
+    /// from one writer are not both accepted. The second is refused as `NotAtBase`,
+    /// unacknowledged and still in the writer's checkout, to be rebased onto the
+    /// sibling's head, as on any fork.
     pub fn publish_draft(
         &self,
         fork: &ForkName,
@@ -349,8 +354,9 @@ impl Store {
     /// Take `fork` over for `holder`, as a compare-and-swap: the fork must be at
     /// `expected_epoch`; it moves to `expected_epoch + 1`, which fences out every
     /// earlier holder. Of two takeovers from the same epoch exactly one succeeds; the
-    /// other gets `EpochMismatch`. An owner act; this layer does not check who asks.
-    /// Returns the new epoch.
+    /// other gets `EpochMismatch`, and so does a retry of a takeover that succeeded
+    /// (read the fork to see who holds it). An owner act; this layer does not check who
+    /// asks. Returns the new epoch.
     pub fn take_over(&self, fork: &ForkName, expected_epoch: u64, holder: &Holder) -> Result<u64> {
         let event = Event::TakenOver {
             fork: fork.clone(),
@@ -1219,6 +1225,33 @@ mod tests {
         txn.open_table(REVOKED).unwrap().insert("agent", 3).unwrap();
         txn.commit().unwrap();
         assert_eq!(inconsistent(&store), "revocations differ from the log");
+    }
+
+    /// A row under a sibling's name, first held by someone else (as a hash collision
+    /// would leave it): the stale draft is refused, never mixed into it.
+    #[test]
+    fn a_sibling_first_held_by_another_writer_is_never_written() {
+        let (_d, store, cs) = setup();
+        let (_, f) = ids();
+        store.take_over(&f, 1, &other()).unwrap();
+        let name = crate::owner::sibling_name(&f, 1, &agent().node);
+        let planted = Fork {
+            name: name.clone(),
+            parent: Some(f.clone()),
+            holders: vec![other()],
+            ..store.fork(&f).unwrap().unwrap()
+        };
+        let txn = store.begin().unwrap();
+        txn.open_table(FORKS)
+            .unwrap()
+            .insert(name.as_str(), to_json(&planted).as_slice())
+            .unwrap();
+        txn.commit().unwrap();
+        let back = next_draft(&store, &cs);
+        match store.publish_draft(&f, &w1(), &back) {
+            Err(CoreError::Inconsistent(why)) => assert!(why.contains("another writer"), "{why}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

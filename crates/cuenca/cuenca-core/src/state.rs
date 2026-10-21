@@ -345,8 +345,10 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
 /// ([`sibling_name`]), new if it does not exist yet, starting from `base` (the draft's) and
 /// held by the writer under epoch 1. If that sibling has since been taken over, the
 /// writer is stale there too, and the draft goes one level down, to the sibling's own
-/// sibling for epoch 1, and so on. So a stale draft is always kept, and never written
-/// into a fork someone else holds.
+/// sibling for epoch 1, and so on. So a stale draft always has a fork of the writer's
+/// own to go to, never one someone else holds. Once there it is a draft like any
+/// other: it must start from that fork's head (the writer's chain continues), or it
+/// is refused as `NotAtBase` and stays in the writer's checkout, unacknowledged.
 pub(crate) fn fenced_target(
     view: &impl View,
     parent: &Fork,
@@ -369,7 +371,14 @@ pub(crate) fn fenced_target(
             });
         };
         // Only this rule creates a fork under a sibling's name (fork creation refuses
-        // them), from this parent's holder under this epoch: the writer.
+        // them), from this parent's holder under this epoch: the writer. A different
+        // first holder means two (parent, epoch) pairs share a name (a hash collision):
+        // refuse rather than mix two holders' drafts.
+        if sibling.holder_at(1) != Some(&writer.holder) {
+            return Err(CoreError::Inconsistent(format!(
+                "sibling {name:?} was first held by another writer"
+            )));
+        }
         if sibling.epoch() == 1 {
             return Ok(sibling);
         }

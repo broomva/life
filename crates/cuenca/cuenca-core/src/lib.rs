@@ -24,7 +24,10 @@
 //! fencing epoch, 1 when the fork is created. Only the holder, under the current epoch,
 //! may publish a draft or ask to land. [`Store::take_over`] moves the fork to a new
 //! holder by compare-and-swap on the epoch, which it increments, and drops the old
-//! holder's landing intent. A publish by the holder of an earlier epoch is not
+//! holder's landing intent (moving main does not read intents: landing, BRO-3255,
+//! must check the intent and the holder in the transaction that moves main). A
+//! takeover retried after it succeeded gets `EpochMismatch`; read the fork to see who
+//! holds it. A publish by the holder of an earlier epoch is not
 //! dropped and not merged in: it becomes a draft of that epoch's sibling fork,
 //! `<fork>-from-<node>-e<epoch>` ([`sibling_name`]), one level further down if that
 //! sibling was taken over too. [`Store::revoke`] makes the

@@ -91,7 +91,7 @@ mutate src/state.rs 'fn check_writer(view: &impl View, state: &Fork, writer: &Wr
 mutate src/state.rs 'if state.holder_at(writer.epoch) != Some(&writer.holder) {' 'if false {' --test forks
 mutate src/state.rs 'if writer.epoch != current {' 'if false {' --test forks
 mutate src/state.rs 'not_revoked(view, &holder.principal)?;
-            if view.fork(name)?.is_some() {' 'if view.fork(name)?.is_some() {' --test forks
+            // `-from` is kept' '// `-from` is kept' --test forks
 mutate src/state.rs 'not_revoked(view, &holder.principal)?;
             let mut state = fork(view, name)?;' 'let mut state = fork(view, name)?;' --test forks
 mutate src/state.rs 'if state.epoch() != *expected_epoch {' 'if false {' --test forks
@@ -137,6 +137,8 @@ mutate src/owner.rs '&& s.len() <= MAX_NODE_BYTES' '' --lib
 mutate src/owner.rs '&& s.bytes().all(|b| b.is_ascii_alphanumeric());' '&& s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'"'"'-'"'"');' --lib
 mutate src/owner.rs 'if readable.len() <= MAX_NAME_BYTES {' 'if true {' --lib
 mutate src/owner.rs 'hash.update(epoch.to_string().as_bytes());' '' --lib
+mutate src/owner.rs 'hash.update([0]);' '' --lib
+mutate src/state.rs 'if sibling.holder_at(1) != Some(&writer.holder) {' 'if false {' --lib
 mutate src/owner.rs '"{parent}-from-{}-e{epoch}",' '"{parent}-from-{}-e1",' --lib
 # The changeset index keeps the first draft that recorded a changeset.
 mutate src/store.rs 'if self.changesets.get(id.as_bytes().as_slice())?.is_none() {' 'if true {' --test store

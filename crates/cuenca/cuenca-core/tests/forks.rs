@@ -272,6 +272,28 @@ fn a_draft_fenced_from_a_taken_over_sibling_goes_one_level_down() {
     assert_eq!(store.replay_check().unwrap().forks, 3);
 }
 
+/// A sibling is one chain, like any fork: a second stale draft that diverges from the
+/// first is refused, unacknowledged, and is kept once rebased onto the sibling's head.
+#[test]
+fn a_divergent_stale_draft_is_refused_until_rebased() {
+    let (_d, store, main) = forked();
+    store.take_over(&fork("f"), 1, &owner()).unwrap();
+    let x = write(&store, &main, &[("x", b"x")]);
+    let y = write(&store, &main, &[("y", b"y")]);
+    let p = store.publish_draft(&fork("f"), &w1(), &x).unwrap();
+    let len = store.len().unwrap();
+    assert!(matches!(
+        store.publish_draft(&fork("f"), &w1(), &y),
+        Err(CoreError::NotAtBase { .. })
+    ));
+    assert_eq!(store.len().unwrap(), len);
+    let rebased = write(&store, &store.fork_head(&p.fork).unwrap(), &[("y", b"y")]);
+    let q = store.publish_draft(&fork("f"), &w1(), &rebased).unwrap();
+    assert_eq!(q.fork, p.fork);
+    let head = store.fork_head(&p.fork).unwrap();
+    assert!(head.get("x").is_some() && head.get("y").is_some());
+}
+
 /// One holder fenced twice, under two epochs (a laptop that goes offline twice): each
 /// episode's drafts are kept, in a sibling of their own.
 #[test]
