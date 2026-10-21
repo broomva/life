@@ -29,14 +29,15 @@ use sha2::{Digest, Sha256};
 #[serde(rename_all = "snake_case")]
 pub enum PrincipalKind {
     /// Reads main of the locations it is granted, the forks its grant names and the
-    /// forks it holds or held; creates forks of granted locations.
+    /// forks it holds now (its own drafts fenced after a takeover land in a sibling it
+    /// holds); creates forks of granted locations.
     Agent,
     /// One of the owner's devices: reads every location and fork, and writes like an
     /// agent (it holds only the forks it creates; it lands nothing on its own).
     OwnerDevice,
 }
 
-/// What an agent's key may read, beyond the forks it holds or held.
+/// What an agent's key may read, beyond the forks it holds now.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Grant {
     /// Locations whose main it reads and which it may fork.

@@ -60,4 +60,4 @@ pub use event::{ChangesetId, Event, Record};
 pub use names::{ForkName, LocationName, MAX_NAME_BYTES, NameError, PrincipalName};
 pub use owner::{Holder, MAX_NODE_BYTES, NodeId, Writer, sibling_name};
 pub use state::{Fork, Location, MainMove};
-pub use store::{BlobInfo, Published, ReplaySummary, Store};
+pub use store::{BlobInfo, Published, ReplaySummary, Snapshot, Store};

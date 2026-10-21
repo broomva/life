@@ -223,6 +223,11 @@ fn kill_during_publish() {
             std::hint::spin_loop();
         }
         std::thread::sleep(Duration::from_micros((seed >> 8) % 3000));
+        // The sleep may have outlasted that publish: wait for one to be out again.
+        while !publishing.load(Ordering::SeqCst) {
+            assert!(start.elapsed() < Duration::from_secs(60), "writer stalled");
+            std::hint::spin_loop();
+        }
         child.kill().unwrap();
         child.wait().unwrap();
         let in_flight = writer.join().unwrap();
@@ -275,8 +280,9 @@ fn kill_during_publish() {
     );
     assert!(summary.changesets >= KILLS, "{summary:?}");
     assert!(
-        retried_recorded + retried_fresh > 0,
-        "no kill interrupted a publish: the test proved nothing"
+        retried_recorded + retried_fresh >= KILLS / 2,
+        "only {} of {KILLS} kills interrupted a publish",
+        retried_recorded + retried_fresh
     );
 }
 

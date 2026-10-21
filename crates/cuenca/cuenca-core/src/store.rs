@@ -428,8 +428,15 @@ impl Store {
     }
 
     pub fn fork(&self, name: &ForkName) -> Result<Option<Fork>> {
-        let txn = self.db.begin_read()?;
-        get_json(&txn.open_table(FORKS)?, name.as_str())
+        self.snapshot()?.fork(name)
+    }
+
+    /// A consistent view: every read through it sees the store at one moment, so a
+    /// decision made on one read (who may see a fork) holds for the others (its history).
+    pub fn snapshot(&self) -> Result<Snapshot> {
+        Ok(Snapshot {
+            txn: self.db.begin_read()?,
+        })
     }
 
     pub fn forks(&self) -> Result<Vec<Fork>> {
@@ -451,17 +458,7 @@ impl Store {
     /// landing intents and moves of main by it, and drafts fenced into or out of it.
     /// Reads the whole log.
     pub fn fork_history(&self, fork: &ForkName) -> Result<Vec<Record>> {
-        let txn = self.db.begin_read()?;
-        let log = txn.open_table(LOG)?;
-        let mut out = Vec::new();
-        for item in log.iter()? {
-            let (k, v) = item?;
-            let record = decode_record(k.value(), v.value())?;
-            if record.event.forks().contains(&fork) {
-                out.push(record);
-            }
-        }
-        Ok(out)
+        self.snapshot()?.fork_history(fork)
     }
 
     /// The tree a location's main is at.
@@ -730,6 +727,31 @@ fn decode_record(offset: u64, bytes: &[u8]) -> Result<Record> {
         });
     }
     Ok(record)
+}
+
+/// The store at one moment ([`Store::snapshot`]).
+pub struct Snapshot {
+    txn: redb::ReadTransaction,
+}
+
+impl Snapshot {
+    pub fn fork(&self, name: &ForkName) -> Result<Option<Fork>> {
+        get_json(&self.txn.open_table(FORKS)?, name.as_str())
+    }
+
+    /// As [`Store::fork_history`], at this snapshot.
+    pub fn fork_history(&self, fork: &ForkName) -> Result<Vec<Record>> {
+        let log = self.txn.open_table(LOG)?;
+        let mut out = Vec::new();
+        for item in log.iter()? {
+            let (k, v) = item?;
+            let record = decode_record(k.value(), v.value())?;
+            if record.event.forks().contains(&fork) {
+                out.push(record);
+            }
+        }
+        Ok(out)
+    }
 }
 
 fn get_json<T: for<'de> Deserialize<'de>>(

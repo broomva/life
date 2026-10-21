@@ -75,8 +75,7 @@ mutate src/http.rs 'Some(f) if caller.sees_fork(&f) => Ok(f),' 'Some(f) => Ok(f)
 mutate src/http.rs 'Some(l) if caller.sees_location(&l) => Ok(l),' 'Some(l) => Ok(l),' --test api
 mutate src/http.rs '        visible_location(a, &c, &location)?;
 ' '' --test api
-mutate src/http.rs '        visible_fork(a, &c, &name)?;
-        let mut shown' '        let mut shown' --test api
+mutate src/http.rs 'if !snapshot.fork(&name)?.is_some_and(|f| c.sees_fork(&f)) {' 'if false {' --test api
 mutate src/http.rs '        writable_fork(a, &c, &name)?;
         let writer' '        let writer' --test api
 # A draft names only blobs the caller reads or has sent: no laundering, no oracle.
@@ -86,7 +85,7 @@ mutate src/authority.rs 'let known = head.as_ref().is_some_and(|set| set.contain
 mutate src/authority.rs '|| own.is_some_and(|set| set.contains(&oid));' ';' --test api
 mutate src/http.rs 'a.possesses(&c.key.principal, oid);' '' --test api
 # History hides drafts fenced into a sibling the caller does not read.
-mutate src/http.rs '!a.store.fork(sibling)?.is_some_and(|f| c.sees_fork(&f))' 'false' --test api
+mutate src/http.rs '!snapshot.fork(sibling)?.is_some_and(|f| c.sees_fork(&f))' 'false' --test api
 # Staging is cleared on open.
 mutate src/authority.rs '            std::fs::remove_dir_all(&staging)?;' '' --test api
 mutate src/http.rs 'if !a.blob_set(tree)?.contains(&oid) {' 'if false {' --test api

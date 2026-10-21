@@ -999,3 +999,65 @@ fn a_takeover_to_the_same_principal_on_another_node_fences_the_first_node() {
         );
     }
 }
+
+/// Spec row (phase 2 · B): take an agent's fork over (`cuenca admin take-over`) while its
+/// host is offline with unpublished writes; the host reconnects and publishes. Its
+/// publish is refused for the stale epoch and kept as a sibling fork, with every file,
+/// 10 of 10.
+#[test]
+fn ten_offline_takeovers_lose_no_file() {
+    let s = Server::start();
+    s.add_location("l1");
+    let a1 = s.mint("a1", Agent, NA, grant(&["l1"], &[]));
+    let d1 = s.mint("d1", OwnerDevice, ND, grant(&[], &[]));
+    for i in 0..10 {
+        let fork = format!("off{i}");
+        s.whois.node(NA);
+        let r = s.post(&a1, "/v1/forks", json!({ "fork": fork, "location": "l1" }));
+        assert_eq!(r.status(), 200);
+        let head = s.fork_head(&a1, &fork);
+        // Offline work: files written while the takeover happens.
+        let files: Vec<(String, Vec<u8>)> = (0..3)
+            .map(|n| {
+                (
+                    format!("dir/file{n}.txt"),
+                    format!("run {i} file {n}\n").into_bytes(),
+                )
+            })
+            .collect();
+        let refs: Vec<(&str, &[u8])> = files
+            .iter()
+            .map(|(p, c)| (p.as_str(), c.as_slice()))
+            .collect();
+        let offline = s.write(&a1, &head, &refs);
+        let v = s.admin(AdminRequest::TakeOver {
+            fork: ForkName::new(fork.clone()).unwrap(),
+            expected_epoch: 1,
+            principal: "d1".parse_name(),
+            node: NodeId::new(ND).unwrap(),
+        });
+        assert_eq!(v["epoch"], 2, "{v}");
+        // The host reconnects.
+        let r = s.publish(&a1, &fork, 1, &offline);
+        assert_eq!(r.status(), 200, "run {i}");
+        let r: Value = r.json().unwrap();
+        assert_eq!(r["fenced"], true, "run {i}: {r}");
+        let sibling = r["fork"].as_str().unwrap();
+        let kept = s.fork_head(&a1, sibling);
+        for (path, content) in &files {
+            let oid = kept
+                .get(path)
+                .unwrap_or_else(|| panic!("run {i}: {path} lost"))
+                .oid();
+            let r = s.get(&a1, &format!("/v1/forks/{sibling}/blobs/{}", oid.to_hex()));
+            assert_eq!(
+                r.bytes().unwrap().as_ref(),
+                content.as_slice(),
+                "run {i}: {path}"
+            );
+        }
+        // And the fork itself is the new holder's, untouched by the stale draft.
+        s.whois.node(ND);
+        assert!(s.fork_head(&d1, &fork).get("dir/file0.txt").is_none());
+    }
+}

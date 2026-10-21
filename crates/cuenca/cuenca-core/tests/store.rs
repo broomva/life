@@ -491,3 +491,23 @@ fn main_follows_a_fork_draft_by_draft() {
     }
     assert_eq!(store.replay_check().unwrap().records, 8);
 }
+
+/// A snapshot keeps seeing the store as it was when it was taken, across later writes.
+#[test]
+fn a_snapshot_sees_one_moment() {
+    let (_d, store) = store();
+    let main = tree(&store, &[("a", b"a")]);
+    store.add_location(&loc("l"), None, &main).unwrap();
+    store.create_fork(&fork("f"), &loc("l"), &agent()).unwrap();
+    let before = store.snapshot().unwrap();
+    let cs = write(&store, &main, &[("b", b"b")]);
+    store.publish_draft(&fork("f"), &w1(), &cs).unwrap();
+    assert_eq!(
+        before.fork(&fork("f")).unwrap().unwrap().head,
+        main.git_tree_id()
+    );
+    assert_eq!(before.fork_history(&fork("f")).unwrap().len(), 1);
+    let after = store.snapshot().unwrap();
+    assert_eq!(after.fork(&fork("f")).unwrap().unwrap().head, cs.target);
+    assert_eq!(after.fork_history(&fork("f")).unwrap().len(), 2);
+}

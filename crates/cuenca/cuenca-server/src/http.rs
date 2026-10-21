@@ -378,16 +378,21 @@ fn blob_of(a: &Authority, tree: GitOid, oid: GitOid) -> ApiResult<Response> {
 }
 
 /// The fork's records, less drafts fenced into a sibling the caller does not read: a
-/// fenced draft is the sibling's content, shown only to those who read the sibling.
+/// fenced draft is the sibling's content, shown only to those who read the sibling. Who
+/// may read what is decided on the same snapshot the records come from, so a takeover
+/// landing during the request cannot hand a former holder its successor's drafts.
 async fn history(State(a): Shared, Extension(c): Me, Path(fork): Path<String>) -> ApiResult {
     let name = parse(&fork, ForkName::new)?;
     blocking(&a, move |a| {
-        visible_fork(a, &c, &name)?;
+        let snapshot = a.store.snapshot()?;
+        if !snapshot.fork(&name)?.is_some_and(|f| c.sees_fork(&f)) {
+            return Err(ApiError::not_found());
+        }
         let mut shown = Vec::new();
-        for record in a.store.fork_history(&name)? {
+        for record in snapshot.fork_history(&name)? {
             let hidden = match &record.event {
                 Event::DraftFenced { sibling, .. } => {
-                    !a.store.fork(sibling)?.is_some_and(|f| c.sees_fork(&f))
+                    !snapshot.fork(sibling)?.is_some_and(|f| c.sees_fork(&f))
                 }
                 _ => false,
             };
