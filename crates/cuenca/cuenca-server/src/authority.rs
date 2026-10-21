@@ -176,13 +176,13 @@ impl Authority {
     /// needs no write, so it holds even when the disk is full. The admin socket's
     /// `key_revoke` does this first, then records the revocation in the log.
     pub fn ban(&self, principal: &PrincipalName) {
-        // Waits for writes already past their check, so once this returns no write by
-        // `principal` commits.
-        let _writes = self.revocation.write().expect("revocation lock");
+        // Refused at once, reads included; then wait for writes already past their
+        // check, so once this returns no write by `principal` is still to commit.
         self.banned
             .lock()
             .expect("ban lock")
             .insert(principal.clone());
+        drop(self.revocation.write().expect("revocation lock"));
     }
 
     /// Run `write` for `principal` only if it is not revoked, checked again here, at
@@ -279,26 +279,21 @@ impl Caller {
     }
 
     /// A fork: an owner device reads every one; an agent, the forks its grant names and
-    /// the fork its principal holds now (on any node), and no other. A former holder
+    /// the fork it holds now (its principal on its key's node: a holder, as the core
+    /// defines one), and no other. A former holder
     /// stops reading a fork when it is taken over; it keeps the sibling its stale
     /// drafts go to, which it holds.
     pub fn sees_fork(&self, fork: &Fork) -> bool {
         self.owner_device()
             || self.key.grant.forks.contains(&fork.name)
-            || fork
-                .holder()
-                .is_some_and(|h| h.principal == self.key.principal)
+            || fork.holder() == Some(&self.holder)
     }
 
     /// Whether a write to `fork` reaches the core's rules, which decide it: true for
     /// whoever reads the fork, and for a former holder, whose stale draft the rules
     /// keep in a sibling. Anyone else is answered as if the fork did not exist.
     pub fn reaches_fork(&self, fork: &Fork) -> bool {
-        self.sees_fork(fork)
-            || fork
-                .holders
-                .iter()
-                .any(|h| h.principal == self.key.principal)
+        self.sees_fork(fork) || fork.holders.contains(&self.holder)
     }
 }
 
@@ -342,14 +337,14 @@ mod tests {
             std::thread::spawn(move || a.ban(&p))
         };
         std::thread::sleep(Duration::from_millis(200));
+        assert!(a.is_banned(&p), "refused at once");
         assert!(
-            !a.is_banned(&p),
+            !banner.is_finished(),
             "the ban must wait for the write to commit"
         );
         go.send(()).unwrap();
         writer.join().unwrap().unwrap();
         banner.join().unwrap();
-        assert!(a.is_banned(&p));
         // And a write after the ban is refused.
         assert!(a.guarded(&p, || Ok::<_, CoreError>(())).is_err());
     }

@@ -950,3 +950,52 @@ fn restart(dir: &std::path::Path) -> Server {
     }
     panic!("the store was not released");
 }
+
+/// A holder is a principal on one node, as the core defines it: after a takeover to the
+/// same principal on another node, the key's own node holds the fork no more and reads
+/// it no more (its stale drafts still reach the rules, which fence them).
+#[test]
+fn a_takeover_to_the_same_principal_on_another_node_fences_the_first_node() {
+    let s = Server::start();
+    s.add_location("l1");
+    let a1 = s.mint("a1", Agent, NA, grant(&["l1"], &[]));
+    s.whois.node(NA);
+    let r = s.post(&a1, "/v1/forks", json!({ "fork": "f", "location": "l1" }));
+    assert_eq!(r.status(), 200);
+    let head = s.fork_head(&a1, "f");
+    let v = s.admin(AdminRequest::TakeOver {
+        fork: ForkName::new("f").unwrap(),
+        expected_epoch: 1,
+        principal: "a1".parse_name(),
+        node: NodeId::new(NB).unwrap(),
+    });
+    assert_eq!(v["epoch"], 2, "{v}");
+    for path in ["/v1/forks/f", "/v1/forks/f/tree", "/v1/forks/f/history"] {
+        assert_eq!(s.get(&a1, path).status(), 404, "{path}");
+    }
+    let cs = s.write(&a1, &head, &[("offline", b"from node A\n")]);
+    let r: Value = s.publish(&a1, "f", 1, &cs).json().unwrap();
+    assert_eq!(r["fenced"], true, "{r}");
+    // A fork node A never held, now held by a1 on node B: node A's writes do not reach
+    // it, and are answered as absence.
+    let a2 = s.mint("a2", Agent, NB, grant(&["l1"], &[]));
+    s.whois.node(NB);
+    let r = s.post(&a2, "/v1/forks", json!({ "fork": "g", "location": "l1" }));
+    assert_eq!(r.status(), 200);
+    let v = s.admin(AdminRequest::TakeOver {
+        fork: ForkName::new("g").unwrap(),
+        expected_epoch: 1,
+        principal: "a1".parse_name(),
+        node: NodeId::new(NB).unwrap(),
+    });
+    assert_eq!(v["epoch"], 2, "{v}");
+    s.whois.node(NA);
+    let cs = s.write(&a1, &Tree::new(), &[("x", b"x")]);
+    for epoch in [1, 2] {
+        assert_eq!(
+            s.publish(&a1, "g", epoch, &cs).status(),
+            404,
+            "epoch {epoch}"
+        );
+    }
+}

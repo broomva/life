@@ -62,18 +62,13 @@ mutate src/authority.rs '.ok_or(AuthError::UnnamedSource(ip))?;' '.unwrap_or(cra
 mutate src/authority.rs 'self.owner_device() || self.key.grant.locations.contains(&location.name)' 'true' --test api
 mutate src/authority.rs '            || self.key.grant.forks.contains(&fork.name)
 ' '' --test api
-mutate src/authority.rs '.is_some_and(|h| h.principal == self.key.principal)' '.is_some_and(|_| true)' --test api
-mutate src/authority.rs '.is_some_and(|h| h.principal == self.key.principal)' '.is_some_and(|_| false)' --test api
+mutate src/authority.rs '|| fork.holder() == Some(&self.holder)' '|| fork.holder().is_some()' --test api
+mutate src/authority.rs '|| fork.holder() == Some(&self.holder)' '|| fork.holder().is_some_and(|h| h.principal == self.key.principal)' --test api
+mutate src/authority.rs '|| fork.holder() == Some(&self.holder)' '|| false' --test api
 # A former holder reads the fork no more, but its stale drafts still reach the rules.
-mutate src/authority.rs '            || fork
-                .holder()
-                .is_some_and(|h| h.principal == self.key.principal)' '            || fork
-                .holders
-                .iter()
-                .any(|h| h.principal == self.key.principal)' --test api
-mutate src/authority.rs '        self.sees_fork(fork)
-            || fork' '        self.sees_fork(fork)
-            && fork' --test api
+mutate src/authority.rs '|| fork.holder() == Some(&self.holder)' '|| fork.holders.contains(&self.holder)' --test api
+mutate src/authority.rs 'self.sees_fork(fork) || fork.holders.contains(&self.holder)' 'self.sees_fork(fork)' --test api
+mutate src/authority.rs 'self.sees_fork(fork) || fork.holders.contains(&self.holder)' 'self.sees_fork(fork) || fork.holders.iter().any(|h| h.principal == self.key.principal)' --test api
 mutate src/http.rs 'Some(f) if caller.reaches_fork(&f) => Ok(f),' 'Some(f) => Ok(f),' --test api
 mutate src/authority.rs 'self.key.kind == PrincipalKind::OwnerDevice' 'true' --test api
 mutate src/http.rs 'Some(f) if caller.sees_fork(&f) => Ok(f),' 'Some(f) => Ok(f),' --test api
@@ -118,6 +113,7 @@ mutate src/identity.rs '    let Some(entry) = in_netmap else {
 mutate src/authority.rs 'if self.is_banned(&key.principal) {' 'if false {' --test api
 mutate src/admin.rs '    a.ban(principal);
     let offset' '    let offset' --lib
+mutate src/authority.rs '        drop(self.revocation.write().expect("revocation lock"));' '' --lib
 # Every agent write checks revocation again right before it commits, serialized with
 # the ban.
 mutate src/authority.rs 'if self.is_banned(principal) || self.store.revoked(principal)?.is_some() {' 'if false {' --test api
