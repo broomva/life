@@ -28,6 +28,9 @@ pub struct Authority {
     /// Principals revoked by this process, refused before any record of it is
     /// written ([`Authority::ban`]).
     banned: Mutex<HashSet<PrincipalName>>,
+    /// Taken for reading by every agent write from its last check to its commit
+    /// ([`Authority::guarded`]), and for writing by [`Authority::ban`].
+    revocation: std::sync::RwLock<()>,
 }
 
 /// An authenticated request's principal, on the node Tailscale named.
@@ -84,6 +87,7 @@ impl Authority {
             blob_sets: Mutex::new(HashMap::new()),
             possessed: Mutex::new(HashMap::new()),
             banned: Mutex::new(HashSet::new()),
+            revocation: std::sync::RwLock::new(()),
         })
     }
 
@@ -172,10 +176,29 @@ impl Authority {
     /// needs no write, so it holds even when the disk is full. The admin socket's
     /// `key_revoke` does this first, then records the revocation in the log.
     pub fn ban(&self, principal: &PrincipalName) {
+        // Waits for writes already past their check, so once this returns no write by
+        // `principal` commits.
+        let _writes = self.revocation.write().expect("revocation lock");
         self.banned
             .lock()
             .expect("ban lock")
             .insert(principal.clone());
+    }
+
+    /// Run `write` for `principal` only if it is not revoked, checked again here, at
+    /// the end of a request that was authenticated at its start: a ban (or a recorded
+    /// revocation) either lands before this check and refuses the write, or waits for
+    /// the write to commit.
+    pub(crate) fn guarded<T, E: From<CoreError>>(
+        &self,
+        principal: &PrincipalName,
+        write: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, E> {
+        let _writes = self.revocation.read().expect("revocation lock");
+        if self.is_banned(principal) || self.store.revoked(principal)?.is_some() {
+            return Err(CoreError::Revoked(principal.to_string()).into());
+        }
+        write()
     }
 
     /// Whether this process has refused `principal` ([`Authority::ban`]).
@@ -283,6 +306,53 @@ impl Caller {
 mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
+
+    struct Nobody;
+
+    impl crate::Whois for Nobody {
+        fn whois(&self, _ip: IpAddr) -> crate::WhoisFuture<'_> {
+            Box::pin(async { Ok(None) })
+        }
+    }
+
+    /// A ban waits for a write already past its check, so once `ban` returns no write
+    /// by that principal is still to commit.
+    #[test]
+    fn a_ban_waits_for_a_write_past_its_check() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let a = Arc::new(Authority::open(dir.path(), Arc::new(Nobody)).unwrap());
+        let p = PrincipalName::new("a1").unwrap();
+        let (inside, reached) = mpsc::channel();
+        let (go, wait) = mpsc::channel::<()>();
+        let writer = {
+            let (a, p) = (a.clone(), p.clone());
+            std::thread::spawn(move || {
+                a.guarded(&p, || {
+                    inside.send(()).unwrap();
+                    wait.recv().unwrap();
+                    Ok::<_, CoreError>(())
+                })
+            })
+        };
+        reached.recv().unwrap();
+        let banner = {
+            let (a, p) = (a.clone(), p.clone());
+            std::thread::spawn(move || a.ban(&p))
+        };
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !a.is_banned(&p),
+            "the ban must wait for the write to commit"
+        );
+        go.send(()).unwrap();
+        writer.join().unwrap().unwrap();
+        banner.join().unwrap();
+        assert!(a.is_banned(&p));
+        // And a write after the ban is refused.
+        assert!(a.guarded(&p, || Ok::<_, CoreError>(())).is_err());
+    }
 
     #[test]
     fn mapped_v4_is_v4() {

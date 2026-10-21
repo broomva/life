@@ -36,8 +36,23 @@ fn a_blob_is_stored_under_its_git_id_with_a_derived_sha256() {
     assert_eq!(info.size, 6);
     assert_eq!(store.blob_info(oid).unwrap(), Some(info));
     assert_eq!(store.read_blob(oid).unwrap(), content);
-    // A second ingest reads nothing: an empty reader would otherwise fail the hash.
-    assert_eq!(store.ingest_blob(oid, 6, &b""[..]).unwrap(), info);
+    // A second ingest of the same bytes stores the same record.
+    assert_eq!(store.ingest_blob(oid, 6, &content[..]).unwrap(), info);
+}
+
+/// An ingest of a blob the store already holds takes the same path as a new one: it
+/// reads and verifies every byte, so wrong bytes fail it exactly as they would fail a
+/// new blob, and the blob stays as it was.
+#[test]
+fn a_held_blob_is_ingested_like_a_new_one() {
+    let (_d, store) = store();
+    let content = b"hello\n";
+    let oid = GitOid::for_blob(content);
+    store.ingest_blob(oid, 6, &content[..]).unwrap();
+    for (size, bytes) in [(6, &b""[..]), (6, &b"other!"[..]), (5, &b"hello"[..])] {
+        assert!(store.ingest_blob(oid, size, bytes).is_err(), "{bytes:?}");
+    }
+    assert_eq!(store.read_blob(oid).unwrap(), content);
 }
 
 #[test]

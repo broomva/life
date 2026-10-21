@@ -95,8 +95,6 @@ mutate src/http.rs '!a.store.fork(sibling)?.is_some_and(|f| c.sees_fork(&f))' 'f
 # Staging is cleared on open.
 mutate src/authority.rs '            std::fs::remove_dir_all(&staging)?;' '' --test api
 mutate src/http.rs 'if !a.blob_set(tree)?.contains(&oid) {' 'if false {' --test api
-# Blob upload: verified even when the store already holds the id.
-mutate src/http.rs 'if blob.oid() != oid {' 'if false {' --test api
 # Binding: tailnet ranges only, unless unsafe.
 mutate src/lib.rs 'if unsafe_bind || is_tailnet(addr.ip()) {' 'if true {' --lib
 mutate src/lib.rs 'o[0] == 100 && (o[1] & 0xc0) == 64' 'o[0] == 100' --lib
@@ -104,7 +102,7 @@ mutate src/lib.rs 's[0] == 0xfd7a && s[1] == 0x115c && s[2] == 0xa1e0' 's[0] == 
 # Owner acts: revocation goes to the log, a revoked name is not minted again, the
 # socket is private.
 mutate src/admin.rs '|p| a.store.revoke(p)' '|_| Ok(0)' --test api
-mutate src/admin.rs 'if a.store.revoked(&principal).map_err(|e| s(&e))?.is_some() {' 'if false {' --test api
+mutate src/admin.rs 'if a.is_banned(&principal) || a.store.revoked(&principal).map_err(|e| s(&e))?.is_some()' 'if a.is_banned(&principal)' --test api
 mutate src/admin.rs 'std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;' '' --test api
 mutate src/admin.rs 'if mode & 0o022 != 0 {' 'if false {' --test api
 # Identity: routes from either source mark a peer; a node outside the netmap is unnamed.
@@ -118,3 +116,23 @@ mutate src/identity.rs '    let Some(entry) = in_netmap else {
 
 # Revocation refuses in memory first, before any write.
 mutate src/authority.rs 'if self.is_banned(&key.principal) {' 'if false {' --test api
+mutate src/admin.rs '    a.ban(principal);
+    let offset' '    let offset' --lib
+# Every agent write checks revocation again right before it commits, serialized with
+# the ban.
+mutate src/authority.rs 'if self.is_banned(principal) || self.store.revoked(principal)?.is_some() {' 'if false {' --test api
+mutate src/authority.rs '        let _writes = self.revocation.read().expect("revocation lock");' '' --lib
+mutate src/http.rs 'let offset = a.guarded(&c.key.principal, || {
+            a.store.create_fork(&fork, &location, &c.holder)
+        })?;' 'let offset = a.store.create_fork(&fork, &location, &c.holder)?;' --test api
+mutate src/http.rs 'let p = a.guarded(&c.key.principal, || {
+            a.store.publish_draft(&name, &writer, &req.changeset)
+        })?;' 'let p = a.store.publish_draft(&name, &writer, &req.changeset)?;' --test api
+mutate src/http.rs 'let offset = a.guarded(&c.key.principal, || {
+            a.store.record_landing_intent(&name, &writer, id)
+        })?;' 'let offset = a.store.record_landing_intent(&name, &writer, id)?;' --test api
+mutate src/http.rs 'let info = a.guarded(&c.key.principal, || {
+            let info = a.store.ingest_blob(oid, size, content)?;' 'let info = a.guarded(&cuenca_core::PrincipalName::new("unrevoked").unwrap(), || {
+            let info = a.store.ingest_blob(oid, size, content)?;' --test api
+
+exit $survived

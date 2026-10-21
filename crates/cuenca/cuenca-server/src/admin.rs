@@ -185,7 +185,8 @@ fn handle(a: &Authority, req: AdminRequest) -> Result<Value, String> {
             node,
             grant,
         } => {
-            if a.store.revoked(&principal).map_err(|e| s(&e))?.is_some() {
+            if a.is_banned(&principal) || a.store.revoked(&principal).map_err(|e| s(&e))?.is_some()
+            {
                 return Err(format!(
                     "principal {principal} was revoked; a principal name is never reused"
                 ));

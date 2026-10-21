@@ -43,7 +43,7 @@ use axum::{Json, Router};
 use cuenca_core::{
     ChangesetId, CoreError, Event, Fork, ForkName, LocationName, MAX_BLOB_BYTES, Writer,
 };
-use cuenca_tree::{BlobHasher, Changeset, GitOid};
+use cuenca_tree::{Changeset, GitOid};
 use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -331,7 +331,9 @@ async fn create_fork(State(a): Shared, Extension(c): Me, body: axum::body::Bytes
     let location = parse(&req.location, LocationName::new)?;
     blocking(&a, move |a| {
         visible_location(a, &c, &location)?;
-        let offset = a.store.create_fork(&fork, &location, &c.holder)?;
+        let offset = a.guarded(&c.key.principal, || {
+            a.store.create_fork(&fork, &location, &c.holder)
+        })?;
         to_json(json!({ "offset": offset, "fork": a.store.fork(&fork)? }))
     })
     .await
@@ -417,7 +419,9 @@ async fn publish(
         let state = writable_fork(a, &c, &name)?;
         a.check_puts(&c, &state, &req.changeset)?;
         let writer = Writer::new(c.holder.clone(), req.epoch);
-        let p = a.store.publish_draft(&name, &writer, &req.changeset)?;
+        let p = a.guarded(&c.key.principal, || {
+            a.store.publish_draft(&name, &writer, &req.changeset)
+        })?;
         Ok(Json(json!({
             "id": p.id.to_hex(),
             "fork": p.fork,
@@ -448,20 +452,22 @@ async fn landing(
     blocking(&a, move |a| {
         writable_fork(a, &c, &name)?;
         let writer = Writer::new(c.holder.clone(), req.epoch);
-        let offset = a.store.record_landing_intent(&name, &writer, id)?;
+        let offset = a.guarded(&c.key.principal, || {
+            a.store.record_landing_intent(&name, &writer, id)
+        })?;
         Ok(Json(json!({ "offset": offset })))
     })
     .await
 }
 
-/// Upload a blob. The body is streamed to a staging file while it is hashed as git
-/// does; only bytes that are exactly `Content-Length` long and hash to `oid` are
-/// ingested (hyper delivers a length-delimited body of exactly that length, refuses a
-/// longer one, and drops a Content-Length sent with chunked encoding, which this
-/// handler then refuses as unsized). An upload of a blob the store already
-/// holds is verified the same way, so the answer never says whether the store had it,
-/// and either way the caller has now shown it holds the bytes
-/// ([`Authority::check_puts`]).
+/// Upload a blob. The body is streamed to a staging file, which the store ingests: it
+/// hashes the bytes as git does and keeps them only if they are exactly
+/// `Content-Length` long and hash to `oid` (hyper delivers a length-delimited body of
+/// exactly that length, refuses a longer one, and drops a Content-Length sent with
+/// chunked encoding, which this handler then refuses as unsized). The store ingests a
+/// blob it already holds the same way as a new one, so neither the answer nor its
+/// timing says whether it had it; either way the caller has now shown it holds the
+/// bytes ([`Authority::check_puts`]).
 async fn upload_blob(
     State(a): Shared,
     Extension(c): Me,
@@ -489,28 +495,21 @@ async fn upload_blob(
     }
     let staged = tempfile::NamedTempFile::new_in(&a.staging).map_err(ApiError::internal)?;
     let mut file = tokio::fs::File::from_std(staged.reopen().map_err(ApiError::internal)?);
-    let mut hasher = BlobHasher::new(size);
     let mut stream = body.into_data_stream();
     while let Some(chunk) = stream.next().await {
         let chunk =
             chunk.map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, "bad_body", e.to_string()))?;
-        hasher.update(&chunk);
         file.write_all(&chunk).await.map_err(ApiError::internal)?;
     }
     file.flush().await.map_err(ApiError::internal)?;
     drop(file);
-    let blob = hasher.finish().map_err(CoreError::Hash)?;
-    if blob.oid() != oid {
-        return Err(CoreError::OidMismatch {
-            claimed: oid,
-            actual: blob.oid(),
-        }
-        .into());
-    }
     blocking(&a, move |a| {
         let content = staged.reopen().map_err(ApiError::internal)?;
-        let info = a.store.ingest_blob(oid, size, content)?;
-        a.possesses(&c.key.principal, oid);
+        let info = a.guarded(&c.key.principal, || {
+            let info = a.store.ingest_blob(oid, size, content)?;
+            a.possesses(&c.key.principal, oid);
+            Ok::<_, CoreError>(info)
+        })?;
         Ok(Json(json!({
             "oid": oid.to_hex(),
             "size": info.size,

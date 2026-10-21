@@ -120,12 +120,13 @@ impl Store {
     /// Ingest a blob that claims to be `claimed`, streaming `size` bytes from
     /// `content`. The bytes are hashed as git does (with SHA-1 collision detection);
     /// unless they are exactly `size` bytes hashing to `claimed`, nothing is stored.
-    /// The SHA-256 is derived from the same verified bytes. Ingesting a blob the store
-    /// already holds reads nothing and returns its record. Blobs are never removed.
+    /// The SHA-256 is derived from the same verified bytes. A blob the store already
+    /// holds is ingested the same way, every byte read, verified, written and synced
+    /// again: an ingest takes as long, and fails the same way, whether or not the store
+    /// had the blob, so its outcome and timing do not say which (an authority that
+    /// serves ingests to principals must not tell one what another stored). Blobs are
+    /// never removed.
     pub fn ingest_blob(&self, claimed: GitOid, size: u64, content: impl Read) -> Result<BlobInfo> {
-        if let Some(info) = self.blob_info(claimed)? {
-            return Ok(info);
-        }
         let blob = self.blobs.write(claimed, size, content)?;
         let txn = self.begin()?;
         txn.open_table(BLOBS)?

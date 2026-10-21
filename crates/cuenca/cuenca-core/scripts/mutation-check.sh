@@ -39,7 +39,14 @@ PY
   restore
 }
 
-# Blob ingest: only bytes that hash to the claim, of exactly the announced size.
+# Blob ingest: only bytes that hash to the claim, of exactly the announced size, and
+# the same path whether or not the store holds the blob.
+mutate src/store.rs '    pub fn ingest_blob(&self, claimed: GitOid, size: u64, content: impl Read) -> Result<BlobInfo> {
+        let blob' '    pub fn ingest_blob(&self, claimed: GitOid, size: u64, content: impl Read) -> Result<BlobInfo> {
+        if let Some(info) = self.blob_info(claimed)? {
+            return Ok(info);
+        }
+        let blob' --test store
 mutate src/blobs.rs 'if blob.oid() != claimed {' 'if false {' --test store
 mutate src/blobs.rs 'content.take(size + 1)' 'content.take(size)' --test store
 mutate src/blobs.rs 'if size > MAX_BLOB_BYTES {' 'if false {' --test store

@@ -812,3 +812,141 @@ fn a_ban_refuses_at_once_without_a_write() {
             .is_none()
     );
 }
+
+/// Send a request's head and the first part of its body, and return the socket; the
+/// rest of the body is sent by [`finish`].
+fn begin(s: &Server, head: String, first: &[u8]) -> std::net::TcpStream {
+    use std::io::Write;
+    let addr = s.url.trim_start_matches("http://");
+    let mut tcp = std::net::TcpStream::connect(addr).unwrap();
+    tcp.write_all(head.as_bytes()).unwrap();
+    tcp.write_all(first).unwrap();
+    tcp.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
+    // Let the server authenticate the request and start reading its body.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    tcp
+}
+
+/// Send the rest of the body and return the status line.
+fn finish(mut tcp: std::net::TcpStream, rest: &[u8]) -> String {
+    use std::io::{Read, Write};
+    tcp.write_all(rest).unwrap();
+    let mut answer = [0u8; 12];
+    let n = tcp.read(&mut answer).unwrap_or(0);
+    String::from_utf8_lossy(&answer[..n]).to_string()
+}
+
+/// A request authenticated before its principal was revoked writes nothing after the
+/// revocation: every agent write checks again, right before it commits. With the
+/// admin's `key_revoke` (log and memory) for an upload, as reported, and with the
+/// in-memory ban alone (the log could not record it) for every write route.
+#[test]
+fn a_write_in_flight_when_its_principal_is_revoked_writes_nothing() {
+    let c = Cast::new();
+    let s = &c.s;
+    s.whois.node(NA);
+    let head = s.fork_head(&c.a1, "f1");
+    let cs = s.write(&c.a1, &head, &[("README", b"two\n")]);
+    let id = cuenca_core::ChangesetId::of(&cs).to_hex();
+    let a1 = &c.a1;
+    let json_head = |path: &str, len: usize| {
+        format!(
+            "POST {path} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {a1}\r\n\
+             Content-Type: application/json\r\nContent-Length: {len}\r\n\r\n"
+        )
+    };
+    let upload_head = |oid: cuenca_tree::GitOid, len: usize| {
+        format!(
+            "PUT /v1/blobs/{} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {a1}\r\n\
+             Content-Length: {len}\r\n\r\n",
+            oid.to_hex()
+        )
+    };
+    let publish = serde_json::to_vec(&json!({ "epoch": 1, "changeset": cs })).unwrap();
+    let fork = serde_json::to_vec(&json!({ "fork": "late", "location": "l1" })).unwrap();
+    let landing = serde_json::to_vec(&json!({ "epoch": 1, "changeset": id })).unwrap();
+    let late = b"written after the ban";
+    let late_oid = cuenca_tree::GitOid::for_blob(late);
+    let started = [
+        begin(
+            s,
+            json_head("/v1/forks/f1/drafts", publish.len()),
+            &publish[..1],
+        ),
+        begin(s, json_head("/v1/forks", fork.len()), &fork[..1]),
+        begin(
+            s,
+            json_head("/v1/forks/f1/landing", landing.len()),
+            &landing[..1],
+        ),
+        begin(s, upload_head(late_oid, late.len()), &late[..1]),
+    ];
+    let len = s.authority.store().len().unwrap();
+    s.authority.ban(&"a1".parse_name());
+    let rests: [&[u8]; 4] = [&publish[1..], &fork[1..], &landing[1..], &late[1..]];
+    for (tcp, rest) in started.into_iter().zip(rests) {
+        let status = finish(tcp, rest);
+        assert!(status.contains("401"), "{status}");
+    }
+    assert_eq!(s.authority.store().len().unwrap(), len, "nothing appended");
+    assert!(s.authority.store().blob_info(late_oid).unwrap().is_none());
+
+    // The reported case: an upload held open across the admin's key_revoke.
+    s.whois.node(NB);
+    let content = b"abc";
+    let oid = cuenca_tree::GitOid::for_blob(content);
+    let a2 = &c.a2;
+    let tcp = begin(
+        s,
+        format!(
+            "PUT /v1/blobs/{} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {a2}\r\n\
+             Content-Length: 3\r\n\r\n",
+            oid.to_hex()
+        ),
+        b"",
+    );
+    let v = s.admin(AdminRequest::KeyRevoke {
+        principal: "a2".parse_name(),
+    });
+    assert_eq!(v["ok"], true, "{v}");
+    assert!(finish(tcp, content).contains("401"));
+    assert!(s.authority.store().blob_info(oid).unwrap().is_none());
+}
+
+/// A revocation the log recorded outlives the authority: after a restart the key is
+/// still refused and its name is still not minted again, with no ban in memory.
+#[test]
+fn a_recorded_revocation_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Server::start_in(dir.path());
+    s.add_location("l1");
+    let a1 = s.mint("a1", Agent, NA, grant(&["l1"], &[]));
+    let v = s.admin(AdminRequest::KeyRevoke {
+        principal: "a1".parse_name(),
+    });
+    assert_eq!(v["ok"], true, "{v}");
+    s.stop();
+    let s = restart(dir.path());
+    s.whois.node(NA);
+    assert!(!s.authority.is_banned(&"a1".parse_name()));
+    assert_eq!(s.get(&a1, "/v1/whoami").status(), 401);
+    let v = s.admin(AdminRequest::KeyMint {
+        principal: "a1".parse_name(),
+        kind: Agent,
+        node: NodeId::new(NA).unwrap(),
+        grant: grant(&["l1"], &[]),
+    });
+    assert_eq!(v["ok"], false, "{v}");
+}
+
+/// Start again on `dir` once the previous authority has let go of its store.
+fn restart(dir: &std::path::Path) -> Server {
+    for _ in 0..100 {
+        if let Ok(s) = std::panic::catch_unwind(|| Server::start_in(dir)) {
+            return s;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("the store was not released");
+}

@@ -19,17 +19,21 @@
 //!
 //! # What it does not defend
 //!
-//! Availability against a principal that holds a key. An agent with a key can use up
-//! disk (uploads, drafts that store wide trees), memory (downloads it does not read)
-//! or connections until the owner revokes it; dividing the authority's resources among
-//! principals is BRO-3312. What holds regardless is revocation: `key_revoke` refuses
-//! the principal in memory before it writes anything, so it takes effect at once even
-//! on a full disk ([`admin`]).
+//! Availability. Anyone who can reach the tailnet address can hold connections open
+//! (incomplete requests are not timed out), and a principal with a key can use up
+//! disk (uploads, drafts that store wide trees) or memory (downloads it does not read)
+//! until the owner revokes it; a request already in flight when its principal is
+//! revoked keeps its connection until it ends, though it writes nothing more. Bounding
+//! and dividing the authority's resources is BRO-3312. What holds regardless is
+//! revocation: `key_revoke` refuses the principal in memory before it writes anything,
+//! so it takes effect at once even on a full disk ([`admin`]), and every agent write
+//! checks for it again, serialized with it, right before it commits.
 //!
-//! Crash safety is the store's: each write is one durable redb transaction, and every
-//! write the API offers is idempotent by its content (a draft by its changeset id, an
-//! intent by its changeset), so a client that lost an answer to a crash sends the same
-//! request again.
+//! Crash safety is the store's: each write is one durable redb transaction. A draft is
+//! idempotent by its changeset id, an intent by its changeset and an upload by its
+//! blob, so a client that lost an answer to a crash sends the same request again; a
+//! fork created before the crash answers its retry with 409, and the client reads the
+//! fork to see it holds it.
 
 pub mod admin;
 mod authority;
