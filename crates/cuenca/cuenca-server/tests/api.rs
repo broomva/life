@@ -123,6 +123,11 @@ fn fifty_publishes_by_non_holders_are_all_refused() {
     s.whois.node(NA);
     let head = s.fork_head(&c.a1, "f1");
     let cs = s.write(&c.a1, &head, &[("README", b"two\n")]);
+    // Every writer has the bytes, so the refusal is about holding the fork.
+    s.whois.node(NB);
+    s.put_blob(&c.a2, b"two\n");
+    s.whois.node(ND);
+    s.put_blob(&c.d1, b"two\n");
     let len = s.authority.store().len().unwrap();
     for i in 0..50u64 {
         let epoch = 1 + i % 3;
@@ -278,11 +283,30 @@ fn after_a_takeover_the_old_holder_publishes_to_a_sibling() {
     assert_eq!(r["fenced"], true, "{r}");
     let sibling = r["fork"].as_str().unwrap();
     assert!(sibling.starts_with("f1-from-"), "{sibling}");
-    assert!(c.names(&c.a1, "/v1/forks").contains(&sibling.to_string()));
+    // The former holder reads its sibling, and no longer reads the fork itself.
+    assert_eq!(c.names(&c.a1, "/v1/forks"), [sibling.to_string()]);
+    assert_eq!(s.get(&c.a1, "/v1/forks/f1").status(), 404);
+    assert_eq!(s.get(&c.a1, "/v1/forks/f1/tree").status(), 404);
     let tree = s.fork_head(&c.a1, sibling);
     assert!(tree.get("offline").is_some());
-    // The new holder writes f1 under epoch 2.
+    // The new holder writes f1 under epoch 2. It may move a file a1 wrote, which it
+    // never uploaded: the blob is in the fork's head, which it reads.
     s.whois.node(ND);
+    let readme = head.get("README").unwrap().oid();
+    let moved = cuenca_tree::Changeset::new(
+        &head,
+        vec![
+            cuenca_tree::Op::delete(cuenca_tree::RepoPath::new("README").unwrap()),
+            cuenca_tree::Op::put(
+                cuenca_tree::RepoPath::new("README.md").unwrap(),
+                cuenca_tree::Entry::File(readme),
+            ),
+        ],
+    )
+    .unwrap();
+    let r = s.publish(&c.d1, "f1", 2, &moved);
+    assert_eq!(r.status(), 200, "{}", r.text().unwrap());
+    let head = s.fork_head(&c.d1, "f1");
     let cs = s.write(&c.d1, &head, &[("README", b"device\n")]);
     assert_eq!(s.publish(&c.d1, "f1", 2, &cs).status(), 200);
 }
@@ -478,6 +502,7 @@ fn the_authority_refuses_a_non_tailnet_bind() {
             admin_socket: dir.path().join("admin.sock"),
             unsafe_bind: false,
             tailscale: "tailscale".into(),
+            min_free: cuenca_server::DEFAULT_MIN_FREE,
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
         let err = rt.block_on(cuenca_server::run(config)).unwrap_err();
@@ -487,4 +512,253 @@ fn the_authority_refuses_a_non_tailnet_bind() {
         !dir.path().join("state").exists(),
         "refused before touching state"
     );
+}
+
+/// A draft may not name a blob the caller can neither read nor has uploaded: the store
+/// holds it, but naming it would let the caller read it back through its own fork. The
+/// refusal is the one an absent blob gets.
+#[test]
+fn a_draft_cannot_launder_a_blob_the_caller_cannot_read() {
+    let c = Cast::new();
+    let s = &c.s;
+    s.whois.node(NA);
+    let head = s.fork_head(&c.a1, "f1");
+    let secret = s.write(&c.a1, &head, &[("secret.txt", b"TOP SECRET of a1\n")]);
+    assert_eq!(s.publish(&c.a1, "f1", 1, &secret).status(), 200);
+    let held = s.fork_head(&c.a1, "f1").get("secret.txt").unwrap().oid();
+    let absent = cuenca_tree::GitOid::for_blob(b"nobody has this");
+    s.whois.node(NB);
+    let r = s.post(&c.a2, "/v1/forks", json!({ "fork": "g", "location": "l1" }));
+    assert_eq!(r.status(), 200);
+    let put = |oid| {
+        cuenca_tree::Changeset::new(
+            &s.fork_head(&c.a2, "g"),
+            vec![cuenca_tree::Op::put(
+                cuenca_tree::RepoPath::new("x").unwrap(),
+                cuenca_tree::Entry::File(oid),
+            )],
+        )
+        .unwrap()
+    };
+    let answers: Vec<(u16, Value)> = [held, absent]
+        .into_iter()
+        .map(|oid| {
+            let r = s.publish(&c.a2, "g", 1, &put(oid));
+            (r.status().as_u16(), r.json().unwrap())
+        })
+        .collect();
+    for (status, body) in &answers {
+        assert_eq!(*status, 422, "{body}");
+        assert_eq!(body["error"], "missing_blob");
+    }
+    let r = s.get(&c.a2, &format!("/v1/forks/g/blobs/{}", held.to_hex()));
+    assert_eq!(r.status(), 404);
+    // Sending the bytes proves a2 has them, and then it may name them.
+    s.put_blob(&c.a2, b"TOP SECRET of a1\n");
+    assert_eq!(s.publish(&c.a2, "g", 1, &put(held)).status(), 200);
+    // A blob already in the fork's own trees needs no upload: a1 drafts on top of its head.
+    s.whois.node(NA);
+    let head = s.fork_head(&c.a1, "f1");
+    let renamed = cuenca_tree::Changeset::new(
+        &head,
+        vec![
+            cuenca_tree::Op::delete(cuenca_tree::RepoPath::new("secret.txt").unwrap()),
+            cuenca_tree::Op::put(
+                cuenca_tree::RepoPath::new("moved.txt").unwrap(),
+                cuenca_tree::Entry::File(held),
+            ),
+        ],
+    )
+    .unwrap();
+    assert_eq!(s.publish(&c.a1, "f1", 1, &renamed).status(), 200);
+}
+
+/// Uploads are remembered per principal, and revocation forgets them; a new authority
+/// remembers nothing, so a client re-sends the bytes after a restart.
+#[test]
+fn possession_is_per_principal() {
+    let c = Cast::new();
+    let s = &c.s;
+    s.whois.node(NB);
+    let r = s.post(&c.a2, "/v1/forks", json!({ "fork": "g", "location": "l1" }));
+    assert_eq!(r.status(), 200);
+    s.whois.node(NA);
+    let oid = s.put_blob(&c.a1, b"a1 sent this\n");
+    s.whois.node(NB);
+    let cs = cuenca_tree::Changeset::new(
+        &Tree::new(),
+        vec![cuenca_tree::Op::put(
+            cuenca_tree::RepoPath::new("y").unwrap(),
+            cuenca_tree::Entry::File(oid),
+        )],
+    )
+    .unwrap();
+    assert_eq!(s.publish(&c.a2, "g", 1, &cs).status(), 422);
+}
+
+/// Spec section 2a: an agent reads the forks its grant names. A draft fenced into a
+/// sibling is the sibling's content, so a reader of the fork who does not read the
+/// sibling does not see it in the fork's history.
+#[test]
+fn history_hides_drafts_fenced_into_a_sibling_the_reader_cannot_read() {
+    let c = Cast::new();
+    let s = &c.s;
+    s.whois.node(NA);
+    let head = s.fork_head(&c.a1, "f1");
+    let v = s.admin(AdminRequest::TakeOver {
+        fork: ForkName::new("f1").unwrap(),
+        expected_epoch: 1,
+        principal: "d1".parse_name(),
+        node: NodeId::new(ND).unwrap(),
+    });
+    assert_eq!(v["epoch"], 2, "{v}");
+    let cs = s.write(&c.a1, &head, &[("a-private.txt", b"stale writer's\n")]);
+    let r: Value = s.publish(&c.a1, "f1", 1, &cs).json().unwrap();
+    let sibling = r["fork"].as_str().unwrap().to_string();
+    let events = |token: &str, fork: &str| -> Vec<String> {
+        let v: Value = s
+            .get(token, &format!("/v1/forks/{fork}/history"))
+            .json()
+            .unwrap();
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["event"]["event"].as_str().unwrap().to_string())
+            .collect()
+    };
+    // a2 reads f1 by grant, not the sibling.
+    s.whois.node(NB);
+    assert_eq!(s.get(&c.a2, &format!("/v1/forks/{sibling}")).status(), 404);
+    let seen = events(&c.a2, "f1");
+    assert!(!seen.contains(&"draft_fenced".to_string()), "{seen:?}");
+    assert!(seen.contains(&"taken_over".to_string()), "{seen:?}");
+    let raw = s.get(&c.a2, "/v1/forks/f1/history").text().unwrap();
+    assert!(!raw.contains("a-private.txt"), "{raw}");
+    // The owner device reads both, and sees it.
+    s.whois.node(ND);
+    assert!(events(&c.d1, "f1").contains(&"draft_fenced".to_string()));
+    // So does the stale writer, through its sibling.
+    s.whois.node(NA);
+    assert!(events(&c.a1, &sibling).contains(&"draft_fenced".to_string()));
+}
+
+/// No request body is read before the caller is authenticated.
+#[test]
+fn bodies_are_not_read_before_authentication() {
+    let c = Cast::new();
+    let s = &c.s;
+    s.whois.node(NA);
+    for path in ["/v1/forks", "/v1/forks/f1/drafts", "/v1/forks/f1/landing"] {
+        for token in ["", "garbage"] {
+            let mut req = s
+                .client
+                .post(format!("{}{path}", s.url))
+                .header("content-type", "application/json")
+                .body("{ not json");
+            if !token.is_empty() {
+                req = req.bearer_auth(token);
+            }
+            assert_eq!(req.send().unwrap().status(), 401, "{path} {token:?}");
+        }
+    }
+    let r = s
+        .client
+        .put(format!("{}/v1/blobs/{}", s.url, "0".repeat(40)))
+        .body(vec![0u8; 1024])
+        .send()
+        .unwrap();
+    assert_eq!(r.status(), 401);
+}
+
+/// A chunked upload longer than the Content-Length it states is refused, and what was
+/// staged is gone.
+#[test]
+fn an_upload_longer_than_it_says_is_refused() {
+    use std::io::{Read, Write};
+    let c = Cast::new();
+    let s = &c.s;
+    s.whois.node(NA);
+    let oid = cuenca_tree::GitOid::for_blob(b"abc");
+    let addr = s.url.trim_start_matches("http://");
+    let mut tcp = std::net::TcpStream::connect(addr).unwrap();
+    let chunk = vec![b'z'; 4096];
+    let mut req = format!(
+        "PUT /v1/blobs/{} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {}\r\n\
+         Content-Length: 3\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+        oid.to_hex(),
+        c.a1
+    )
+    .into_bytes();
+    for _ in 0..4 {
+        req.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+        req.extend_from_slice(&chunk);
+        req.extend_from_slice(b"\r\n");
+    }
+    req.extend_from_slice(b"0\r\n\r\n");
+    tcp.write_all(&req).unwrap();
+    let mut answer = String::new();
+    let _ = tcp.read_to_string(&mut answer);
+    let status = answer.split(' ').nth(1).unwrap_or("");
+    // hyper drops a Content-Length sent with Transfer-Encoding (RFC 9112 6.3), so this
+    // is refused as unsized; a length-checked body never runs past what it said.
+    assert!(["400", "411", "422"].contains(&status), "{answer}");
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let staging = s.authority.staging_dir();
+    assert_eq!(std::fs::read_dir(staging).unwrap().count(), 0);
+}
+
+#[test]
+fn staging_left_by_a_crash_is_cleared_on_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    std::fs::create_dir_all(state.join("staging")).unwrap();
+    std::fs::write(state.join("staging/.tmpXYZ"), b"half an upload").unwrap();
+    let whois: std::sync::Arc<dyn cuenca_server::Whois> = std::sync::Arc::new(Never);
+    let a = cuenca_server::Authority::open(&state, whois).unwrap();
+    assert_eq!(std::fs::read_dir(a.staging_dir()).unwrap().count(), 0);
+}
+
+struct Never;
+
+impl cuenca_server::Whois for Never {
+    fn whois(&self, _ip: std::net::IpAddr) -> cuenca_server::WhoisFuture<'_> {
+        Box::pin(async { Ok(None) })
+    }
+}
+
+#[test]
+fn the_admin_socket_refuses_a_directory_others_can_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let open = dir.path().join("open");
+    std::fs::create_dir(&open).unwrap();
+    std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let err = cuenca_server::admin::bind(&open.join("admin.sock")).unwrap_err();
+    assert!(err.to_string().contains("owner only"), "{err}");
+    std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(cuenca_server::admin::bind(&open.join("admin.sock")).is_ok());
+}
+
+/// Uploads leave the free-space reserve: past it they are refused, and the log keeps
+/// room for its own writes.
+#[test]
+fn uploads_keep_the_free_space_reserve() {
+    let c = Cast::new();
+    let s = &c.s;
+    s.whois.node(NA);
+    s.authority.set_min_free(u64::MAX / 2);
+    let content = b"no room for me\n";
+    let oid = cuenca_tree::GitOid::for_blob(content);
+    let r = s
+        .client
+        .put(format!("{}/v1/blobs/{}", s.url, oid.to_hex()))
+        .bearer_auth(&c.a1)
+        .body(content.to_vec())
+        .send()
+        .unwrap();
+    assert_eq!(r.status(), 507);
+    assert!(s.authority.store().blob_info(oid).unwrap().is_none());
+    s.authority.set_min_free(0);
+    assert_eq!(s.put_blob(&c.a1, content), oid);
 }

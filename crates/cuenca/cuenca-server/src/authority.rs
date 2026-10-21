@@ -3,10 +3,11 @@
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use cuenca_core::{Fork, Holder, Location, Store};
-use cuenca_tree::GitOid;
+use cuenca_core::{CoreError, Fork, Holder, Location, PrincipalName, Store};
+use cuenca_tree::{Changeset, GitOid, Op};
 
 use crate::identity::Whois;
 use crate::keys::{KeyRecord, KeyRing, PrincipalKind};
@@ -23,6 +24,10 @@ pub struct Authority {
     /// Where blob uploads are staged before they are verified.
     pub(crate) staging: PathBuf,
     blob_sets: Mutex<HashMap<GitOid, Arc<HashSet<GitOid>>>>,
+    /// Free bytes an upload must leave on the state's filesystem.
+    min_free: AtomicU64,
+    /// Blobs each principal has sent the bytes of (see [`Authority::check_puts`]).
+    possessed: Mutex<HashMap<PrincipalName, HashSet<GitOid>>>,
 }
 
 /// An authenticated request's principal, on the node Tailscale named.
@@ -65,7 +70,11 @@ impl Authority {
         std::fs::create_dir_all(dir)?;
         let store = Store::open(dir.join("store")).map_err(std::io::Error::other)?;
         let keys = KeyRing::open(dir.join("keys.json"))?;
+        // Uploads a crash interrupted are never resumed.
         let staging = dir.join("staging");
+        if staging.exists() {
+            std::fs::remove_dir_all(&staging)?;
+        }
         std::fs::create_dir_all(&staging)?;
         Ok(Self {
             store,
@@ -73,6 +82,8 @@ impl Authority {
             whois,
             staging,
             blob_sets: Mutex::new(HashMap::new()),
+            possessed: Mutex::new(HashMap::new()),
+            min_free: AtomicU64::new(DEFAULT_MIN_FREE),
         })
     }
 
@@ -82,6 +93,11 @@ impl Authority {
 
     pub fn keys(&self) -> &KeyRing {
         &self.keys
+    }
+
+    /// Where uploads are staged before they are verified.
+    pub fn staging_dir(&self) -> &Path {
+        &self.staging
     }
 
     /// Who `token`, arriving from `source`, is: the key must verify, its principal must
@@ -144,6 +160,70 @@ impl Authority {
     }
 }
 
+/// Free space uploads leave on the state's filesystem by default: the log's own writes
+/// need room, and no principal's uploads may take it.
+pub const DEFAULT_MIN_FREE: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Most blobs remembered per principal; past it the record starts over, and the client
+/// sends the bytes again when a draft is refused for a missing blob.
+const MAX_POSSESSED: usize = 1 << 20;
+
+impl Authority {
+    /// Set the free space an upload must leave ([`DEFAULT_MIN_FREE`]).
+    pub fn set_min_free(&self, bytes: u64) {
+        self.min_free.store(bytes, Ordering::Relaxed);
+    }
+
+    /// Whether an upload of `size` bytes leaves the reserve free on the state's
+    /// filesystem. Uploads are not counted per principal; this keeps one principal's
+    /// uploads from stopping the log (and every other principal's publishes).
+    pub(crate) fn has_room_for(&self, size: u64) -> std::io::Result<bool> {
+        let fs = rustix::fs::statvfs(&self.staging)?;
+        let free = fs.f_bavail.saturating_mul(fs.f_frsize);
+        Ok(free.saturating_sub(size) >= self.min_free.load(Ordering::Relaxed) && free >= size)
+    }
+
+    /// Remember that `principal` sent the bytes of `oid`, verified.
+    pub(crate) fn possesses(&self, principal: &PrincipalName, oid: GitOid) {
+        let mut all = self.possessed.lock().expect("possession lock");
+        let set = all.entry(principal.clone()).or_default();
+        if set.len() >= MAX_POSSESSED {
+            set.clear();
+        }
+        set.insert(oid);
+    }
+
+    /// Whether `caller` may name each blob `changeset` puts, in a draft of `fork`.
+    ///
+    /// The store accepts any blob it holds, whoever sent it, and a blob in the
+    /// caller's own fork can then be read back. So a put must name a blob the caller
+    /// can already read through the fork, one in the fork's head (the tree the API
+    /// serves), or one whose bytes this principal uploaded to this authority since it
+    /// started. Anything else is refused as `MissingBlob`, the same answer an absent
+    /// blob gets, so the refusal does not say whether the store holds it. After a
+    /// restart, or for content it dropped from the head, a client sends the bytes again.
+    pub(crate) fn check_puts(
+        &self,
+        caller: &Caller,
+        fork: &Fork,
+        changeset: &Changeset,
+    ) -> cuenca_core::Result<()> {
+        let head = self.blob_set(fork.head)?;
+        let possessed = self.possessed.lock().expect("possession lock");
+        let own = possessed.get(&caller.key.principal);
+        for op in &changeset.ops {
+            if let Op::Put { entry, .. } = op {
+                let oid = entry.oid();
+                let known = head.contains(&oid) || own.is_some_and(|set| set.contains(&oid));
+                if !known {
+                    return Err(CoreError::MissingBlob(oid));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// An IPv4 address that arrived as IPv4-mapped IPv6 is the IPv4 address.
 fn canonical(ip: IpAddr) -> IpAddr {
     match ip {
@@ -164,10 +244,22 @@ impl Caller {
     }
 
     /// A fork: an owner device reads every one; an agent, the forks its grant names and
-    /// the forks its principal holds or held (on any node), and no other.
+    /// the fork its principal holds now (on any node), and no other. A former holder
+    /// stops reading a fork when it is taken over; it keeps the sibling its stale
+    /// drafts go to, which it holds.
     pub fn sees_fork(&self, fork: &Fork) -> bool {
         self.owner_device()
             || self.key.grant.forks.contains(&fork.name)
+            || fork
+                .holder()
+                .is_some_and(|h| h.principal == self.key.principal)
+    }
+
+    /// Whether a write to `fork` reaches the core's rules, which decide it: true for
+    /// whoever reads the fork, and for a former holder, whose stale draft the rules
+    /// keep in a sibling. Anyone else is answered as if the fork did not exist.
+    pub fn reaches_fork(&self, fork: &Fork) -> bool {
+        self.sees_fork(fork)
             || fork
                 .holders
                 .iter()

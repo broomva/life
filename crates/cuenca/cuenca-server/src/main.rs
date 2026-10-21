@@ -25,6 +25,9 @@ struct Args {
     /// The tailscale binary.
     #[arg(long, default_value = "tailscale")]
     tailscale: PathBuf,
+    /// Free bytes blob uploads must leave on the state's filesystem.
+    #[arg(long, default_value_t = cuenca_server::DEFAULT_MIN_FREE)]
+    min_free: u64,
 }
 
 #[tokio::main]
@@ -41,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
         admin_socket: a.admin_socket,
         unsafe_bind: a.unsafe_bind,
         tailscale: a.tailscale,
+        min_free: a.min_free,
     })
     .await
 }

@@ -1,10 +1,15 @@
 //! The agent-facing HTTP API (spec section 0: the agent verbs, never an owner verb).
 //!
-//! Every route authenticates the request first ([`Authority::authenticate`]). Reads are
-//! scoped ([`Caller::sees_fork`], [`Caller::sees_location`]); what a caller may not
-//! read answers 404, the same as what does not exist. Writes go to cuenca-core as
-//! the caller's [`Writer`] (its principal, on the node Tailscale named, under the epoch
-//! it states), and the core's rules decide whether that writer holds the fork.
+//! A middleware authenticates every request ([`Authority::authenticate`]) before any
+//! handler runs, so no request body is read for a caller who is not authenticated.
+//! Reads are scoped ([`Caller::sees_fork`], [`Caller::sees_location`]): what a caller
+//! may not read answers 404, the same as what does not exist. Fork and location names
+//! are global, so creating a fork under a name taken by a fork the caller cannot read
+//! answers 409; that says the name is taken, nothing about the fork. Writes go to
+//! cuenca-core as the caller's [`Writer`] (its principal, on the node Tailscale named,
+//! under the epoch it states), and the core's rules decide whether that writer holds
+//! the fork. A draft may only name blobs the caller could read or has uploaded
+//! ([`Authority::check_puts`]).
 //!
 //! Minting and revoking keys, registering a location and taking a fork over have no
 //! route here: they are owner acts, on the admin socket only.
@@ -20,7 +25,7 @@
 //! | GET | `/v1/forks/{fork}` | the fork's record |
 //! | GET | `/v1/forks/{fork}/tree` | the fork's head tree |
 //! | GET | `/v1/forks/{fork}/blobs/{oid}` | a blob of that tree |
-//! | GET | `/v1/forks/{fork}/history` | the log records naming the fork |
+//! | GET | `/v1/forks/{fork}/history` | the log records naming the fork (and only forks the caller reads) |
 //! | POST | `/v1/forks/{fork}/drafts` | `{epoch, changeset}`: publish a draft |
 //! | POST | `/v1/forks/{fork}/landing` | `{epoch, changeset}` (an id): ask to land |
 //! | PUT | `/v1/blobs/{oid}` | upload a blob; `Content-Length` is its size |
@@ -29,12 +34,15 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Path, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use cuenca_core::{ChangesetId, CoreError, ForkName, LocationName, MAX_BLOB_BYTES, Writer};
+use cuenca_core::{
+    ChangesetId, CoreError, Event, Fork, ForkName, LocationName, MAX_BLOB_BYTES, Writer,
+};
 use cuenca_tree::{BlobHasher, Changeset, GitOid};
 use futures_util::StreamExt;
 use serde::Deserialize;
@@ -47,7 +55,7 @@ use crate::authority::{AuthError, Authority, Caller};
 const MAX_JSON_BYTES: usize = 64 * 1024 * 1024;
 
 type Shared = State<Arc<Authority>>;
-type Source = ConnectInfo<SocketAddr>;
+type Me = Extension<Caller>;
 
 pub fn router(authority: Arc<Authority>) -> Router {
     Router::new()
@@ -67,7 +75,28 @@ pub fn router(authority: Arc<Authority>) -> Router {
             put(upload_blob).layer(DefaultBodyLimit::max(MAX_BLOB_BYTES as usize)),
         )
         .layer(DefaultBodyLimit::max(MAX_JSON_BYTES))
+        .route_layer(middleware::from_fn_with_state(
+            authority.clone(),
+            authenticate,
+        ))
         .with_state(authority)
+}
+
+/// Authenticate the request and hand its [`Caller`] to the handler; anything else is
+/// answered 401 before the handler, and its body, are reached.
+async fn authenticate(
+    State(a): Shared,
+    ConnectInfo(source): ConnectInfo<SocketAddr>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    match a.authenticate(bearer(request.headers()), source).await {
+        Ok(caller) => {
+            request.extensions_mut().insert(caller);
+            next.run(request).await
+        }
+        Err(e) => ApiError::from(e).into_response(),
+    }
 }
 
 /// An error answer: a status and `{"error": code, "message": ..}`, plus fields some
@@ -172,10 +201,6 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
         .strip_prefix("Bearer ")
 }
 
-async fn auth(a: &Authority, headers: &HeaderMap, source: SocketAddr) -> ApiResult<Caller> {
-    Ok(a.authenticate(bearer(headers), source).await?)
-}
-
 /// Run `f` on the blocking pool: the store's calls are synchronous.
 async fn blocking<T: Send + 'static>(
     a: &Arc<Authority>,
@@ -201,9 +226,18 @@ fn to_json(v: impl serde::Serialize) -> ApiResult {
 }
 
 /// The fork named `name`, if the caller reads it; otherwise 404.
-fn visible_fork(a: &Authority, caller: &Caller, name: &ForkName) -> ApiResult<cuenca_core::Fork> {
+fn visible_fork(a: &Authority, caller: &Caller, name: &ForkName) -> ApiResult<Fork> {
     match a.store.fork(name)? {
         Some(f) if caller.sees_fork(&f) => Ok(f),
+        _ => Err(ApiError::not_found()),
+    }
+}
+
+/// The fork named `name`, if a write by the caller reaches the core's rules
+/// ([`Caller::reaches_fork`]); otherwise 404.
+fn writable_fork(a: &Authority, caller: &Caller, name: &ForkName) -> ApiResult<Fork> {
+    match a.store.fork(name)? {
+        Some(f) if caller.reaches_fork(&f) => Ok(f),
         _ => Err(ApiError::not_found()),
     }
 }
@@ -219,8 +253,13 @@ fn visible_location(
     }
 }
 
-async fn whoami(State(a): Shared, ConnectInfo(src): Source, h: HeaderMap) -> ApiResult {
-    let c = auth(&a, &h, src).await?;
+/// The body as JSON, read only now that the caller is authenticated.
+fn json_body<T: serde::de::DeserializeOwned>(body: &[u8]) -> ApiResult<T> {
+    serde_json::from_slice(body)
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, "invalid", e.to_string()))
+}
+
+async fn whoami(Extension(c): Me) -> ApiResult {
     Ok(Json(json!({
         "principal": c.key.principal,
         "kind": c.key.kind,
@@ -229,8 +268,7 @@ async fn whoami(State(a): Shared, ConnectInfo(src): Source, h: HeaderMap) -> Api
     })))
 }
 
-async fn locations(State(a): Shared, ConnectInfo(src): Source, h: HeaderMap) -> ApiResult {
-    let c = auth(&a, &h, src).await?;
+async fn locations(State(a): Shared, Extension(c): Me) -> ApiResult {
     blocking(&a, move |a| {
         let all = a.store.locations()?;
         to_json(
@@ -244,11 +282,9 @@ async fn locations(State(a): Shared, ConnectInfo(src): Source, h: HeaderMap) -> 
 
 async fn location_tree(
     State(a): Shared,
-    ConnectInfo(src): Source,
-    h: HeaderMap,
+    Extension(c): Me,
     Path(location): Path<String>,
 ) -> ApiResult {
-    let c = auth(&a, &h, src).await?;
     let name = parse(&location, LocationName::new)?;
     blocking(&a, move |a| {
         let l = visible_location(a, &c, &name)?;
@@ -259,11 +295,9 @@ async fn location_tree(
 
 async fn location_blob(
     State(a): Shared,
-    ConnectInfo(src): Source,
-    h: HeaderMap,
+    Extension(c): Me,
     Path((location, oid)): Path<(String, String)>,
 ) -> ApiResult<Response> {
-    let c = auth(&a, &h, src).await?;
     let name = parse(&location, LocationName::new)?;
     let oid = parse(&oid, GitOid::from_hex)?;
     blocking(&a, move |a| {
@@ -273,8 +307,7 @@ async fn location_blob(
     .await
 }
 
-async fn forks(State(a): Shared, ConnectInfo(src): Source, h: HeaderMap) -> ApiResult {
-    let c = auth(&a, &h, src).await?;
+async fn forks(State(a): Shared, Extension(c): Me) -> ApiResult {
     blocking(&a, move |a| {
         let all = a.store.forks()?;
         to_json(
@@ -292,13 +325,8 @@ struct CreateFork {
     location: String,
 }
 
-async fn create_fork(
-    State(a): Shared,
-    ConnectInfo(src): Source,
-    h: HeaderMap,
-    Json(req): Json<CreateFork>,
-) -> ApiResult {
-    let c = auth(&a, &h, src).await?;
+async fn create_fork(State(a): Shared, Extension(c): Me, body: axum::body::Bytes) -> ApiResult {
+    let req: CreateFork = json_body(&body)?;
     let fork = parse(&req.fork, ForkName::new)?;
     let location = parse(&req.location, LocationName::new)?;
     blocking(&a, move |a| {
@@ -309,24 +337,12 @@ async fn create_fork(
     .await
 }
 
-async fn fork(
-    State(a): Shared,
-    ConnectInfo(src): Source,
-    h: HeaderMap,
-    Path(fork): Path<String>,
-) -> ApiResult {
-    let c = auth(&a, &h, src).await?;
+async fn fork(State(a): Shared, Extension(c): Me, Path(fork): Path<String>) -> ApiResult {
     let name = parse(&fork, ForkName::new)?;
     blocking(&a, move |a| to_json(visible_fork(a, &c, &name)?)).await
 }
 
-async fn fork_tree(
-    State(a): Shared,
-    ConnectInfo(src): Source,
-    h: HeaderMap,
-    Path(fork): Path<String>,
-) -> ApiResult {
-    let c = auth(&a, &h, src).await?;
+async fn fork_tree(State(a): Shared, Extension(c): Me, Path(fork): Path<String>) -> ApiResult {
     let name = parse(&fork, ForkName::new)?;
     blocking(&a, move |a| {
         let f = visible_fork(a, &c, &name)?;
@@ -337,11 +353,9 @@ async fn fork_tree(
 
 async fn fork_blob(
     State(a): Shared,
-    ConnectInfo(src): Source,
-    h: HeaderMap,
+    Extension(c): Me,
     Path((fork, oid)): Path<(String, String)>,
 ) -> ApiResult<Response> {
-    let c = auth(&a, &h, src).await?;
     let name = parse(&fork, ForkName::new)?;
     let oid = parse(&oid, GitOid::from_hex)?;
     blocking(&a, move |a| {
@@ -361,17 +375,26 @@ fn blob_of(a: &Authority, tree: GitOid, oid: GitOid) -> ApiResult<Response> {
     Ok(([(header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
 }
 
-async fn history(
-    State(a): Shared,
-    ConnectInfo(src): Source,
-    h: HeaderMap,
-    Path(fork): Path<String>,
-) -> ApiResult {
-    let c = auth(&a, &h, src).await?;
+/// The fork's records, less drafts fenced into a sibling the caller does not read: a
+/// fenced draft is the sibling's content, shown only to those who read the sibling.
+async fn history(State(a): Shared, Extension(c): Me, Path(fork): Path<String>) -> ApiResult {
     let name = parse(&fork, ForkName::new)?;
     blocking(&a, move |a| {
         visible_fork(a, &c, &name)?;
-        to_json(a.store.fork_history(&name)?)
+        let mut shown = Vec::new();
+        for record in a.store.fork_history(&name)? {
+            let hidden = match &record.event {
+                Event::DraftFenced { sibling, .. } => {
+                    !a.store.fork(sibling)?.is_some_and(|f| c.sees_fork(&f))
+                }
+                _ => false,
+            };
+            if hidden {
+                continue;
+            }
+            shown.push(record);
+        }
+        to_json(shown)
     })
     .await
 }
@@ -384,15 +407,15 @@ struct Publish {
 
 async fn publish(
     State(a): Shared,
-    ConnectInfo(src): Source,
-    h: HeaderMap,
+    Extension(c): Me,
     Path(fork): Path<String>,
-    Json(req): Json<Publish>,
+    body: axum::body::Bytes,
 ) -> ApiResult {
-    let c = auth(&a, &h, src).await?;
     let name = parse(&fork, ForkName::new)?;
+    let req: Publish = json_body(&body)?;
     blocking(&a, move |a| {
-        visible_fork(a, &c, &name)?;
+        let state = writable_fork(a, &c, &name)?;
+        a.check_puts(&c, &state, &req.changeset)?;
         let writer = Writer::new(c.holder.clone(), req.epoch);
         let p = a.store.publish_draft(&name, &writer, &req.changeset)?;
         Ok(Json(json!({
@@ -415,16 +438,15 @@ struct Landing {
 
 async fn landing(
     State(a): Shared,
-    ConnectInfo(src): Source,
-    h: HeaderMap,
+    Extension(c): Me,
     Path(fork): Path<String>,
-    Json(req): Json<Landing>,
+    body: axum::body::Bytes,
 ) -> ApiResult {
-    let c = auth(&a, &h, src).await?;
     let name = parse(&fork, ForkName::new)?;
+    let req: Landing = json_body(&body)?;
     let id = parse(&req.changeset, ChangesetId::from_hex)?;
     blocking(&a, move |a| {
-        visible_fork(a, &c, &name)?;
+        writable_fork(a, &c, &name)?;
         let writer = Writer::new(c.holder.clone(), req.epoch);
         let offset = a.store.record_landing_intent(&name, &writer, id)?;
         Ok(Json(json!({ "offset": offset })))
@@ -433,17 +455,20 @@ async fn landing(
 }
 
 /// Upload a blob. The body is streamed to a staging file while it is hashed as git
-/// does (hyper reads no more than `Content-Length`); only bytes that are exactly that
-/// long and hash to `oid` are ingested. An upload of a blob the store already holds is verified the same way, so
-/// the answer never says whether the store had it.
+/// does; only bytes that are exactly `Content-Length` long and hash to `oid` are
+/// ingested (hyper delivers a length-delimited body of exactly that length, refuses a
+/// longer one, and drops a Content-Length sent with chunked encoding, which this
+/// handler then refuses as unsized). An upload of a blob the store already
+/// holds is verified the same way, so the answer never says whether the store had it,
+/// and either way the caller has now shown it holds the bytes
+/// ([`Authority::check_puts`]).
 async fn upload_blob(
     State(a): Shared,
-    ConnectInfo(src): Source,
-    h: HeaderMap,
+    Extension(c): Me,
     Path(oid): Path<String>,
+    h: HeaderMap,
     body: Body,
 ) -> ApiResult {
-    auth(&a, &h, src).await?;
     let oid = parse(&oid, GitOid::from_hex)?;
     let size: u64 = h
         .get(header::CONTENT_LENGTH)
@@ -461,6 +486,13 @@ async fn upload_blob(
             limit: MAX_BLOB_BYTES,
         }
         .into());
+    }
+    if !a.has_room_for(size).map_err(ApiError::internal)? {
+        return Err(ApiError::new(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "insufficient_storage",
+            "the authority keeps its free-space reserve; ask the owner",
+        ));
     }
     let staged = tempfile::NamedTempFile::new_in(&a.staging).map_err(ApiError::internal)?;
     let mut file = tokio::fs::File::from_std(staged.reopen().map_err(ApiError::internal)?);
@@ -485,6 +517,7 @@ async fn upload_blob(
     blocking(&a, move |a| {
         let content = staged.reopen().map_err(ApiError::internal)?;
         let info = a.store.ingest_blob(oid, size, content)?;
+        a.possesses(&c.key.principal, oid);
         Ok(Json(json!({
             "oid": oid.to_hex(),
             "size": info.size,

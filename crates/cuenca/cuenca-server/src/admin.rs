@@ -11,8 +11,9 @@
 //! `{"ok": true, ..}` or `{"ok": false, "error": ".."}`.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+
 use std::sync::Arc;
 
 use cuenca_core::{ForkName, Holder, LocationName, NodeId, PrincipalName};
@@ -72,10 +73,26 @@ pub struct GitSource {
     pub rev: String,
 }
 
-/// Bind the admin socket at `path`, mode 0600. A socket file left by an earlier run is
-/// replaced; any other file there is refused. Call after the store is open: the store's
-/// lock is what keeps two authorities off one state directory.
+/// Bind the admin socket at `path`, mode 0600. Its directory must be writable by its
+/// owner only (anyone else could swap the socket for their own). A socket file left by
+/// an earlier run is replaced; any other file there is refused. Call after the store
+/// is open: the store's lock is what keeps two authorities off one state directory.
 pub fn bind(path: &Path) -> std::io::Result<UnixListener> {
+    let dir = match path.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d,
+        _ => Path::new("."),
+    };
+    let mode = std::fs::metadata(dir)?.permissions().mode();
+    if mode & 0o022 != 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "{} has mode {:o}: the admin socket's directory must be writable by its owner only",
+                dir.display(),
+                mode & 0o7777
+            ),
+        ));
+    }
     match std::fs::symlink_metadata(path) {
         Ok(m) if std::os::unix::fs::FileTypeExt::is_socket(&m.file_type()) => {
             std::fs::remove_file(path)?
@@ -94,15 +111,10 @@ pub fn bind(path: &Path) -> std::io::Result<UnixListener> {
     Ok(listener)
 }
 
-/// Serve owner acts on `listener` (bound at `path`) until the task is dropped.
-pub async fn serve(listener: UnixListener, path: PathBuf, authority: Arc<Authority>) {
-    let own_uid = match std::fs::metadata(&path) {
-        Ok(m) => m.uid(),
-        Err(e) => {
-            tracing::error!(error = %e, "admin socket vanished; owner acts are off");
-            return;
-        }
-    };
+/// Serve owner acts on `listener` until the task is dropped, to connections whose peer
+/// runs as this process's effective uid.
+pub async fn serve(listener: UnixListener, authority: Arc<Authority>) {
+    let own_uid = rustix::process::geteuid().as_raw();
     loop {
         let (stream, _) = match listener.accept().await {
             Ok(c) => c,

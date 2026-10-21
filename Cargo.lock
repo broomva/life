@@ -2895,6 +2895,7 @@ dependencies = [
  "hex",
  "rand 0.8.8",
  "reqwest 0.12.28",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "sha2 0.10.9",

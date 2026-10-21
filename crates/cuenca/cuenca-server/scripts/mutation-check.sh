@@ -62,23 +62,38 @@ mutate src/authority.rs '.ok_or(AuthError::UnnamedSource(ip))?;' '.unwrap_or(cra
 mutate src/authority.rs 'self.owner_device() || self.key.grant.locations.contains(&location.name)' 'true' --test api
 mutate src/authority.rs '            || self.key.grant.forks.contains(&fork.name)
 ' '' --test api
-mutate src/authority.rs '.any(|h| h.principal == self.key.principal)' '.any(|_| true)' --test api
-mutate src/authority.rs '.any(|h| h.principal == self.key.principal)' '.any(|_| false)' --test api
+mutate src/authority.rs '.is_some_and(|h| h.principal == self.key.principal)' '.is_some_and(|_| true)' --test api
+mutate src/authority.rs '.is_some_and(|h| h.principal == self.key.principal)' '.is_some_and(|_| false)' --test api
+# A former holder reads the fork no more, but its stale drafts still reach the rules.
+mutate src/authority.rs '            || fork
+                .holder()
+                .is_some_and(|h| h.principal == self.key.principal)' '            || fork
+                .holders
+                .iter()
+                .any(|h| h.principal == self.key.principal)' --test api
+mutate src/authority.rs '        self.sees_fork(fork)
+            || fork' '        self.sees_fork(fork)
+            && fork' --test api
+mutate src/http.rs 'Some(f) if caller.reaches_fork(&f) => Ok(f),' 'Some(f) => Ok(f),' --test api
 mutate src/authority.rs 'self.key.kind == PrincipalKind::OwnerDevice' 'true' --test api
 mutate src/http.rs 'Some(f) if caller.sees_fork(&f) => Ok(f),' 'Some(f) => Ok(f),' --test api
 mutate src/http.rs 'Some(l) if caller.sees_location(&l) => Ok(l),' 'Some(l) => Ok(l),' --test api
 mutate src/http.rs '        visible_location(a, &c, &location)?;
 ' '' --test api
 mutate src/http.rs '        visible_fork(a, &c, &name)?;
-        to_json(a.store.fork_history' '        to_json(a.store.fork_history' --test api
-mutate src/http.rs '        visible_fork(a, &c, &name)?;
-        let writer = Writer::new(c.holder.clone(), req.epoch);
-        let p =' '        let writer = Writer::new(c.holder.clone(), req.epoch);
-        let p =' --test api
-mutate src/http.rs '        visible_fork(a, &c, &name)?;
-        let writer = Writer::new(c.holder.clone(), req.epoch);
-        let offset' '        let writer = Writer::new(c.holder.clone(), req.epoch);
-        let offset' --test api
+        let mut shown' '        let mut shown' --test api
+mutate src/http.rs '        writable_fork(a, &c, &name)?;
+        let writer' '        let writer' --test api
+# A draft names only blobs the caller reads or has sent: no laundering, no oracle.
+mutate src/authority.rs 'if !known {' 'if false {' --test api
+mutate src/authority.rs 'let known = head.contains(&oid) || own' 'let known = false || own' --test api
+mutate src/authority.rs '|| own.is_some_and(|set| set.contains(&oid));' ';' --test api
+mutate src/http.rs 'a.possesses(&c.key.principal, oid);' '' --test api
+# History hides drafts fenced into a sibling the caller does not read.
+mutate src/http.rs '!a.store.fork(sibling)?.is_some_and(|f| c.sees_fork(&f))' 'false' --test api
+# Uploads keep the free-space reserve; staging is cleared on open.
+mutate src/http.rs 'if !a.has_room_for(size).map_err(ApiError::internal)? {' 'if false {' --test api
+mutate src/authority.rs '            std::fs::remove_dir_all(&staging)?;' '' --test api
 mutate src/http.rs 'if !a.blob_set(tree)?.contains(&oid) {' 'if false {' --test api
 # Blob upload: verified even when the store already holds the id.
 mutate src/http.rs 'if blob.oid() != oid {' 'if false {' --test api
@@ -91,6 +106,7 @@ mutate src/lib.rs 's[0] == 0xfd7a && s[1] == 0x115c && s[2] == 0xa1e0' 's[0] == 
 mutate src/admin.rs 'let offset = a.store.revoke(&principal).map_err(|e| s(&e))?;' 'let offset = 0;' --test api
 mutate src/admin.rs 'if a.store.revoked(&principal).map_err(|e| s(&e))?.is_some() {' 'if false {' --test api
 mutate src/admin.rs 'std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;' '' --test api
+mutate src/admin.rs 'if mode & 0o022 != 0 {' 'if false {' --test api
 # Identity: routes from either source mark a peer; a node outside the netmap is unnamed.
 mutate src/identity.rs 'serves_routes: routes(&whois.node.primary_routes) || routes(&entry.primary_routes),' 'serves_routes: routes(&entry.primary_routes),' --lib
 mutate src/identity.rs 'serves_routes: routes(&whois.node.primary_routes) || routes(&entry.primary_routes),' 'serves_routes: routes(&whois.node.primary_routes),' --lib

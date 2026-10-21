@@ -32,7 +32,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub use authority::{AuthError, Authority, Caller};
+pub use authority::{AuthError, Authority, Caller, DEFAULT_MIN_FREE};
 pub use identity::{Peer, Tailscale, Whois, WhoisFuture};
 pub use keys::{Grant, KeyError, KeyRecord, KeyRing, PrincipalKind};
 
@@ -49,6 +49,8 @@ pub struct Config {
     pub unsafe_bind: bool,
     /// The `tailscale` binary.
     pub tailscale: PathBuf,
+    /// Free bytes blob uploads must leave on the state's filesystem.
+    pub min_free: u64,
 }
 
 /// Whether `ip` is in Tailscale's address ranges: 100.64.0.0/10 and
@@ -103,7 +105,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     tracing::info!(bind = %config.bind, admin = %config.admin_socket.display(), "cuenca authority up");
     tokio::select! {
         r = serve_http(listener, authority.clone()) => r?,
-        () = admin::serve(admin, config.admin_socket.clone(), authority) => {}
+        () = admin::serve(admin, authority) => {}
         r = tokio::signal::ctrl_c() => r?,
     }
     Ok(())

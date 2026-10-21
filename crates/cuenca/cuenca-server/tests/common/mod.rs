@@ -69,6 +69,8 @@ impl Server {
         let whois = Arc::new(Switch(Mutex::new(Ok(None))));
         let authority =
             Arc::new(Authority::open(&dir.join("state"), whois.clone() as Arc<dyn Whois>).unwrap());
+        // Tests do not depend on the host's free disk.
+        authority.set_min_free(0);
         let admin_path = dir.join("admin.sock");
         let (listener, admin_listener) = rt.block_on(async {
             (
@@ -78,11 +80,7 @@ impl Server {
         });
         let addr: SocketAddr = listener.local_addr().unwrap();
         rt.spawn(cuenca_server::serve_http(listener, authority.clone()));
-        rt.spawn(admin::serve(
-            admin_listener,
-            admin_path.clone(),
-            authority.clone(),
-        ));
+        rt.spawn(admin::serve(admin_listener, authority.clone()));
         Self {
             url: format!("http://{addr}"),
             admin: admin_path,

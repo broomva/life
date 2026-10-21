@@ -107,18 +107,19 @@ impl Client {
         serde_json::from_value(v["tree"].clone()).map_err(|e| e.to_string())
     }
 
-    /// The draft that writes counter `n` over `head`.
-    fn next(&self, head: &Tree, n: u64) -> Result<Changeset, String> {
+    /// The draft that writes counter `n` over `head`, and the content it uploaded.
+    fn next(&self, head: &Tree, n: u64) -> Result<(Changeset, Vec<u8>), String> {
         let body = format!("{n}\n").repeat(256);
         let oid = self.put_blob(body.as_bytes())?;
-        Ok(Changeset::new(
+        let cs = Changeset::new(
             head,
             vec![cuenca_tree::Op::put(
                 cuenca_tree::RepoPath::new("counter").unwrap(),
                 cuenca_tree::Entry::File(oid),
             )],
         )
-        .unwrap())
+        .unwrap();
+        Ok((cs, body.into_bytes()))
     }
 
     fn publish(&self, cs: &Changeset) -> Result<Value, String> {
@@ -191,11 +192,11 @@ fn kill_during_publish() {
                 acks.clone(),
                 publishing.clone(),
             );
-            std::thread::spawn(move || -> Option<Changeset> {
+            std::thread::spawn(move || -> Option<(Changeset, Vec<u8>)> {
                 loop {
                     let head = client.head().ok()?;
                     let n = counter_of(&client, &head)? + 1;
-                    let cs = client.next(&head, n).ok()?;
+                    let (cs, content) = client.next(&head, n).ok()?;
                     publishing.store(true, Ordering::SeqCst);
                     let answer = client.publish(&cs);
                     publishing.store(false, Ordering::SeqCst);
@@ -205,7 +206,7 @@ fn kill_during_publish() {
                             acked.lock().unwrap().push(v["id"].as_str().unwrap().into());
                             acks.fetch_add(1, Ordering::SeqCst);
                         }
-                        Err(_) => return Some(cs),
+                        Err(_) => return Some((cs, content)),
                     }
                 }
             })
@@ -235,9 +236,19 @@ fn kill_during_publish() {
             http: http.clone(),
         };
         // Send again the publish the kill interrupted: recorded or not, it succeeds,
-        // and a recorded one is answered as the same draft, not a second.
-        if let Some(cs) = in_flight {
-            match client.publish(&cs) {
+        // and a recorded one is answered as the same draft, not a second. A new
+        // authority does not know what the client uploaded to the old one, so a draft
+        // it had not recorded is refused for its blob until the client sends the bytes
+        // again, as a client does.
+        if let Some((cs, content)) = in_flight {
+            let answer = match client.publish(&cs) {
+                Err(e) if e.contains("missing_blob") => {
+                    client.put_blob(&content).unwrap();
+                    client.publish(&cs)
+                }
+                other => other,
+            };
+            match answer {
                 Ok(v) => {
                     if v["fresh"] == true {
                         retried_fresh += 1;
