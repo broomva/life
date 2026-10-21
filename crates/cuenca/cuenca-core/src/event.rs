@@ -5,7 +5,8 @@ use crate::names::{ForkName, LocationName};
 
 /// A changeset's id: the SHA-256 of its canonical JSON. Changesets are canonical (ops
 /// sorted, one per path, each a real change), so two equal changesets share an id, and
-/// a publish retried after a crash is recognised as the same publish.
+/// a publish retried while its draft is still the fork's head is recognised as the
+/// same publish.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ChangesetId(ContentHash);
@@ -35,11 +36,13 @@ impl std::fmt::Display for ChangesetId {
     }
 }
 
-/// One fact in the log. The log is the authority's state: every table in the store is
-/// a projection of these events, rebuilt and compared by [`crate::Store::replay_check`].
+/// One fact in the log. The locations, forks and changeset index are projections of
+/// these events, rebuilt and compared by [`crate::Store::replay_check`].
 ///
-/// Ownership (holder, fencing epoch, takeover, revocation) is added by BRO-3249 as new
-/// variants; existing variants are a one-way door and never change shape.
+/// The event set is not frozen yet: ownership (holder, fencing epoch, takeover,
+/// revocation, BRO-3249) adds the writer's holder and epoch to the events that write.
+/// No log has been deployed, so that change needs no migration; the format freezes
+/// when the authority first runs on the VPS (BRO-3257).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -64,9 +67,10 @@ pub enum Event {
         id: ChangesetId,
         changeset: Changeset,
     },
-    /// A location's main moved by a changeset already in the log.
+    /// A location's main moved by the changeset at the head of one of its forks.
     MainAdvanced {
         location: LocationName,
+        fork: ForkName,
         changeset: ChangesetId,
     },
     /// The intent to land a fork's head changeset; landing itself (BRO-3255) records

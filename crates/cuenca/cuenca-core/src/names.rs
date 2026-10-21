@@ -15,8 +15,10 @@ pub struct NameError {
 }
 
 /// Whether `s` is safe as one directory name in the volume (`main/<location>`,
-/// `forks/<fork>`) on every client: lowercase, so no two names fold together on APFS;
-/// ASCII, so normalization cannot either; no separators, no dot-only names.
+/// `forks/<fork>`) on the clients the spec names, macOS and iOS over Samba and Linux:
+/// lowercase, so no two names fold together on APFS; ASCII, so normalization cannot
+/// either; no separators, no dot-only names. Windows rules (no trailing dot, reserved
+/// device names) are not applied.
 fn valid(s: &str) -> bool {
     let b = s.as_bytes();
     !b.is_empty()

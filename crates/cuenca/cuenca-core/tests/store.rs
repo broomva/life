@@ -115,7 +115,8 @@ fn locations_hold_any_tree_and_an_optional_remote() {
         store.add_location(&loc("notes"), None, &notes),
         Err(CoreError::LocationExists(_))
     ));
-    for bad in ["", "-uupload-pack=x", "a b", "a\nb"] {
+    let long = "x".repeat(513);
+    for bad in ["", "-uupload-pack=x", "a b", "a\nb", &long] {
         assert!(matches!(
             store.add_location(&loc("x"), Some(bad), &notes),
             Err(CoreError::BadRemote(_))
@@ -237,29 +238,75 @@ fn main_advances_by_compare_and_swap() {
     let pf = store.publish_draft(&fork("f"), &f1).unwrap();
     let pg = store.publish_draft(&fork("g"), &g1).unwrap();
 
-    store.record_landing_intent(&fork("f"), pf.id).unwrap();
-    let at = store.advance_main(&loc("l"), pf.id).unwrap();
+    // Only the fork's head can move main.
+    assert!(matches!(
+        store.advance_main(&fork("g"), pf.id),
+        Err(CoreError::NotHead { .. })
+    ));
+    let at = store.advance_main(&fork("f"), pf.id).unwrap();
     assert_eq!(store.main_tree(&loc("l")).unwrap().git_tree_id(), f1.target);
-    // Retried: nothing appended, same offset.
+    assert_eq!(
+        store.location(&loc("l")).unwrap().unwrap().main_changeset,
+        Some((pf.id, at))
+    );
+    // Something else is appended; a retry still answers with the move's own offset.
+    store.create_fork(&fork("h"), &loc("l")).unwrap();
+    assert_eq!(store.fork(&fork("h")).unwrap().unwrap().base, f1.target);
     let len = store.len().unwrap();
-    assert_eq!(store.advance_main(&loc("l"), pf.id).unwrap(), at);
+    assert_eq!(store.advance_main(&fork("f"), pf.id).unwrap(), at);
     assert_eq!(store.len().unwrap(), len);
     // g was based on the old main: the swap fails.
     assert!(matches!(
-        store.advance_main(&loc("l"), pg.id),
+        store.advance_main(&fork("g"), pg.id),
         Err(CoreError::NotAtBase { .. })
     ));
-    let unknown = ChangesetId::of(&write(&store, &main, &[("z", b"z")]));
     assert!(matches!(
-        store.advance_main(&loc("l"), unknown),
-        Err(CoreError::UnknownChangeset(_))
-    ));
-    // A landing intent names the fork's head.
-    assert!(matches!(
-        store.record_landing_intent(&fork("g"), pf.id),
-        Err(CoreError::NotHead { .. })
+        store.advance_main(&fork("nope"), pg.id),
+        Err(CoreError::UnknownFork(_))
     ));
     assert_eq!(store.len().unwrap(), len);
+}
+
+#[test]
+fn a_landing_intent_names_the_head_and_a_retry_appends_nothing() {
+    let (_d, store) = store();
+    let main = tree(&store, &[("a", b"1")]);
+    store.add_location(&loc("l"), None, &main).unwrap();
+    store.create_fork(&fork("f"), &loc("l")).unwrap();
+    let cs = write(&store, &main, &[("a", b"2")]);
+    let p = store.publish_draft(&fork("f"), &cs).unwrap();
+    let unknown = ChangesetId::of(&write(&store, &main, &[("z", b"z")]));
+    assert!(matches!(
+        store.record_landing_intent(&fork("f"), unknown),
+        Err(CoreError::NotHead { .. })
+    ));
+    let at = store.record_landing_intent(&fork("f"), p.id).unwrap();
+    store.create_fork(&fork("g"), &loc("l")).unwrap();
+    let len = store.len().unwrap();
+    assert_eq!(store.record_landing_intent(&fork("f"), p.id).unwrap(), at);
+    assert_eq!(store.len().unwrap(), len);
+    assert_eq!(
+        store.fork(&fork("f")).unwrap().unwrap().landing_intent,
+        Some((p.id, at))
+    );
+}
+
+#[test]
+fn a_publish_retried_after_a_newer_draft_is_refused_as_stale() {
+    let (_d, store) = store();
+    let main = tree(&store, &[("a", b"1")]);
+    store.add_location(&loc("l"), None, &main).unwrap();
+    store.create_fork(&fork("f"), &loc("l")).unwrap();
+    let one = write(&store, &main, &[("a", b"2")]);
+    store.publish_draft(&fork("f"), &one).unwrap();
+    let after = store.fork_head(&fork("f")).unwrap();
+    store
+        .publish_draft(&fork("f"), &write(&store, &after, &[("a", b"3")]))
+        .unwrap();
+    assert!(matches!(
+        store.publish_draft(&fork("f"), &one),
+        Err(CoreError::NotAtBase { .. })
+    ));
 }
 
 #[test]
@@ -283,7 +330,7 @@ fn state_survives_reopen_and_matches_a_replay_of_the_log() {
         .unwrap();
         let p = store.publish_draft(&fork("f"), &cs).unwrap();
         store.record_landing_intent(&fork("f"), p.id).unwrap();
-        store.advance_main(&loc("l"), p.id).unwrap();
+        store.advance_main(&fork("f"), p.id).unwrap();
         (cs, p.id)
     };
     let store = Store::open(dir.path()).unwrap();
@@ -309,4 +356,19 @@ fn state_survives_reopen_and_matches_a_replay_of_the_log() {
     );
     assert!(matches!(records[2].event, Event::DraftPublished { .. }));
     assert_eq!(store.records(3, 1).unwrap()[0].offset, 3);
+}
+
+#[test]
+fn a_changeset_published_on_two_forks_is_indexed_at_its_first_draft() {
+    let (_d, store) = store();
+    let main = tree(&store, &[("a", b"1")]);
+    store.add_location(&loc("l"), None, &main).unwrap();
+    store.create_fork(&fork("f"), &loc("l")).unwrap();
+    store.create_fork(&fork("g"), &loc("l")).unwrap();
+    let cs = write(&store, &main, &[("a", b"2")]);
+    let first = store.publish_draft(&fork("f"), &cs).unwrap();
+    let second = store.publish_draft(&fork("g"), &cs).unwrap();
+    assert!(second.fresh && second.offset > first.offset);
+    assert_eq!(store.replay_check().unwrap().changesets, 1);
+    assert_eq!(store.changeset(first.id).unwrap(), Some(cs));
 }

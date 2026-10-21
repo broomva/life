@@ -26,9 +26,16 @@ impl BlobFiles {
         let tmp = root.join("tmp");
         fs::create_dir_all(&objects)?;
         fs::create_dir_all(&tmp)?;
+        // Make the directories' own entries durable before any blob is indexed.
+        for dir in [root.parent().unwrap_or(root), root, &objects] {
+            File::open(dir)?.sync_all()?;
+        }
         // Leftovers of interrupted ingests: never indexed, so never referenced.
         for leftover in fs::read_dir(&tmp)? {
-            fs::remove_file(leftover?.path())?;
+            let path = leftover?.path();
+            if path.is_file() {
+                fs::remove_file(path)?;
+            }
         }
         Ok(Self { objects, tmp })
     }
@@ -73,7 +80,11 @@ impl BlobFiles {
         tmp.as_file().sync_all()?;
         let dest = self.path(claimed);
         let dir = dest.parent().expect("objects/<xx>");
-        fs::create_dir_all(dir)?;
+        if !dir.exists() {
+            fs::create_dir(dir)?;
+            // The new directory's own entry must be durable before the index names it.
+            File::open(&self.objects)?.sync_all()?;
+        }
         tmp.persist(&dest).map_err(|e| e.error)?;
         File::open(dir)?.sync_all()?;
         Ok(blob)

@@ -49,6 +49,8 @@ pub enum CoreError {
         head: GitOid,
         base: GitOid,
     },
+    #[error("fork {fork:?} is not a fork of location {location:?}")]
+    WrongLocation { fork: String, location: String },
     #[error("changeset {changeset} is not the head of fork {fork:?}")]
     NotHead { fork: String, changeset: String },
     #[error("remote {0:?} is not a plausible git remote")]

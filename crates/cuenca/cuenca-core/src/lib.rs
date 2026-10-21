@@ -3,14 +3,16 @@
 //!
 //! A [`Store`] is one directory holding:
 //!
-//! - **the log**, an append-only sequence of [`Record`]s in a redb database. Every
-//!   mutation is a single write transaction that appends exactly one record and updates
-//!   the projections that record implies, so a crash leaves the record and its effects,
-//!   or neither; commits are durable before they return;
+//! - **the log**, an append-only sequence of [`Record`]s in a redb database. Each call
+//!   that changes it is one write transaction that runs the event through the
+//!   transition rules (one copy of them, in `state.rs`), appends exactly one record and
+//!   updates the projections, so a crash leaves the record and its effects, or neither;
+//!   commits are durable before they return;
 //! - **projections** of the log: [`Location`]s (any directory tree the authority tracks,
-//!   with an optional git remote), [`Fork`]s with their head, a changeset index, and the
-//!   git tree objects every recorded tree is made of. [`Store::replay_check`] rebuilds
-//!   them from the log alone and compares;
+//!   with an optional git remote), [`Fork`]s with their head, and a changeset index.
+//!   [`Store::replay_check`] replays the log through the same rules and compares. The
+//!   git tree objects every recorded tree is made of sit beside them, checked against
+//!   their id on every read;
 //! - **blobs**, keyed by git object id. A blob enters the store only after its bytes
 //!   hash to the claimed id ([`cuenca_tree::BlobHasher`], with SHA-1 collision
 //!   detection), and its SHA-256 is derived from those verified bytes.
@@ -29,10 +31,12 @@ mod blobs;
 mod error;
 mod event;
 mod names;
+mod state;
 mod store;
 
 pub use blobs::MAX_BLOB_BYTES;
 pub use error::{CoreError, Result};
 pub use event::{ChangesetId, Event, Record};
 pub use names::{ForkName, LocationName, MAX_NAME_BYTES, NameError};
-pub use store::{BlobInfo, Fork, Location, Published, ReplaySummary, Store};
+pub use state::{Fork, Location};
+pub use store::{BlobInfo, Published, ReplaySummary, Store};

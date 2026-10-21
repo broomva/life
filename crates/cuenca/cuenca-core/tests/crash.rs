@@ -1,11 +1,13 @@
 //! Kill the writer mid-append, again and again, and check the log after each kill.
 //!
 //! `kill_during_append` re-runs this test binary as a child that only runs
-//! `child_writer`, which publishes drafts in a tight loop and prints an ack with the id after
-//! each publish returns. The parent SIGKILLs it at a random moment, reopens the store
-//! and checks: the log replays cleanly (no torn, missing or duplicated record), every
-//! acknowledged draft is in it, and the drafts are exactly the chain the fork's head
-//! counter says, so none was lost or recorded twice.
+//! `child_writer`, which in a tight loop records a landing intent for the fork's head,
+//! moves main to it, and publishes the next draft, printing an ack with the draft's id
+//! after each publish returns. After a restart the intent and the move are retries.
+//! The parent SIGKILLs it at a random moment, reopens the store and checks: the log
+//! replays cleanly (no torn, missing or duplicated record of any kind), every
+//! acknowledged draft is in it, the drafts are exactly the chain the fork's head counter
+//! says, and intents and moves of main trail the drafts by at most the interrupted step.
 
 mod common;
 
@@ -43,6 +45,12 @@ fn child_writer() {
     // found within a line, not matched as one.
     println!("{READY}");
     loop {
+        // Land the head, every time: after a restart these are retries of what the
+        // killed child may already have recorded, and must append nothing.
+        if let Some((head, _)) = store.fork(&fork("f")).unwrap().unwrap().head_changeset {
+            store.record_landing_intent(&fork("f"), head).unwrap();
+            store.advance_main(&fork("f"), head).unwrap();
+        }
         let head = store.fork_head(&fork("f")).unwrap();
         let next = counter(&store, &head) + 1;
         let body = format!("{next}\n").repeat(512);
@@ -152,6 +160,23 @@ fn kill_during_append() {
             "round {round}: drafts in the log are not the head's chain"
         );
         assert_eq!(summary.changesets as u64, drafts);
+        // Each draft is followed by its intent and its move of main, so each lags the
+        // one before by at most the step the kill interrupted.
+        let count = |want: fn(&Event) -> bool| {
+            store
+                .records(0, usize::MAX)
+                .unwrap()
+                .iter()
+                .filter(|r| want(&r.event))
+                .count() as u64
+        };
+        let intents = count(|e| matches!(e, Event::LandingIntent { .. }));
+        let moves = count(|e| matches!(e, Event::MainAdvanced { .. }));
+        assert!(
+            intents <= drafts && drafts <= intents + 1 && moves <= intents && intents <= moves + 1,
+            "round {round}: {drafts} drafts, {intents} intents, {moves} moves of main"
+        );
+        assert_eq!(counter(&store, &store.main_tree(&loc("l")).unwrap()), moves);
     }
     eprintln!(
         "{KILLS} kills, {acked_total} acknowledged drafts, {kills_after_an_ack} kills after an ack"

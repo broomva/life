@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,6 +16,7 @@ use crate::blobs::BlobFiles;
 use crate::error::{CoreError, Result};
 use crate::event::{ChangesetId, Event, Record};
 use crate::names::{ForkName, LocationName};
+use crate::state::{Applied, Fork, Location, Memory, View, apply};
 
 type Bytes = &'static [u8];
 
@@ -32,33 +33,9 @@ const FORKS: TableDefinition<&str, Bytes> = TableDefinition::new("forks");
 /// Projection: changeset id → offset of the draft that first recorded it.
 const CHANGESETS: TableDefinition<Bytes, u64> = TableDefinition::new("changesets");
 
-/// A location as the log has it now.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Location {
-    pub name: LocationName,
-    /// The git remote it lands to, if any (section 6 of the spec).
-    pub remote: Option<String>,
-    /// The tree of its main.
-    pub main: GitOid,
-    /// The changeset that last moved main, if any has.
-    pub main_changeset: Option<ChangesetId>,
-}
-
-/// A fork as the log has it now.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Fork {
-    pub name: ForkName,
-    pub location: LocationName,
-    /// The tree it started from.
-    pub base: GitOid,
-    /// The tree of its latest draft, or `base` before the first.
-    pub head: GitOid,
-    /// The latest draft's changeset and its offset in the log.
-    pub head_changeset: Option<(ChangesetId, u64)>,
-}
-
 /// What a blob's ingest stored next to its content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BlobInfo {
     /// Derived from the bytes the store verified, never from the sender.
     pub sha256: ContentHash,
@@ -67,17 +44,19 @@ pub struct BlobInfo {
 
 /// The result of a publish.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Published {
     pub id: ChangesetId,
     /// The offset of the draft's record.
     pub offset: u64,
-    /// False when this exact changeset already was the fork's head: a retried publish,
-    /// which appends nothing.
+    /// False when this changeset already was the fork's head: a retried publish, which
+    /// appends nothing and returns the first publish's offset.
     pub fresh: bool,
 }
 
 /// What [`Store::replay_check`] rebuilt from the log.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ReplaySummary {
     pub records: u64,
     pub locations: usize,
@@ -87,10 +66,11 @@ pub struct ReplaySummary {
 
 /// The authority's state: the log, its projections and the blobs, in one directory.
 ///
-/// Each mutation is one redb write transaction that appends exactly one record and
-/// updates the projections it implies, so after a crash the store holds the record
-/// and its effects, or neither. redb commits with immediate durability (fsync), so
-/// a call that returned `Ok` survives a crash.
+/// Each call that changes the log is one redb write transaction that runs the event
+/// through the transition rules ([`crate::state`]), appends exactly one record, and
+/// updates the projections, so after a crash the store holds the record and its
+/// effects, or neither. Commits use immediate durability: a call that returned `Ok`
+/// has been fsynced.
 pub struct Store {
     db: Database,
     blobs: BlobFiles,
@@ -127,7 +107,7 @@ impl Store {
     /// `content`. The bytes are hashed as git does (with SHA-1 collision detection);
     /// unless they are exactly `size` bytes hashing to `claimed`, nothing is stored.
     /// The SHA-256 is derived from the same verified bytes. Ingesting a blob the store
-    /// already holds reads nothing and returns its record.
+    /// already holds reads nothing and returns its record. Blobs are never removed.
     pub fn ingest_blob(&self, claimed: GitOid, size: u64, content: impl Read) -> Result<BlobInfo> {
         if let Some(info) = self.blob_info(claimed)? {
             return Ok(info);
@@ -159,7 +139,57 @@ impl Store {
         self.blobs.read(oid)
     }
 
+    /// An entry may enter the log only if its blob is ingested and, where a content
+    /// rule applies, the blob's bytes pass it. Checked before the write transaction
+    /// opens (blobs are never removed, so the answer cannot change), to keep large
+    /// reads out of the single writer's lock.
+    fn check_entry(&self, path: &RepoPath, entry: &Entry) -> Result<()> {
+        let oid = entry.oid();
+        if self.blob_info(oid)?.is_none() {
+            return Err(CoreError::MissingBlob(oid));
+        }
+        if has_content_rule(path, entry.mode()) {
+            check_content(path, entry.mode(), &self.blobs.read(oid)?)?;
+        }
+        Ok(())
+    }
+
     // ---- writes -----------------------------------------------------------------
+
+    /// Run `event` through the transition rules against the tables and, unless it is
+    /// a retry, append it. `extra` runs inside the same transaction after the rules
+    /// pass, for writes the event implies beyond the projections (tree objects).
+    fn record(
+        &self,
+        event: Event,
+        extra: impl FnOnce(&WriteTransaction) -> Result<()>,
+    ) -> Result<(u64, bool)> {
+        let txn = self.begin()?;
+        let offset;
+        {
+            let mut log = txn.open_table(LOG)?;
+            offset = last_offset(&log)?.map_or(0, |last| last + 1);
+            let mut view = Tables {
+                locations: txn.open_table(LOCATIONS)?,
+                forks: txn.open_table(FORKS)?,
+                changesets: txn.open_table(CHANGESETS)?,
+                log: &log,
+            };
+            if let Applied::Repeat(at) = apply(&mut view, offset, &event)? {
+                return Ok((at, false));
+            }
+            drop(view);
+            extra(&txn)?;
+            let record = Record {
+                offset,
+                at_ms: now_ms(),
+                event,
+            };
+            log.insert(offset, to_json(&record).as_slice())?;
+        }
+        txn.commit()?;
+        Ok((offset, true))
+    }
 
     /// Register a location whose main is `main`. Every blob `main` names must already
     /// be ingested. Registering is an owner act; this layer does not check who asks.
@@ -172,200 +202,93 @@ impl Store {
         if let Some(remote) = remote {
             check_remote(remote)?;
         }
-        let txn = self.begin()?;
-        let offset;
-        {
-            let mut locations = txn.open_table(LOCATIONS)?;
-            if locations.get(name.as_str())?.is_some() {
-                return Err(CoreError::LocationExists(name.to_string()));
-            }
-            let blobs = txn.open_table(BLOBS)?;
-            for (path, entry) in main.entries() {
-                self.check_entry(&blobs, path, entry)?;
-            }
-            store_tree(&mut txn.open_table(TREES)?, main)?;
-            let location = Location {
-                name: name.clone(),
-                remote: remote.map(str::to_string),
-                main: main.git_tree_id(),
-                main_changeset: None,
-            };
-            offset = append(
-                &mut txn.open_table(LOG)?,
-                Event::LocationAdded {
-                    location: name.clone(),
-                    remote: location.remote.clone(),
-                    main: location.main,
-                },
-            )?;
-            locations.insert(name.as_str(), to_json(&location).as_slice())?;
+        for (path, entry) in main.entries() {
+            self.check_entry(path, entry)?;
         }
-        txn.commit()?;
+        let event = Event::LocationAdded {
+            location: name.clone(),
+            remote: remote.map(str::to_string),
+            main: main.git_tree_id(),
+        };
+        let (offset, _) =
+            self.record(event, |txn| store_tree(&mut txn.open_table(TREES)?, main))?;
         Ok(offset)
     }
 
     /// Fork `location` at its current main.
     pub fn create_fork(&self, fork: &ForkName, location: &LocationName) -> Result<u64> {
-        let txn = self.begin()?;
-        let offset;
-        {
-            let mut forks = txn.open_table(FORKS)?;
-            if forks.get(fork.as_str())?.is_some() {
-                return Err(CoreError::ForkExists(fork.to_string()));
-            }
-            let loc = get_location(&txn.open_table(LOCATIONS)?, location)?;
-            let state = Fork {
-                name: fork.clone(),
-                location: location.clone(),
-                base: loc.main,
-                head: loc.main,
-                head_changeset: None,
-            };
-            offset = append(
-                &mut txn.open_table(LOG)?,
-                Event::ForkCreated {
-                    fork: fork.clone(),
-                    location: location.clone(),
-                    base: loc.main,
-                },
-            )?;
-            forks.insert(fork.as_str(), to_json(&state).as_slice())?;
-        }
-        txn.commit()?;
-        Ok(offset)
+        let main = self
+            .location(location)?
+            .ok_or_else(|| CoreError::UnknownLocation(location.to_string()))?
+            .main;
+        let event = Event::ForkCreated {
+            fork: fork.clone(),
+            location: location.clone(),
+            base: main,
+        };
+        // Main may move between the read above and the transaction; the rules then
+        // refuse the fork rather than start it from a stale main.
+        Ok(self.record(event, |_| Ok(()))?.0)
     }
 
     /// Publish a draft: `changeset` must start from the fork's head, every blob it puts
     /// must be ingested, and content with a rule (symlinks, `.gitattributes`) must pass
-    /// it. Publishing the changeset that already is the fork's head is a retry: it
-    /// appends nothing and returns the first publish's offset.
+    /// it. Publishing the changeset that is already the fork's head is a retry: it
+    /// appends nothing and returns the first publish's offset. A retry that arrives
+    /// after a newer draft is refused as `NotAtBase`, like any stale publish.
     pub fn publish_draft(&self, fork: &ForkName, changeset: &Changeset) -> Result<Published> {
+        for op in &changeset.ops {
+            if let Op::Put { path, entry } = op {
+                self.check_entry(path, entry)?;
+            }
+        }
         let id = ChangesetId::of(changeset);
-        let txn = self.begin()?;
-        let offset;
-        {
-            let mut forks = txn.open_table(FORKS)?;
-            let mut state = get_fork(&forks, fork)?;
-            if let Some((head, at)) = state.head_changeset
-                && head == id
-            {
-                return Ok(Published {
-                    id,
-                    offset: at,
-                    fresh: false,
-                });
-            }
-            if changeset.base != state.head {
-                return Err(CoreError::NotAtBase {
-                    what: format!("fork {fork:?}"),
-                    head: state.head,
-                    base: changeset.base,
-                });
-            }
-            let mut trees = txn.open_table(TREES)?;
-            let target = changeset.apply(&load_tree(&trees, state.head)?)?;
-            let blobs = txn.open_table(BLOBS)?;
-            for op in &changeset.ops {
-                if let Op::Put { path, entry } = op {
-                    self.check_entry(&blobs, path, entry)?;
-                }
-            }
-            store_tree(&mut trees, &target)?;
-            offset = append(
-                &mut txn.open_table(LOG)?,
-                Event::DraftPublished {
-                    fork: fork.clone(),
-                    id,
-                    changeset: changeset.clone(),
-                },
-            )?;
-            let mut changesets = txn.open_table(CHANGESETS)?;
-            if changesets.get(id.as_bytes().as_slice())?.is_none() {
-                changesets.insert(id.as_bytes().as_slice(), offset)?;
-            }
-            state.head = changeset.target;
-            state.head_changeset = Some((id, offset));
-            forks.insert(fork.as_str(), to_json(&state).as_slice())?;
-        }
-        txn.commit()?;
-        Ok(Published {
+        let event = Event::DraftPublished {
+            fork: fork.clone(),
             id,
-            offset,
-            fresh: true,
-        })
+            changeset: changeset.clone(),
+        };
+        let (offset, fresh) = self.record(event, |txn| {
+            // The rules checked the base by id; applying checks the ops and the target.
+            let mut trees = txn.open_table(TREES)?;
+            let target = changeset.apply(&load_tree(&trees, changeset.base)?)?;
+            store_tree(&mut trees, &target)
+        })?;
+        Ok(Published { id, offset, fresh })
     }
 
-    /// Move a location's main by a changeset in the log, as a compare-and-swap: the
-    /// changeset must start from the main the location has now. Advancing by the
-    /// changeset that last moved main is a retry and appends nothing.
-    pub fn advance_main(&self, location: &LocationName, id: ChangesetId) -> Result<u64> {
-        let changeset = self
-            .changeset(id)?
-            .ok_or_else(|| CoreError::UnknownChangeset(id.to_hex()))?;
-        let txn = self.begin()?;
-        let offset;
-        {
-            let mut locations = txn.open_table(LOCATIONS)?;
-            let mut loc = get_location(&locations, location)?;
-            let mut log = txn.open_table(LOG)?;
-            if loc.main_changeset == Some(id) {
-                return Ok(last_offset(&log)?.expect("a location implies a record"));
-            }
-            if changeset.base != loc.main {
-                return Err(CoreError::NotAtBase {
-                    what: format!("main of {location:?}"),
-                    head: loc.main,
-                    base: changeset.base,
-                });
-            }
-            offset = append(
-                &mut log,
-                Event::MainAdvanced {
-                    location: location.clone(),
-                    changeset: id,
-                },
-            )?;
-            loc.main = changeset.target;
-            loc.main_changeset = Some(id);
-            locations.insert(location.as_str(), to_json(&loc).as_slice())?;
-        }
-        txn.commit()?;
-        Ok(offset)
-    }
-
-    /// Record the intent to land `id`, which must be the fork's head.
+    /// Record the intent to land `id`, which must be the fork's head. Recording the
+    /// same intent again while it is the latest is a retry and appends nothing.
     pub fn record_landing_intent(&self, fork: &ForkName, id: ChangesetId) -> Result<u64> {
-        let txn = self.begin()?;
-        let offset;
-        {
-            let state = get_fork(&txn.open_table(FORKS)?, fork)?;
-            if state.head_changeset.map(|(head, _)| head) != Some(id) {
-                return Err(CoreError::NotHead {
-                    fork: fork.to_string(),
-                    changeset: id.to_hex(),
-                });
-            }
-            offset = append(
-                &mut txn.open_table(LOG)?,
-                Event::LandingIntent {
-                    fork: fork.clone(),
-                    changeset: id,
-                },
-            )?;
-        }
-        txn.commit()?;
-        Ok(offset)
+        let event = Event::LandingIntent {
+            fork: fork.clone(),
+            changeset: id,
+        };
+        Ok(self.record(event, |_| Ok(()))?.0)
+    }
+
+    /// Move the main of `fork`'s location by `id`, the fork's head, as a
+    /// compare-and-swap: the changeset must start from the main the location has now.
+    /// Advancing by the changeset that last moved main is a retry: it appends nothing
+    /// and returns that move's offset.
+    pub fn advance_main(&self, fork: &ForkName, id: ChangesetId) -> Result<u64> {
+        let location = self
+            .fork(fork)?
+            .ok_or_else(|| CoreError::UnknownFork(fork.to_string()))?
+            .location;
+        let event = Event::MainAdvanced {
+            location,
+            fork: fork.clone(),
+            changeset: id,
+        };
+        Ok(self.record(event, |_| Ok(()))?.0)
     }
 
     // ---- reads ------------------------------------------------------------------
 
     pub fn location(&self, name: &LocationName) -> Result<Option<Location>> {
         let txn = self.db.begin_read()?;
-        let table = txn.open_table(LOCATIONS)?;
-        table
-            .get(name.as_str())?
-            .map(|v| from_json(v.value()))
-            .transpose()
+        get_json(&txn.open_table(LOCATIONS)?, name.as_str())
     }
 
     pub fn locations(&self) -> Result<Vec<Location>> {
@@ -376,11 +299,7 @@ impl Store {
 
     pub fn fork(&self, name: &ForkName) -> Result<Option<Fork>> {
         let txn = self.db.begin_read()?;
-        let table = txn.open_table(FORKS)?;
-        table
-            .get(name.as_str())?
-            .map(|v| from_json(v.value()))
-            .transpose()
+        get_json(&txn.open_table(FORKS)?, name.as_str())
     }
 
     pub fn forks(&self) -> Result<Vec<Fork>> {
@@ -392,14 +311,16 @@ impl Store {
     /// The tree a location's main is at.
     pub fn main_tree(&self, location: &LocationName) -> Result<Tree> {
         let txn = self.db.begin_read()?;
-        let loc = get_location(&txn.open_table(LOCATIONS)?, location)?;
+        let loc: Location = get_json(&txn.open_table(LOCATIONS)?, location.as_str())?
+            .ok_or_else(|| CoreError::UnknownLocation(location.to_string()))?;
         load_tree(&txn.open_table(TREES)?, loc.main)
     }
 
     /// The tree a fork's head is at.
     pub fn fork_head(&self, fork: &ForkName) -> Result<Tree> {
         let txn = self.db.begin_read()?;
-        let state = get_fork(&txn.open_table(FORKS)?, fork)?;
+        let state: Fork = get_json(&txn.open_table(FORKS)?, fork.as_str())?
+            .ok_or_else(|| CoreError::UnknownFork(fork.to_string()))?;
         load_tree(&txn.open_table(TREES)?, state.head)
     }
 
@@ -412,20 +333,7 @@ impl Store {
     /// A changeset by id, from the draft that first recorded it.
     pub fn changeset(&self, id: ChangesetId) -> Result<Option<Changeset>> {
         let txn = self.db.begin_read()?;
-        let Some(offset) = txn
-            .open_table(CHANGESETS)?
-            .get(id.as_bytes().as_slice())?
-            .map(|v| v.value())
-        else {
-            return Ok(None);
-        };
-        match read_record(&txn.open_table(LOG)?, offset)?.event {
-            Event::DraftPublished { changeset, .. } => Ok(Some(changeset)),
-            other => Err(CoreError::CorruptLog {
-                offset,
-                reason: format!("changeset index points at {other:?}"),
-            }),
-        }
+        indexed_changeset(&txn.open_table(CHANGESETS)?, &txn.open_table(LOG)?, id)
     }
 
     /// The number of records in the log.
@@ -451,181 +359,137 @@ impl Store {
             .collect()
     }
 
-    /// Rebuild every projection from the log alone and compare it with the tables.
+    /// Replay the log from empty through the same transition rules the writer uses,
+    /// and compare the result with the projection tables.
     ///
-    /// Checks that offsets run from 0 with no gap, that every record decodes, that
-    /// every draft's id is its changeset's, starts from its fork's head at that point
-    /// and applies, that no draft repeats its fork's head (a duplicated publish), that
-    /// main only moves by known changesets from the tree it was at, and that the
-    /// locations, forks and changeset index equal the replay's, with every tree and
-    /// blob they reach present.
+    /// Fails if an offset is missing or out of place, a record does not decode, an
+    /// event breaks a rule (or repeats the current state, which only a duplicated
+    /// record could), or the locations, forks or changeset index differ from the
+    /// replay's. It does not re-read tree objects or blob content: [`Store::tree`]
+    /// checks a tree against its id on every read, and [`Store::read_blob`] a blob.
     pub fn replay_check(&self) -> Result<ReplaySummary> {
         let txn = self.db.begin_read()?;
         let log = txn.open_table(LOG)?;
-        let trees = txn.open_table(TREES)?;
-        let blobs = txn.open_table(BLOBS)?;
-        let mut locations: BTreeMap<LocationName, Location> = BTreeMap::new();
-        let mut forks: BTreeMap<ForkName, Fork> = BTreeMap::new();
-        let mut changesets: HashMap<ChangesetId, (u64, Changeset)> = HashMap::new();
+        let mut memory = Memory::default();
         let mut records = 0u64;
-        let bad = |offset: u64, reason: String| CoreError::CorruptLog { offset, reason };
         for item in log.iter()? {
             let (k, v) = item?;
             let record = decode_record(k.value(), v.value())?;
-            let offset = record.offset;
-            if offset != records {
-                return Err(bad(offset, format!("expected offset {records}")));
+            let corrupt = |reason: String| CoreError::CorruptLog {
+                offset: record.offset,
+                reason,
+            };
+            if record.offset != records {
+                return Err(corrupt(format!("expected offset {records}")));
             }
             records += 1;
-            match record.event {
-                Event::LocationAdded {
-                    location,
-                    remote,
-                    main,
-                } => {
-                    let tree = load_tree(&trees, main)?;
-                    check_blobs(&blobs, &tree)?;
-                    let fresh = Location {
-                        name: location.clone(),
-                        remote,
-                        main,
-                        main_changeset: None,
-                    };
-                    if locations.insert(location, fresh).is_some() {
-                        return Err(bad(offset, "location added twice".into()));
-                    }
+            match apply(&mut memory, record.offset, &record.event) {
+                Ok(Applied::Fresh) => {}
+                Ok(Applied::Repeat(at)) => {
+                    return Err(corrupt(format!("duplicates the record at {at}")));
                 }
-                Event::ForkCreated {
-                    fork,
-                    location,
-                    base,
-                } => {
-                    let loc = locations
-                        .get(&location)
-                        .ok_or_else(|| bad(offset, format!("unknown location {location}")))?;
-                    if loc.main != base {
-                        return Err(bad(offset, "fork base is not main".into()));
-                    }
-                    let state = Fork {
-                        name: fork.clone(),
-                        location,
-                        base,
-                        head: base,
-                        head_changeset: None,
-                    };
-                    if forks.insert(fork, state).is_some() {
-                        return Err(bad(offset, "fork created twice".into()));
-                    }
-                }
-                Event::DraftPublished {
-                    fork,
-                    id,
-                    changeset,
-                } => {
-                    if ChangesetId::of(&changeset) != id {
-                        return Err(bad(offset, "draft id is not its changeset's".into()));
-                    }
-                    let state = forks
-                        .get_mut(&fork)
-                        .ok_or_else(|| bad(offset, format!("unknown fork {fork}")))?;
-                    if state.head_changeset.map(|(h, _)| h) == Some(id) {
-                        return Err(bad(offset, format!("draft {id} duplicates the head")));
-                    }
-                    if changeset.base != state.head {
-                        return Err(bad(offset, "draft does not start at the head".into()));
-                    }
-                    let target = changeset.apply(&load_tree(&trees, state.head)?)?;
-                    check_blobs(&blobs, &target)?;
-                    load_tree(&trees, changeset.target)?;
-                    state.head = changeset.target;
-                    state.head_changeset = Some((id, offset));
-                    changesets.entry(id).or_insert((offset, changeset));
-                }
-                Event::MainAdvanced {
-                    location,
-                    changeset,
-                } => {
-                    let (_, cs) = changesets
-                        .get(&changeset)
-                        .ok_or_else(|| bad(offset, format!("unknown changeset {changeset}")))?;
-                    let loc = locations
-                        .get_mut(&location)
-                        .ok_or_else(|| bad(offset, format!("unknown location {location}")))?;
-                    if cs.base != loc.main {
-                        return Err(bad(offset, "main moved from a tree it was not at".into()));
-                    }
-                    loc.main = cs.target;
-                    loc.main_changeset = Some(changeset);
-                }
-                Event::LandingIntent { fork, changeset } => {
-                    let state = forks
-                        .get(&fork)
-                        .ok_or_else(|| bad(offset, format!("unknown fork {fork}")))?;
-                    if state.head_changeset.map(|(h, _)| h) != Some(changeset) {
-                        return Err(bad(offset, "landing intent for a non-head".into()));
-                    }
-                }
+                Err(e) => return Err(corrupt(e.to_string())),
             }
         }
 
-        let differ = |what: &str| CoreError::Inconsistent(what.to_string());
-        let table_locations: BTreeMap<LocationName, Location> = txn
+        let differ = |what: &str| CoreError::Inconsistent(format!("{what} differ from the log"));
+        let locations: BTreeMap<LocationName, Location> = txn
             .open_table(LOCATIONS)?
             .iter()?
-            .map(|r| {
-                let loc: Location = from_json(r?.1.value())?;
-                Ok((loc.name.clone(), loc))
-            })
+            .map(|r| from_json::<Location>(r?.1.value()).map(|l| (l.name.clone(), l)))
             .collect::<Result<_>>()?;
-        if table_locations != locations {
+        if locations != memory.locations {
             return Err(differ("locations"));
         }
-        let table_forks: BTreeMap<ForkName, Fork> = txn
+        let forks: BTreeMap<ForkName, Fork> = txn
             .open_table(FORKS)?
             .iter()?
-            .map(|r| {
-                let fork: Fork = from_json(r?.1.value())?;
-                Ok((fork.name.clone(), fork))
-            })
+            .map(|r| from_json::<Fork>(r?.1.value()).map(|f| (f.name.clone(), f)))
             .collect::<Result<_>>()?;
-        if table_forks != forks {
+        if forks != memory.forks {
             return Err(differ("forks"));
         }
-        let index = txn.open_table(CHANGESETS)?;
-        if index.len()? != changesets.len() as u64 {
-            return Err(differ("changeset index size"));
-        }
-        for (id, (offset, _)) in &changesets {
-            if index.get(id.as_bytes().as_slice())?.map(|v| v.value()) != Some(*offset) {
-                return Err(differ("changeset index entry"));
-            }
+        let index: BTreeMap<Vec<u8>, u64> = txn
+            .open_table(CHANGESETS)?
+            .iter()?
+            .map(|r| r.map(|(k, v)| (k.value().to_vec(), v.value())))
+            .collect::<Result<_, _>>()?;
+        let replayed: BTreeMap<Vec<u8>, u64> = memory
+            .changesets
+            .iter()
+            .map(|(id, (offset, _))| (id.as_bytes().to_vec(), *offset))
+            .collect();
+        if index != replayed {
+            return Err(differ("changeset index"));
         }
         Ok(ReplaySummary {
             records,
-            locations: locations.len(),
-            forks: forks.len(),
-            changesets: changesets.len(),
+            locations: memory.locations.len(),
+            forks: memory.forks.len(),
+            changesets: memory.changesets.len(),
         })
     }
+}
 
-    // ---- helpers ----------------------------------------------------------------
+/// The projection tables of one write transaction, as the rules see them.
+struct Tables<'t> {
+    locations: redb::Table<'t, &'static str, Bytes>,
+    forks: redb::Table<'t, &'static str, Bytes>,
+    changesets: redb::Table<'t, Bytes, u64>,
+    log: &'t redb::Table<'t, u64, Bytes>,
+}
 
-    /// An entry may enter the log only if its blob is ingested and, where a content
-    /// rule applies, the blob's bytes pass it.
-    fn check_entry(
-        &self,
-        blobs: &impl ReadableTable<Bytes, Bytes>,
-        path: &RepoPath,
-        entry: &Entry,
-    ) -> Result<()> {
-        let oid = entry.oid();
-        if blobs.get(oid.as_bytes().as_slice())?.is_none() {
-            return Err(CoreError::MissingBlob(oid));
-        }
-        if has_content_rule(path, entry.mode()) {
-            check_content(path, entry.mode(), &self.blobs.read(oid)?)?;
+impl View for Tables<'_> {
+    fn location(&self, name: &LocationName) -> Result<Option<Location>> {
+        get_json(&self.locations, name.as_str())
+    }
+
+    fn fork(&self, name: &ForkName) -> Result<Option<Fork>> {
+        get_json(&self.forks, name.as_str())
+    }
+
+    fn changeset(&self, id: ChangesetId) -> Result<Option<Changeset>> {
+        indexed_changeset(&self.changesets, self.log, id)
+    }
+
+    fn put_location(&mut self, location: &Location) -> Result<()> {
+        self.locations
+            .insert(location.name.as_str(), to_json(location).as_slice())?;
+        Ok(())
+    }
+
+    fn put_fork(&mut self, fork: &Fork) -> Result<()> {
+        self.forks
+            .insert(fork.name.as_str(), to_json(fork).as_slice())?;
+        Ok(())
+    }
+
+    fn index_changeset(&mut self, id: ChangesetId, offset: u64, _: &Changeset) -> Result<()> {
+        if self.changesets.get(id.as_bytes().as_slice())?.is_none() {
+            self.changesets.insert(id.as_bytes().as_slice(), offset)?;
         }
         Ok(())
+    }
+}
+
+fn indexed_changeset(
+    index: &impl ReadableTable<Bytes, u64>,
+    log: &impl ReadableTable<u64, Bytes>,
+    id: ChangesetId,
+) -> Result<Option<Changeset>> {
+    let Some(offset) = index.get(id.as_bytes().as_slice())?.map(|v| v.value()) else {
+        return Ok(None);
+    };
+    let value = log.get(offset)?.ok_or(CoreError::CorruptLog {
+        offset,
+        reason: "the changeset index points past the log".into(),
+    })?;
+    match decode_record(offset, value.value())?.event {
+        Event::DraftPublished { changeset, .. } => Ok(Some(changeset)),
+        other => Err(CoreError::CorruptLog {
+            offset,
+            reason: format!("the changeset index points at {other:?}"),
+        }),
     }
 }
 
@@ -652,27 +516,6 @@ fn last_offset(log: &impl ReadableTable<u64, Bytes>) -> Result<Option<u64>> {
     Ok(log.last()?.map(|(k, _)| k.value()))
 }
 
-/// Append `event` at the next offset. Only the transaction holding the log's one
-/// writer calls this, so offsets cannot race.
-fn append(log: &mut redb::Table<u64, Bytes>, event: Event) -> Result<u64> {
-    let offset = last_offset(log)?.map_or(0, |last| last + 1);
-    let record = Record {
-        offset,
-        at_ms: now_ms(),
-        event,
-    };
-    log.insert(offset, to_json(&record).as_slice())?;
-    Ok(offset)
-}
-
-fn read_record(log: &impl ReadableTable<u64, Bytes>, offset: u64) -> Result<Record> {
-    let value = log.get(offset)?.ok_or(CoreError::CorruptLog {
-        offset,
-        reason: "missing".into(),
-    })?;
-    decode_record(offset, value.value())
-}
-
 fn decode_record(offset: u64, bytes: &[u8]) -> Result<Record> {
     let record: Record = serde_json::from_slice(bytes).map_err(|e| CoreError::CorruptLog {
         offset,
@@ -687,21 +530,11 @@ fn decode_record(offset: u64, bytes: &[u8]) -> Result<Record> {
     Ok(record)
 }
 
-fn get_location(
+fn get_json<T: for<'de> Deserialize<'de>>(
     table: &impl ReadableTable<&'static str, Bytes>,
-    name: &LocationName,
-) -> Result<Location> {
-    let value = table
-        .get(name.as_str())?
-        .ok_or_else(|| CoreError::UnknownLocation(name.to_string()))?;
-    from_json(value.value())
-}
-
-fn get_fork(table: &impl ReadableTable<&'static str, Bytes>, name: &ForkName) -> Result<Fork> {
-    let value = table
-        .get(name.as_str())?
-        .ok_or_else(|| CoreError::UnknownFork(name.to_string()))?;
-    from_json(value.value())
+    key: &str,
+) -> Result<Option<T>> {
+    table.get(key)?.map(|v| from_json(v.value())).transpose()
 }
 
 fn to_json<T: Serialize>(value: &T) -> Vec<u8> {
@@ -729,7 +562,7 @@ fn decode_blob(bytes: &[u8]) -> BlobInfo {
     }
 }
 
-/// One stored git tree object's children.
+/// One stored git tree object's children: `(mode, name, oid)`.
 type Children = Vec<(String, String, GitOid)>;
 
 /// Store every git tree object of `tree` that is not stored yet.
@@ -776,19 +609,15 @@ fn load_tree(trees: &impl ReadableTable<Bytes, Bytes>, root: GitOid) -> Result<T
     Ok(tree)
 }
 
-fn check_blobs(blobs: &impl ReadableTable<Bytes, Bytes>, tree: &Tree) -> Result<()> {
-    for (_, entry) in tree.entries() {
-        if blobs.get(entry.oid().as_bytes().as_slice())?.is_none() {
-            return Err(CoreError::MissingBlob(entry.oid()));
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn ids() -> (LocationName, ForkName) {
+        (LocationName::new("l").unwrap(), ForkName::new("f").unwrap())
+    }
+
+    /// A location, a fork and one draft on it: four records, offsets 0..3.
     fn setup() -> (tempfile::TempDir, Store, Changeset) {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path()).unwrap();
@@ -798,8 +627,7 @@ mod tests {
             Entry::File(oid)
         };
         let main = Tree::from_entries([(RepoPath::new("d/a").unwrap(), put(b"1"))]).unwrap();
-        let l = LocationName::new("l").unwrap();
-        let f = ForkName::new("f").unwrap();
+        let (l, f) = ids();
         store.add_location(&l, None, &main).unwrap();
         store.create_fork(&f, &l).unwrap();
         let cs = Changeset::new(
@@ -808,23 +636,31 @@ mod tests {
         )
         .unwrap();
         store.publish_draft(&f, &cs).unwrap();
-        assert!(store.replay_check().is_ok());
+        store.create_fork(&ForkName::new("g").unwrap(), &l).unwrap();
+        assert_eq!(store.replay_check().unwrap().records, 4);
         (dir, store, cs)
     }
 
-    /// Write `event` into the log behind the store's back, at `offset`.
-    fn inject(store: &Store, offset: u64, event: Event) {
+    /// Write `record` into the log behind the rules' back.
+    fn inject(store: &Store, key: u64, record: Record) {
         let txn = store.begin().unwrap();
-        let record = Record {
-            offset,
-            at_ms: 0,
-            event,
-        };
         txn.open_table(LOG)
             .unwrap()
-            .insert(offset, to_json(&record).as_slice())
+            .insert(key, to_json(&record).as_slice())
             .unwrap();
         txn.commit().unwrap();
+    }
+
+    fn inject_event(store: &Store, offset: u64, event: Event) {
+        inject(
+            store,
+            offset,
+            Record {
+                offset,
+                at_ms: 0,
+                event,
+            },
+        );
     }
 
     fn corrupt(store: &Store) -> String {
@@ -834,84 +670,177 @@ mod tests {
         }
     }
 
-    #[test]
-    fn replay_refuses_a_duplicated_draft() {
-        let (_d, store, cs) = setup();
-        let fork = ForkName::new("f").unwrap();
-        let id = ChangesetId::of(&cs);
-        inject(
-            &store,
-            3,
-            Event::DraftPublished {
-                fork,
-                id,
-                changeset: cs,
-            },
-        );
-        assert!(corrupt(&store).contains("duplicates the head"));
+    fn inconsistent(store: &Store) -> String {
+        match store.replay_check() {
+            Err(CoreError::Inconsistent(what)) => what,
+            other => panic!("expected inconsistent tables, got {other:?}"),
+        }
     }
 
     #[test]
     fn replay_refuses_a_gap() {
         let (_d, store, _) = setup();
-        let fork = ForkName::new("f").unwrap();
-        let id = store
-            .fork(&fork)
-            .unwrap()
-            .unwrap()
-            .head_changeset
-            .unwrap()
-            .0;
+        let (l, _) = ids();
+        let g = ForkName::new("h").unwrap();
+        let main = store.location(&l).unwrap().unwrap().main;
+        inject_event(
+            &store,
+            5,
+            Event::ForkCreated {
+                fork: g,
+                location: l,
+                base: main,
+            },
+        );
+        assert!(corrupt(&store).contains("expected offset 4"));
+    }
+
+    #[test]
+    fn replay_refuses_a_record_filed_under_another_offset() {
+        let (_d, store, _) = setup();
+        let (l, _) = ids();
+        let main = store.location(&l).unwrap().unwrap().main;
+        let event = Event::ForkCreated {
+            fork: ForkName::new("h").unwrap(),
+            location: l,
+            base: main,
+        };
         inject(
             &store,
             4,
-            Event::LandingIntent {
-                fork,
-                changeset: id,
+            Record {
+                offset: 7,
+                at_ms: 0,
+                event,
             },
         );
-        assert!(corrupt(&store).contains("expected offset 3"));
+        assert!(corrupt(&store).contains("record says offset 7"));
+    }
+
+    #[test]
+    fn replay_refuses_a_duplicated_draft() {
+        let (_d, store, cs) = setup();
+        let (_, f) = ids();
+        let id = ChangesetId::of(&cs);
+        inject_event(
+            &store,
+            4,
+            Event::DraftPublished {
+                fork: f,
+                id,
+                changeset: cs,
+            },
+        );
+        assert!(corrupt(&store).contains("duplicates the record at 2"));
     }
 
     #[test]
     fn replay_refuses_a_draft_under_a_wrong_id() {
         let (_d, store, cs) = setup();
-        let fork = ForkName::new("f").unwrap();
-        let back = Changeset::between(
-            &store.fork_head(&fork).unwrap(),
-            &store.tree(cs.base).unwrap(),
-        );
-        inject(
+        let (_, f) = ids();
+        let back = Changeset::between(&store.fork_head(&f).unwrap(), &store.tree(cs.base).unwrap());
+        let id = ChangesetId::of(&cs);
+        inject_event(
             &store,
-            3,
+            4,
             Event::DraftPublished {
-                fork,
-                id: ChangesetId::of(&cs),
+                fork: f,
+                id,
                 changeset: back,
             },
         );
-        assert!(corrupt(&store).contains("not its changeset's"));
+        assert!(corrupt(&store).contains("is not its changeset's id"));
     }
 
     #[test]
-    fn replay_refuses_tables_the_log_does_not_explain() {
-        let (_d, store, _) = setup();
+    fn replay_refuses_a_fork_that_does_not_start_at_main() {
+        let (_d, store, cs) = setup();
+        let (l, _) = ids();
+        let event = Event::ForkCreated {
+            fork: ForkName::new("h").unwrap(),
+            location: l,
+            base: cs.target,
+        };
+        inject_event(&store, 4, event);
+        assert!(corrupt(&store).contains("starts from"));
+    }
+
+    #[test]
+    fn replay_refuses_main_moved_by_another_locations_fork() {
+        let (_d, store, cs) = setup();
+        let (_, f) = ids();
+        let other = LocationName::new("m").unwrap();
+        let main = store
+            .location(&LocationName::new("l").unwrap())
+            .unwrap()
+            .unwrap()
+            .main;
+        inject_event(
+            &store,
+            4,
+            Event::LocationAdded {
+                location: other.clone(),
+                remote: None,
+                main,
+            },
+        );
+        let event = Event::MainAdvanced {
+            location: other,
+            fork: f,
+            changeset: ChangesetId::of(&cs),
+        };
+        inject_event(&store, 5, event);
+        assert!(corrupt(&store).contains("is not a fork of location"));
+    }
+
+    fn rewrite<T: Serialize + for<'de> Deserialize<'de>>(
+        store: &Store,
+        table: TableDefinition<&str, Bytes>,
+        key: &str,
+        change: impl FnOnce(&mut T),
+    ) {
         let txn = store.begin().unwrap();
         {
-            let mut forks = txn.open_table(FORKS).unwrap();
-            let mut f: Fork = from_json(forks.get("f").unwrap().unwrap().value()).unwrap();
-            f.head = f.base;
-            forks.insert("f", to_json(&f).as_slice()).unwrap();
+            let mut t = txn.open_table(table).unwrap();
+            let mut value: T = from_json(t.get(key).unwrap().unwrap().value()).unwrap();
+            change(&mut value);
+            t.insert(key, to_json(&value).as_slice()).unwrap();
         }
         txn.commit().unwrap();
-        assert!(matches!(store.replay_check(), Err(CoreError::Inconsistent(w)) if w == "forks"));
+    }
+
+    #[test]
+    fn replay_refuses_a_locations_table_the_log_does_not_explain() {
+        let (_d, store, _) = setup();
+        rewrite(&store, LOCATIONS, "l", |l: &mut Location| {
+            l.remote = Some("git@example.com:x.git".into())
+        });
+        assert_eq!(inconsistent(&store), "locations differ from the log");
+    }
+
+    #[test]
+    fn replay_refuses_a_forks_table_the_log_does_not_explain() {
+        let (_d, store, _) = setup();
+        rewrite(&store, FORKS, "f", |f: &mut Fork| f.head = f.base);
+        assert_eq!(inconsistent(&store), "forks differ from the log");
+    }
+
+    #[test]
+    fn replay_refuses_a_changeset_index_the_log_does_not_explain() {
+        let (_d, store, cs) = setup();
+        let txn = store.begin().unwrap();
+        txn.open_table(CHANGESETS)
+            .unwrap()
+            .insert(ChangesetId::of(&cs).as_bytes().as_slice(), 3)
+            .unwrap();
+        txn.commit().unwrap();
+        assert_eq!(inconsistent(&store), "changeset index differ from the log");
     }
 
     #[test]
     fn a_stored_tree_that_does_not_rebuild_to_its_id_is_refused() {
         let (_d, store, cs) = setup();
-        // Point the root at different children: the subtree "d" now holds the base's
-        // "a" under a new name.
+        // Rename the root's only child: the tree now holds e/a, not d/a.
         let txn = store.begin().unwrap();
         {
             let mut trees = txn.open_table(TREES).unwrap();
