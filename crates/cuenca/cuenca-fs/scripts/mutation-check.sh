@@ -107,11 +107,8 @@ mutate src/checkout.rs 'check_content(path, entry.mode(), &bytes)?;' '' --test f
 
 mutate src/checkout.rs 'file.take(MAX_SYMLINK_TARGET as u64 + 1)' 'file.take(MAX_FILE_BYTES + 1)' --test fs refused_unread
 mutate src/scan.rs '            ignored_files.contains(*path)
-                || path' '            false
-                || path' --test fs refused_unless
-mutate src/scan.rs '            ignored_files.contains(*path)
-                || path' '            ignored_files.contains(*path) || ignored_dirs.contains(*path)
-                || path' --test fs became_a_directory
+                || (ignored_dirs' '            false
+                || (ignored_dirs' --test fs refused_unless
 
 mutate src/scan.rs '.any(|(i, _)| ignored_dirs.contains(&path[..i]))' '.any(|(i, _)| ignored_dirs.contains(&path[..i]) || ignored_files.contains(&path[..i]))' --test fs became_a_file
 
