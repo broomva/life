@@ -960,3 +960,24 @@ fn a_file_that_became_a_directory_under_a_directory_rule_is_an_ordinary_deletion
     let paths: Vec<&str> = snap.tree.entries().map(|(p, _)| p.as_str()).collect();
     assert_eq!(paths, [".forkignore"]);
 }
+
+#[test]
+fn a_directory_that_became_a_file_under_a_rule_for_both_kinds_is_an_ordinary_deletion() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "out/a.txt", b"a\n");
+    let base = snapshot_with(
+        dir.path(),
+        &Tree::new(),
+        &mut StatCache::new(),
+        &only(&ForkIgnore::parse("").unwrap()),
+    )
+    .unwrap();
+    write(dir.path(), ".forkignore", b"out\n");
+    fs::remove_dir_all(dir.path().join("out")).unwrap();
+    write(dir.path(), "out", b"now a file\n");
+    // `out` names both kinds; the walk skipped a file, and the base's directory is gone.
+    let snap = snapshot(dir.path(), &base.tree, &mut StatCache::new()).unwrap();
+    assert!(snap.dropped.is_empty());
+    let paths: Vec<&str> = snap.tree.entries().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(paths, [".forkignore"]);
+}
