@@ -23,9 +23,11 @@
 //! Every fork has a holder ([`Holder`]: a principal writing from one machine) and a
 //! fencing epoch, 1 when the fork is created. Only the holder, under the current epoch,
 //! may publish a draft or ask to land. [`Store::take_over`] moves the fork to a new
-//! holder by compare-and-swap on the epoch, which it increments. A publish by the
-//! holder of an earlier epoch is not dropped and not merged in: it becomes a draft of
-//! the sibling fork `<fork>-from-<node>` ([`sibling_name`]). [`Store::revoke`] makes the
+//! holder by compare-and-swap on the epoch, which it increments, and drops the old
+//! holder's landing intent. A publish by the holder of an earlier epoch is not
+//! dropped and not merged in: it becomes a draft of that epoch's sibling fork,
+//! `<fork>-from-<node>-e<epoch>` ([`sibling_name`]), one level further down if that
+//! sibling was taken over too. [`Store::revoke`] makes the
 //! log refuse every later write a principal asks for. Who a request comes from (keys,
 //! `tailscale whois`) is the authority's to establish (BRO-3251); this layer trusts
 //! the [`Writer`] it is given.

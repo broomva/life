@@ -16,8 +16,8 @@ use crate::blobs::BlobFiles;
 use crate::error::{CoreError, Result};
 use crate::event::{ChangesetId, Event, Record};
 use crate::names::{ForkName, LocationName, PrincipalName};
-use crate::owner::{Holder, Writer, sibling_name};
-use crate::state::{Applied, Fork, Location, Memory, View, apply};
+use crate::owner::{Holder, Writer};
+use crate::state::{Applied, Fork, Location, Memory, View, apply, check_writer, fenced_target};
 
 type Bytes = &'static [u8];
 
@@ -53,7 +53,11 @@ pub struct Published {
     /// Where the draft is: the fork asked for, or, for a publish under a stale epoch,
     /// its sibling fork `<fork>-from-<node>`.
     pub fork: ForkName,
-    /// True when the publish came under a stale epoch and went to the sibling fork.
+    /// The epoch the draft was written under on `fork`: the writer's own, or 1 on a
+    /// sibling (where the writer is the first holder). Further drafts to `fork` go
+    /// under this epoch.
+    pub epoch: u64,
+    /// True when the publish came under a stale epoch and went to a sibling fork.
     pub fenced: bool,
     /// The offset of the draft's record.
     pub offset: u64,
@@ -185,6 +189,17 @@ impl Store {
         event: Event,
         extra: impl FnOnce(&WriteTransaction) -> Result<()>,
     ) -> Result<(u64, bool)> {
+        self.record_with(|_| Ok(event), extra)
+    }
+
+    /// [`Store::record`], with the event built by `build` from the tables inside the
+    /// same transaction, for an event whose shape depends on the state (a fenced draft
+    /// and the sibling it goes to).
+    fn record_with(
+        &self,
+        build: impl FnOnce(&Tables<'_>) -> Result<Event>,
+        extra: impl FnOnce(&WriteTransaction) -> Result<()>,
+    ) -> Result<(u64, bool)> {
         let txn = self.begin()?;
         let offset;
         {
@@ -197,6 +212,7 @@ impl Store {
                 revoked: txn.open_table(REVOKED)?,
                 log: &log,
             };
+            let event = build(&view)?;
             if let Applied::Repeat(at) = apply(&mut view, offset, &event)? {
                 return Ok((at, false));
             }
@@ -262,14 +278,17 @@ impl Store {
     /// `.gitattributes`) must pass it.
     ///
     /// Only the fork's holder under its current epoch publishes to the fork. The holder
-    /// of an earlier epoch (the fork was taken over since) publishes to the sibling fork
-    /// `<fork>-from-<node>`, created on its first such draft, starting from the
-    /// changeset's base; the result says so (`fenced`). Anyone else is refused, and so
-    /// is a revoked principal.
+    /// of an earlier epoch (the fork was taken over since) publishes to that epoch's
+    /// sibling fork ([`crate::sibling_name`]), created on its first such draft from the
+    /// changeset's base, which may be any tree the store holds; the result says where
+    /// (`fork`, `epoch`, `fenced`). Anyone else is refused, and so is a revoked
+    /// principal.
     ///
     /// Publishing the changeset that is already the head is a retry: it appends nothing
     /// and returns the first publish's offset. A retry that arrives after a newer draft
-    /// is refused as `NotAtBase`, like any stale publish.
+    /// is refused as `NotAtBase`, like any stale publish. A retry of a draft the fork
+    /// accepted, sent after the fork was taken over, is a stale publish: it is kept in
+    /// the sibling as well (a copy, nothing lost).
     pub fn publish_draft(
         &self,
         fork: &ForkName,
@@ -281,48 +300,50 @@ impl Store {
             _ => None,
         }))?;
         let id = ChangesetId::of(changeset);
-        // The rules checked the base by id; applying checks the ops and the target.
-        let store_target = |txn: &WriteTransaction| {
-            let mut trees = txn.open_table(TREES)?;
-            let target = changeset.apply(&load_tree(&trees, changeset.base)?)?;
-            store_tree(&mut trees, &target)
-        };
-        let event = Event::DraftPublished {
-            fork: fork.clone(),
-            writer: writer.clone(),
-            id,
-            changeset: changeset.clone(),
-        };
-        match self.record(event, store_target) {
-            Ok((offset, fresh)) => Ok(Published {
-                id,
-                fork: fork.clone(),
-                fenced: false,
-                offset,
-                fresh,
-            }),
-            // Epochs only grow and a past epoch's holder never changes, so a publish
-            // that is stale now is stale in the next transaction too.
-            Err(CoreError::StaleEpoch { .. }) => {
-                let sibling = sibling_name(fork, &writer.holder.node)?;
-                let event = Event::DraftFenced {
+        // Where the draft goes is decided inside the transaction, from the fork as it
+        // is there: its holder under the current epoch writes the fork; the holder of a
+        // stale epoch writes that epoch's sibling. Anyone else is refused by the rules.
+        let mut placed = (fork.clone(), writer.epoch, false);
+        let build = |view: &Tables<'_>| {
+            let state = view
+                .fork(fork)?
+                .ok_or_else(|| CoreError::UnknownFork(fork.to_string()))?;
+            match check_writer(view, &state, writer) {
+                Err(CoreError::StaleEpoch { .. }) => {
+                    let sibling = fenced_target(view, &state, writer, changeset.base)?;
+                    placed = (sibling.name.clone(), sibling.epoch(), true);
+                    Ok(Event::DraftFenced {
+                        fork: fork.clone(),
+                        sibling: sibling.name,
+                        writer: writer.clone(),
+                        id,
+                        changeset: changeset.clone(),
+                    })
+                }
+                // Refusals come from the rules, which see the same event.
+                _ => Ok(Event::DraftPublished {
                     fork: fork.clone(),
-                    sibling: sibling.clone(),
                     writer: writer.clone(),
                     id,
                     changeset: changeset.clone(),
-                };
-                let (offset, fresh) = self.record(event, store_target)?;
-                Ok(Published {
-                    id,
-                    fork: sibling,
-                    fenced: true,
-                    offset,
-                    fresh,
-                })
+                }),
             }
-            Err(e) => Err(e),
-        }
+        };
+        let (offset, fresh) = self.record_with(build, |txn| {
+            // The rules checked the base by id; applying checks the ops and the target.
+            let mut trees = txn.open_table(TREES)?;
+            let target = changeset.apply(&load_tree(&trees, changeset.base)?)?;
+            store_tree(&mut trees, &target)
+        })?;
+        let (fork, epoch, fenced) = placed;
+        Ok(Published {
+            id,
+            fork,
+            epoch,
+            fenced,
+            offset,
+            fresh,
+        })
     }
 
     /// Take `fork` over for `holder`, as a compare-and-swap: the fork must be at
@@ -1075,7 +1096,7 @@ mod tests {
             4,
             Event::DraftFenced {
                 fork: f.clone(),
-                sibling: sibling_name(&f, &agent().node).unwrap(),
+                sibling: crate::owner::sibling_name(&f, 1, &agent().node),
                 writer: w1(),
                 id: ChangesetId::of(&back),
                 changeset: back,
@@ -1101,7 +1122,50 @@ mod tests {
                 changeset: back,
             },
         );
-        assert!(corrupt(&store).contains("is not the sibling of"));
+        assert!(corrupt(&store).contains("belongs in"));
+    }
+
+    #[test]
+    fn replay_refuses_a_draft_fenced_by_a_writer_that_never_held_the_fork() {
+        let (_d, store, cs) = setup();
+        let (_, f) = ids();
+        store.take_over(&f, 1, &other()).unwrap();
+        let back = next_draft(&store, &cs);
+        let stranger = Holder::new(
+            PrincipalName::new("stranger").unwrap(),
+            NodeId::new("n9").unwrap(),
+        );
+        inject_event(
+            &store,
+            5,
+            Event::DraftFenced {
+                fork: f.clone(),
+                sibling: crate::owner::sibling_name(&f, 1, &stranger.node),
+                writer: Writer::new(stranger, 1),
+                id: ChangesetId::of(&back),
+                changeset: back,
+            },
+        );
+        assert!(corrupt(&store).contains("does not hold fork"));
+    }
+
+    #[test]
+    fn replay_refuses_a_fork_created_under_a_reserved_name() {
+        let (_d, store, cs) = setup();
+        let (l, _) = ids();
+        let _ = cs;
+        let main = store.location(&l).unwrap().unwrap().main;
+        inject_event(
+            &store,
+            4,
+            Event::ForkCreated {
+                fork: ForkName::new("x-from-n1-e1").unwrap(),
+                location: l,
+                base: main,
+                holder: agent(),
+            },
+        );
+        assert!(corrupt(&store).contains("kept for sibling forks"));
     }
 
     #[test]

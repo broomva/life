@@ -175,11 +175,11 @@ fn a_takeover_while_the_holder_is_offline_keeps_its_drafts_in_a_sibling_10_of_10
         let owner_head = store.fork_head(&fork("f")).unwrap();
 
         // The agent reconnects and publishes its drafts under epoch 1.
-        let sibling = ForkName::new("f-from-nagentcntrl").unwrap();
+        let sibling = ForkName::new("f-from-nagentcntrl-e1").unwrap();
         for (i, cs) in drafts.iter().enumerate() {
             let p = store.publish_draft(&fork("f"), &w1(), cs).unwrap();
             assert!(p.fenced && p.fresh, "round {round} draft {i}: {p:?}");
-            assert_eq!(p.fork, sibling);
+            assert_eq!((&p.fork, p.epoch), (&sibling, 1));
         }
         // A retried publish of the last draft appends nothing.
         let len = store.len().unwrap();
@@ -223,74 +223,185 @@ fn a_sibling_is_written_like_any_fork_by_its_holder() {
     store.take_over(&fork("f"), 1, &owner()).unwrap();
     let one = write(&store, &main, &[("a", b"2")]);
     let p = store.publish_draft(&fork("f"), &w1(), &one).unwrap();
-    // The agent may also publish to the sibling directly, under its epoch there.
+    assert_eq!((p.fork.as_str(), p.epoch), ("f-from-nagentcntrl-e1", 1));
+    // The agent may also publish to the sibling directly, under the epoch it was given.
     let two = write(&store, &store.fork_head(&p.fork).unwrap(), &[("b", b"3")]);
-    let q = store.publish_draft(&p.fork, &w1(), &two).unwrap();
+    let q = store
+        .publish_draft(&p.fork, &Writer::new(agent(), p.epoch), &two)
+        .unwrap();
     assert!(!q.fenced && q.fork == p.fork);
     // Out of order is refused, not reordered.
     assert!(matches!(
         store.publish_draft(&fork("f"), &w1(), &one.clone()),
         Err(CoreError::NotAtBase { .. })
     ));
-    // The sibling can be taken over too; the agent's next stale publish is then refused,
-    // and its checkout still holds the draft.
-    store.take_over(&p.fork, 1, &owner()).unwrap();
-    let three = write(&store, &store.fork_head(&p.fork).unwrap(), &[("c", b"4")]);
-    let len = store.len().unwrap();
-    assert!(matches!(
-        store.publish_draft(&fork("f"), &w1(), &three),
-        Err(CoreError::NotHolder { .. })
-    ));
-    assert_eq!(store.len().unwrap(), len);
 }
 
+/// A sibling taken over in turn fences the agent again: its next stale draft goes one
+/// level down, never into the fork the owner now holds.
 #[test]
-fn a_fork_squatting_a_siblings_name_is_never_mixed_in() {
+fn a_draft_fenced_from_a_taken_over_sibling_goes_one_level_down() {
     let (_d, store, main) = forked();
-    let squat = ForkName::new("f-from-nagentcntrl").unwrap();
-    store.create_fork(&squat, &loc("l"), &agent()).unwrap();
     store.take_over(&fork("f"), 1, &owner()).unwrap();
-    let cs = write(&store, &main, &[("a", b"2")]);
-    assert!(matches!(
-        store.publish_draft(&fork("f"), &w1(), &cs),
-        Err(CoreError::ForkExists(name)) if name == squat.as_str()
-    ));
-    assert_eq!(store.fork_head(&squat).unwrap(), main);
+    let one = write(&store, &main, &[("a", b"2")]);
+    let s = store.publish_draft(&fork("f"), &w1(), &one).unwrap().fork;
+    store.take_over(&s, 1, &owner()).unwrap();
+    let owners = write(&store, &store.fork_head(&s).unwrap(), &[("o", b"owner")]);
+    store
+        .publish_draft(&s, &Writer::new(owner(), 2), &owners)
+        .unwrap();
+    let owner_head = store.fork_head(&s).unwrap();
+
+    let local = one.apply(&main).unwrap();
+    let two = write(&store, &local, &[("c", b"4")]);
+    let p = store.publish_draft(&fork("f"), &w1(), &two).unwrap();
+    assert_eq!(
+        (p.fork.as_str(), p.epoch, p.fenced),
+        ("f-from-nagentcntrl-e1-from-nagentcntrl-e1", 1, true)
+    );
+    assert_eq!(store.fork_head(&p.fork).unwrap().git_tree_id(), two.target);
+    assert_eq!(store.fork_head(&s).unwrap(), owner_head);
+    assert_eq!(
+        store.fork(&p.fork).unwrap().unwrap().parent,
+        Some(s.clone())
+    );
+    // Published straight to the taken-over sibling, it goes the same way.
+    let three = write(&store, &store.fork_head(&p.fork).unwrap(), &[("d", b"5")]);
+    let q = store.publish_draft(&s, &w1(), &three).unwrap();
+    assert_eq!(q.fork, p.fork);
+    assert_eq!(store.replay_check().unwrap().forks, 3);
 }
 
+/// One holder fenced twice, under two epochs (a laptop that goes offline twice): each
+/// episode's drafts are kept, in a sibling of their own.
 #[test]
-fn two_nodes_whose_ids_differ_only_in_case_do_not_share_a_sibling() {
+fn a_holder_fenced_under_two_epochs_keeps_both_episodes() {
+    let (_d, store, main) = forked();
+    store.take_over(&fork("f"), 1, &owner()).unwrap();
+    let d1 = write(&store, &main, &[("a", b"episode 1")]);
+    let p1 = store.publish_draft(&fork("f"), &w1(), &d1).unwrap();
+    // The agent gets the fork back (epoch 3), publishes, and is fenced again (epoch 4).
+    store.take_over(&fork("f"), 2, &agent()).unwrap();
+    let d2 = write(&store, &main, &[("b", b"accepted")]);
+    store
+        .publish_draft(&fork("f"), &Writer::new(agent(), 3), &d2)
+        .unwrap();
+    store.take_over(&fork("f"), 3, &owner()).unwrap();
+    let d3 = write(&store, &d2.apply(&main).unwrap(), &[("c", b"episode 2")]);
+    let p3 = store
+        .publish_draft(&fork("f"), &Writer::new(agent(), 3), &d3)
+        .unwrap();
+    assert_eq!(p1.fork.as_str(), "f-from-nagentcntrl-e1");
+    assert_eq!(p3.fork.as_str(), "f-from-nagentcntrl-e3");
+    assert_eq!(store.fork_head(&p1.fork).unwrap().git_tree_id(), d1.target);
+    assert_eq!(store.fork_head(&p3.fork).unwrap().git_tree_id(), d3.target);
+}
+
+/// Two principals on one machine (many agents on one Mac), both fenced: each keeps its
+/// drafts, in its own sibling, whichever publishes first.
+#[test]
+fn two_principals_on_one_node_are_each_kept() {
+    let (_d, store, main) = forked();
+    let agent2 = holder("agent2", "nAgentCNTRL");
+    store.take_over(&fork("f"), 1, &agent2).unwrap();
+    store.take_over(&fork("f"), 2, &owner()).unwrap();
+    let mine = write(&store, &main, &[("a", b"agent")]);
+    let theirs = write(&store, &main, &[("a", b"agent2")]);
+    let p2 = store
+        .publish_draft(&fork("f"), &Writer::new(agent2.clone(), 2), &theirs)
+        .unwrap();
+    let p1 = store.publish_draft(&fork("f"), &w1(), &mine).unwrap();
+    assert_eq!(p1.fork.as_str(), "f-from-nagentcntrl-e1");
+    assert_eq!(p2.fork.as_str(), "f-from-nagentcntrl-e2");
+    let s2 = store.fork(&p2.fork).unwrap().unwrap();
+    assert_eq!(s2.holder().unwrap(), &agent2);
+    assert_eq!(
+        store.fork_head(&p1.fork).unwrap().git_tree_id(),
+        mine.target
+    );
+    assert_eq!(
+        store.fork_head(&p2.fork).unwrap().git_tree_id(),
+        theirs.target
+    );
+}
+
+/// Node ids that differ only in case name the same text in a sibling's name, but
+/// different epochs, so different siblings.
+#[test]
+fn two_nodes_whose_ids_differ_only_in_case_are_each_kept() {
     let (_d, store, main) = forked();
     let upper = holder("agent", "NAGENTCNTRL");
     store.take_over(&fork("f"), 1, &upper).unwrap();
     store.take_over(&fork("f"), 2, &owner()).unwrap();
     let mine = write(&store, &main, &[("a", b"mine")]);
-    let p = store.publish_draft(&fork("f"), &w1(), &mine).unwrap();
-    assert_eq!(p.fork.as_str(), "f-from-nagentcntrl");
     let theirs = write(&store, &main, &[("a", b"theirs")]);
-    assert!(matches!(
-        store.publish_draft(&fork("f"), &Writer::new(upper, 2), &theirs),
-        Err(CoreError::NotHolder { .. })
-    ));
+    let p = store.publish_draft(&fork("f"), &w1(), &mine).unwrap();
+    let q = store
+        .publish_draft(&fork("f"), &Writer::new(upper, 2), &theirs)
+        .unwrap();
+    assert_ne!(p.fork, q.fork);
     assert_eq!(store.fork_head(&p.fork).unwrap().git_tree_id(), mine.target);
+    assert_eq!(
+        store.fork_head(&q.fork).unwrap().git_tree_id(),
+        theirs.target
+    );
 }
 
+/// Sibling names are kept for siblings: no one can create a fork that a stale draft
+/// would later be refused by.
 #[test]
-fn a_sibling_name_that_does_not_fit_is_refused() {
+fn a_fork_cannot_take_a_name_kept_for_siblings() {
+    let (_d, store, _) = forked();
+    for name in ["f-from-nagentcntrl-e1", "x-from.00", "a-fromage"] {
+        assert!(matches!(
+            store.create_fork(&fork(name), &loc("l"), &agent()),
+            Err(CoreError::ReservedName(n)) if n == name
+        ));
+    }
+    store
+        .create_fork(&fork("from-here"), &loc("l"), &agent())
+        .unwrap();
+}
+
+/// A fork whose name leaves no room for a readable sibling name still keeps its stale
+/// drafts, under the hashed name.
+#[test]
+fn a_long_forks_stale_drafts_are_kept_under_a_hashed_name() {
     let (_d, store) = store();
     let main = tree(&store, &[("a", b"1")]);
     store.add_location(&loc("l"), None, &main).unwrap();
-    let long = ForkName::new("f".repeat(100)).unwrap();
-    let node = holder("agent", &"n".repeat(30));
+    let long = ForkName::new("f".repeat(128)).unwrap();
+    let node = holder("agent", &"n".repeat(64));
     store.create_fork(&long, &loc("l"), &node).unwrap();
     store.take_over(&long, 1, &owner()).unwrap();
     let cs = write(&store, &main, &[("a", b"2")]);
+    let p = store
+        .publish_draft(&long, &Writer::new(node, 1), &cs)
+        .unwrap();
+    assert!(p.fenced && p.fork.as_str().contains("-from."), "{p:?}");
+    assert_eq!(store.fork_head(&p.fork).unwrap().git_tree_id(), cs.target);
+}
+
+/// A landing intent is its holder's request: a takeover drops it.
+#[test]
+fn a_takeover_drops_the_old_holders_landing_intent() {
+    let (_d, store, main) = forked();
+    let cs = write(&store, &main, &[("a", b"2")]);
+    let p = store.publish_draft(&fork("f"), &w1(), &cs).unwrap();
+    store
+        .record_landing_intent(&fork("f"), &w1(), p.id)
+        .unwrap();
+    store.take_over(&fork("f"), 1, &owner()).unwrap();
+    assert_eq!(
+        store.fork(&fork("f")).unwrap().unwrap().landing_intent,
+        None
+    );
+    // The new holder asking for the same landing is a new intent, not a retry.
     let len = store.len().unwrap();
-    assert!(matches!(
-        store.publish_draft(&long, &Writer::new(node, 1), &cs),
-        Err(CoreError::Name(_))
-    ));
-    assert_eq!(store.len().unwrap(), len);
+    let at = store
+        .record_landing_intent(&fork("f"), &Writer::new(owner(), 2), p.id)
+        .unwrap();
+    assert_eq!(at, len);
 }
 
 /// Spec row 2 · B + D: revoke a principal mid-session; its next request is refused.
@@ -406,7 +517,7 @@ fn a_takeover_fences_every_earlier_holder() {
     ] {
         let cs = write(&store, &main, &[("a", node.as_bytes())]);
         let p = store.publish_draft(&fork("f"), &writer, &cs).unwrap();
-        assert_eq!(p.fork.as_str(), format!("f-from-{node}"));
+        assert_eq!(p.fork.as_str(), format!("f-from-{node}-e{}", writer.epoch));
         // A stale holder cannot ask to land either.
         assert!(matches!(
             store.record_landing_intent(&fork("f"), &writer, p.id),

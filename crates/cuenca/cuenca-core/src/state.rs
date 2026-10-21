@@ -44,7 +44,8 @@ pub struct MainMove {
     pub offset: u64,
 }
 
-/// A fork as the log has it now. Fields added later are `#[serde(default)]`.
+/// A fork as the log has it now. Until the format freezes (BRO-3257) fields change
+/// freely; after that, fields added later are `#[serde(default)]`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Fork {
@@ -135,7 +136,7 @@ fn not_revoked(view: &impl View, principal: &PrincipalName) -> Result<()> {
 /// refused first; then the holder under the fork's current epoch may write; the holder
 /// of an earlier epoch is told its epoch is stale (its publish goes to a sibling fork);
 /// anyone else, or any epoch the fork has not reached, is not the holder.
-fn check_writer(view: &impl View, state: &Fork, writer: &Writer) -> Result<()> {
+pub(crate) fn check_writer(view: &impl View, state: &Fork, writer: &Writer) -> Result<()> {
     not_revoked(view, &writer.holder.principal)?;
     let current = state.epoch();
     if state.holder_at(writer.epoch) != Some(&writer.holder) {
@@ -181,6 +182,10 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
             holder,
         } => {
             not_revoked(view, &holder.principal)?;
+            // `-from` is kept for siblings, so a sibling's name is never taken.
+            if name.as_str().contains("-from") {
+                return Err(CoreError::ReservedName(name.to_string()));
+            }
             if view.fork(name)?.is_some() {
                 return Err(CoreError::ForkExists(name.to_string()));
             }
@@ -233,34 +238,13 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
                     )));
                 }
             }
-            if *sibling != sibling_name(name, &writer.holder.node)? {
+            let state = fenced_target(view, &parent, writer, changeset.base)?;
+            if state.name != *sibling {
                 return Err(CoreError::Inconsistent(format!(
-                    "{sibling:?} is not the sibling of {name:?} for node {}",
-                    writer.holder.node
+                    "draft {id} fenced from {name:?} belongs in {:?}, not {sibling:?}",
+                    state.name
                 )));
             }
-            let state = match view.fork(sibling)? {
-                None => Fork {
-                    name: sibling.clone(),
-                    location: parent.location.clone(),
-                    holders: vec![writer.holder.clone()],
-                    parent: Some(name.clone()),
-                    base: changeset.base,
-                    head: changeset.base,
-                    head_changeset: None,
-                    landing_intent: None,
-                },
-                // A fork of that name that is not this fork's sibling is not mixed in.
-                Some(other) if other.parent.as_ref() != Some(name) => {
-                    return Err(CoreError::ForkExists(sibling.to_string()));
-                }
-                // The sibling is written by its own holder under its own epoch, as any fork.
-                Some(existing) => {
-                    let as_holder = Writer::new(writer.holder.clone(), existing.epoch());
-                    check_writer(view, &existing, &as_holder)?;
-                    existing
-                }
-            };
             return draft(view, offset, state, id, changeset);
         }
         Event::TakenOver {
@@ -278,6 +262,8 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
                 });
             }
             state.holders.push(holder.clone());
+            // A landing intent is the old holder's request; it does not pass to the new one.
+            state.landing_intent = None;
             view.put_fork(&state)?;
         }
         Event::PrincipalRevoked { principal } => {
@@ -352,6 +338,43 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
         }
     }
     Ok(Applied::Fresh)
+}
+
+/// The fork a draft fenced from `parent` (written by `writer` under one of `parent`'s
+/// stale epochs) goes to: the sibling for that parent and epoch
+/// ([`sibling_name`]), new if it does not exist yet, starting from `base` (the draft's) and
+/// held by the writer under epoch 1. If that sibling has since been taken over, the
+/// writer is stale there too, and the draft goes one level down, to the sibling's own
+/// sibling for epoch 1, and so on. So a stale draft is always kept, and never written
+/// into a fork someone else holds.
+pub(crate) fn fenced_target(
+    view: &impl View,
+    parent: &Fork,
+    writer: &Writer,
+    base: GitOid,
+) -> Result<Fork> {
+    let (mut at, mut epoch) = (parent.clone(), writer.epoch);
+    loop {
+        let name = sibling_name(&at.name, epoch, &writer.holder.node);
+        let Some(sibling) = view.fork(&name)? else {
+            return Ok(Fork {
+                name,
+                location: at.location.clone(),
+                holders: vec![writer.holder.clone()],
+                parent: Some(at.name.clone()),
+                base,
+                head: base,
+                head_changeset: None,
+                landing_intent: None,
+            });
+        };
+        // Only this rule creates a fork under a sibling's name (fork creation refuses
+        // them), from this parent's holder under this epoch: the writer.
+        if sibling.epoch() == 1 {
+            return Ok(sibling);
+        }
+        (at, epoch) = (sibling, 1);
+    }
 }
 
 fn check_id(id: &ChangesetId, changeset: &Changeset) -> Result<()> {

@@ -115,12 +115,6 @@ mutate src/state.rs 'Ok(()) => {
                         "draft {id} is fenced from {name:?}, but its writer holds it"
                     )));
                 }' 'Ok(()) => {}' --lib
-mutate src/state.rs 'if *sibling != sibling_name(name, &writer.holder.node)? {' 'if false {' --lib
-mutate src/state.rs 'Some(other) if other.parent.as_ref() != Some(name) => {' 'Some(_) if false => {' --test forks
-mutate src/state.rs 'check_writer(view, &existing, &as_holder)?;' '' --test forks
-mutate src/state.rs 'base: changeset.base,
-                    head: changeset.base,' 'base: parent.base,
-                    head: changeset.base,' --test forks
 mutate src/state.rs 'let index = usize::try_from(epoch.checked_sub(1)?).ok()?;' 'let index = usize::try_from(epoch).ok()?;' --test forks
 mutate src/store.rs 'Err(CoreError::StaleEpoch { .. }) => {' 'Err(CoreError::StaleEpoch { .. }) if false => {' --test forks
 mutate src/store.rs 'if record.event.forks().contains(&fork) {' 'if true {' --test forks
@@ -128,7 +122,22 @@ mutate src/event.rs 'Event::DraftFenced { fork, sibling, .. } => vec![fork, sibl
 mutate src/store.rs 'Event::DraftPublished { changeset, .. } | Event::DraftFenced { changeset, .. } => {' 'Event::DraftPublished { changeset, .. } => {' --lib
 mutate src/store.rs 'if revoked != replayed {' 'if false {' --lib
 mutate src/owner.rs 'node.as_str().to_ascii_lowercase()' 'node.as_str()' --test forks
+mutate src/state.rs 'Err(e) => return Err(e),
+                Ok(()) => {' 'Err(_) => {}
+                Ok(()) => {' --lib
+mutate src/state.rs 'if state.name != *sibling {' 'if false {' --lib
+mutate src/state.rs 'if sibling.epoch() == 1 {' 'if true {' --test forks
+mutate src/state.rs '(at, epoch) = (sibling, 1);' '(at, epoch) = (sibling, epoch + 1);' --test forks
+mutate src/state.rs 'head: base,' 'head: at.head,' --test forks
+mutate src/state.rs 'if name.as_str().contains("-from") {' 'if false {' --test forks
+mutate src/state.rs 'state.landing_intent = None;' '' --test forks
+mutate src/store.rs 'placed = (sibling.name.clone(), sibling.epoch(), true);' '' --test forks
+# Sibling names: every (parent, epoch) its own name, and one that fits.
 mutate src/owner.rs '&& s.len() <= MAX_NODE_BYTES' '' --lib
+mutate src/owner.rs '&& s.bytes().all(|b| b.is_ascii_alphanumeric());' '&& s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'"'"'-'"'"');' --lib
+mutate src/owner.rs 'if readable.len() <= MAX_NAME_BYTES {' 'if true {' --lib
+mutate src/owner.rs 'hash.update(epoch.to_string().as_bytes());' '' --lib
+mutate src/owner.rs '"{parent}-from-{}-e{epoch}",' '"{parent}-from-{}-e1",' --lib
 # The changeset index keeps the first draft that recorded a changeset.
 mutate src/store.rs 'if self.changesets.get(id.as_bytes().as_slice())?.is_none() {' 'if true {' --test store
 # Replay: offsets, record bodies, duplicates, and each projection table.
