@@ -15,7 +15,7 @@ cuenca-tree = { path = "../cuenca-tree" }
 ignore = "0.4"
 libc = "0.2"
 rayon = "1"
-reflink-copy = "0.1"
+rustix = { version = "1", features = ["fs", "process"] }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

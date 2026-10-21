@@ -26,12 +26,20 @@
 //! Regular files (executable when the owner's execute bit is set, as git reads it) and
 //! symbolic links, which are never followed. Directories are implicit, so an empty
 //! directory is not recorded. A `.git` entry at any depth is skipped silently: it is a
-//! repository's own state, and the format cannot hold the name. Anything else a tree
+//! repository's own state, and the format cannot hold the name. The `.forkignore` rules
+//! apply before anything else, so they can leave out any name. Anything else a tree
 //! cannot hold fails the snapshot loudly with its path, so nothing is lost without a
 //! word: a name that is not UTF-8 or that the path rules refuse, two names that collide
 //! on a case-insensitive disk, an unreadable file, or a file that keeps changing while it
-//! is read. Sockets, FIFOs and device files are not content; they are left out and
-//! listed in [`Snapshot::skipped`].
+//! is read. Sockets, FIFOs and devices are not content; they are left out and listed in
+//! [`Snapshot::skipped`]. A path of the base that the rules leave out keeps its base
+//! entry: the snapshot did not look at it, so it does not claim it changed.
+//!
+//! The walk reaches everything relative to open directory descriptors, opens no file
+//! through a link and a directory only if it is the inode the listing saw, so a directory
+//! swapped for a symlink mid-scan cannot lead it outside the root. A checkout writes
+//! relative to one descriptor for its destination, which must be the caller's own and
+//! writable by no one else.
 //!
 //! # Trust
 //!
@@ -39,14 +47,16 @@
 //! a file whose stat matches its cached entry exactly is not read. An entry is cached
 //! only once its modification time is [`RACY_MARGIN`] older than the scan that recorded
 //! it, so a write landing within the clock's granularity after the scan cannot hide
-//! behind an unchanged stat (git's "racy git" rule). A checkout gives every file it
-//! writes a modification time that old, so the checkout's first snapshot reads nothing.
+//! behind an unchanged stat (git's "racy git" rule). The scan's clock is the host's, so a
+//! location on a network filesystem whose server clock runs more than the margin behind
+//! weakens this rule.
 //!
-//! A [`BlobSource`] is trusted to return the content it is asked for when it hands back
-//! a file to clone: [`ObjectDir`] is the authority's blob store, which verified every
-//! blob at ingest, and [`CheckoutSource`] offers a file only while its stat matches the
-//! stat cache, and checkout re-checks that stat after cloning. Bytes handed back in
-//! memory are hashed before they are written.
+//! A checkout's new cache vouches only for what was verified: content handed over in
+//! memory, which is hashed before it is written, and clones of files a source vouched for
+//! by stat ([`CheckoutSource`], whose stat the checkout re-checks after cloning). A file
+//! cloned from [`ObjectDir`], the authority's blob store, is taken on the store's word
+//! (it verified every blob at ingest) and is left out of the new cache, so the first
+//! snapshot of the checkout reads it.
 
 mod cache;
 mod checkout;

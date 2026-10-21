@@ -43,6 +43,20 @@ impl Stamp {
         }
     }
 
+    /// The same stamp from a raw `stat`, as `fstatat`/`fstat` return it. It equals
+    /// [`Stamp::of`] for the same file (tested).
+    pub(crate) fn from_stat(st: &rustix::fs::Stat) -> Self {
+        #[allow(clippy::unnecessary_cast)] // the field types differ between platforms
+        Self {
+            dev: st.st_dev as u64,
+            ino: st.st_ino as u64,
+            size: st.st_size as u64,
+            mtime: (st.st_mtime as i64, st.st_mtime_nsec as i64),
+            ctime: (st.st_ctime as i64, st.st_ctime_nsec as i64),
+            mode: st.st_mode as u32,
+        }
+    }
+
     pub(crate) fn size(&self) -> u64 {
         self.size
     }
@@ -199,6 +213,21 @@ mod tests {
         chmod.mode = 0o100755;
         assert_eq!(cache.lookup("f", &chmod), None);
         assert!(cache.lookup("f", &stamp).is_some());
+    }
+
+    #[test]
+    fn a_raw_stat_and_std_metadata_give_one_stamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f");
+        std::fs::write(&path, b"x").unwrap();
+        let raw = rustix::fs::statat(
+            rustix::fs::CWD,
+            &path,
+            rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
+        )
+        .unwrap();
+        let std = std::fs::symlink_metadata(&path).unwrap();
+        assert_eq!(Stamp::from_stat(&raw), Stamp::of(&std));
     }
 
     #[test]

@@ -27,13 +27,13 @@ pub enum FsError {
     Tree(#[from] TreeError),
     #[error(".forkignore: {0}")]
     Ignore(String),
-    #[error("{0}: a checkout needs an empty or missing directory")]
-    DestinationNotEmpty(PathBuf),
+    #[error("{path}: a checkout needs a missing or empty directory of its own: {why}")]
+    Destination { path: PathBuf, why: &'static str },
     #[error("no source has blob {0}")]
     MissingBlob(GitOid),
     #[error("the source returned content for {expected} that hashes to {actual}")]
     BlobMismatch { expected: GitOid, actual: GitOid },
-    #[error("{0}: the source file changed while it was cloned")]
+    #[error("{0}: its source file changed while it was cloned")]
     SourceChanged(PathBuf),
 }
 

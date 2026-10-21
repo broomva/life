@@ -161,10 +161,9 @@ fn snapshot_checkout_snapshot_is_the_same_tree_from_every_source() {
         let again = snapshot(&dest, &snap.tree, &mut fork_cache).unwrap();
         assert_eq!(again.tree.git_tree_id(), id, "{name}");
         assert!(again.is_clean(), "{name}");
-        assert_eq!(
-            again.hashed, 0,
-            "{name}: the first snapshot of a checkout reads nothing"
-        );
+        // What the checkout verified it vouches for; the object store's files it does not.
+        let unverified = if name == "objects" { 7 } else { 0 };
+        assert_eq!(again.hashed, unverified, "{name}");
         assert_eq!(git_tree_id(&dest), id.to_hex(), "{name}");
         let mode = fs::metadata(dest.join("bin/run.sh"))
             .unwrap()
@@ -328,11 +327,7 @@ fn git_state_is_left_out_and_special_files_are_listed() {
     let snap = snapshot(root, &Tree::new(), &mut StatCache::new()).unwrap();
     let paths: Vec<&str> = snap.tree.entries().map(|(p, _)| p.as_str()).collect();
     assert_eq!(paths, ["file"]);
-    let mut skipped: Vec<String> = snap
-        .skipped
-        .iter()
-        .map(|s| s.path.file_name().unwrap().to_string_lossy().into_owned())
-        .collect();
+    let mut skipped: Vec<String> = snap.skipped.iter().map(|s| s.path.clone()).collect();
     skipped.sort();
     assert_eq!(skipped, ["pipe", "sock"]);
 }
@@ -365,7 +360,7 @@ fn what_a_tree_cannot_hold_fails_loudly() {
 
 #[test]
 fn an_unreadable_file_fails_the_snapshot_with_its_path() {
-    if unsafe { libc::geteuid() } == 0 {
+    if rustix::process::geteuid().is_root() {
         return; // root reads everything
     }
     let dir = tempfile::tempdir().unwrap();
@@ -394,13 +389,19 @@ fn a_failed_snapshot_leaves_the_cache_alone() {
 
 #[test]
 fn checkout_refuses_a_non_empty_destination() {
-    let dest = tempfile::tempdir().unwrap();
-    write(dest.path(), "already", b"x\n");
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("dest");
+    fs::create_dir(&dest).unwrap();
+    set_mode(out.path(), "dest", 0o700);
+    write(&dest, "already", b"x\n");
     let tree = Tree::new();
-    assert!(matches!(
-        checkout(&tree, dest.path(), &Memory(HashMap::new())),
-        Err(FsError::DestinationNotEmpty(_))
-    ));
+    match checkout(&tree, &dest, &Memory(HashMap::new())) {
+        Err(FsError::Destination {
+            why: "it is not empty",
+            ..
+        }) => {}
+        other => panic!("expected a refusal for a non-empty destination, got {other:?}"),
+    }
 }
 
 #[test]
@@ -452,7 +453,7 @@ fn a_checkout_source_never_offers_a_file_edited_since_its_snapshot() {
     write(src.path(), "a.txt", b"v2\n");
     let source = CheckoutSource::new(src.path(), &snap.tree, &cache);
     let oid = snap.tree.get("a.txt").unwrap().oid();
-    assert_eq!(source.fetch(oid).unwrap(), None);
+    assert!(source.fetch(oid).unwrap().is_none());
     let out = tempfile::tempdir().unwrap();
     assert!(matches!(
         checkout(&snap.tree, &out.path().join("f"), &source),
@@ -574,7 +575,7 @@ struct Moved {
 impl BlobSource for Moved {
     fn fetch(&self, _: GitOid) -> io::Result<Option<Fetched>> {
         Ok(Some(Fetched::File {
-            path: self.path.clone(),
+            file: File::open(&self.path)?,
             stamp: Some(self.stamp),
         }))
     }
@@ -603,4 +604,157 @@ fn a_clone_whose_source_changed_is_refused() {
         Err(FsError::SourceChanged(_))
     ));
     assert!(!dest.join("a.txt").exists(), "the clone is removed");
+}
+
+#[test]
+fn ignored_paths_of_the_base_are_carried_not_deleted() {
+    // A tree that holds paths the defaults ignore (imported, or from rules that kept them).
+    let src = tempfile::tempdir().unwrap();
+    write(src.path(), "src/lib.rs", b"pub fn f() {}\n");
+    write(src.path(), "src/target/mod.rs", b"// tracked\n");
+    write(
+        src.path(),
+        "node_modules/vendored/index.js",
+        b"module.exports = 1;\n",
+    );
+    let keep_all = ForkIgnore::parse("").unwrap();
+    let base = snapshot_with(src.path(), &Tree::new(), &mut StatCache::new(), &keep_all).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("fork");
+    let mut cache = checkout(&base.tree, &dest, &memory_of(&base))
+        .unwrap()
+        .cache;
+    // No .forkignore: the defaults ignore both, and the snapshot carries them.
+    let snap = snapshot(&dest, &base.tree, &mut cache).unwrap();
+    assert!(snap.is_clean(), "{:?}", snap.changeset.ops);
+    assert_eq!(snap.tree.git_tree_id(), base.tree.git_tree_id());
+    // Editing an ignored file changes nothing the snapshot claims.
+    write(&dest, "src/target/mod.rs", b"// edited, host-local now\n");
+    assert!(snapshot(&dest, &base.tree, &mut cache).unwrap().is_clean());
+    // A deletion outside the ignored paths is still seen.
+    fs::remove_file(dest.join("src/lib.rs")).unwrap();
+    let ops: Vec<String> = snapshot(&dest, &base.tree, &mut cache)
+        .unwrap()
+        .changeset
+        .ops
+        .iter()
+        .map(|o| o.path().to_string())
+        .collect();
+    assert_eq!(ops, ["src/lib.rs"]);
+}
+
+#[test]
+fn a_checkout_source_serves_files_too_new_to_be_cached() {
+    let src = tempfile::tempdir().unwrap();
+    sample(src.path());
+    let mut cache = StatCache::new();
+    let snap = snapshot(src.path(), &Tree::new(), &mut cache).unwrap();
+    assert!(cache.is_empty(), "just written, nothing is settled");
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("fork");
+    let done = checkout(
+        &snap.tree,
+        &dest,
+        &CheckoutSource::new(src.path(), &snap.tree, &cache),
+    )
+    .unwrap();
+    let mut fork_cache = done.cache;
+    let again = snapshot(&dest, &snap.tree, &mut fork_cache).unwrap();
+    assert!(again.is_clean());
+    assert_eq!(
+        again.hashed, 0,
+        "bytes read and hashed by the source are vouched for"
+    );
+}
+
+#[test]
+fn a_checkout_source_tries_every_path_with_the_content() {
+    let src = tempfile::tempdir().unwrap();
+    write(src.path(), "a", b"same\n");
+    write(src.path(), "b", b"same\n");
+    age(src.path());
+    let mut cache = StatCache::new();
+    let snap = snapshot(src.path(), &Tree::new(), &mut cache).unwrap();
+    write(src.path(), "a", b"edited\n");
+    let out = tempfile::tempdir().unwrap();
+    let done = checkout(
+        &snap.tree,
+        &out.path().join("fork"),
+        &CheckoutSource::new(src.path(), &snap.tree, &cache),
+    )
+    .unwrap();
+    assert_eq!(fs::read(out.path().join("fork/a")).unwrap(), b"same\n");
+    // Both from the intact `b`, offered as a file the source vouches for (cloned or, on a
+    // disk that cannot clone, copied), so the new cache vouches for both.
+    assert_eq!(done.cloned + done.copied, 2);
+    assert_eq!(done.cache.len(), 2);
+}
+
+#[test]
+fn a_corrupt_object_is_not_vouched_for() {
+    let src = tempfile::tempdir().unwrap();
+    write(src.path(), "a.txt", b"right content\n");
+    let snap = snapshot(src.path(), &Tree::new(), &mut StatCache::new()).unwrap();
+    let objects = tempfile::tempdir().unwrap();
+    let hex = snap.tree.get("a.txt").unwrap().oid().to_hex();
+    write(
+        objects.path(),
+        &format!("{}/{}", &hex[..2], &hex[2..]),
+        b"TRUNC",
+    );
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("fork");
+    let mut cache = checkout(&snap.tree, &dest, &ObjectDir::new(objects.path()))
+        .unwrap()
+        .cache;
+    assert!(cache.is_empty());
+    let first = snapshot(&dest, &snap.tree, &mut cache).unwrap();
+    assert!(
+        !first.is_clean(),
+        "the first snapshot reads the file and sees the damage"
+    );
+}
+
+#[test]
+fn forkignore_rules_can_leave_out_a_name_no_tree_holds() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "weird\\name.txt", b"x\n");
+    write(dir.path(), "ok.txt", b"y\n");
+    write(dir.path(), ".forkignore", b"weird*\n");
+    let snap = snapshot(dir.path(), &Tree::new(), &mut StatCache::new()).unwrap();
+    let paths: Vec<&str> = snap.tree.entries().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(paths, [".forkignore", "ok.txt"]);
+}
+
+#[test]
+fn checkout_refuses_a_destination_it_does_not_own_alone() {
+    let out = tempfile::tempdir().unwrap();
+    let tree = Tree::new();
+    let empty = Memory(HashMap::new());
+    fs::create_dir(out.path().join("real")).unwrap();
+    symlink("real", out.path().join("link")).unwrap();
+    assert!(matches!(
+        checkout(&tree, &out.path().join("link"), &empty),
+        Err(FsError::Destination {
+            why: "it is a symlink",
+            ..
+        })
+    ));
+    fs::create_dir(out.path().join("shared")).unwrap();
+    set_mode(out.path(), "shared", 0o775);
+    assert!(matches!(
+        checkout(&tree, &out.path().join("shared"), &empty),
+        Err(FsError::Destination {
+            why: "group or others can write it",
+            ..
+        })
+    ));
+    write(out.path(), "file", b"x");
+    assert!(matches!(
+        checkout(&tree, &out.path().join("file"), &empty),
+        Err(FsError::Destination {
+            why: "it is not a directory",
+            ..
+        })
+    ));
 }

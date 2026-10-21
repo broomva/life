@@ -2,7 +2,10 @@
 
 use crate::error::{FsError, Result};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
-use std::io;
+use rustix::fs::{CWD, Mode, OFlags, openat};
+use std::fs::File;
+use std::io::Read as _;
+use std::os::fd::OwnedFd;
 use std::path::Path;
 
 /// The file name, at a location's root.
@@ -52,20 +55,70 @@ impl ForkIgnore {
     }
 
     /// The rules of `root/.forkignore`, or the defaults when there is no such file. A
-    /// file that exists is the whole rule set: the location may drop a default.
+    /// file that exists is the whole rule set: the location may drop a default. It must be
+    /// a regular file; a symlink is refused rather than followed.
     pub fn for_root(root: &Path) -> Result<Self> {
-        let path = root.join(FORKIGNORE);
-        match std::fs::read_to_string(&path) {
-            Ok(text) => Self::parse(&text),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Self::defaults()),
-            Err(e) => Err(FsError::Io { path, source: e }),
-        }
+        let dir = open_dir(root)?;
+        Ok(Self::load(&dir, root)?.0)
     }
 
-    /// Whether `path` (relative to the root, `/`-separated) is ignored.
-    pub fn is_ignored(&self, path: &str, is_dir: bool) -> bool {
+    /// [`ForkIgnore::for_root`] through an open root directory, with the bytes the rules
+    /// were parsed from (`None` when the defaults apply).
+    pub(crate) fn load(dir: &OwnedFd, root: &Path) -> Result<(Self, Option<Vec<u8>>)> {
+        let path = root.join(FORKIGNORE);
+        let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+        let fd = match openat(dir, FORKIGNORE, flags, Mode::empty()) {
+            Ok(fd) => fd,
+            Err(rustix::io::Errno::NOENT) => return Ok((Self::defaults(), None)),
+            Err(rustix::io::Errno::LOOP) => return Err(not_a_file()),
+            Err(e) => return Err(FsError::io(path)(e.into())),
+        };
+        let mut file = File::from(fd);
+        if !file.metadata().map_err(FsError::io(&path))?.is_file() {
+            return Err(not_a_file());
+        }
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(FsError::io(&path))?;
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|_| FsError::Ignore("the file is not UTF-8".into()))?;
+        Ok((Self::parse(text)?, Some(bytes)))
+    }
+
+    /// Whether `path` (relative to the root) is ignored.
+    pub fn is_ignored(&self, path: impl AsRef<Path>, is_dir: bool) -> bool {
         self.matcher.matched(path, is_dir).is_ignore()
     }
+
+    /// Whether a snapshot leaves the file at `path` out: the file is ignored, or one of
+    /// its directories is. This is exactly what the walk does, which does not descend into
+    /// an ignored directory.
+    pub fn excludes(&self, path: &str) -> bool {
+        let mut end = 0;
+        while let Some(i) = path[end..].find('/') {
+            end += i;
+            if self.is_ignored(&path[..end], true) {
+                return true;
+            }
+            end += 1;
+        }
+        self.is_ignored(path, false)
+    }
+}
+
+fn not_a_file() -> FsError {
+    FsError::Ignore(format!("{FORKIGNORE} must be a regular file"))
+}
+
+/// Open a directory for an fd-relative walk or checkout. `root` itself may be reached
+/// through a symlink; what is under it is never followed.
+pub(crate) fn open_dir(root: &Path) -> Result<OwnedFd> {
+    openat(
+        CWD,
+        root,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|e| FsError::io(root)(e.into()))
 }
 
 #[cfg(test)]
@@ -113,5 +166,33 @@ mod tests {
         assert!(!rules.is_ignored("keep.log", false));
         assert!(rules.is_ignored("build", true));
         assert!(!rules.is_ignored("src/build", true));
+    }
+
+    #[test]
+    fn excludes_matches_the_walk_under_an_ignored_directory() {
+        let rules = ForkIgnore::parse("node_modules\n!node_modules/keep\n").unwrap();
+        assert!(
+            rules.excludes("node_modules/keep"),
+            "git cannot re-include under an ignored dir"
+        );
+        assert!(rules.excludes("a/node_modules/x/y.js"));
+        assert!(!rules.excludes("src/node_modules.rs"));
+    }
+
+    #[test]
+    fn a_forkignore_that_is_a_symlink_or_a_directory_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("rules"), b".env\n").unwrap();
+        std::os::unix::fs::symlink("rules", dir.path().join(FORKIGNORE)).unwrap();
+        assert!(matches!(
+            ForkIgnore::for_root(dir.path()),
+            Err(FsError::Ignore(_))
+        ));
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(FORKIGNORE)).unwrap();
+        assert!(matches!(
+            ForkIgnore::for_root(dir.path()),
+            Err(FsError::Ignore(_))
+        ));
     }
 }
