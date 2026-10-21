@@ -6,8 +6,8 @@
 //! snapshot (spec section 2): no change notification is trusted to say what changed. A
 //! [`StatCache`] makes the scan cheap, by hashing only files whose stat changed since
 //! the cache recorded them. A path the location's [`ForkIgnore`] names never enters a
-//! snapshot, even one the base held: that one is dropped and reported in
-//! [`Snapshot::dropped`].
+//! snapshot; if the base holds one, [`snapshot`] fails loudly rather than delete it, and
+//! [`snapshot_dropping`] is the explicit way to drop it.
 //!
 //! ```no_run
 //! use cuenca_fs::{StatCache, checkout, snapshot, CheckoutSource};
@@ -57,7 +57,7 @@
 //! memory and files ([`ObjectDir`], any other source) are hashed, and only a file this
 //! crate's [`CheckoutSource`] vouches for by its stat cache is cloned unhashed, while its
 //! stat is that stamp, checked again after cloning. A clone also carries its source's
-//! extended attributes, which no tree records.
+//! extended attributes and, on APFS, its ACL, which no tree records.
 
 mod cache;
 mod checkout;
@@ -69,4 +69,6 @@ pub use cache::{RACY_MARGIN, Stamp, StatCache};
 pub use checkout::{BlobSource, Checkout, CheckoutSource, Fetched, ObjectDir, Vouched, checkout};
 pub use error::FsError;
 pub use ignore::{DEFAULT_FORKIGNORE, FORKIGNORE, ForkIgnore};
-pub use scan::{Content, MAX_FILE_BYTES, NewBlob, Skipped, Snapshot, snapshot, snapshot_with};
+pub use scan::{
+    Content, MAX_FILE_BYTES, NewBlob, Skipped, Snapshot, snapshot, snapshot_dropping, snapshot_with,
+};

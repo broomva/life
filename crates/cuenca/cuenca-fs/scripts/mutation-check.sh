@@ -30,7 +30,11 @@ p.write_text(s.replace(sys.argv[2], sys.argv[3]))
 PY
   then echo "ANCHOR MISSING  $file: $old"; survived=1; restore; return; fi
   if cargo test -q -p cuenca-fs "$@" >"$backup/log" 2>&1; then
-    echo "SURVIVED  $file: $old"; survived=1
+    if ! grep -qE 'test result: ok\. [1-9]' "$backup/log"; then
+      echo "NO TESTS  $file: $old (the filter $* ran no test)"; survived=1
+    else
+      echo "SURVIVED  $file: $old"; survived=1
+    fi
   elif grep -qE '^error\[E[0-9]+\]|could not compile|failed to select a version' "$backup/log"; then
     echo "NO BUILD  $file: $old (a mutant that does not build proves nothing)"; survived=1
   else
@@ -48,7 +52,7 @@ mutate src/scan.rs 'if ignore.is_ignored(&rel, kind == FileType::Directory) {' '
 mutate src/scan.rs 'if held != parsed.map(GitOid::for_blob) {' 'if false {' --lib rules_that_changed
 mutate src/scan.rs 'if after.as_deref() != parsed {' 'if false {' --lib rules_changed_after
 # base paths the rules name are dropped, and reported
-mutate src/scan.rs '.filter(|path| ignore.excludes(path))' '.filter(|_| false)' --test fs dropped_and_reported
+mutate src/scan.rs '.filter(|path| ignore.excludes(path))' '.filter(|_| false)' --test fs refused_unless
 
 # what a snapshot holds
 mutate src/scan.rs 'if bytes == b"." || bytes == b".." || bytes == b".git" {' 'if bytes == b"." || bytes == b".." {' --test fs git_state
@@ -96,5 +100,10 @@ mutate src/checkout.rs 'if !meta.is_file() || meta.nlink() != 1 {' 'if !meta.is_
 mutate src/checkout.rs '&& Stamp::of(&file.metadata()?) == *stamp' '&& true' --test fs edited_since
 mutate src/checkout.rs 'if Blob::of(&content).map(|b| b.oid()) == Some(oid) {' 'if true {' --test fs edited_since
 mutate src/checkout.rs '.permissions() != mode {' '.permissions() == u32::MAX {' --test fs every_source
+
+mutate src/scan.rs 'if !dropped.is_empty() && !drop_ignored {' 'if false {' --test fs refused_unless
+mutate src/checkout.rs 'Fetched::Vouched(v) if v.oid == oid => (v.file, v.stamp),' 'Fetched::Vouched(v) if true => (v.file, v.stamp),' --test fs its_own_blob
+mutate src/checkout.rs 'if has_content_rule(path, entry.mode()) {' 'if false {' --test fs refused_at_checkout
+mutate src/checkout.rs 'check_content(path, entry.mode(), &bytes)?;' '' --test fs refused_at_checkout
 
 exit $survived

@@ -23,6 +23,10 @@ pub enum FsError {
     Collision(PathBuf),
     #[error("{0}: the file kept changing while it was read; snapshot again once it settles")]
     Unstable(PathBuf),
+    #[error(
+        "the base holds paths the rules name, which this snapshot would delete from the fork: {0:?}; snapshot with `snapshot_dropping` to accept that"
+    )]
+    Ignored(Vec<String>),
     #[error("the files cannot form a tree: {0}")]
     Tree(#[from] TreeError),
     #[error(".forkignore: {0}")]

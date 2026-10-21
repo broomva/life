@@ -567,7 +567,7 @@ fn a_file_over_the_blob_limit_fails_the_snapshot() {
 }
 
 #[test]
-fn ignored_paths_the_base_holds_are_dropped_and_reported() {
+fn a_base_holding_ignored_paths_is_refused_unless_the_drop_is_accepted() {
     // A tree that holds paths the defaults name (imported, or from rules that kept them).
     let src = tempfile::tempdir().unwrap();
     write(src.path(), "src/lib.rs", b"pub fn f() {}\n");
@@ -582,11 +582,19 @@ fn ignored_paths_the_base_holds_are_dropped_and_reported() {
     let out = tempfile::tempdir().unwrap();
     let dest = out.path().join("fork");
     checkout(&base.tree, &dest, &memory_of(&base)).unwrap();
-    // No .forkignore, so the defaults name both: the snapshot holds neither, deletes
-    // both, and says so; the files stay on disk.
+    // No .forkignore, so the defaults name both. Leaving them out would delete them
+    // from the fork, so a plain snapshot refuses, naming them, and publishes nothing.
     write(&dest, "src/target/mod.rs", b"// edited, host-local now\n");
     let mut cache = StatCache::new();
-    let snap = snapshot(&dest, &base.tree, &mut cache).unwrap();
+    match snapshot(&dest, &base.tree, &mut cache) {
+        Err(FsError::Ignored(paths)) => assert_eq!(
+            paths,
+            ["node_modules/vendored/index.js", "src/target/mod.rs"]
+        ),
+        other => panic!("expected a refusal naming the paths, got {other:?}"),
+    }
+    // Accepted explicitly: the snapshot holds neither, deletes both, and says so.
+    let snap = cuenca_fs::snapshot_dropping(&dest, &base.tree, &mut cache).unwrap();
     let paths: Vec<&str> = snap.tree.entries().map(|(p, _)| p.as_str()).collect();
     assert_eq!(paths, ["src/lib.rs"]);
     assert_eq!(
@@ -623,7 +631,7 @@ fn a_kind_change_under_a_directory_rule_does_not_wedge_snapshots() {
     write(dir.path(), ".forkignore", b"out/\n");
     fs::remove_dir_all(dir.path().join("out")).unwrap();
     write(dir.path(), "out", b"now a file\n");
-    let snap = snapshot(dir.path(), &base.tree, &mut StatCache::new()).unwrap();
+    let snap = cuenca_fs::snapshot_dropping(dir.path(), &base.tree, &mut StatCache::new()).unwrap();
     let paths: Vec<&str> = snap.tree.entries().map(|(p, _)| p.as_str()).collect();
     assert_eq!(paths, [".forkignore", "out"]);
 }
@@ -758,4 +766,92 @@ fn an_ignored_directory_is_never_entered() {
         .map(|(p, _)| p.to_string())
         .collect();
     assert_eq!(paths, ["src/a.rs"]);
+}
+
+/// A source that answers every request with what another source gives for one blob.
+struct Relay(CheckoutSource, GitOid);
+
+impl BlobSource for Relay {
+    fn fetch(&self, _: GitOid) -> io::Result<Option<Fetched>> {
+        self.0.fetch(self.1)
+    }
+}
+
+#[test]
+fn a_vouched_file_is_taken_only_for_its_own_blob() {
+    let src = tempfile::tempdir().unwrap();
+    write(src.path(), "good.txt", b"good content\n");
+    age(src.path());
+    let mut cache = StatCache::new();
+    let snap = snapshot(src.path(), &Tree::new(), &mut cache).unwrap();
+    let good = snap.tree.get("good.txt").unwrap().oid();
+    let tree = Tree::from_entries([(
+        cuenca_tree::RepoPath::new("a.txt").unwrap(),
+        Entry::file(b"what the tree says\n"),
+    )])
+    .unwrap();
+    let relay = Relay(CheckoutSource::new(src.path(), &snap.tree, &cache), good);
+    let out = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        checkout(&tree, &out.path().join("fork"), &relay),
+        Err(FsError::BlobMismatch { .. })
+    ));
+}
+
+#[test]
+fn a_gitattributes_git_cannot_parse_is_refused_at_checkout() {
+    let content = format!("*.md {}\n", "x".repeat(3000)).into_bytes();
+    let tree = Tree::from_entries([(
+        cuenca_tree::RepoPath::new("docs/.gitattributes").unwrap(),
+        Entry::file(&content),
+    )])
+    .unwrap();
+    let oid = tree.get("docs/.gitattributes").unwrap().oid();
+    let out = tempfile::tempdir().unwrap();
+    let memory = Memory(HashMap::from([(oid, content.clone())]));
+    assert!(matches!(
+        checkout(&tree, &out.path().join("a"), &memory),
+        Err(FsError::Tree(_))
+    ));
+    let objects = tempfile::tempdir().unwrap();
+    let hex = oid.to_hex();
+    write(
+        objects.path(),
+        &format!("{}/{}", &hex[..2], &hex[2..]),
+        &content,
+    );
+    assert!(matches!(
+        checkout(
+            &tree,
+            &out.path().join("b"),
+            &ObjectDir::new(objects.path())
+        ),
+        Err(FsError::Tree(_))
+    ));
+}
+
+#[test]
+fn a_symlink_target_too_long_to_check_out_is_refused_unread() {
+    let tree = Tree::from_entries([(
+        cuenca_tree::RepoPath::new("link").unwrap(),
+        Entry::symlink(b"t"),
+    )])
+    .unwrap();
+    let hex = tree.get("link").unwrap().oid().to_hex();
+    // The object for the link holds far more than any target can be.
+    let objects = tempfile::tempdir().unwrap();
+    write(
+        objects.path(),
+        &format!("{}/{}", &hex[..2], &hex[2..]),
+        &vec![b'a'; 4096],
+    );
+    let out = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        checkout(
+            &tree,
+            &out.path().join("fork"),
+            &ObjectDir::new(objects.path())
+        ),
+        Err(FsError::Tree(cuenca_tree::TreeError::SymlinkTarget { .. }))
+    ));
 }

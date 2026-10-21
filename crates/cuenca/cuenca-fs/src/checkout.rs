@@ -11,7 +11,10 @@
 use crate::cache::{Stamp, StatCache};
 use crate::error::{FsError, Result};
 use crate::scan::MAX_FILE_BYTES;
-use cuenca_tree::{Blob, Entry, GitOid, Mode, RepoPath, Tree, TreeError, check_content};
+use cuenca_tree::{
+    Blob, Entry, GitOid, MAX_GITATTRIBUTES_BYTES, MAX_SYMLINK_TARGET, Mode, RepoPath, Tree,
+    TreeError, check_content, has_content_rule,
+};
 use rayon::prelude::*;
 use rustix::fs::{AtFlags, CWD, Dir, OFlags, mkdirat, openat, symlinkat, unlinkat};
 use rustix::io::Errno;
@@ -48,9 +51,11 @@ pub enum Fetched {
     Vouched(Vouched),
 }
 
-/// An open file and the stat under which a [`StatCache`] recorded its content.
+/// An open file, the blob a [`StatCache`] recorded it as, and the stat it was recorded
+/// under. A checkout takes it only for that blob.
 #[derive(Debug)]
 pub struct Vouched {
+    oid: GitOid,
     file: File,
     stamp: Stamp,
 }
@@ -139,6 +144,7 @@ impl BlobSource for CheckoutSource {
                 && Stamp::of(&file.metadata()?) == *stamp
             {
                 return Ok(Some(Fetched::Vouched(Vouched {
+                    oid,
                     file,
                     stamp: *stamp,
                 })));
@@ -267,15 +273,16 @@ pub fn checkout(tree: &Tree, dest: &Path, source: &dyn BlobSource) -> Result<Che
             None => return Err(FsError::MissingBlob(oid)),
             Some(Fetched::Bytes(bytes)) => bytes,
             Some(Fetched::File(file) | Fetched::Vouched(Vouched { file, .. })) => {
+                // A target longer than any checkout can hold is refused unread.
                 let mut bytes = Vec::new();
-                file.take(MAX_FILE_BYTES + 1)
+                file.take(MAX_SYMLINK_TARGET as u64 + 1)
                     .read_to_end(&mut bytes)
                     .map_err(FsError::io(&abs))?;
                 bytes
             }
         };
-        verify(oid, &target)?;
         check_content(path, Mode::Symlink, &target)?;
+        verify(oid, &target)?;
         let (parent, name) = split(path.as_str());
         let at = open_under(&root, dest, parent)?;
         symlinkat(OsStr::from_bytes(&target), &at, name).map_err(errno(abs))?;
@@ -389,13 +396,22 @@ fn write_file(
         None => return Err(FsError::MissingBlob(oid)),
         Some(fetched @ (Fetched::File(_) | Fetched::Vouched(_))) => {
             let (file, stamp) = match fetched {
-                Fetched::Vouched(Vouched { file, stamp }) => (file, stamp),
+                Fetched::Vouched(v) if v.oid == oid => (v.file, v.stamp),
+                Fetched::Vouched(v) => {
+                    return Err(FsError::BlobMismatch {
+                        expected: oid,
+                        actual: v.oid,
+                    });
+                }
                 Fetched::File(file) => {
                     let stamp = verify_file(oid, &file, &abs)?;
                     (file, stamp)
                 }
                 Fetched::Bytes(_) => unreachable!("matched above"),
             };
+            if has_content_rule(path, entry.mode()) {
+                check_content(path, entry.mode(), &read_ruled(&file, &abs)?)?;
+            }
             let (cloned, written) = clone_or_copy(&file, root, &name).map_err(FsError::io(&abs))?;
             let now = Stamp::of(&file.metadata().map_err(FsError::io(&abs))?);
             if now != stamp {
@@ -406,6 +422,7 @@ fn write_file(
         }
         Some(Fetched::Bytes(bytes)) => {
             verify(oid, &bytes)?;
+            check_content(path, entry.mode(), &bytes)?;
             let mut file = create(root, &name).map_err(FsError::io(&abs))?;
             file.write_all(&bytes).map_err(FsError::io(&abs))?;
             (false, Some(file))
@@ -443,6 +460,23 @@ fn reopen_alone(root: &OwnedFd, name: &CString, abs: &Path) -> Result<File> {
         });
     }
     Ok(file)
+}
+
+/// The content of a file a content rule applies to (`.gitattributes`), read up to one
+/// byte past the largest such file git accepts.
+fn read_ruled(file: &File, abs: &Path) -> Result<Vec<u8>> {
+    let limit = MAX_GITATTRIBUTES_BYTES as u64 + 1;
+    let mut bytes = Vec::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    while (bytes.len() as u64) < limit {
+        match file.read_at(&mut buf, bytes.len() as u64) {
+            Ok(0) => break,
+            Ok(n) => bytes.extend_from_slice(&buf[..n]),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(FsError::io(abs)(e)),
+        }
+    }
+    Ok(bytes)
 }
 
 /// Hash an open file that came without a stamp and return the stamp it was hashed under,
@@ -586,6 +620,7 @@ mod tests {
         impl BlobSource for Stale {
             fn fetch(&self, _: GitOid) -> io::Result<Option<Fetched>> {
                 Ok(Some(Fetched::Vouched(Vouched {
+                    oid: GitOid::for_blob(b"content\n"),
                     file: File::open(&self.0)?,
                     stamp: self.1,
                 })))
