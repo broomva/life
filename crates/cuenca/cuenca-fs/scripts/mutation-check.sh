@@ -113,4 +113,9 @@ mutate src/scan.rs '            ignored_files.contains(*path)
                 || path' '            ignored_files.contains(*path) || ignored_dirs.contains(*path)
                 || path' --test fs became_a_directory
 
+# The macOS clone must not follow a link planted at the name (Linux creates with O_EXCL).
+if [ "$(uname)" = Darwin ]; then
+  mutate src/checkout.rs '            CLONE_NOFOLLOW,' '            0,' --test fs planted_at_a_file_name
+fi
+
 exit $survived

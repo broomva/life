@@ -812,6 +812,42 @@ fn an_ignored_directory_is_never_entered() {
     assert_eq!(paths, ["src/a.rs"]);
 }
 
+/// A source that, like a writer of `dest` racing the checkout, plants a dangling
+/// symlink at the name about to be written, pointing outside `dest`.
+struct Planting {
+    blob: std::path::PathBuf,
+    at: std::path::PathBuf,
+    target: std::path::PathBuf,
+}
+
+impl BlobSource for Planting {
+    fn fetch(&self, _: GitOid) -> io::Result<Option<Fetched>> {
+        std::os::unix::fs::symlink(&self.target, &self.at)?;
+        Ok(Some(Fetched::File(fs::File::open(&self.blob)?)))
+    }
+}
+
+#[test]
+fn a_link_planted_at_a_file_name_is_never_followed() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("blob"), b"tree content\n").unwrap();
+    let outside = dir.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    let dest = dir.path().join("dest");
+    let tree = Tree::from_entries([(
+        cuenca_tree::RepoPath::new("a.txt").unwrap(),
+        Entry::file(b"tree content\n"),
+    )])
+    .unwrap();
+    let planting = Planting {
+        blob: dir.path().join("blob"),
+        at: dest.join("a.txt"),
+        target: outside.join("planted"),
+    };
+    assert!(checkout(&tree, &dest, &planting).is_err());
+    assert!(!outside.join("planted").exists());
+}
+
 /// A source that answers every request with what another source gives for one blob.
 struct Relay(CheckoutSource, GitOid);
 

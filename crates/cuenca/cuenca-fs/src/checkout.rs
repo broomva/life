@@ -563,9 +563,21 @@ fn copy_from_start(src: &File, dst: &mut File) -> io::Result<u64> {
 #[cfg(target_os = "macos")]
 fn clone_or_copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<(bool, Option<File>)> {
     use std::os::fd::AsRawFd;
+    // `CLONE_NOFOLLOW` from <sys/clonefile.h>; libc does not export it. Without it the
+    // clone follows a symlink already at `name`, even a dangling one, and writes its
+    // target, which can lie outside `dest`. With it an existing name fails `EEXIST`,
+    // as `create` does on Linux.
+    const CLONE_NOFOLLOW: u32 = 0x0001;
     // SAFETY: both descriptors are open for the duration of the call and `name` is a
     // NUL-terminated string that outlives it; `fclonefileat` reads only these.
-    let rc = unsafe { libc::fclonefileat(src.as_raw_fd(), root.as_raw_fd(), name.as_ptr(), 0) };
+    let rc = unsafe {
+        libc::fclonefileat(
+            src.as_raw_fd(),
+            root.as_raw_fd(),
+            name.as_ptr(),
+            CLONE_NOFOLLOW,
+        )
+    };
     if rc == 0 {
         return Ok((true, None));
     }
