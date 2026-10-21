@@ -288,8 +288,10 @@ impl Store {
     /// Publishing the changeset that is already the head is a retry: it appends nothing
     /// and returns the first publish's offset. A retry that arrives after a newer draft
     /// is refused as `NotAtBase`, like any stale publish. A retry of a draft the fork
-    /// accepted, sent after the fork was taken over, is a stale publish: it is kept in
-    /// the sibling as well (a copy, nothing lost).
+    /// accepted, sent after the fork was taken over, is refused as `NotAtBase` with
+    /// `head` equal to its own target: it is already in the fork, nothing is lost. A
+    /// client tells that apart from a divergent draft by comparing `head` with the
+    /// changeset's target.
     ///
     /// A fork is one chain of drafts, and so is a sibling: two divergent stale drafts
     /// from one writer are not both accepted. The second is refused as `NotAtBase`,

@@ -370,6 +370,51 @@ fn a_holder_fenced_under_two_epochs_keeps_both_episodes() {
     assert_eq!(store.fork_head(&p3.fork).unwrap().git_tree_id(), d3.target);
 }
 
+/// Each stale epoch's sibling starts from the head that epoch left, not the latest one:
+/// a holder fenced twice whose first episode's draft arrives after the second fencing.
+#[test]
+fn each_stale_epoch_resumes_from_its_own_released_head() {
+    let (_d, store, main) = forked();
+    let agent3 = Writer::new(agent(), 3);
+    let a1 = write(&store, &main, &[("a", b"agent, epoch 1")]);
+    store.publish_draft(&fork("f"), &w1(), &a1).unwrap();
+    store.take_over(&fork("f"), 1, &owner()).unwrap();
+    let h1 = a1.apply(&main).unwrap();
+    let o2 = write(&store, &h1, &[("o", b"owner, epoch 2")]);
+    store
+        .publish_draft(&fork("f"), &Writer::new(owner(), 2), &o2)
+        .unwrap();
+    store.take_over(&fork("f"), 2, &agent()).unwrap();
+    let a3 = write(&store, &o2.apply(&h1).unwrap(), &[("b", b"agent, epoch 3")]);
+    store.publish_draft(&fork("f"), &agent3, &a3).unwrap();
+    store.take_over(&fork("f"), 3, &owner()).unwrap();
+    let h3 = a3.apply(&o2.apply(&h1).unwrap()).unwrap();
+    let refused = |writer: &Writer, base: &Tree, left: &Tree| {
+        let draft = write(&store, base, &[("x", b"x")]);
+        assert!(matches!(
+            store.publish_draft(&fork("f"), writer, &draft),
+            Err(CoreError::NotAtBase { head, .. }) if head == left.git_tree_id()
+        ));
+    };
+    refused(&w1(), &h3, &h1);
+    refused(&agent3, &h1, &h3);
+    let e1 = write(&store, &h1, &[("late", b"episode 1, sent late")]);
+    let e3 = write(&store, &h3, &[("late", b"episode 2")]);
+    let p1 = store.publish_draft(&fork("f"), &w1(), &e1).unwrap();
+    let p3 = store.publish_draft(&fork("f"), &agent3, &e3).unwrap();
+    assert_eq!(p1.fork.as_str(), "f-from-nagentcntrl-e1");
+    assert_eq!(p3.fork.as_str(), "f-from-nagentcntrl-e3");
+    assert_eq!(
+        store.fork(&p1.fork).unwrap().unwrap().base,
+        h1.git_tree_id()
+    );
+    assert_eq!(
+        store.fork(&p3.fork).unwrap().unwrap().base,
+        h3.git_tree_id()
+    );
+    store.replay_check().unwrap();
+}
+
 /// Two principals on one machine (many agents on one Mac), both fenced: each keeps its
 /// drafts, in its own sibling, whichever publishes first.
 #[test]

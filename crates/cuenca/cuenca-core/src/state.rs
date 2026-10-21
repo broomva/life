@@ -60,7 +60,8 @@ pub struct Fork {
     pub released: Vec<GitOid>,
     /// For a sibling fork, the fork whose stale-epoch publishes it keeps.
     pub parent: Option<ForkName>,
-    /// The tree it started from: main for a fork, the stale writer's base for a sibling.
+    /// The tree it started from: main for a fork, the head its parent's stale epoch left
+    /// for a sibling ([`Fork::released_at`]).
     pub base: GitOid,
     /// The tree of its latest draft, or `base` before the first.
     pub head: GitOid,

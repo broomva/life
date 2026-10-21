@@ -139,6 +139,7 @@ mutate src/owner.rs 'if readable.len() <= MAX_NAME_BYTES {' 'if true {' --lib
 mutate src/owner.rs 'hash.update(epoch.to_string().as_bytes());' '' --lib
 mutate src/owner.rs 'hash.update([0]);' '' --lib
 mutate src/state.rs 'if sibling.holder_at(1) != Some(&writer.holder) {' 'if false {' --lib
+mutate src/state.rs 'let released = at.released_at(epoch)' 'let released = at.released.last().copied()' --test forks each_stale_epoch_resumes_from_its_own_released_head
 mutate src/state.rs 'if base != released {' 'if false {' --test forks a_sibling_starts_only_from_the_head_its_epoch_left
 mutate src/state.rs 'state.released.push(state.head);' 'state.released.push(state.base);' --test forks a_sibling_starts_only_from_the_head_its_epoch_left
 mutate src/owner.rs '"{parent}-from-{}-e{epoch}",' '"{parent}-from-{}-e1",' --lib
