@@ -573,8 +573,8 @@ fn a_draft_cannot_launder_a_blob_the_caller_cannot_read() {
     assert_eq!(s.publish(&c.a1, "f1", 1, &renamed).status(), 200);
 }
 
-/// Uploads are remembered per principal, and revocation forgets them; a new authority
-/// remembers nothing, so a client re-sends the bytes after a restart.
+/// What a principal uploaded counts for that principal only (and only until the
+/// authority restarts: a client sends the bytes again then).
 #[test]
 fn possession_is_per_principal() {
     let c = Cast::new();
@@ -761,4 +761,103 @@ fn uploads_keep_the_free_space_reserve() {
     assert!(s.authority.store().blob_info(oid).unwrap().is_none());
     s.authority.set_min_free(0);
     assert_eq!(s.put_blob(&c.a1, content), oid);
+}
+
+/// After a takeover the former holder reads the fork no more, and its stale drafts,
+/// which land in a sibling it reads, may not name the new holder's blobs: not as a
+/// read-back, and not as an oracle (a hit and a miss get the same answer, before any
+/// base check).
+#[test]
+fn a_former_holder_cannot_launder_or_probe_the_new_holders_blobs() {
+    let c = Cast::new();
+    let s = &c.s;
+    s.whois.node(NA);
+    let released = s.fork_head(&c.a1, "f1");
+    let v = s.admin(AdminRequest::TakeOver {
+        fork: ForkName::new("f1").unwrap(),
+        expected_epoch: 1,
+        principal: "a2".parse_name(),
+        node: NodeId::new(NB).unwrap(),
+    });
+    assert_eq!(v["epoch"], 2, "{v}");
+    s.whois.node(NB);
+    let head = s.fork_head(&c.a2, "f1");
+    let cs = s.write(&c.a2, &head, &[("pin.txt", b"PIN=4821\n")]);
+    assert_eq!(s.publish(&c.a2, "f1", 2, &cs).status(), 200);
+    let secret = cuenca_tree::GitOid::for_blob(b"PIN=4821\n");
+    let miss = cuenca_tree::GitOid::for_blob(b"PIN=4820\n");
+    s.whois.node(NA);
+    let stale = |base: &Tree, oid| {
+        cuenca_tree::Changeset::new(
+            base,
+            vec![cuenca_tree::Op::put(
+                cuenca_tree::RepoPath::new("got.txt").unwrap(),
+                cuenca_tree::Entry::File(oid),
+            )],
+        )
+        .unwrap()
+    };
+    for base in [&released, &Tree::new()] {
+        let answers: Vec<(u16, String)> = [secret, miss]
+            .into_iter()
+            .map(|oid| {
+                let r = s.publish(&c.a1, "f1", 1, &stale(base, oid));
+                let status = r.status().as_u16();
+                let v: Value = r.json().unwrap();
+                (status, v["error"].as_str().unwrap_or("").to_string())
+            })
+            .collect();
+        assert_eq!(answers[0], answers[1], "a hit and a miss answer alike");
+        assert_eq!(answers[0], (422, "missing_blob".to_string()));
+    }
+    // With its own bytes, the stale draft lands in a1's sibling as before.
+    let mine = s.write(&c.a1, &released, &[("offline.txt", b"a1 wrote this\n")]);
+    let r: Value = s.publish(&c.a1, "f1", 1, &mine).json().unwrap();
+    assert_eq!(r["fenced"], true, "{r}");
+}
+
+/// Uploads in flight hold their room: a second upload cannot pass on space the first
+/// has been promised, and the room comes back when the first ends.
+#[test]
+fn uploads_in_flight_hold_their_room() {
+    use std::io::Write;
+    const MIB: u64 = 1024 * 1024;
+    let c = Cast::new();
+    let s = &c.s;
+    s.whois.node(NA);
+    let free = s.authority.free_bytes().unwrap();
+    assert!(free > 1024 * MIB, "this test needs 1 GiB free, has {free}");
+    // 300 MiB above the reserve: one 100 MiB upload (200 MiB held) fits, two do not.
+    s.authority.set_min_free(free - 300 * MIB);
+    let addr = s.url.trim_start_matches("http://").to_string();
+    let open_upload = |size: u64| {
+        let mut tcp = std::net::TcpStream::connect(&addr).unwrap();
+        let head = format!(
+            "PUT /v1/blobs/{} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {}\r\n\
+             Content-Length: {size}\r\n\r\nx",
+            "1".repeat(40),
+            c.a1
+        );
+        tcp.write_all(head.as_bytes()).unwrap();
+        tcp
+    };
+    let first = open_upload(100 * MIB);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let probe = |size: u64| {
+        let mut tcp = open_upload(size);
+        tcp.set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        let mut answer = [0u8; 12];
+        use std::io::Read;
+        let n = tcp.read(&mut answer).unwrap_or(0);
+        String::from_utf8_lossy(&answer[..n]).to_string()
+    };
+    assert!(
+        probe(100 * MIB).contains("507"),
+        "the first upload's room is held"
+    );
+    drop(first);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    // Its room is back: the same upload now passes the check and waits for its body.
+    assert!(!probe(100 * MIB).contains("507"), "the room came back");
 }

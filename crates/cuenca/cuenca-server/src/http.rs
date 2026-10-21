@@ -487,13 +487,13 @@ async fn upload_blob(
         }
         .into());
     }
-    if !a.has_room_for(size).map_err(ApiError::internal)? {
+    let Some(reservation) = a.reserve(size).map_err(ApiError::internal)? else {
         return Err(ApiError::new(
             StatusCode::INSUFFICIENT_STORAGE,
             "insufficient_storage",
             "the authority keeps its free-space reserve; ask the owner",
         ));
-    }
+    };
     let staged = tempfile::NamedTempFile::new_in(&a.staging).map_err(ApiError::internal)?;
     let mut file = tokio::fs::File::from_std(staged.reopen().map_err(ApiError::internal)?);
     let mut hasher = BlobHasher::new(size);
@@ -518,6 +518,7 @@ async fn upload_blob(
         let content = staged.reopen().map_err(ApiError::internal)?;
         let info = a.store.ingest_blob(oid, size, content)?;
         a.possesses(&c.key.principal, oid);
+        drop(reservation);
         Ok(Json(json!({
             "oid": oid.to_hex(),
             "size": info.size,

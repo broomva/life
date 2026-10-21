@@ -26,6 +26,8 @@ pub struct Authority {
     blob_sets: Mutex<HashMap<GitOid, Arc<HashSet<GitOid>>>>,
     /// Free bytes an upload must leave on the state's filesystem.
     min_free: AtomicU64,
+    /// Bytes reserved by uploads in flight.
+    in_flight: Mutex<u64>,
     /// Blobs each principal has sent the bytes of (see [`Authority::check_puts`]).
     possessed: Mutex<HashMap<PrincipalName, HashSet<GitOid>>>,
 }
@@ -84,6 +86,7 @@ impl Authority {
             blob_sets: Mutex::new(HashMap::new()),
             possessed: Mutex::new(HashMap::new()),
             min_free: AtomicU64::new(DEFAULT_MIN_FREE),
+            in_flight: Mutex::new(0),
         })
     }
 
@@ -174,13 +177,35 @@ impl Authority {
         self.min_free.store(bytes, Ordering::Relaxed);
     }
 
-    /// Whether an upload of `size` bytes leaves the reserve free on the state's
-    /// filesystem. Uploads are not counted per principal; this keeps one principal's
-    /// uploads from stopping the log (and every other principal's publishes).
-    pub(crate) fn has_room_for(&self, size: u64) -> std::io::Result<bool> {
+    /// Bytes free on the state's filesystem, to an unprivileged writer.
+    pub fn free_bytes(&self) -> std::io::Result<u64> {
         let fs = rustix::fs::statvfs(&self.staging)?;
-        let free = fs.f_bavail.saturating_mul(fs.f_frsize);
-        Ok(free.saturating_sub(size) >= self.min_free.load(Ordering::Relaxed) && free >= size)
+        Ok(fs.f_bavail.saturating_mul(fs.f_frsize))
+    }
+
+    /// Reserve room for an upload of `size` bytes, or `None` if it would dip into the
+    /// free-space reserve. An upload takes up to twice its size while it is ingested
+    /// (the staged file and the store's copy), and every upload in flight holds its
+    /// reservation until it ends, so concurrent uploads cannot all pass on the same
+    /// free space. Uploads are not counted per principal; this keeps uploads from
+    /// stopping the log (and every principal's publishes).
+    pub(crate) fn reserve(self: &Arc<Self>, size: u64) -> std::io::Result<Option<Reservation>> {
+        let need = size.saturating_mul(2);
+        let mut in_flight = self.in_flight.lock().expect("reservation lock");
+        let free = self.free_bytes()?;
+        if !fits(
+            free,
+            *in_flight,
+            need,
+            self.min_free.load(Ordering::Relaxed),
+        ) {
+            return Ok(None);
+        }
+        *in_flight += need;
+        Ok(Some(Reservation {
+            authority: self.clone(),
+            bytes: need,
+        }))
     }
 
     /// Remember that `principal` sent the bytes of `oid`, verified.
@@ -195,26 +220,38 @@ impl Authority {
 
     /// Whether `caller` may name each blob `changeset` puts, in a draft of `fork`.
     ///
-    /// The store accepts any blob it holds, whoever sent it, and a blob in the
-    /// caller's own fork can then be read back. So a put must name a blob the caller
-    /// can already read through the fork, one in the fork's head (the tree the API
-    /// serves), or one whose bytes this principal uploaded to this authority since it
-    /// started. Anything else is refused as `MissingBlob`, the same answer an absent
-    /// blob gets, so the refusal does not say whether the store holds it. After a
-    /// restart, or for content it dropped from the head, a client sends the bytes again.
+    /// The store accepts any blob it holds, whoever sent it, and a blob in a fork the
+    /// caller holds can be read back. So a put must name a blob the caller can already
+    /// read, or has shown it has:
+    ///
+    /// - a caller who reads the fork may name a blob in the fork's head, the tree the
+    ///   API serves it;
+    /// - any caller may name a blob whose bytes its principal uploaded to this
+    ///   authority since it started.
+    ///
+    /// A former holder (whose draft the rules fence into its sibling) reads the fork no
+    /// more, so it gets the second rule only. Anything else is refused as
+    /// `MissingBlob`, the same answer an absent blob gets, so the refusal does not say
+    /// whether the store holds it. This runs before the rules, so after a restart even
+    /// a retried draft is refused this way until the client sends the bytes again.
     pub(crate) fn check_puts(
         &self,
         caller: &Caller,
         fork: &Fork,
         changeset: &Changeset,
     ) -> cuenca_core::Result<()> {
-        let head = self.blob_set(fork.head)?;
+        let head = if caller.sees_fork(fork) {
+            Some(self.blob_set(fork.head)?)
+        } else {
+            None
+        };
         let possessed = self.possessed.lock().expect("possession lock");
         let own = possessed.get(&caller.key.principal);
         for op in &changeset.ops {
             if let Op::Put { entry, .. } = op {
                 let oid = entry.oid();
-                let known = head.contains(&oid) || own.is_some_and(|set| set.contains(&oid));
+                let known = head.as_ref().is_some_and(|set| set.contains(&oid))
+                    || own.is_some_and(|set| set.contains(&oid));
                 if !known {
                     return Err(CoreError::MissingBlob(oid));
                 }
@@ -222,6 +259,27 @@ impl Authority {
         }
         Ok(())
     }
+}
+
+/// Room held for one upload in flight, given back when it is dropped.
+pub(crate) struct Reservation {
+    authority: Arc<Authority>,
+    bytes: u64,
+}
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        let mut in_flight = self.authority.in_flight.lock().expect("reservation lock");
+        *in_flight = in_flight.saturating_sub(self.bytes);
+    }
+}
+
+/// Whether `need` more bytes fit in `free` with `in_flight` already promised and
+/// `min_free` kept.
+fn fits(free: u64, in_flight: u64, need: u64, min_free: u64) -> bool {
+    free.checked_sub(in_flight)
+        .and_then(|left| left.checked_sub(need))
+        .is_some_and(|left| left >= min_free)
 }
 
 /// An IPv4 address that arrived as IPv4-mapped IPv6 is the IPv4 address.
@@ -271,6 +329,16 @@ impl Caller {
 mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn room_counts_what_is_in_flight() {
+        assert!(fits(100, 0, 50, 50));
+        assert!(!fits(100, 0, 51, 50));
+        assert!(!fits(100, 10, 50, 50));
+        assert!(fits(100, 10, 40, 50));
+        assert!(!fits(100, 101, 0, 0));
+        assert!(!fits(10, 0, 11, 0));
+    }
 
     #[test]
     fn mapped_v4_is_v4() {

@@ -86,13 +86,19 @@ mutate src/http.rs '        writable_fork(a, &c, &name)?;
         let writer' '        let writer' --test api
 # A draft names only blobs the caller reads or has sent: no laundering, no oracle.
 mutate src/authority.rs 'if !known {' 'if false {' --test api
-mutate src/authority.rs 'let known = head.contains(&oid) || own' 'let known = false || own' --test api
+mutate src/authority.rs 'let head = if caller.sees_fork(fork) {' 'let head = if true {' --test api
+mutate src/authority.rs 'let known = head.as_ref().is_some_and(|set| set.contains(&oid))' 'let known = false' --test api
 mutate src/authority.rs '|| own.is_some_and(|set| set.contains(&oid));' ';' --test api
 mutate src/http.rs 'a.possesses(&c.key.principal, oid);' '' --test api
 # History hides drafts fenced into a sibling the caller does not read.
 mutate src/http.rs '!a.store.fork(sibling)?.is_some_and(|f| c.sees_fork(&f))' 'false' --test api
 # Uploads keep the free-space reserve; staging is cleared on open.
-mutate src/http.rs 'if !a.has_room_for(size).map_err(ApiError::internal)? {' 'if false {' --test api
+mutate src/authority.rs '        if !fits(
+            free,' '        if false && !fits(
+            free,' --test api
+mutate src/authority.rs 'let need = size.saturating_mul(2);' 'let need = size;' --test api
+mutate src/authority.rs '        *in_flight += need;' '' --test api
+mutate src/authority.rs '*in_flight = in_flight.saturating_sub(self.bytes);' '' --test api
 mutate src/authority.rs '            std::fs::remove_dir_all(&staging)?;' '' --test api
 mutate src/http.rs 'if !a.blob_set(tree)?.contains(&oid) {' 'if false {' --test api
 # Blob upload: verified even when the store already holds the id.
