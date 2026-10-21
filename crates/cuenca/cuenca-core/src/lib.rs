@@ -18,8 +18,26 @@
 //!   hash to the claimed id ([`cuenca_tree::BlobHasher`], with SHA-1 collision
 //!   detection), and its SHA-256 is derived from those verified bytes.
 //!
-//! Who may do what (holders, fencing epochs, takeover, revocation) is BRO-3249, built
-//! on top of this layer; this layer only enforces that the log stays well-formed.
+//! # One writer per fork
+//!
+//! Every fork has a holder ([`Holder`]: a principal writing from one machine) and a
+//! fencing epoch, 1 when the fork is created. Only the holder, under the current epoch,
+//! may publish a draft or ask to land. [`Store::take_over`] moves the fork to a new
+//! holder by compare-and-swap on the epoch, which it increments, and drops the old
+//! holder's landing intent (moving main does not read intents: landing, BRO-3255,
+//! must check, in the transaction that moves main, that the intent is live and its
+//! holder still holds the fork and is not revoked: a revocation leaves intents in place). A
+//! takeover retried after it succeeded gets `EpochMismatch`; read the fork to see who
+//! holds it. A publish by the holder of an earlier epoch is not
+//! dropped and not merged in: it becomes a draft of that epoch's sibling fork,
+//! `<fork>-from-<node>-e<epoch>` ([`sibling_name`]), one level further down if that
+//! sibling was taken over too. A sibling starts from the head its epoch ended at and
+//! from no other tree, so a stale writer never gains a tree it was not given (another
+//! location's main, another fork's head); a stale draft that does not continue that
+//! head is refused as `NotAtBase` and stays in the writer's checkout. [`Store::revoke`] makes the
+//! log refuse every later write a principal asks for. Who a request comes from (keys,
+//! `tailscale whois`) is the authority's to establish (BRO-3251); this layer trusts
+//! the [`Writer`] it is given.
 //!
 //! # Why not `lago-journal`
 //!
@@ -32,12 +50,14 @@ mod blobs;
 mod error;
 mod event;
 mod names;
+mod owner;
 mod state;
 mod store;
 
 pub use blobs::MAX_BLOB_BYTES;
 pub use error::{CoreError, Result};
 pub use event::{ChangesetId, Event, Record};
-pub use names::{ForkName, LocationName, MAX_NAME_BYTES, NameError};
+pub use names::{ForkName, LocationName, MAX_NAME_BYTES, NameError, PrincipalName};
+pub use owner::{Holder, MAX_NODE_BYTES, NodeId, Writer, sibling_name};
 pub use state::{Fork, Location, MainMove};
 pub use store::{BlobInfo, Published, ReplaySummary, Store};

@@ -53,6 +53,28 @@ pub enum CoreError {
     WrongLocation { fork: String, location: String },
     #[error("changeset {changeset} is not the head of fork {fork:?}")]
     NotHead { fork: String, changeset: String },
+    #[error("fork name {0:?} contains \"-from\", which is kept for sibling forks")]
+    ReservedName(String),
+    #[error("principal {0:?} is revoked")]
+    Revoked(String),
+    #[error("{holder} does not hold fork {fork:?} under epoch {epoch}")]
+    NotHolder {
+        fork: String,
+        holder: String,
+        epoch: u64,
+    },
+    #[error("epoch {epoch} of fork {fork:?} is stale: the fork is at epoch {current}")]
+    StaleEpoch {
+        fork: String,
+        epoch: u64,
+        current: u64,
+    },
+    #[error("fork {fork:?} is at epoch {actual}, not {expected}")]
+    EpochMismatch {
+        fork: String,
+        expected: u64,
+        actual: u64,
+    },
     #[error("remote {0:?} is not a plausible git remote")]
     BadRemote(String),
     #[error("log record {offset} is unreadable: {reason}")]

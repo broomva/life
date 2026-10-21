@@ -2,16 +2,25 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// Longest location or fork name, in bytes.
-pub const MAX_NAME_BYTES: usize = 64;
+/// Longest location, fork or principal name, in bytes: room for a sibling fork's
+/// name (`<fork>-from-<node>-e<epoch>`), well under any filesystem's 255.
+pub const MAX_NAME_BYTES: usize = 128;
+
+const NAME_RULE: &str =
+    "1-128 bytes of a-z, 0-9, '.', '_' or '-', starting with a letter or digit, without '..'";
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error(
-    "{kind} name {name:?} must be 1-{MAX_NAME_BYTES} bytes of a-z, 0-9, '.', '_' or '-', starting with a letter or digit, without '..'"
-)]
+#[error("{kind} name {name:?} must be {rule}")]
 pub struct NameError {
     kind: &'static str,
     name: String,
+    rule: &'static str,
+}
+
+impl NameError {
+    pub(crate) fn new(kind: &'static str, name: String, rule: &'static str) -> Self {
+        Self { kind, name, rule }
+    }
 }
 
 /// Whether `s` is safe as one directory name in the volume (`main/<location>`,
@@ -42,7 +51,7 @@ macro_rules! name {
                 if valid(&s) {
                     Ok(Self(s))
                 } else {
-                    Err(NameError { kind: $kind, name: s })
+                    Err(NameError::new($kind, s, NAME_RULE))
                 }
             }
 
@@ -75,6 +84,12 @@ name!(
     ForkName,
     "fork"
 );
+name!(
+    /// A principal: who holds keys and forks (an agent session, the owner). Minting and
+    /// revoking its keys is the authority's (BRO-3251); the log records revocation.
+    PrincipalName,
+    "principal"
+);
 
 #[cfg(test)]
 mod tests {
@@ -88,7 +103,7 @@ mod tests {
             "a",
             "my-notes.v2",
             "x_1",
-            &"a".repeat(64),
+            &"a".repeat(128),
         ] {
             assert!(LocationName::new(ok).is_ok(), "{ok}");
         }
@@ -105,7 +120,7 @@ mod tests {
             "é",
             "a b",
             "a\0",
-            &"a".repeat(65),
+            &"a".repeat(129),
         ] {
             assert!(ForkName::new(bad).is_err(), "{bad:?}");
         }

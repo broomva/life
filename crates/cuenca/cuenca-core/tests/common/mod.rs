@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use cuenca_core::{ForkName, LocationName, Store};
+use cuenca_core::{ForkName, Holder, LocationName, NodeId, PrincipalName, Store, Writer};
 use cuenca_tree::{Blob, Changeset, Entry, GitOid, Op, RepoPath, Tree};
 
 pub fn loc(s: &str) -> LocationName {
@@ -45,4 +45,21 @@ pub fn write(store: &Store, base: &Tree, files: &[(&str, &[u8])]) -> Changeset {
 
 pub fn sha256(content: &[u8]) -> cuenca_tree::ContentHash {
     Blob::of(content).unwrap().sha256()
+}
+
+pub fn holder(principal: &str, node: &str) -> Holder {
+    Holder::new(
+        PrincipalName::new(principal).unwrap(),
+        NodeId::new(node).unwrap(),
+    )
+}
+
+/// The holder the tests create forks with.
+pub fn agent() -> Holder {
+    holder("agent", "nAgentCNTRL")
+}
+
+/// [`agent`] under epoch 1, a new fork's.
+pub fn w1() -> Writer {
+    Writer::new(agent(), 1)
 }

@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 use crate::blobs::BlobFiles;
 use crate::error::{CoreError, Result};
 use crate::event::{ChangesetId, Event, Record};
-use crate::names::{ForkName, LocationName};
-use crate::state::{Applied, Fork, Location, Memory, View, apply};
+use crate::names::{ForkName, LocationName, PrincipalName};
+use crate::owner::{Holder, Writer};
+use crate::state::{Applied, Fork, Location, Memory, View, apply, check_writer, fenced_target};
 
 type Bytes = &'static [u8];
 
@@ -32,6 +33,8 @@ const LOCATIONS: TableDefinition<&str, Bytes> = TableDefinition::new("locations"
 const FORKS: TableDefinition<&str, Bytes> = TableDefinition::new("forks");
 /// Projection: changeset id → offset of the draft that first recorded it.
 const CHANGESETS: TableDefinition<Bytes, u64> = TableDefinition::new("changesets");
+/// Projection: revoked principal → offset of the record that revoked it.
+const REVOKED: TableDefinition<&str, u64> = TableDefinition::new("revoked");
 
 /// What a blob's ingest stored next to its content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,10 +46,19 @@ pub struct BlobInfo {
 }
 
 /// The result of a publish.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Published {
     pub id: ChangesetId,
+    /// Where the draft is: the fork asked for, or, for a publish under a stale epoch,
+    /// a sibling fork ([`crate::sibling_name`]); use this name, do not derive it.
+    pub fork: ForkName,
+    /// The epoch the draft was written under on `fork`: the writer's own, or 1 on a
+    /// sibling (where the writer is the first holder). Further drafts to `fork` go
+    /// under this epoch.
+    pub epoch: u64,
+    /// True when the publish came under a stale epoch and went to a sibling fork.
+    pub fenced: bool,
     /// The offset of the draft's record.
     pub offset: u64,
     /// False when this changeset already was the fork's head: a retried publish, which
@@ -62,6 +74,7 @@ pub struct ReplaySummary {
     pub locations: usize,
     pub forks: usize,
     pub changesets: usize,
+    pub revoked: usize,
 }
 
 /// The authority's state: the log, its projections and the blobs, in one directory.
@@ -89,6 +102,7 @@ impl Store {
         txn.open_table(LOCATIONS)?;
         txn.open_table(FORKS)?;
         txn.open_table(CHANGESETS)?;
+        txn.open_table(REVOKED)?;
         txn.commit()?;
         let blobs = BlobFiles::open(&dir.join("blobs"))?;
         Ok(Self { db, blobs })
@@ -175,6 +189,17 @@ impl Store {
         event: Event,
         extra: impl FnOnce(&WriteTransaction) -> Result<()>,
     ) -> Result<(u64, bool)> {
+        self.record_with(|_| Ok(event), extra)
+    }
+
+    /// [`Store::record`], with the event built by `build` from the tables inside the
+    /// same transaction, for an event whose shape depends on the state (a fenced draft
+    /// and the sibling it goes to).
+    fn record_with(
+        &self,
+        build: impl FnOnce(&Tables<'_>) -> Result<Event>,
+        extra: impl FnOnce(&WriteTransaction) -> Result<()>,
+    ) -> Result<(u64, bool)> {
         let txn = self.begin()?;
         let offset;
         {
@@ -184,8 +209,10 @@ impl Store {
                 locations: txn.open_table(LOCATIONS)?,
                 forks: txn.open_table(FORKS)?,
                 changesets: txn.open_table(CHANGESETS)?,
+                revoked: txn.open_table(REVOKED)?,
                 log: &log,
             };
+            let event = build(&view)?;
             if let Applied::Repeat(at) = apply(&mut view, offset, &event)? {
                 return Ok((at, false));
             }
@@ -224,8 +251,13 @@ impl Store {
         Ok(offset)
     }
 
-    /// Fork `location` at its current main.
-    pub fn create_fork(&self, fork: &ForkName, location: &LocationName) -> Result<u64> {
+    /// Fork `location` at its current main, held by `holder` under epoch 1.
+    pub fn create_fork(
+        &self,
+        fork: &ForkName,
+        location: &LocationName,
+        holder: &Holder,
+    ) -> Result<u64> {
         let main = self
             .location(location)?
             .ok_or_else(|| CoreError::UnknownLocation(location.to_string()))?
@@ -234,42 +266,131 @@ impl Store {
             fork: fork.clone(),
             location: location.clone(),
             base: main,
+            holder: holder.clone(),
         };
         // Main may move between the read above and the transaction; the rules then
         // refuse the fork rather than start it from a stale main.
         Ok(self.record(event, |_| Ok(()))?.0)
     }
 
-    /// Publish a draft: `changeset` must start from the fork's head, every blob it puts
-    /// must be ingested, and content with a rule (symlinks, `.gitattributes`) must pass
-    /// it. Publishing the changeset that is already the fork's head is a retry: it
-    /// appends nothing and returns the first publish's offset. A retry that arrives
-    /// after a newer draft is refused as `NotAtBase`, like any stale publish.
-    pub fn publish_draft(&self, fork: &ForkName, changeset: &Changeset) -> Result<Published> {
+    /// Publish a draft written by `writer`: `changeset` must start from the fork's head,
+    /// every blob it puts must be ingested, and content with a rule (symlinks,
+    /// `.gitattributes`) must pass it.
+    ///
+    /// Only the fork's holder under its current epoch publishes to the fork. The holder
+    /// of an earlier epoch (the fork was taken over since) publishes to that epoch's
+    /// sibling fork ([`crate::sibling_name`]), created on its first such draft, which must
+    /// start from the head the stale epoch ended at (anything else is `NotAtBase`); the
+    /// result says where
+    /// (`fork`, `epoch`, `fenced`). Anyone else is refused, and so is a revoked
+    /// principal.
+    ///
+    /// Publishing the changeset that is already the head is a retry: it appends nothing
+    /// and returns the first publish's offset. A retry that arrives after a newer draft
+    /// is refused as `NotAtBase`, like any stale publish. A retry of a draft the fork
+    /// accepted, sent after the fork was taken over, is refused as `NotAtBase` with
+    /// `head` equal to its own target: it is already in the fork, nothing is lost. A
+    /// client tells that apart from a divergent draft by comparing `head` with the
+    /// changeset's target.
+    ///
+    /// A fork is one chain of drafts, and so is a sibling: two divergent stale drafts
+    /// from one writer are not both accepted. The second is refused as `NotAtBase`,
+    /// unacknowledged and still in the writer's checkout, to be rebased onto the
+    /// sibling's head, as on any fork.
+    pub fn publish_draft(
+        &self,
+        fork: &ForkName,
+        writer: &Writer,
+        changeset: &Changeset,
+    ) -> Result<Published> {
         self.check_entries(changeset.ops.iter().filter_map(|op| match op {
             Op::Put { path, entry } => Some((path, entry)),
             _ => None,
         }))?;
         let id = ChangesetId::of(changeset);
-        let event = Event::DraftPublished {
-            fork: fork.clone(),
-            id,
-            changeset: changeset.clone(),
+        // Where the draft goes is decided inside the transaction, from the fork as it
+        // is there: its holder under the current epoch writes the fork; the holder of a
+        // stale epoch writes that epoch's sibling. Anyone else is refused by the rules.
+        let mut placed = (fork.clone(), writer.epoch, false);
+        let build = |view: &Tables<'_>| {
+            let state = view
+                .fork(fork)?
+                .ok_or_else(|| CoreError::UnknownFork(fork.to_string()))?;
+            match check_writer(view, &state, writer) {
+                Err(CoreError::StaleEpoch { .. }) => {
+                    let sibling = fenced_target(view, &state, writer, changeset.base)?;
+                    placed = (sibling.name.clone(), sibling.epoch(), true);
+                    Ok(Event::DraftFenced {
+                        fork: fork.clone(),
+                        sibling: sibling.name,
+                        writer: writer.clone(),
+                        id,
+                        changeset: changeset.clone(),
+                    })
+                }
+                // Refusals come from the rules, which see the same event.
+                _ => Ok(Event::DraftPublished {
+                    fork: fork.clone(),
+                    writer: writer.clone(),
+                    id,
+                    changeset: changeset.clone(),
+                }),
+            }
         };
-        let (offset, fresh) = self.record(event, |txn| {
+        let (offset, fresh) = self.record_with(build, |txn| {
             // The rules checked the base by id; applying checks the ops and the target.
             let mut trees = txn.open_table(TREES)?;
             let target = changeset.apply(&load_tree(&trees, changeset.base)?)?;
             store_tree(&mut trees, &target)
         })?;
-        Ok(Published { id, offset, fresh })
+        let (fork, epoch, fenced) = placed;
+        Ok(Published {
+            id,
+            fork,
+            epoch,
+            fenced,
+            offset,
+            fresh,
+        })
     }
 
-    /// Record the intent to land `id`, which must be the fork's head. Recording the
-    /// same intent again while it is the latest is a retry and appends nothing.
-    pub fn record_landing_intent(&self, fork: &ForkName, id: ChangesetId) -> Result<u64> {
+    /// Take `fork` over for `holder`, as a compare-and-swap: the fork must be at
+    /// `expected_epoch`; it moves to `expected_epoch + 1`, which fences out every
+    /// earlier holder. Of two takeovers from the same epoch exactly one succeeds; the
+    /// other gets `EpochMismatch`, and so does a retry of a takeover that succeeded
+    /// (read the fork to see who holds it). An owner act; this layer does not check who
+    /// asks. Returns the new epoch.
+    pub fn take_over(&self, fork: &ForkName, expected_epoch: u64, holder: &Holder) -> Result<u64> {
+        let event = Event::TakenOver {
+            fork: fork.clone(),
+            expected_epoch,
+            holder: holder.clone(),
+        };
+        self.record(event, |_| Ok(()))?;
+        Ok(expected_epoch + 1)
+    }
+
+    /// Revoke `principal`: every write it asks for from now on is refused. Revoking it
+    /// again appends nothing and returns the first revocation's offset. An owner act.
+    pub fn revoke(&self, principal: &PrincipalName) -> Result<u64> {
+        let event = Event::PrincipalRevoked {
+            principal: principal.clone(),
+        };
+        Ok(self.record(event, |_| Ok(()))?.0)
+    }
+
+    /// Record the holder's intent to land `id`, which must be the fork's head.
+    /// Recording the same intent again while it is the latest is a retry and appends
+    /// nothing.
+    pub fn record_landing_intent(
+        &self,
+        fork: &ForkName,
+        writer: &Writer,
+        id: ChangesetId,
+    ) -> Result<u64> {
         let event = Event::LandingIntent {
             fork: fork.clone(),
+            writer: writer.clone(),
             changeset: id,
         };
         Ok(self.record(event, |_| Ok(()))?.0)
@@ -314,6 +435,32 @@ impl Store {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(FORKS)?;
         table.iter()?.map(|r| from_json(r?.1.value())).collect()
+    }
+
+    /// The offset of the record that revoked `principal`, if one did.
+    pub fn revoked(&self, principal: &PrincipalName) -> Result<Option<u64>> {
+        let txn = self.db.begin_read()?;
+        Ok(txn
+            .open_table(REVOKED)?
+            .get(principal.as_str())?
+            .map(|v| v.value()))
+    }
+
+    /// Every record that names `fork`, in log order: its creation, drafts, takeovers,
+    /// landing intents and moves of main by it, and drafts fenced into or out of it.
+    /// Reads the whole log.
+    pub fn fork_history(&self, fork: &ForkName) -> Result<Vec<Record>> {
+        let txn = self.db.begin_read()?;
+        let log = txn.open_table(LOG)?;
+        let mut out = Vec::new();
+        for item in log.iter()? {
+            let (k, v) = item?;
+            let record = decode_record(k.value(), v.value())?;
+            if record.event.forks().contains(&fork) {
+                out.push(record);
+            }
+        }
+        Ok(out)
     }
 
     /// The tree a location's main is at.
@@ -450,11 +597,25 @@ impl Store {
         if index != replayed {
             return Err(differ("changeset index"));
         }
+        let revoked: BTreeMap<String, u64> = txn
+            .open_table(REVOKED)?
+            .iter()?
+            .map(|r| r.map(|(k, v)| (k.value().to_string(), v.value())))
+            .collect::<Result<_, _>>()?;
+        let replayed: BTreeMap<String, u64> = memory
+            .revoked
+            .iter()
+            .map(|(p, offset)| (p.to_string(), *offset))
+            .collect();
+        if revoked != replayed {
+            return Err(differ("revocations"));
+        }
         Ok(ReplaySummary {
             records,
             locations: memory.locations.len(),
             forks: memory.forks.len(),
             changesets: memory.changesets.len(),
+            revoked: memory.revoked.len(),
         })
     }
 }
@@ -464,6 +625,7 @@ struct Tables<'t> {
     locations: redb::Table<'t, &'static str, Bytes>,
     forks: redb::Table<'t, &'static str, Bytes>,
     changesets: redb::Table<'t, Bytes, u64>,
+    revoked: redb::Table<'t, &'static str, u64>,
     log: &'t redb::Table<'t, u64, Bytes>,
 }
 
@@ -474,6 +636,15 @@ impl View for Tables<'_> {
 
     fn fork(&self, name: &ForkName) -> Result<Option<Fork>> {
         get_json(&self.forks, name.as_str())
+    }
+
+    fn revoked(&self, principal: &PrincipalName) -> Result<Option<u64>> {
+        Ok(self.revoked.get(principal.as_str())?.map(|v| v.value()))
+    }
+
+    fn put_revoked(&mut self, principal: &PrincipalName, offset: u64) -> Result<()> {
+        self.revoked.insert(principal.as_str(), offset)?;
+        Ok(())
     }
 
     fn changeset(&self, id: ChangesetId) -> Result<Option<Changeset>> {
@@ -513,7 +684,9 @@ fn indexed_changeset(
         reason: "the changeset index points past the log".into(),
     })?;
     match decode_record(offset, value.value())?.event {
-        Event::DraftPublished { changeset, .. } => Ok(Some(changeset)),
+        Event::DraftPublished { changeset, .. } | Event::DraftFenced { changeset, .. } => {
+            Ok(Some(changeset))
+        }
         other => Err(CoreError::CorruptLog {
             offset,
             reason: format!("the changeset index points at {other:?}"),
@@ -639,6 +812,18 @@ fn load_tree(trees: &impl ReadableTable<Bytes, Bytes>, root: GitOid) -> Result<T
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::owner::NodeId;
+
+    fn agent() -> Holder {
+        Holder::new(
+            PrincipalName::new("agent").unwrap(),
+            NodeId::new("n1").unwrap(),
+        )
+    }
+
+    fn w1() -> Writer {
+        Writer::new(agent(), 1)
+    }
 
     fn ids() -> (LocationName, ForkName) {
         (LocationName::new("l").unwrap(), ForkName::new("f").unwrap())
@@ -656,14 +841,16 @@ mod tests {
         let main = Tree::from_entries([(RepoPath::new("d/a").unwrap(), put(b"1"))]).unwrap();
         let (l, f) = ids();
         store.add_location(&l, None, &main).unwrap();
-        store.create_fork(&f, &l).unwrap();
+        store.create_fork(&f, &l, &agent()).unwrap();
         let cs = Changeset::new(
             &main,
             vec![Op::put(RepoPath::new("d/a").unwrap(), put(b"2"))],
         )
         .unwrap();
-        store.publish_draft(&f, &cs).unwrap();
-        store.create_fork(&ForkName::new("g").unwrap(), &l).unwrap();
+        store.publish_draft(&f, &w1(), &cs).unwrap();
+        store
+            .create_fork(&ForkName::new("g").unwrap(), &l, &agent())
+            .unwrap();
         assert_eq!(store.replay_check().unwrap().records, 4);
         (dir, store, cs)
     }
@@ -717,6 +904,7 @@ mod tests {
                 fork: g,
                 location: l,
                 base: main,
+                holder: agent(),
             },
         );
         assert!(corrupt(&store).contains("expected offset 4"));
@@ -731,6 +919,7 @@ mod tests {
             fork: ForkName::new("h").unwrap(),
             location: l,
             base: main,
+            holder: agent(),
         };
         inject(
             &store,
@@ -754,6 +943,7 @@ mod tests {
             4,
             Event::DraftPublished {
                 fork: f,
+                writer: w1(),
                 id,
                 changeset: cs,
             },
@@ -772,6 +962,7 @@ mod tests {
             4,
             Event::DraftPublished {
                 fork: f,
+                writer: w1(),
                 id,
                 changeset: back,
             },
@@ -787,6 +978,7 @@ mod tests {
             fork: ForkName::new("h").unwrap(),
             location: l,
             base: cs.target,
+            holder: agent(),
         };
         inject_event(&store, 4, event);
         assert!(corrupt(&store).contains("starts from"));
@@ -888,6 +1080,192 @@ mod tests {
             .unwrap();
         txn.commit().unwrap();
         assert_eq!(inconsistent(&store), "changeset index differ from the log");
+    }
+
+    fn other() -> Holder {
+        Holder::new(
+            PrincipalName::new("owner").unwrap(),
+            NodeId::new("n2").unwrap(),
+        )
+    }
+
+    /// The draft `cs` again, on top of `f`'s head, as a new changeset.
+    fn next_draft(store: &Store, cs: &Changeset) -> Changeset {
+        let head = store.tree(cs.target).unwrap();
+        Changeset::between(&head, &store.tree(cs.base).unwrap())
+    }
+
+    #[test]
+    fn replay_refuses_a_draft_fenced_from_a_fork_its_writer_holds() {
+        let (_d, store, cs) = setup();
+        let (_, f) = ids();
+        let back = next_draft(&store, &cs);
+        inject_event(
+            &store,
+            4,
+            Event::DraftFenced {
+                fork: f.clone(),
+                sibling: crate::owner::sibling_name(&f, 1, &agent().node),
+                writer: w1(),
+                id: ChangesetId::of(&back),
+                changeset: back,
+            },
+        );
+        assert!(corrupt(&store).contains("but its writer holds it"));
+    }
+
+    #[test]
+    fn replay_refuses_a_draft_fenced_into_the_wrong_sibling() {
+        let (_d, store, cs) = setup();
+        let (_, f) = ids();
+        store.take_over(&f, 1, &other()).unwrap();
+        let back = next_draft(&store, &cs);
+        inject_event(
+            &store,
+            5,
+            Event::DraftFenced {
+                fork: f.clone(),
+                sibling: ForkName::new("f-from-elsewhere").unwrap(),
+                writer: w1(),
+                id: ChangesetId::of(&back),
+                changeset: back,
+            },
+        );
+        assert!(corrupt(&store).contains("belongs in"));
+    }
+
+    #[test]
+    fn replay_refuses_a_draft_fenced_by_a_writer_that_never_held_the_fork() {
+        let (_d, store, cs) = setup();
+        let (_, f) = ids();
+        store.take_over(&f, 1, &other()).unwrap();
+        let back = next_draft(&store, &cs);
+        let stranger = Holder::new(
+            PrincipalName::new("stranger").unwrap(),
+            NodeId::new("n9").unwrap(),
+        );
+        inject_event(
+            &store,
+            5,
+            Event::DraftFenced {
+                fork: f.clone(),
+                sibling: crate::owner::sibling_name(&f, 1, &stranger.node),
+                writer: Writer::new(stranger, 1),
+                id: ChangesetId::of(&back),
+                changeset: back,
+            },
+        );
+        assert!(corrupt(&store).contains("does not hold fork"));
+    }
+
+    #[test]
+    fn replay_refuses_a_fork_created_under_a_reserved_name() {
+        let (_d, store, cs) = setup();
+        let (l, _) = ids();
+        let _ = cs;
+        let main = store.location(&l).unwrap().unwrap().main;
+        inject_event(
+            &store,
+            4,
+            Event::ForkCreated {
+                fork: ForkName::new("x-from-n1-e1").unwrap(),
+                location: l,
+                base: main,
+                holder: agent(),
+            },
+        );
+        assert!(corrupt(&store).contains("kept for sibling forks"));
+    }
+
+    #[test]
+    fn replay_refuses_a_takeover_from_the_wrong_epoch() {
+        let (_d, store, _) = setup();
+        let (_, f) = ids();
+        inject_event(
+            &store,
+            4,
+            Event::TakenOver {
+                fork: f,
+                expected_epoch: 2,
+                holder: other(),
+            },
+        );
+        assert!(corrupt(&store).contains("is at epoch 1, not 2"));
+    }
+
+    #[test]
+    fn replay_refuses_a_duplicated_revocation() {
+        let (_d, store, _) = setup();
+        let p = PrincipalName::new("gone").unwrap();
+        store.revoke(&p).unwrap();
+        inject_event(&store, 5, Event::PrincipalRevoked { principal: p });
+        assert!(corrupt(&store).contains("duplicates the record at 4"));
+    }
+
+    #[test]
+    fn replay_refuses_a_draft_by_a_revoked_principal() {
+        let (_d, store, cs) = setup();
+        let (_, f) = ids();
+        store.revoke(&agent().principal).unwrap();
+        let back = next_draft(&store, &cs);
+        inject_event(
+            &store,
+            5,
+            Event::DraftPublished {
+                fork: f,
+                writer: w1(),
+                id: ChangesetId::of(&back),
+                changeset: back,
+            },
+        );
+        assert!(corrupt(&store).contains("is revoked"));
+    }
+
+    #[test]
+    fn replay_refuses_a_revocations_table_the_log_does_not_explain() {
+        let (_d, store, _) = setup();
+        let txn = store.begin().unwrap();
+        txn.open_table(REVOKED).unwrap().insert("agent", 3).unwrap();
+        txn.commit().unwrap();
+        assert_eq!(inconsistent(&store), "revocations differ from the log");
+    }
+
+    /// A row under a sibling's name, first held by someone else (as a hash collision
+    /// would leave it): the stale draft is refused, never mixed into it.
+    #[test]
+    fn a_sibling_first_held_by_another_writer_is_never_written() {
+        let (_d, store, cs) = setup();
+        let (_, f) = ids();
+        store.take_over(&f, 1, &other()).unwrap();
+        let name = crate::owner::sibling_name(&f, 1, &agent().node);
+        let planted = Fork {
+            name: name.clone(),
+            parent: Some(f.clone()),
+            holders: vec![other()],
+            ..store.fork(&f).unwrap().unwrap()
+        };
+        let txn = store.begin().unwrap();
+        txn.open_table(FORKS)
+            .unwrap()
+            .insert(name.as_str(), to_json(&planted).as_slice())
+            .unwrap();
+        txn.commit().unwrap();
+        let back = next_draft(&store, &cs);
+        match store.publish_draft(&f, &w1(), &back) {
+            Err(CoreError::Inconsistent(why)) => assert!(why.contains("another writer"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_fenced_draft_is_found_by_its_changeset_id() {
+        let (_d, store, cs) = setup();
+        let (_, f) = ids();
+        store.take_over(&f, 1, &other()).unwrap();
+        let back = next_draft(&store, &cs);
+        let p = store.publish_draft(&f, &w1(), &back).unwrap();
+        assert!(p.fenced);
+        assert_eq!(store.changeset(p.id).unwrap(), Some(back));
     }
 
     #[test]
