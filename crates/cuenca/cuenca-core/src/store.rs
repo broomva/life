@@ -279,8 +279,9 @@ impl Store {
     ///
     /// Only the fork's holder under its current epoch publishes to the fork. The holder
     /// of an earlier epoch (the fork was taken over since) publishes to that epoch's
-    /// sibling fork ([`crate::sibling_name`]), created on its first such draft from the
-    /// changeset's base, which may be any tree the store holds; the result says where
+    /// sibling fork ([`crate::sibling_name`]), created on its first such draft, which must
+    /// start from the head the stale epoch ended at (anything else is `NotAtBase`); the
+    /// result says where
     /// (`fork`, `epoch`, `fenced`). Anyone else is refused, and so is a revoked
     /// principal.
     ///

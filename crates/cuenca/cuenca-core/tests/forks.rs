@@ -294,6 +294,57 @@ fn a_divergent_stale_draft_is_refused_until_rebased() {
     assert!(head.get("x").is_some() && head.get("y").is_some());
 }
 
+/// A sibling starts from the head the stale epoch ended at, never from a tree the writer
+/// was not given: another location's main, another fork's head, or the fork's tree from
+/// before its last acknowledged draft. Each is refused as `NotAtBase`, appending nothing
+/// and creating no sibling.
+#[test]
+fn a_sibling_starts_only_from_the_head_its_epoch_left() {
+    let (_d, store, main) = forked();
+    let secret = tree(&store, &[("secret.env", b"TOKEN=hunter2")]);
+    store.add_location(&loc("private"), None, &secret).unwrap();
+    store.create_fork(&fork("g"), &loc("l"), &owner()).unwrap();
+    let theirs = write(&store, &main, &[("theirs", b"owner's work")]);
+    store
+        .publish_draft(&fork("g"), &Writer::new(owner(), 1), &theirs)
+        .unwrap();
+    let acked = write(&store, &main, &[("a", b"acked")]);
+    store.publish_draft(&fork("f"), &w1(), &acked).unwrap();
+    store.take_over(&fork("f"), 1, &owner()).unwrap();
+    let left = acked.apply(&main).unwrap();
+    assert_eq!(
+        store.fork(&fork("f")).unwrap().unwrap().released_at(1),
+        Some(left.git_tree_id())
+    );
+    let len = store.len().unwrap();
+    let foreign_fork = theirs.apply(&main).unwrap();
+    for base in [&secret, &foreign_fork, &main] {
+        let draft = write(&store, base, &[("x", b"y")]);
+        assert!(
+            matches!(
+                store.publish_draft(&fork("f"), &w1(), &draft),
+                Err(CoreError::NotAtBase { head, .. }) if head == left.git_tree_id()
+            ),
+            "a sibling started from {}",
+            base.git_tree_id()
+        );
+    }
+    // The acknowledged draft, retried after the takeover, is already in `f`: refused too.
+    assert!(matches!(
+        store.publish_draft(&fork("f"), &w1(), &acked),
+        Err(CoreError::NotAtBase { .. })
+    ));
+    assert_eq!(store.len().unwrap(), len);
+    assert_eq!(store.forks().unwrap().len(), 2);
+    let next = write(&store, &left, &[("x", b"y")]);
+    let p = store.publish_draft(&fork("f"), &w1(), &next).unwrap();
+    assert_eq!(
+        store.fork(&p.fork).unwrap().unwrap().base,
+        left.git_tree_id()
+    );
+    store.replay_check().unwrap();
+}
+
 /// One holder fenced twice, under two epochs (a laptop that goes offline twice): each
 /// episode's drafts are kept, in a sibling of their own.
 #[test]

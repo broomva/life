@@ -54,6 +54,10 @@ pub struct Fork {
     /// Who held it, epoch by epoch: `holders[e - 1]` held it under epoch `e`. The last
     /// is the holder now, and the fork's epoch is the length (never 0).
     pub holders: Vec<Holder>,
+    /// The head each finished epoch ended at: `released[e - 1]` is the tree the fork
+    /// held when epoch `e` was taken over (one entry per takeover, so one fewer than
+    /// `holders`). A stale writer's offline chain resumes from there and nowhere else.
+    pub released: Vec<GitOid>,
     /// For a sibling fork, the fork whose stale-epoch publishes it keeps.
     pub parent: Option<ForkName>,
     /// The tree it started from: main for a fork, the stale writer's base for a sibling.
@@ -81,6 +85,12 @@ impl Fork {
     pub fn holder_at(&self, epoch: u64) -> Option<&Holder> {
         let index = usize::try_from(epoch.checked_sub(1)?).ok()?;
         self.holders.get(index)
+    }
+
+    /// The head the fork held when `epoch` ended (`None` while it is current).
+    pub fn released_at(&self, epoch: u64) -> Option<GitOid> {
+        let ended = usize::try_from(epoch.checked_sub(1)?).ok()?;
+        self.released.get(ended).copied()
     }
 }
 
@@ -201,6 +211,7 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
                 name: name.clone(),
                 location: at.clone(),
                 holders: vec![holder.clone()],
+                released: Vec::new(),
                 parent: None,
                 base: *base,
                 head: *base,
@@ -261,6 +272,7 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
                     actual: state.epoch(),
                 });
             }
+            state.released.push(state.head);
             state.holders.push(holder.clone());
             // A landing intent is the old holder's request; it does not pass to the new one.
             state.landing_intent = None;
@@ -342,8 +354,11 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
 
 /// The fork a draft fenced from `parent` (written by `writer` under one of `parent`'s
 /// stale epochs) goes to: the sibling for that parent and epoch
-/// ([`sibling_name`]), new if it does not exist yet, starting from `base` (the draft's) and
-/// held by the writer under epoch 1. If that sibling has since been taken over, the
+/// ([`sibling_name`]), new if it does not exist yet, starting from the head the stale
+/// epoch ended at ([`Fork::released_at`]) and held by the writer under epoch 1. A draft
+/// whose base is any other tree is refused as `NotAtBase`: the writer could read only
+/// what its epoch left, so a sibling never starts from a tree it was not given (another
+/// location's main, another fork's head). If that sibling has since been taken over, the
 /// writer is stale there too, and the draft goes one level down, to the sibling's own
 /// sibling for epoch 1, and so on. So a stale draft always has a fork of the writer's
 /// own to go to, never one someone else holds. Once there it is a draft like any
@@ -359,10 +374,21 @@ pub(crate) fn fenced_target(
     loop {
         let name = sibling_name(&at.name, epoch, &writer.holder.node);
         let Some(sibling) = view.fork(&name)? else {
+            let released = at.released_at(epoch).ok_or_else(|| {
+                CoreError::Inconsistent(format!("{:?} has no end for epoch {epoch}", at.name))
+            })?;
+            if base != released {
+                return Err(CoreError::NotAtBase {
+                    what: format!("fork {:?} as epoch {epoch} left it", at.name),
+                    head: released,
+                    base,
+                });
+            }
             return Ok(Fork {
                 name,
                 location: at.location.clone(),
                 holders: vec![writer.holder.clone()],
+                released: Vec::new(),
                 parent: Some(at.name.clone()),
                 base,
                 head: base,
