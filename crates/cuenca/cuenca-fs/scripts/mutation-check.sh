@@ -70,6 +70,8 @@ mutate src/scan.rs '            Err(Errno::LOOP) => None,
             Err(Errno::NOENT) => return Ok(None),' '            Err(Errno::LOOP) => None,' --lib removed_after_the_listing
 # never leaving the root
 mutate src/scan.rs 'let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;' 'let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;' --lib renamed_out_of_the_root
+mutate src/scan.rs '        Err(Errno::LOOP | Errno::NOTDIR) => return Err(FsError::Unstable(p.abs.clone())),
+        Err(Errno::NOENT) => return Ok(None),' '        Err(Errno::LOOP | Errno::NOTDIR) => return Err(FsError::Unstable(p.abs.clone())),' --lib swapped_for_a_symlink
 mutate src/scan.rs 'if dev_ino(&fstat(&fd).map_err(errno(&p.abs))?) != p.dev_ino {' 'if false {' --lib swapped_for_a_symlink
 mutate src/scan.rs 'let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;' 'let flags = OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC;' --lib replaced_by_a_symlink
 mutate src/scan.rs 'if after != stamp {' 'if false {' --lib stale_stamp
@@ -93,10 +95,9 @@ mutate src/checkout.rs 'if !matches!(item.file_name().to_bytes(), b"." | b"..") 
 mutate src/checkout.rs 'verify(oid, &bytes)?;' '' --test fs wrong_or_missing
 mutate src/checkout.rs 'verify(oid, &target)?;' '' --test fs wrong_or_missing
 mutate src/checkout.rs 'if now != stamp {' 'if false {' --test fs source_changed
-mutate src/checkout.rs '(cloned, stamp.is_some())' '(cloned, true)' --test fs corrupt_object
-mutate src/checkout.rs 'cache.record(w.path, w.stamp, w.entry, started);' 'cache.record(w.path, w.stamp, w.entry, started + std::time::Duration::from_secs(3600));' --test fs every_source
+mutate src/checkout.rs 'None => verify_file(oid, &file, &abs)?,' 'None => Stamp::of(&file.metadata().map_err(FsError::io(&abs))?),' --test fs corrupt_object
 mutate src/checkout.rs '&& Stamp::of(&file.metadata()?) == *stamp' '&& true' --test fs edited_since
 mutate src/checkout.rs 'if Blob::of(&content).map(|b| b.oid()) == Some(oid) {' 'if true {' --test fs edited_since
-mutate src/checkout.rs 'if stamp.permissions() != mode {' 'if false {' --test fs every_source
+mutate src/checkout.rs '.permissions() != mode {' '.permissions() == u32::MAX {' --test fs every_source
 
 exit $survived

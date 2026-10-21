@@ -205,10 +205,11 @@ fn scan(
         let (dir, tracked_only, prefix, rel_dir, abs_dir) = match next_dir.take() {
             Some(dir) => dir,
             None => match pending.pop() {
-                Some(p) => {
-                    let fd = open_child(&p)?;
-                    (fd, p.tracked_only, p.prefix, p.rel, p.abs)
-                }
+                Some(p) => match open_child(&p)? {
+                    Some(fd) => (fd, p.tracked_only, p.prefix, p.rel, p.abs),
+                    // Removed since it was listed, as a build tool's temporary directory is.
+                    None => continue,
+                },
                 None => break,
             },
         };
@@ -362,17 +363,18 @@ fn dev_ino(st: &rustix::fs::Stat) -> (u64, u64) {
 /// Open a directory the walk listed, refusing anything but that same directory: a link
 /// put in its place fails the open, even one to the very directory renamed out of the
 /// root, and another directory fails the inode check.
-fn open_child(p: &Pending) -> Result<Arc<OwnedFd>> {
+fn open_child(p: &Pending) -> Result<Option<Arc<OwnedFd>>> {
     let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     let fd = match openat(&*p.parent, &p.name, flags, rustix::fs::Mode::empty()) {
         Ok(fd) => fd,
         Err(Errno::LOOP | Errno::NOTDIR) => return Err(FsError::Unstable(p.abs.clone())),
+        Err(Errno::NOENT) => return Ok(None),
         Err(e) => return Err(FsError::io(&p.abs)(e.into())),
     };
     if dev_ino(&fstat(&fd).map_err(errno(&p.abs))?) != p.dev_ino {
         return Err(FsError::Unstable(p.abs.clone()));
     }
-    Ok(Arc::new(fd))
+    Ok(Some(Arc::new(fd)))
 }
 
 fn errno(path: &Path) -> impl Fn(Errno) -> FsError + '_ {
@@ -619,7 +621,12 @@ mod tests {
             )
             .unwrap(),
         );
-        assert!(open_child(&pending).is_ok());
+        assert!(matches!(open_child(&pending), Ok(Some(_))));
+        fs::remove_dir(dir.path().join("a")).unwrap();
+        assert!(
+            matches!(open_child(&pending), Ok(None)),
+            "removed since listed: left out"
+        );
     }
 
     #[test]

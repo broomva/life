@@ -52,13 +52,12 @@
 //! location on a network filesystem whose server clock runs more than the margin behind
 //! weakens this rule.
 //!
-//! A checkout's new cache vouches for a file only if its content was verified and its
-//! stat is settled: a clone of a file a source vouched for by stat ([`CheckoutSource`],
-//! re-checked after cloning) keeps that file's old modification time, and any write into
-//! it during the checkout would give it a new one. Copies, content written from memory,
-//! and clones from [`ObjectDir`] (the authority's blob store, whose blobs were verified at
-//! ingest and are taken on its word) are left out, so the checkout's first snapshot reads
-//! them. A clone also carries its source's extended attributes, which no tree records.
+//! A checkout leaves no stat cache: what it wrote is read by its first snapshot, which
+//! builds one. Content a source hands over is checked before it is written: bytes in
+//! memory and files offered without a stamp ([`ObjectDir`]) are hashed, and a file
+//! offered with a stamp ([`CheckoutSource`], from its stat cache) is cloned only while its
+//! stat is that stamp, checked again after cloning. A clone also carries its source's
+//! extended attributes, which no tree records.
 
 mod cache;
 mod checkout;

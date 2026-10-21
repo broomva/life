@@ -1,6 +1,7 @@
 //! Measure spec row 2·B "fork of a tree already checked out": snapshot `<src>` (twice, so
 //! the second scan runs from the stat cache), check its tree out into `<dest>` from the
-//! source checkout, and snapshot the result.
+//! source checkout, and snapshot the result (a checkout leaves no cache, so that first
+//! snapshot reads every file, and the one after it none).
 //!
 //! cargo run --release -p cuenca-fs --example fork_bench -- <src> <dest>
 //!
@@ -60,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tree_bytes / 1024,
         100.0 * grew as f64 / tree_bytes as f64
     );
-    let mut fork_cache = done.cache;
+    let mut fork_cache = StatCache::new();
     let t = Instant::now();
     let fork = snapshot(dest, &snap.tree, &mut fork_cache)?;
     println!(

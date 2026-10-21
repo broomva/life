@@ -23,7 +23,6 @@ use std::os::fd::OwnedFd;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 /// How many files a checkout writes at once. Clones on one APFS volume contend: on a
 /// 10,844-file tree, 1 to 4 threads took 0.9 to 1.0 s and 14 threads 2.8 s (a volume
@@ -39,11 +38,11 @@ pub trait BlobSource: Sync {
 /// A blob's content, as a source hands it over.
 #[derive(Debug)]
 pub enum Fetched {
-    /// An open regular file holding exactly the blob, which a checkout clones (or copies,
-    /// where the disk cannot clone). With a `stamp`, the source vouches for the content by
-    /// that stat: the checkout re-checks it after cloning, fails if it moved, and lets its
-    /// new stat cache vouch for the copy. Without one, the content is taken on trust and
-    /// the copy is left out of the new cache, so the next snapshot reads it.
+    /// An open regular file holding the blob, which a checkout clones (or copies, where
+    /// the disk cannot clone). With a `stamp`, the source vouches for the content by that
+    /// stat (a stat cache recorded it when the content was hashed). Without one, the
+    /// checkout hashes the file before cloning it. Either way it checks the file's stat
+    /// after cloning, and fails if the file changed while it was cloned.
     File { file: File, stamp: Option<Stamp> },
     /// The content in memory. A checkout hashes it before writing it.
     Bytes(Vec<u8>),
@@ -65,9 +64,9 @@ impl<A: BlobSource, B: BlobSource> BlobSource for (A, B) {
     }
 }
 
-/// A directory laid out as the authority's blob store: `<dir>/<2 hex>/<38 hex>`, each
-/// file the blob with that git id as the store verified it at ingest. Its files are not
-/// re-hashed here, so a checkout from it does not vouch for them in its cache.
+/// A directory laid out as the authority's blob store: `<dir>/<2 hex>/<38 hex>`. Its
+/// files are offered without a stamp, so a checkout hashes each one before cloning it: a
+/// damaged object fails the checkout instead of reaching a checkout.
 pub struct ObjectDir {
     dir: PathBuf,
 }
@@ -188,12 +187,6 @@ fn open_regular(path: &Path) -> io::Result<Option<File>> {
 /// What a checkout wrote.
 #[derive(Debug)]
 pub struct Checkout {
-    /// The new checkout's stat cache. It vouches for a file only if its content was
-    /// verified (a clone of a file the source vouched for by stat) and its stat is settled
-    /// (see [`crate::RACY_MARGIN`]): a clone keeps its source's old modification time,
-    /// and any write into the file during the checkout gives it a new one. Copies and
-    /// content written from memory are new, so the checkout's first snapshot reads them.
-    pub cache: StatCache,
     /// Files cloned copy-on-write.
     pub cloned: usize,
     /// Files copied, because the disk could not clone them or the content came in memory.
@@ -201,14 +194,16 @@ pub struct Checkout {
 }
 
 /// Materialise `tree` into `dest`: a missing directory, which is created, or an empty
-/// one. Others who can write `dest` can still put content in it while the checkout runs,
-/// which its first snapshot sees, but they cannot redirect a write outside it. Files are
+/// one. `dest` is the caller's path and is resolved as given (on macOS `/tmp` is itself a
+/// link); everything under it is reached without following a link. Others who can write
+/// `dest` can still put content in it while the checkout runs, which its first snapshot
+/// sees (a checkout leaves no stat cache, so that snapshot reads every file), but they
+/// cannot redirect a write outside it. Files are
 /// cloned from `source` where the disk supports it (APFS `clonefile`, a Linux reflink)
 /// and copied otherwise; modes are git's (`0644`, `0755`), whatever the source's are.
 /// Symlinks are created last. On error the destination is left partly written and should
 /// be discarded.
 pub fn checkout(tree: &Tree, dest: &Path, source: &dyn BlobSource) -> Result<Checkout> {
-    let started = SystemTime::now();
     let root = prepare(dest)?;
     let mut dirs = BTreeSet::new();
     for (path, _) in tree.entries() {
@@ -247,7 +242,7 @@ pub fn checkout(tree: &Tree, dest: &Path, source: &dyn BlobSource) -> Result<Che
         .num_threads(WRITERS)
         .build()
         .map_err(|e| FsError::io(dest)(io::Error::other(e)))?;
-    let written: Vec<Vec<Written>> = pool.install(|| {
+    let written: Vec<Vec<bool>> = pool.install(|| {
         files
             .par_iter()
             .map(|(dir, entries)| {
@@ -278,31 +273,9 @@ pub fn checkout(tree: &Tree, dest: &Path, source: &dyn BlobSource) -> Result<Che
         let at = open_under(&root, dest, parent)?;
         symlinkat(OsStr::from_bytes(&target), &at, name).map_err(errno(abs))?;
     }
-    let mut cache = StatCache::new();
-    let (mut cloned, mut copied) = (0, 0);
-    for w in written.into_iter().flatten() {
-        if w.cloned {
-            cloned += 1;
-        } else {
-            copied += 1;
-        }
-        if w.vouched {
-            cache.record(w.path, w.stamp, w.entry, started);
-        }
-    }
-    Ok(Checkout {
-        cache,
-        cloned,
-        copied,
-    })
-}
-
-struct Written {
-    path: String,
-    stamp: Stamp,
-    entry: Entry,
-    cloned: bool,
-    vouched: bool,
+    let cloned = written.iter().flatten().filter(|c| **c).count();
+    let copied = written.iter().flatten().count() - cloned;
+    Ok(Checkout { cloned, copied })
 }
 
 /// `a/b/c` → (`a/b`, `c`); `c` → (``, `c`).
@@ -393,37 +366,38 @@ fn verify(oid: GitOid, content: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Write one regular file by its name in its directory `root`. A clone carries the
-/// source's mode, so the mode is set only where it is not already git's.
+/// Write one regular file by its name in its directory `root`; true if it was cloned. A
+/// clone carries the source's mode, so the mode is set only where it is not already git's.
 fn write_file(
     root: &OwnedFd,
     dest: &Path,
     path: &RepoPath,
     entry: Entry,
     source: &dyn BlobSource,
-) -> Result<Written> {
+) -> Result<bool> {
     let abs = dest.join(path.as_str());
     let name = CString::new(path.file_name()).expect("a repository path has no NUL");
     let oid = entry.oid();
-    let (cloned, vouched) = match source.fetch(oid).map_err(FsError::io(&abs))? {
+    let cloned = match source.fetch(oid).map_err(FsError::io(&abs))? {
         None => return Err(FsError::MissingBlob(oid)),
         Some(Fetched::File { file, stamp }) => {
+            let stamp = match stamp {
+                Some(stamp) => stamp,
+                None => verify_file(oid, &file, &abs)?,
+            };
             let cloned = clone_or_copy(&file, root, &name).map_err(FsError::io(&abs))?;
-            if let Some(stamp) = stamp {
-                let now = Stamp::of(&file.metadata().map_err(FsError::io(&abs))?);
-                if now != stamp {
-                    unlinkat(root, &*name, AtFlags::empty()).map_err(errno(abs.clone()))?;
-                    return Err(FsError::SourceChanged(abs));
-                }
+            let now = Stamp::of(&file.metadata().map_err(FsError::io(&abs))?);
+            if now != stamp {
+                unlinkat(root, &*name, AtFlags::empty()).map_err(errno(abs.clone()))?;
+                return Err(FsError::SourceChanged(abs));
             }
-            (cloned, stamp.is_some())
+            cloned
         }
         Some(Fetched::Bytes(bytes)) => {
             verify(oid, &bytes)?;
             let mut file = create(root, &name).map_err(FsError::io(&abs))?;
             file.write_all(&bytes).map_err(FsError::io(&abs))?;
-            // Verified, but written now: the cache leaves it out until it settles.
-            (false, true)
+            false
         }
     };
     let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
@@ -435,20 +409,43 @@ fn write_file(
     } else {
         0o644
     };
-    let mut stamp = Stamp::of(&file.metadata().map_err(FsError::io(&abs))?);
-    if stamp.permissions() != mode {
-        // A mode change moves the change time only, never the modification time.
+    if Stamp::of(&file.metadata().map_err(FsError::io(&abs))?).permissions() != mode {
         file.set_permissions(fs::Permissions::from_mode(mode))
             .map_err(FsError::io(&abs))?;
-        stamp = Stamp::of(&file.metadata().map_err(FsError::io(&abs))?);
     }
-    Ok(Written {
-        path: path.to_string(),
-        stamp,
-        entry,
-        cloned,
-        vouched,
-    })
+    Ok(cloned)
+}
+
+/// Hash an open file that came without a stamp and return the stamp it was hashed under,
+/// or fail if it is not the blob `oid`.
+fn verify_file(oid: GitOid, file: &File, abs: &Path) -> Result<Stamp> {
+    let stamp = Stamp::of(&file.metadata().map_err(FsError::io(abs))?);
+    let mut hasher = cuenca_tree::BlobHasher::new(stamp.size());
+    let mut reader = file.take(stamp.size() + 1);
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => hasher.update(&buf[..n]),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(FsError::io(abs)(e)),
+        }
+    }
+    let actual = match hasher.finish() {
+        Ok(blob) => blob.oid(),
+        Err(cuenca_tree::HashFailure::Collision) => return Err(FsError::Collision(abs.into())),
+        // Not the length its stat gave: it changed while it was read.
+        Err(cuenca_tree::HashFailure::WrongLength { .. }) => {
+            return Err(FsError::SourceChanged(abs.into()));
+        }
+    };
+    if actual != oid {
+        return Err(FsError::BlobMismatch {
+            expected: oid,
+            actual,
+        });
+    }
+    Ok(stamp)
 }
 
 /// A new, empty file `name` under `root`, readable and writable by the owner only until
@@ -462,8 +459,16 @@ fn create(root: &OwnedFd, name: &CString) -> io::Result<File> {
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 fn copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<bool> {
     let mut dst = create(root, name)?;
-    io::copy(&mut &*src, &mut dst)?;
+    copy_from_start(src, &mut dst)?;
     Ok(false)
+}
+
+/// Copy all of `src`, whatever its offset (it may just have been hashed).
+fn copy_from_start(src: &File, dst: &mut File) -> io::Result<u64> {
+    use std::io::{Seek as _, SeekFrom};
+    let mut src = src;
+    src.seek(SeekFrom::Start(0))?;
+    io::copy(&mut src, dst)
 }
 
 /// Clone `src` to `name` under `root`; true if cloned, false if the disk cannot clone and
@@ -490,7 +495,7 @@ fn clone_or_copy(src: &File, root: &OwnedFd, name: &CString) -> io::Result<bool>
     match rustix::fs::ioctl_ficlone(&dst, src) {
         Ok(()) => Ok(true),
         Err(Errno::OPNOTSUPP | Errno::XDEV | Errno::INVAL | Errno::NOTTY | Errno::BADF) => {
-            io::copy(&mut &*src, &mut dst)?;
+            copy_from_start(src, &mut dst)?;
             Ok(false)
         }
         Err(e) => Err(e.into()),

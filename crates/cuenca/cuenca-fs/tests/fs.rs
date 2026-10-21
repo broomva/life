@@ -157,19 +157,10 @@ fn snapshot_checkout_snapshot_is_the_same_tree_from_every_source() {
         let out = tempfile::tempdir().unwrap();
         let dest = out.path().join("fork");
         let done = checkout(&snap.tree, &dest, &*source).unwrap();
-        let (done_vouched, done_copied) = (done.cache.len(), done.copied);
-        let mut fork_cache = done.cache;
-        let again = snapshot(&dest, &snap.tree, &mut fork_cache).unwrap();
+        assert_eq!(done.cloned + done.copied, 7, "{name}");
+        let again = snapshot(&dest, &snap.tree, &mut StatCache::new()).unwrap();
         assert_eq!(again.tree.git_tree_id(), id, "{name}");
         assert!(again.is_clean(), "{name}");
-        // The checkout vouches only for settled clones of files the source vouched for;
-        // the first snapshot reads everything else.
-        assert_eq!(again.hashed, 7 - done_vouched, "{name}");
-        if name == "checkout" && done_copied == 0 {
-            assert_eq!(done_vouched, 7, "every clone of a vouched, settled source");
-        } else if name != "checkout" {
-            assert_eq!(done_vouched, 0, "{name}: copies and unverified clones");
-        }
         assert_eq!(git_tree_id(&dest), id.to_hex(), "{name}");
         let mode = fs::metadata(dest.join("bin/run.sh"))
             .unwrap()
@@ -474,9 +465,8 @@ fn drift_from_a_checkout_is_seen() {
     let snap = snapshot(src.path(), &Tree::new(), &mut StatCache::new()).unwrap();
     let out = tempfile::tempdir().unwrap();
     let dest = out.path().join("fork");
-    let mut cache = checkout(&snap.tree, &dest, &memory_of(&snap))
-        .unwrap()
-        .cache;
+    checkout(&snap.tree, &dest, &memory_of(&snap)).unwrap();
+    let mut cache = StatCache::new();
     assert!(snapshot(&dest, &snap.tree, &mut cache).unwrap().is_clean());
     fs::remove_file(dest.join("README.md")).unwrap();
     fs::rename(dest.join("src/main.rs"), dest.join("src/lib.rs")).unwrap();
@@ -627,9 +617,8 @@ fn ignored_paths_the_base_holds_stay_tracked() {
     let base = snapshot_with(src.path(), &Tree::new(), &mut StatCache::new(), &keep_all).unwrap();
     let out = tempfile::tempdir().unwrap();
     let dest = out.path().join("fork");
-    let mut cache = checkout(&base.tree, &dest, &memory_of(&base))
-        .unwrap()
-        .cache;
+    checkout(&base.tree, &dest, &memory_of(&base)).unwrap();
+    let mut cache = StatCache::new();
     let ops = |snap: &cuenca_fs::Snapshot| -> Vec<String> {
         snap.changeset
             .ops
@@ -699,14 +688,13 @@ fn a_checkout_source_serves_files_too_new_to_be_cached() {
         &CheckoutSource::new(src.path(), &snap.tree, &cache),
     )
     .unwrap();
-    let mut fork_cache = done.cache;
-    let again = snapshot(&dest, &snap.tree, &mut fork_cache).unwrap();
+    assert_eq!(
+        done.copied, 7,
+        "read and hashed by the source, then written"
+    );
+    let again = snapshot(&dest, &snap.tree, &mut StatCache::new()).unwrap();
     assert!(again.is_clean());
     assert_eq!(again.tree.git_tree_id(), snap.tree.git_tree_id());
-    assert_eq!(
-        again.hashed, 7,
-        "written now from memory, so not settled: the first snapshot reads them"
-    );
 }
 
 #[test]
@@ -726,15 +714,16 @@ fn a_checkout_source_tries_every_path_with_the_content() {
     )
     .unwrap();
     assert_eq!(fs::read(out.path().join("fork/a")).unwrap(), b"same\n");
-    // Both from the intact `b`, offered as a file the source vouches for. The new cache
-    // vouches for exactly the clones, which keep the source's settled stat; a copy, on a
-    // disk that cannot clone, is new.
+    // Both from the intact `b`, offered as a file (cloned, or copied where the disk
+    // cannot clone), not read into memory.
     assert_eq!(done.cloned + done.copied, 2);
-    assert_eq!(done.cache.len(), done.cloned);
+    if cfg!(target_os = "macos") {
+        assert_eq!(done.cloned, 2);
+    }
 }
 
 #[test]
-fn a_corrupt_object_is_not_vouched_for() {
+fn a_corrupt_object_fails_the_checkout() {
     let src = tempfile::tempdir().unwrap();
     write(src.path(), "a.txt", b"right content\n");
     let snap = snapshot(src.path(), &Tree::new(), &mut StatCache::new()).unwrap();
@@ -745,18 +734,15 @@ fn a_corrupt_object_is_not_vouched_for() {
         &format!("{}/{}", &hex[..2], &hex[2..]),
         b"TRUNC",
     );
-    // Settled, as an object ingested long ago is: only the source's word is missing.
-    age(objects.path());
     let out = tempfile::tempdir().unwrap();
     let dest = out.path().join("fork");
-    let mut cache = checkout(&snap.tree, &dest, &ObjectDir::new(objects.path()))
-        .unwrap()
-        .cache;
-    assert!(cache.is_empty());
-    let first = snapshot(&dest, &snap.tree, &mut cache).unwrap();
+    assert!(matches!(
+        checkout(&snap.tree, &dest, &ObjectDir::new(objects.path())),
+        Err(FsError::BlobMismatch { .. })
+    ));
     assert!(
-        !first.is_clean(),
-        "the first snapshot reads the file and sees the damage"
+        !dest.join("a.txt").exists(),
+        "nothing of it reaches the checkout"
     );
 }
 
