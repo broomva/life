@@ -80,11 +80,15 @@ impl BlobFiles {
         tmp.as_file().sync_all()?;
         let dest = self.path(claimed);
         let dir = dest.parent().expect("objects/<xx>");
-        if !dir.exists() {
-            fs::create_dir(dir)?;
-            // The new directory's own entry must be durable before the index names it.
-            File::open(&self.objects)?.sync_all()?;
+        match fs::create_dir(dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e.into()),
         }
+        // The shard's own entry must be durable before the index names the blob. Done
+        // on every ingest: a concurrent ingest may have created the shard and not yet
+        // made it durable.
+        File::open(&self.objects)?.sync_all()?;
         tmp.persist(&dest).map_err(|e| e.error)?;
         File::open(dir)?.sync_all()?;
         Ok(blob)

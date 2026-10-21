@@ -60,8 +60,8 @@ pub enum Event {
         base: GitOid,
     },
     /// A draft: a changeset moving the fork's head from `changeset.base` to
-    /// `changeset.target`. The changeset is stored whole, so the log alone rebuilds
-    /// every tree's shape.
+    /// `changeset.target`, stored whole. (A location's first tree is named by id only;
+    /// its objects are in the store's tree table.)
     DraftPublished {
         fork: ForkName,
         id: ChangesetId,

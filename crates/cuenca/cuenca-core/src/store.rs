@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -126,9 +126,10 @@ impl Store {
     pub fn blob_info(&self, oid: GitOid) -> Result<Option<BlobInfo>> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(BLOBS)?;
-        Ok(table
+        table
             .get(oid.as_bytes().as_slice())?
-            .map(|v| decode_blob(v.value())))
+            .map(|v| decode_blob(oid, v.value()))
+            .transpose()
     }
 
     /// A blob's content, verified against its id on the way out.
@@ -139,17 +140,27 @@ impl Store {
         self.blobs.read(oid)
     }
 
-    /// An entry may enter the log only if its blob is ingested and, where a content
-    /// rule applies, the blob's bytes pass it. Checked before the write transaction
+    /// Admission: an entry may enter the log only if its blob is ingested and, where a
+    /// content rule applies, the blob's bytes pass it. Each blob is read once per mode
+    /// and file name, however many paths name it. Checked before the write transaction
     /// opens (blobs are never removed, so the answer cannot change), to keep large
-    /// reads out of the single writer's lock.
-    fn check_entry(&self, path: &RepoPath, entry: &Entry) -> Result<()> {
-        let oid = entry.oid();
-        if self.blob_info(oid)?.is_none() {
-            return Err(CoreError::MissingBlob(oid));
-        }
-        if has_content_rule(path, entry.mode()) {
-            check_content(path, entry.mode(), &self.blobs.read(oid)?)?;
+    /// reads out of the single writer's lock. These checks need blob content, so
+    /// [`Store::replay_check`] does not repeat them.
+    fn check_entries<'a>(
+        &self,
+        entries: impl IntoIterator<Item = (&'a RepoPath, &'a Entry)>,
+    ) -> Result<()> {
+        let mut checked = HashSet::new();
+        for (path, entry) in entries {
+            let oid = entry.oid();
+            if self.blob_info(oid)?.is_none() {
+                return Err(CoreError::MissingBlob(oid));
+            }
+            if has_content_rule(path, entry.mode())
+                && checked.insert((oid, entry.mode(), path.file_name().to_string()))
+            {
+                check_content(path, entry.mode(), &self.blobs.read(oid)?)?;
+            }
         }
         Ok(())
     }
@@ -202,9 +213,7 @@ impl Store {
         if let Some(remote) = remote {
             check_remote(remote)?;
         }
-        for (path, entry) in main.entries() {
-            self.check_entry(path, entry)?;
-        }
+        self.check_entries(main.entries())?;
         let event = Event::LocationAdded {
             location: name.clone(),
             remote: remote.map(str::to_string),
@@ -237,11 +246,10 @@ impl Store {
     /// appends nothing and returns the first publish's offset. A retry that arrives
     /// after a newer draft is refused as `NotAtBase`, like any stale publish.
     pub fn publish_draft(&self, fork: &ForkName, changeset: &Changeset) -> Result<Published> {
-        for op in &changeset.ops {
-            if let Op::Put { path, entry } = op {
-                self.check_entry(path, entry)?;
-            }
-        }
+        self.check_entries(changeset.ops.iter().filter_map(|op| match op {
+            Op::Put { path, entry } => Some((path, entry)),
+            _ => None,
+        }))?;
         let id = ChangesetId::of(changeset);
         let event = Event::DraftPublished {
             fork: fork.clone(),
@@ -359,14 +367,18 @@ impl Store {
             .collect()
     }
 
-    /// Replay the log from empty through the same transition rules the writer uses,
-    /// and compare the result with the projection tables.
+    /// Replay the log from empty through the same transition rules the writer uses
+    /// (`state.rs`), and compare the result with the projection tables, key by key.
     ///
     /// Fails if an offset is missing or out of place, a record does not decode, an
-    /// event breaks a rule (or repeats the current state, which only a duplicated
-    /// record could), or the locations, forks or changeset index differ from the
-    /// replay's. It does not re-read tree objects or blob content: [`Store::tree`]
-    /// checks a tree against its id on every read, and [`Store::read_blob`] a blob.
+    /// event breaks a transition rule (or repeats the latest record of its kind, which
+    /// only a duplicated record could), or the locations, forks or changeset index
+    /// differ from the replay's. The writer's admission checks are not repeated: blob
+    /// presence and content rules, a draft's ops and target against its base tree, and
+    /// remote syntax need blob or tree content. A record that bypassed the writer can
+    /// therefore pass this check and still name a missing blob or tree; reads then
+    /// fail loudly ([`Store::tree`] checks a tree against its id, [`Store::read_blob`]
+    /// a blob).
     pub fn replay_check(&self) -> Result<ReplaySummary> {
         let txn = self.db.begin_read()?;
         let log = txn.open_table(LOG)?;
@@ -393,20 +405,36 @@ impl Store {
         }
 
         let differ = |what: &str| CoreError::Inconsistent(format!("{what} differ from the log"));
-        let locations: BTreeMap<LocationName, Location> = txn
+        let locations: BTreeMap<String, Location> = txn
             .open_table(LOCATIONS)?
             .iter()?
-            .map(|r| from_json::<Location>(r?.1.value()).map(|l| (l.name.clone(), l)))
+            .map(|r| {
+                let (k, v) = r?;
+                Ok((k.value().to_string(), from_json(v.value())?))
+            })
             .collect::<Result<_>>()?;
-        if locations != memory.locations {
+        let replayed: BTreeMap<String, Location> = memory
+            .locations
+            .iter()
+            .map(|(name, l)| (name.to_string(), l.clone()))
+            .collect();
+        if locations != replayed {
             return Err(differ("locations"));
         }
-        let forks: BTreeMap<ForkName, Fork> = txn
+        let forks: BTreeMap<String, Fork> = txn
             .open_table(FORKS)?
             .iter()?
-            .map(|r| from_json::<Fork>(r?.1.value()).map(|f| (f.name.clone(), f)))
+            .map(|r| {
+                let (k, v) = r?;
+                Ok((k.value().to_string(), from_json(v.value())?))
+            })
             .collect::<Result<_>>()?;
-        if forks != memory.forks {
+        let replayed: BTreeMap<String, Fork> = memory
+            .forks
+            .iter()
+            .map(|(name, f)| (name.to_string(), f.clone()))
+            .collect();
+        if forks != replayed {
             return Err(differ("forks"));
         }
         let index: BTreeMap<Vec<u8>, u64> = txn
@@ -551,15 +579,14 @@ fn encode_blob(blob: &Blob) -> Vec<u8> {
     v
 }
 
-fn decode_blob(bytes: &[u8]) -> BlobInfo {
-    let mut sha = [0u8; 32];
-    sha.copy_from_slice(&bytes[..32]);
-    let mut size = [0u8; 8];
-    size.copy_from_slice(&bytes[32..40]);
-    BlobInfo {
-        sha256: ContentHash::from_bytes(sha),
-        size: u64::from_le_bytes(size),
-    }
+fn decode_blob(oid: GitOid, bytes: &[u8]) -> Result<BlobInfo> {
+    let (Some(sha), Some(size)) = (bytes.get(..32), bytes.get(32..40)) else {
+        return Err(CoreError::CorruptBlob(oid));
+    };
+    Ok(BlobInfo {
+        sha256: ContentHash::from_bytes(sha.try_into().expect("32 bytes")),
+        size: u64::from_le_bytes(size.try_into().expect("8 bytes")),
+    })
 }
 
 /// One stored git tree object's children: `(mode, name, oid)`.
@@ -816,6 +843,32 @@ mod tests {
             l.remote = Some("git@example.com:x.git".into())
         });
         assert_eq!(inconsistent(&store), "locations differ from the log");
+    }
+
+    #[test]
+    fn replay_refuses_a_location_filed_under_another_key() {
+        let (_d, store, _) = setup();
+        let txn = store.begin().unwrap();
+        {
+            let mut t = txn.open_table(LOCATIONS).unwrap();
+            let row = t.remove("l").unwrap().unwrap().value().to_vec();
+            t.insert("alias", row.as_slice()).unwrap();
+        }
+        txn.commit().unwrap();
+        assert_eq!(inconsistent(&store), "locations differ from the log");
+    }
+
+    #[test]
+    fn a_short_blob_index_row_is_an_error_not_a_panic() {
+        let (_d, store, _) = setup();
+        let oid = GitOid::for_blob(b"1");
+        let txn = store.begin().unwrap();
+        txn.open_table(BLOBS)
+            .unwrap()
+            .insert(oid.as_bytes().as_slice(), &b"short"[..])
+            .unwrap();
+        txn.commit().unwrap();
+        assert!(matches!(store.blob_info(oid), Err(CoreError::CorruptBlob(o)) if o == oid));
     }
 
     #[test]

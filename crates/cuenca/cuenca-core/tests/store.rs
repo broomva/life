@@ -246,9 +246,19 @@ fn main_advances_by_compare_and_swap() {
     let at = store.advance_main(&fork("f"), pf.id).unwrap();
     assert_eq!(store.main_tree(&loc("l")).unwrap().git_tree_id(), f1.target);
     assert_eq!(
-        store.location(&loc("l")).unwrap().unwrap().main_changeset,
-        Some((pf.id, at))
+        store
+            .location(&loc("l"))
+            .unwrap()
+            .unwrap()
+            .main_moved
+            .map(|m| (m.changeset, m.fork, m.offset)),
+        Some((pf.id, fork("f"), at))
     );
+    // Another fork asking for the move f made is not a retry of it.
+    assert!(matches!(
+        store.advance_main(&fork("g"), pf.id),
+        Err(CoreError::NotHead { .. })
+    ));
     // Something else is appended; a retry still answers with the move's own offset.
     store.create_fork(&fork("h"), &loc("l")).unwrap();
     assert_eq!(store.fork(&fork("h")).unwrap().unwrap().base, f1.target);
@@ -371,4 +381,89 @@ fn a_changeset_published_on_two_forks_is_indexed_at_its_first_draft() {
     assert!(second.fresh && second.offset > first.offset);
     assert_eq!(store.replay_check().unwrap().changesets, 1);
     assert_eq!(store.changeset(first.id).unwrap(), Some(cs));
+}
+
+#[test]
+fn a_changeset_that_does_not_apply_to_its_base_is_refused_and_appends_nothing() {
+    let (_d, store) = store();
+    let main = tree(&store, &[("a", b"1")]);
+    store.add_location(&loc("l"), None, &main).unwrap();
+    store.create_fork(&fork("f"), &loc("l")).unwrap();
+    let len = store.len().unwrap();
+
+    let mut forged = write(&store, &main, &[("a", b"2")]);
+    forged.target = GitOid::empty_tree();
+    let missing = Changeset {
+        ops: vec![Op::delete(path("never-there"))],
+        ..forged.clone()
+    };
+    let mut no_op = write(&store, &main, &[("a", b"2")]);
+    no_op.ops = vec![Op::put(path("a"), Entry::file(b"1"))];
+    for bad in [forged, missing, no_op] {
+        assert!(
+            matches!(
+                store.publish_draft(&fork("f"), &bad),
+                Err(CoreError::Changeset(_))
+            ),
+            "{bad:?}"
+        );
+    }
+    assert_eq!(store.len().unwrap(), len);
+    assert_eq!(store.fork_head(&fork("f")).unwrap(), main);
+}
+
+#[test]
+fn concurrent_ingests_into_one_new_shard_all_succeed() {
+    let (_d, store) = store();
+    // Contents whose git ids share their first byte, so they share a shard directory.
+    let mut contents: Vec<Vec<u8>> = Vec::new();
+    let mut n = 0u64;
+    let want = GitOid::for_blob(b"0").as_bytes()[0];
+    while contents.len() < 16 {
+        let c = n.to_string().into_bytes();
+        if GitOid::for_blob(&c).as_bytes()[0] == want {
+            contents.push(c);
+        }
+        n += 1;
+    }
+    std::thread::scope(|scope| {
+        for c in &contents {
+            let store = &store;
+            scope.spawn(move || {
+                store
+                    .ingest_blob(GitOid::for_blob(c), c.len() as u64, &c[..])
+                    .unwrap()
+            });
+        }
+    });
+    for c in &contents {
+        assert_eq!(store.read_blob(GitOid::for_blob(c)).unwrap(), *c);
+    }
+}
+
+#[test]
+fn leftovers_of_an_interrupted_ingest_are_removed_on_open() {
+    let dir = tempfile::tempdir().unwrap();
+    drop(Store::open(dir.path()).unwrap());
+    let leftover = dir.path().join("blobs/tmp/.tmpXYZ");
+    std::fs::write(&leftover, b"half a blob").unwrap();
+    drop(Store::open(dir.path()).unwrap());
+    assert!(!leftover.exists());
+}
+
+#[test]
+fn main_follows_a_fork_draft_by_draft() {
+    let (_d, store) = store();
+    let main = tree(&store, &[("a", b"0")]);
+    store.add_location(&loc("l"), None, &main).unwrap();
+    store.create_fork(&fork("f"), &loc("l")).unwrap();
+    for n in 1..=3u8 {
+        let head = store.fork_head(&fork("f")).unwrap();
+        let cs = write(&store, &head, &[("a", &[b'0' + n])]);
+        let p = store.publish_draft(&fork("f"), &cs).unwrap();
+        let at = store.advance_main(&fork("f"), p.id).unwrap();
+        assert_eq!(at, p.offset + 1, "draft {n} moved main");
+        assert_eq!(store.main_tree(&loc("l")).unwrap().git_tree_id(), cs.target);
+    }
+    assert_eq!(store.replay_check().unwrap().records, 8);
 }

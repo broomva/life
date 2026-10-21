@@ -10,7 +10,8 @@
 //!   commits are durable before they return;
 //! - **projections** of the log: [`Location`]s (any directory tree the authority tracks,
 //!   with an optional git remote), [`Fork`]s with their head, and a changeset index.
-//!   [`Store::replay_check`] replays the log through the same rules and compares. The
+//!   [`Store::replay_check`] replays the log through the same transition rules and
+//!   compares (admission checks that need blob content are the writer's alone). The
 //!   git tree objects every recorded tree is made of sit beside them, checked against
 //!   their id on every read;
 //! - **blobs**, keyed by git object id. A blob enters the store only after its bytes
@@ -38,5 +39,5 @@ pub use blobs::MAX_BLOB_BYTES;
 pub use error::{CoreError, Result};
 pub use event::{ChangesetId, Event, Record};
 pub use names::{ForkName, LocationName, MAX_NAME_BYTES, NameError};
-pub use state::{Fork, Location};
+pub use state::{Fork, Location, MainMove};
 pub use store::{BlobInfo, Published, ReplaySummary, Store};

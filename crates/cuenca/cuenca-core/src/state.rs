@@ -1,7 +1,9 @@
 //! The log's transition rules, in one place.
 //!
 //! [`apply`] is the only code that decides whether an event may follow the state the
-//! log is in, and what state it leaves. The store's writer runs it against the redb
+//! log is in, and what state it leaves. Admission checks that need blob or tree
+//! content (blob presence, content rules, a draft's ops and target) are the writer's,
+//! in `store.rs`, and run before an event reaches these rules. The store's writer runs it against the redb
 //! tables inside the transaction that appends the event; [`crate::Store::replay_check`]
 //! runs it against an empty in-memory [`Memory`] for every record in order. The two
 //! cannot disagree about a rule, because there is one copy of each.
@@ -26,8 +28,19 @@ pub struct Location {
     pub remote: Option<String>,
     /// The tree of its main.
     pub main: GitOid,
-    /// The changeset that last moved main, and the offset of that move.
-    pub main_changeset: Option<(ChangesetId, u64)>,
+    /// The last move of main, if any.
+    pub main_moved: Option<MainMove>,
+}
+
+/// One move of a location's main.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct MainMove {
+    pub changeset: ChangesetId,
+    /// The fork whose head it was.
+    pub fork: ForkName,
+    /// The offset of the `MainAdvanced` record.
+    pub offset: u64,
 }
 
 /// A fork as the log has it now. Fields added later are `#[serde(default)]`.
@@ -51,8 +64,8 @@ pub struct Fork {
 pub(crate) enum Applied {
     /// The event changes the state; the caller appends it at the offset it gave.
     Fresh,
-    /// The event repeats the one recorded at this offset, which is still current: a
-    /// retry. The writer appends nothing; in a replay it is a duplicated record.
+    /// The event repeats the latest record of its kind for the same fork, at this
+    /// offset: a retry of a call that succeeded (a draft only while it is the head).     /// retry. The writer appends nothing; in a replay it is a duplicated record.
     Repeat(u64),
 }
 
@@ -99,7 +112,7 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
                 name: name.clone(),
                 remote: remote.clone(),
                 main: *main,
-                main_changeset: None,
+                main_moved: None,
             })?;
         }
         Event::ForkCreated {
@@ -168,10 +181,11 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
                 });
             }
             let mut loc = location(view, at)?;
-            if let Some((last, at)) = loc.main_changeset
-                && last == *id
+            if let Some(last) = &loc.main_moved
+                && last.changeset == *id
+                && last.fork == *from
             {
-                return Ok(Applied::Repeat(at));
+                return Ok(Applied::Repeat(last.offset));
             }
             if state.head_changeset.map(|(head, _)| head) != Some(*id) {
                 return Err(CoreError::NotHead {
@@ -190,7 +204,11 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
                 });
             }
             loc.main = changeset.target;
-            loc.main_changeset = Some((*id, offset));
+            loc.main_moved = Some(MainMove {
+                changeset: *id,
+                fork: from.clone(),
+                offset,
+            });
             view.put_location(&loc)?;
         }
         Event::LandingIntent {
