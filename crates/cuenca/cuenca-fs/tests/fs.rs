@@ -981,3 +981,24 @@ fn a_directory_that_became_a_file_under_a_rule_for_both_kinds_is_an_ordinary_del
     let paths: Vec<&str> = snap.tree.entries().map(|(p, _)| p.as_str()).collect();
     assert_eq!(paths, [".forkignore"]);
 }
+
+#[test]
+fn a_file_that_became_a_directory_under_a_rule_for_both_kinds_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "build", b"a file\n");
+    let base = snapshot_with(
+        dir.path(),
+        &Tree::new(),
+        &mut StatCache::new(),
+        &only(&ForkIgnore::parse("").unwrap()),
+    )
+    .unwrap();
+    write(dir.path(), ".forkignore", b"build\n");
+    fs::remove_file(dir.path().join("build")).unwrap();
+    write(dir.path(), "build/out.o", b"object\n");
+    // `build` names files too, so the base's file is a path the rules name: refused.
+    assert!(matches!(
+        snapshot(dir.path(), &base.tree, &mut StatCache::new()),
+        Err(FsError::Ignored(_))
+    ));
+}

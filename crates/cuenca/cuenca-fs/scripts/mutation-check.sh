@@ -115,6 +115,9 @@ mutate src/scan.rs '            ignored_files.contains(*path)
 
 mutate src/scan.rs '.any(|(i, _)| ignored_dirs.contains(&path[..i]))' '.any(|(i, _)| ignored_dirs.contains(&path[..i]) || ignored_files.contains(&path[..i]))' --test fs became_a_file
 
+mutate src/scan.rs '|| (ignored_dirs.contains(*path) && ignore.is_ignored(path, false))' '|| false' --test fs both_kinds_is_refused
+mutate src/scan.rs '|| (ignored_dirs.contains(*path) && ignore.is_ignored(path, false))' '|| ignored_dirs.contains(*path)' --test fs became_a_directory_under_a_directory_rule
+
 # The macOS clone must not follow a link planted at the name (Linux creates with O_EXCL).
 if [ "$(uname)" = Darwin ]; then
   mutate src/checkout.rs '            CLONE_NOFOLLOW,' '            0,' --test fs planted_at_a_file_name

@@ -335,13 +335,16 @@ fn scan(
     hashed += read_all(&mut queue, &mut found)?;
 
     // A base path the walk left out because the rules named it as a file, or named one of
-    // its directories as a directory. One that is simply gone, or whose name the rules
-    // name only as another kind, is an ordinary deletion.
+    // its directories as a directory. A base path is never a directory, so one the walk
+    // skipped as a directory counts when the rules name it as a file too. One that is
+    // simply gone, or whose name the rules name only as another kind, is an ordinary
+    // deletion.
     let dropped: Vec<String> = base
         .entries()
         .map(|(path, _)| path.as_str())
         .filter(|path| {
             ignored_files.contains(*path)
+                || (ignored_dirs.contains(*path) && ignore.is_ignored(path, false))
                 || path
                     .match_indices('/')
                     .any(|(i, _)| ignored_dirs.contains(&path[..i]))
