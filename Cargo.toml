@@ -58,6 +58,7 @@ members = [
     # Cuenca — the agent-native change plane
     "crates/cuenca/cuenca-tree",
     "crates/cuenca/cuenca-core",
+    "crates/cuenca/cuenca-fs",
     # Autonomic — homeostasis
     "crates/autonomic/autonomic-api-schema",
     "crates/autonomic/autonomic-api",

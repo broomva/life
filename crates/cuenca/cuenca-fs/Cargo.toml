@@ -1,0 +1,25 @@
+[package]
+name = "cuenca-fs"
+description = "Cuenca's working-directory side: snapshot any directory into a changeset and check a tree out with copy-on-write clones"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cuenca-tree = { path = "../cuenca-tree" }
+ignore = "0.4"
+libc = "0.2"
+rayon = "1"
+reflink-copy = "0.1"
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
