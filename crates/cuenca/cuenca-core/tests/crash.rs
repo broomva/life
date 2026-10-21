@@ -46,7 +46,9 @@ fn child_writer() {
         // Land the head, every time: after a restart these are retries of what the
         // killed child may already have recorded, and must append nothing.
         if let Some((head, _)) = store.fork(&fork("f")).unwrap().unwrap().head_changeset {
-            store.record_landing_intent(&fork("f"), head).unwrap();
+            store
+                .record_landing_intent(&fork("f"), &w1(), head)
+                .unwrap();
             store.advance_main(&fork("f"), head).unwrap();
         }
         let head = store.fork_head(&fork("f")).unwrap();
@@ -60,7 +62,7 @@ fn child_writer() {
                 (&format!("files/{}", next % 50), body.as_bytes()),
             ],
         );
-        let published = store.publish_draft(&fork("f"), &cs).unwrap();
+        let published = store.publish_draft(&fork("f"), &w1(), &cs).unwrap();
         println!("{ACKED}{}", published.id);
     }
 }
@@ -72,7 +74,7 @@ fn kill_during_append() {
         let store = Store::open(dir.path()).unwrap();
         let main = tree(&store, &[("counter", b"0")]);
         store.add_location(&loc("l"), None, &main).unwrap();
-        store.create_fork(&fork("f"), &loc("l")).unwrap();
+        store.create_fork(&fork("f"), &loc("l"), &agent()).unwrap();
     }
     let exe = std::env::current_exe().unwrap();
     // A small deterministic generator, so a failure reproduces.

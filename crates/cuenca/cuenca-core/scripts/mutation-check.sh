@@ -85,6 +85,50 @@ mutate src/state.rs 'if state.head_changeset.map(|(head, _)| head) != Some(*id) 
                     fork: name.to_string(),' 'if false {
                 return Err(CoreError::NotHead {
                     fork: name.to_string(),' --test store
+# One writer per fork: holders, fencing epochs, takeover, sibling forks, revocation.
+mutate src/state.rs 'fn check_writer(view: &impl View, state: &Fork, writer: &Writer) -> Result<()> {
+    not_revoked(view, &writer.holder.principal)?;' 'fn check_writer(view: &impl View, state: &Fork, writer: &Writer) -> Result<()> {' --test forks
+mutate src/state.rs 'if state.holder_at(writer.epoch) != Some(&writer.holder) {' 'if false {' --test forks
+mutate src/state.rs 'if writer.epoch != current {' 'if false {' --test forks
+mutate src/state.rs 'not_revoked(view, &holder.principal)?;
+            if view.fork(name)?.is_some() {' 'if view.fork(name)?.is_some() {' --test forks
+mutate src/state.rs 'not_revoked(view, &holder.principal)?;
+            let mut state = fork(view, name)?;' 'let mut state = fork(view, name)?;' --test forks
+mutate src/state.rs 'if state.epoch() != *expected_epoch {' 'if false {' --test forks
+mutate src/state.rs 'state.holders.push(holder.clone());' '' --test forks
+mutate src/state.rs 'if let Some(at) = view.revoked(principal)? {' 'if let Some(at) = None::<u64> {' --test forks
+mutate src/state.rs 'view.put_revoked(principal, offset)?;' '' --test forks
+mutate src/state.rs 'check_writer(view, &state, writer)?;
+            return draft(view, offset, state, id, changeset);' 'if let Some((head, at)) = state.head_changeset
+                && head == *id
+            {
+                return Ok(Applied::Repeat(at));
+            }
+            check_writer(view, &state, writer)?;
+            return draft(view, offset, state, id, changeset);' --test forks
+mutate src/state.rs 'check_writer(view, &state, writer)?;
+            return draft(view, offset, state, id, changeset);' 'return draft(view, offset, state, id, changeset);' --test forks
+mutate src/state.rs 'let mut state = fork(view, name)?;
+            check_writer(view, &state, writer)?;' 'let mut state = fork(view, name)?;' --test forks
+mutate src/state.rs 'Ok(()) => {
+                    return Err(CoreError::Inconsistent(format!(
+                        "draft {id} is fenced from {name:?}, but its writer holds it"
+                    )));
+                }' 'Ok(()) => {}' --lib
+mutate src/state.rs 'if *sibling != sibling_name(name, &writer.holder.node)? {' 'if false {' --lib
+mutate src/state.rs 'Some(other) if other.parent.as_ref() != Some(name) => {' 'Some(_) if false => {' --test forks
+mutate src/state.rs 'check_writer(view, &existing, &as_holder)?;' '' --test forks
+mutate src/state.rs 'base: changeset.base,
+                    head: changeset.base,' 'base: parent.base,
+                    head: changeset.base,' --test forks
+mutate src/state.rs 'let index = usize::try_from(epoch.checked_sub(1)?).ok()?;' 'let index = usize::try_from(epoch).ok()?;' --test forks
+mutate src/store.rs 'Err(CoreError::StaleEpoch { .. }) => {' 'Err(CoreError::StaleEpoch { .. }) if false => {' --test forks
+mutate src/store.rs 'if record.event.forks().contains(&fork) {' 'if true {' --test forks
+mutate src/event.rs 'Event::DraftFenced { fork, sibling, .. } => vec![fork, sibling],' 'Event::DraftFenced { fork, .. } => vec![fork],' --test forks
+mutate src/store.rs 'Event::DraftPublished { changeset, .. } | Event::DraftFenced { changeset, .. } => {' 'Event::DraftPublished { changeset, .. } => {' --lib
+mutate src/store.rs 'if revoked != replayed {' 'if false {' --lib
+mutate src/owner.rs 'node.as_str().to_ascii_lowercase()' 'node.as_str()' --test forks
+mutate src/owner.rs '&& s.len() <= MAX_NODE_BYTES' '' --lib
 # The changeset index keeps the first draft that recorded a changeset.
 mutate src/store.rs 'if self.changesets.get(id.as_bytes().as_slice())?.is_none() {' 'if true {' --test store
 # Replay: offsets, record bodies, duplicates, and each projection table.

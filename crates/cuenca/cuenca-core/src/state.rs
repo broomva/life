@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
 use crate::event::{ChangesetId, Event};
-use crate::names::{ForkName, LocationName};
+use crate::names::{ForkName, LocationName, PrincipalName};
+use crate::owner::{Holder, Writer, sibling_name};
 
 /// A location as the log has it now. Fields added later are `#[serde(default)]`, so
 /// rows written by this version still decode.
@@ -49,7 +50,12 @@ pub struct MainMove {
 pub struct Fork {
     pub name: ForkName,
     pub location: LocationName,
-    /// The tree it started from.
+    /// Who held it, epoch by epoch: `holders[e - 1]` held it under epoch `e`. The last
+    /// is the holder now, and the fork's epoch is the length (never 0).
+    pub holders: Vec<Holder>,
+    /// For a sibling fork, the fork whose stale-epoch publishes it keeps.
+    pub parent: Option<ForkName>,
+    /// The tree it started from: main for a fork, the stale writer's base for a sibling.
     pub base: GitOid,
     /// The tree of its latest draft, or `base` before the first.
     pub head: GitOid,
@@ -59,13 +65,32 @@ pub struct Fork {
     pub landing_intent: Option<(ChangesetId, u64)>,
 }
 
+impl Fork {
+    /// The fencing epoch: 1 at creation, plus one per takeover.
+    pub fn epoch(&self) -> u64 {
+        self.holders.len() as u64
+    }
+
+    /// Who holds it now (`None` only for a damaged row; the log always gives a holder).
+    pub fn holder(&self) -> Option<&Holder> {
+        self.holders.last()
+    }
+
+    /// Who held it under `epoch`.
+    pub fn holder_at(&self, epoch: u64) -> Option<&Holder> {
+        let index = usize::try_from(epoch.checked_sub(1)?).ok()?;
+        self.holders.get(index)
+    }
+}
+
 /// What [`apply`] decided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Applied {
     /// The event changes the state; the caller appends it at the offset it gave.
     Fresh,
     /// The event repeats the latest record of its kind for the same fork, at this
-    /// offset: a retry of a call that succeeded (a draft only while it is the head).     /// retry. The writer appends nothing; in a replay it is a duplicated record.
+    /// offset: a retry of a call that succeeded (a draft only while it is the head).
+    /// The writer appends nothing; in a replay it is a duplicated record.
     Repeat(u64),
 }
 
@@ -73,6 +98,9 @@ pub(crate) enum Applied {
 pub(crate) trait View {
     fn location(&self, name: &LocationName) -> Result<Option<Location>>;
     fn fork(&self, name: &ForkName) -> Result<Option<Fork>>;
+    /// The offset of the record that revoked `principal`, if one did.
+    fn revoked(&self, principal: &PrincipalName) -> Result<Option<u64>>;
+    fn put_revoked(&mut self, principal: &PrincipalName, offset: u64) -> Result<()>;
     /// A changeset some draft recorded.
     fn changeset(&self, id: ChangesetId) -> Result<Option<Changeset>>;
     fn put_location(&mut self, location: &Location) -> Result<()>;
@@ -94,6 +122,37 @@ fn location(view: &impl View, name: &LocationName) -> Result<Location> {
 fn fork(view: &impl View, name: &ForkName) -> Result<Fork> {
     view.fork(name)?
         .ok_or_else(|| CoreError::UnknownFork(name.to_string()))
+}
+
+fn not_revoked(view: &impl View, principal: &PrincipalName) -> Result<()> {
+    match view.revoked(principal)? {
+        Some(_) => Err(CoreError::Revoked(principal.to_string())),
+        None => Ok(()),
+    }
+}
+
+/// Whether `writer` may write `state` now. A writer whose principal is revoked is
+/// refused first; then the holder under the fork's current epoch may write; the holder
+/// of an earlier epoch is told its epoch is stale (its publish goes to a sibling fork);
+/// anyone else, or any epoch the fork has not reached, is not the holder.
+fn check_writer(view: &impl View, state: &Fork, writer: &Writer) -> Result<()> {
+    not_revoked(view, &writer.holder.principal)?;
+    let current = state.epoch();
+    if state.holder_at(writer.epoch) != Some(&writer.holder) {
+        return Err(CoreError::NotHolder {
+            fork: state.name.to_string(),
+            holder: writer.holder.to_string(),
+            epoch: writer.epoch,
+        });
+    }
+    if writer.epoch != current {
+        return Err(CoreError::StaleEpoch {
+            fork: state.name.to_string(),
+            epoch: writer.epoch,
+            current,
+        });
+    }
+    Ok(())
 }
 
 /// Apply `event`, to be recorded at `offset`, to `view`. On `Err` the view may be
@@ -119,7 +178,9 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
             fork: name,
             location: at,
             base,
+            holder,
         } => {
+            not_revoked(view, &holder.principal)?;
             if view.fork(name)?.is_some() {
                 return Err(CoreError::ForkExists(name.to_string()));
             }
@@ -134,6 +195,8 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
             view.put_fork(&Fork {
                 name: name.clone(),
                 location: at.clone(),
+                holders: vec![holder.clone()],
+                parent: None,
                 base: *base,
                 head: *base,
                 head_changeset: None,
@@ -142,31 +205,86 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
         }
         Event::DraftPublished {
             fork: name,
+            writer,
             id,
             changeset,
         } => {
-            if ChangesetId::of(changeset) != *id {
+            check_id(id, changeset)?;
+            let state = fork(view, name)?;
+            // Fencing comes before the retry: a fenced-out holder is never told Ok.
+            check_writer(view, &state, writer)?;
+            return draft(view, offset, state, id, changeset);
+        }
+        Event::DraftFenced {
+            fork: name,
+            sibling,
+            writer,
+            id,
+            changeset,
+        } => {
+            check_id(id, changeset)?;
+            let parent = fork(view, name)?;
+            match check_writer(view, &parent, writer) {
+                Err(CoreError::StaleEpoch { .. }) => {}
+                Err(e) => return Err(e),
+                Ok(()) => {
+                    return Err(CoreError::Inconsistent(format!(
+                        "draft {id} is fenced from {name:?}, but its writer holds it"
+                    )));
+                }
+            }
+            if *sibling != sibling_name(name, &writer.holder.node)? {
                 return Err(CoreError::Inconsistent(format!(
-                    "draft {id} is not its changeset's id"
+                    "{sibling:?} is not the sibling of {name:?} for node {}",
+                    writer.holder.node
                 )));
             }
-            let mut state = fork(view, name)?;
-            if let Some((head, at)) = state.head_changeset
-                && head == *id
-            {
-                return Ok(Applied::Repeat(at));
-            }
-            if changeset.base != state.head {
-                return Err(CoreError::NotAtBase {
-                    what: format!("fork {name:?}"),
-                    head: state.head,
+            let state = match view.fork(sibling)? {
+                None => Fork {
+                    name: sibling.clone(),
+                    location: parent.location.clone(),
+                    holders: vec![writer.holder.clone()],
+                    parent: Some(name.clone()),
                     base: changeset.base,
+                    head: changeset.base,
+                    head_changeset: None,
+                    landing_intent: None,
+                },
+                // A fork of that name that is not this fork's sibling is not mixed in.
+                Some(other) if other.parent.as_ref() != Some(name) => {
+                    return Err(CoreError::ForkExists(sibling.to_string()));
+                }
+                // The sibling is written by its own holder under its own epoch, as any fork.
+                Some(existing) => {
+                    let as_holder = Writer::new(writer.holder.clone(), existing.epoch());
+                    check_writer(view, &existing, &as_holder)?;
+                    existing
+                }
+            };
+            return draft(view, offset, state, id, changeset);
+        }
+        Event::TakenOver {
+            fork: name,
+            expected_epoch,
+            holder,
+        } => {
+            not_revoked(view, &holder.principal)?;
+            let mut state = fork(view, name)?;
+            if state.epoch() != *expected_epoch {
+                return Err(CoreError::EpochMismatch {
+                    fork: name.to_string(),
+                    expected: *expected_epoch,
+                    actual: state.epoch(),
                 });
             }
-            state.head = changeset.target;
-            state.head_changeset = Some((*id, offset));
+            state.holders.push(holder.clone());
             view.put_fork(&state)?;
-            view.index_changeset(*id, offset, changeset)?;
+        }
+        Event::PrincipalRevoked { principal } => {
+            if let Some(at) = view.revoked(principal)? {
+                return Ok(Applied::Repeat(at));
+            }
+            view.put_revoked(principal, offset)?;
         }
         Event::MainAdvanced {
             location: at,
@@ -213,9 +331,11 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
         }
         Event::LandingIntent {
             fork: name,
+            writer,
             changeset: id,
         } => {
             let mut state = fork(view, name)?;
+            check_writer(view, &state, writer)?;
             if let Some((last, at)) = state.landing_intent
                 && last == *id
             {
@@ -234,12 +354,50 @@ pub(crate) fn apply(view: &mut impl View, offset: u64, event: &Event) -> Result<
     Ok(Applied::Fresh)
 }
 
+fn check_id(id: &ChangesetId, changeset: &Changeset) -> Result<()> {
+    if ChangesetId::of(changeset) != *id {
+        return Err(CoreError::Inconsistent(format!(
+            "draft {id} is not its changeset's id"
+        )));
+    }
+    Ok(())
+}
+
+/// Move `state`'s head by `changeset`, which must start from it. Publishing the
+/// changeset that already is the head is a retry.
+fn draft(
+    view: &mut impl View,
+    offset: u64,
+    mut state: Fork,
+    id: &ChangesetId,
+    changeset: &Changeset,
+) -> Result<Applied> {
+    if let Some((head, at)) = state.head_changeset
+        && head == *id
+    {
+        return Ok(Applied::Repeat(at));
+    }
+    if changeset.base != state.head {
+        return Err(CoreError::NotAtBase {
+            what: format!("fork {:?}", state.name),
+            head: state.head,
+            base: changeset.base,
+        });
+    }
+    state.head = changeset.target;
+    state.head_changeset = Some((*id, offset));
+    view.put_fork(&state)?;
+    view.index_changeset(*id, offset, changeset)?;
+    Ok(Applied::Fresh)
+}
+
 /// The projections held in memory, as a replay builds them.
 #[derive(Debug, Default)]
 pub(crate) struct Memory {
     pub(crate) locations: BTreeMap<LocationName, Location>,
     pub(crate) forks: BTreeMap<ForkName, Fork>,
     pub(crate) changesets: HashMap<ChangesetId, (u64, Changeset)>,
+    pub(crate) revoked: BTreeMap<PrincipalName, u64>,
 }
 
 impl View for Memory {
@@ -249,6 +407,15 @@ impl View for Memory {
 
     fn fork(&self, name: &ForkName) -> Result<Option<Fork>> {
         Ok(self.forks.get(name).cloned())
+    }
+
+    fn revoked(&self, principal: &PrincipalName) -> Result<Option<u64>> {
+        Ok(self.revoked.get(principal).copied())
+    }
+
+    fn put_revoked(&mut self, principal: &PrincipalName, offset: u64) -> Result<()> {
+        self.revoked.insert(principal.clone(), offset);
+        Ok(())
     }
 
     fn changeset(&self, id: ChangesetId) -> Result<Option<Changeset>> {
