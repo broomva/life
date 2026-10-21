@@ -1,0 +1,20 @@
+[package]
+name = "cuenca-core"
+description = "The Cuenca authority's state: a durable append-only log, locations, forks and an oid-keyed blob store"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cuenca-tree = { path = "../cuenca-tree" }
+redb.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true

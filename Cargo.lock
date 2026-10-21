@@ -2870,6 +2870,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "cuenca-core"
+version = "0.3.0"
+dependencies = [
+ "cuenca-tree",
+ "redb",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "cuenca-tree"
 version = "0.3.0"
 dependencies = [
