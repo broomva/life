@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use cuenca_core::NodeId;
 use cuenca_server::admin::{self, AdminRequest};
-use cuenca_server::{Authority, Grant, Limits, Peer, PrincipalKind, Whois, WhoisFuture};
+use cuenca_server::{Authority, Grant, Peer, PrincipalKind, Whois, WhoisFuture};
 use cuenca_tree::{Changeset, Entry, GitOid, Op, RepoPath, Tree};
 use reqwest::blocking::{Client, Response};
 use serde_json::{Value, json};
@@ -59,33 +59,16 @@ impl Server {
         s
     }
 
-    /// Start with other request [`Limits`].
-    pub fn start_with(limits: Limits) -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().to_path_buf();
-        let mut s = Self::start_in_with(&path, limits);
-        s._dir = Some(dir);
-        s
-    }
-
     /// Start on the state in `dir` (kept by the caller).
     pub fn start_in(dir: &Path) -> Self {
-        Self::start_in_with(dir, Limits::default())
-    }
-
-    fn start_in_with(dir: &Path, limits: Limits) -> Self {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
             .build()
             .unwrap();
         let whois = Arc::new(Switch(Mutex::new(Ok(None))));
-        let authority = Arc::new(
-            Authority::open_with(&dir.join("state"), whois.clone() as Arc<dyn Whois>, limits)
-                .unwrap(),
-        );
-        // Tests do not depend on the host's free disk.
-        authority.set_min_free(0);
+        let authority =
+            Arc::new(Authority::open(&dir.join("state"), whois.clone() as Arc<dyn Whois>).unwrap());
         // The admin socket's directory must be its owner's alone, whatever the umask.
         std::fs::set_permissions(dir, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
         let admin_path = dir.join("admin.sock");

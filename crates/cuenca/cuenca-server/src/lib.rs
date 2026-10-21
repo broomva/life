@@ -17,6 +17,15 @@
 //! The authority binds only a tailnet address (100.64.0.0/10 or fd7a:115c:a1e0::/48)
 //! unless told `unsafe_bind`.
 //!
+//! # What it does not defend
+//!
+//! Availability against a principal that holds a key. An agent with a key can use up
+//! disk (uploads, drafts that store wide trees), memory (downloads it does not read)
+//! or connections until the owner revokes it; dividing the authority's resources among
+//! principals is BRO-3312. What holds regardless is revocation: `key_revoke` refuses
+//! the principal in memory before it writes anything, so it takes effect at once even
+//! on a full disk ([`admin`]).
+//!
 //! Crash safety is the store's: each write is one durable redb transaction, and every
 //! write the API offers is idempotent by its content (a draft by its changeset id, an
 //! intent by its changeset), so a client that lost an answer to a crash sends the same
@@ -32,7 +41,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub use authority::{AuthError, Authority, Caller, DEFAULT_MIN_FREE, Limits};
+pub use authority::{AuthError, Authority, Caller};
 pub use identity::{Peer, Tailscale, Whois, WhoisFuture};
 pub use keys::{Grant, KeyError, KeyRecord, KeyRing, PrincipalKind};
 
@@ -49,8 +58,6 @@ pub struct Config {
     pub unsafe_bind: bool,
     /// The `tailscale` binary.
     pub tailscale: PathBuf,
-    /// Free bytes blob uploads must leave on the state's filesystem.
-    pub min_free: u64,
 }
 
 /// Whether `ip` is in Tailscale's address ranges: 100.64.0.0/10 and
@@ -92,22 +99,14 @@ pub async fn serve_http(
     .await
 }
 
-/// Open the authority's state as `config` says: its directory and its free-space
-/// reserve.
-pub fn open_authority(config: &Config, whois: Arc<dyn Whois>) -> std::io::Result<Authority> {
-    let authority = Authority::open(&config.state, whois)?;
-    authority.set_min_free(config.min_free);
-    Ok(authority)
-}
-
 /// Run the authority: check the bind address, open the state, then serve the agent
 /// API and the admin socket until either stops or the process gets Ctrl-C.
 pub async fn run(config: Config) -> anyhow::Result<()> {
     check_bind(config.bind, config.unsafe_bind).map_err(anyhow::Error::msg)?;
     let whois: Arc<dyn Whois> = Arc::new(Tailscale::new(&config.tailscale));
-    let opened = config.clone();
+    let state = config.state.clone();
     let authority =
-        Arc::new(tokio::task::spawn_blocking(move || open_authority(&opened, whois)).await??);
+        Arc::new(tokio::task::spawn_blocking(move || Authority::open(&state, whois)).await??);
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
     let admin = admin::bind(&config.admin_socket)?;
     tracing::info!(bind = %config.bind, admin = %config.admin_socket.display(), "cuenca authority up");

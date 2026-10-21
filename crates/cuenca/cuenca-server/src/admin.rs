@@ -196,17 +196,7 @@ fn handle(a: &Authority, req: AdminRequest) -> Result<Value, String> {
                 .map_err(|e| s(&e))?;
             Ok(json!({ "key": record, "token": token }))
         }
-        AdminRequest::KeyRevoke { principal } => {
-            // In memory first: the key is refused from the next request on, even if
-            // the disk is full and nothing below can be written. Then the log, which
-            // makes it permanent; then the keys file.
-            a.ban(&principal);
-            let offset = a.store.revoke(&principal).map_err(|e| {
-                format!("{principal} is refused until this authority restarts; the log could not record the revocation: {e}")
-            })?;
-            let had_key = a.keys.remove(&principal).map_err(|e| s(&e))?;
-            Ok(json!({ "offset": offset, "had_key": had_key }))
-        }
+        AdminRequest::KeyRevoke { principal } => revoke(a, &principal, |p| a.store.revoke(p)),
         AdminRequest::KeyList => Ok(json!({ "keys": a.keys.list() })),
         AdminRequest::LocationAdd { name, remote, git } => {
             let tree = match git {
@@ -244,6 +234,25 @@ fn handle(a: &Authority, req: AdminRequest) -> Result<Value, String> {
     }
 }
 
+/// Revoke `principal`: in memory first, so the key is refused from its next request
+/// on even if nothing below can be written (a full disk); then `record` it in the log,
+/// which makes it permanent; then drop its key from the keys file.
+fn revoke(
+    a: &Authority,
+    principal: &PrincipalName,
+    record: impl FnOnce(&PrincipalName) -> cuenca_core::Result<u64>,
+) -> Result<Value, String> {
+    a.ban(principal);
+    let offset = record(principal).map_err(|e| {
+        format!(
+            "{principal} is refused until this authority restarts; \
+             the log could not record the revocation: {e}"
+        )
+    })?;
+    let had_key = a.keys.remove(principal).map_err(|e| e.to_string())?;
+    Ok(json!({ "offset": offset, "had_key": had_key }))
+}
+
 /// Send one owner act to the admin socket at `path` and read the answer (for the CLI's
 /// `cuenca admin`, and tests).
 pub fn call(path: &Path, req: &AdminRequest) -> std::io::Result<Value> {
@@ -254,4 +263,37 @@ pub fn call(path: &Path, req: &AdminRequest) -> std::io::Result<Value> {
     let mut answer = String::new();
     BufReader::new(stream).read_line(&mut answer)?;
     serde_json::from_str(&answer).map_err(std::io::Error::other)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Nobody;
+
+    impl crate::Whois for Nobody {
+        fn whois(&self, _ip: std::net::IpAddr) -> crate::WhoisFuture<'_> {
+            Box::pin(async { Ok(None) })
+        }
+    }
+
+    /// A revocation the log cannot record still refuses the key at once, and says so.
+    #[test]
+    fn a_revocation_the_log_cannot_record_still_refuses_the_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = Authority::open(dir.path(), Arc::new(Nobody)).unwrap();
+        let p = PrincipalName::new("a1").unwrap();
+        let err = revoke(&a, &p, |_| {
+            Err(cuenca_core::CoreError::Io(std::io::Error::other(
+                "disk full",
+            )))
+        })
+        .unwrap_err();
+        assert!(
+            err.contains("refused until this authority restarts"),
+            "{err}"
+        );
+        assert!(a.is_banned(&p));
+        assert!(a.store.revoked(&p).unwrap().is_none());
+    }
 }

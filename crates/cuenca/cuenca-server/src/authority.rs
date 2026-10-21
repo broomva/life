@@ -3,7 +3,6 @@
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cuenca_core::{CoreError, Fork, Holder, Location, PrincipalName, Store};
@@ -24,18 +23,11 @@ pub struct Authority {
     /// Where blob uploads are staged before they are verified.
     pub(crate) staging: PathBuf,
     blob_sets: Mutex<HashMap<GitOid, Arc<HashSet<GitOid>>>>,
-    /// Free bytes an upload must leave on the state's filesystem.
-    min_free: AtomicU64,
-    /// Bytes reserved by uploads in flight.
-    in_flight: Mutex<u64>,
     /// Blobs each principal has sent the bytes of (see [`Authority::check_puts`]).
     possessed: Mutex<HashMap<PrincipalName, HashSet<GitOid>>>,
     /// Principals revoked by this process, refused before any record of it is
     /// written ([`Authority::ban`]).
     banned: Mutex<HashSet<PrincipalName>>,
-    pub(crate) limits: Limits,
-    /// One permit per request in flight ([`Limits::requests`]).
-    pub(crate) requests: Arc<tokio::sync::Semaphore>,
 }
 
 /// An authenticated request's principal, on the node Tailscale named.
@@ -75,11 +67,6 @@ impl Authority {
     /// Open the authority's state in `dir`: the store in `dir/store`, the keys file
     /// `dir/keys.json`, staging in `dir/staging`.
     pub fn open(dir: &Path, whois: Arc<dyn Whois>) -> std::io::Result<Self> {
-        Self::open_with(dir, whois, Limits::default())
-    }
-
-    /// [`Authority::open`] with other [`Limits`].
-    pub fn open_with(dir: &Path, whois: Arc<dyn Whois>, limits: Limits) -> std::io::Result<Self> {
         std::fs::create_dir_all(dir)?;
         let store = Store::open(dir.join("store")).map_err(std::io::Error::other)?;
         let keys = KeyRing::open(dir.join("keys.json"))?;
@@ -96,11 +83,7 @@ impl Authority {
             staging,
             blob_sets: Mutex::new(HashMap::new()),
             possessed: Mutex::new(HashMap::new()),
-            min_free: AtomicU64::new(DEFAULT_MIN_FREE),
-            in_flight: Mutex::new(0),
             banned: Mutex::new(HashSet::new()),
-            requests: Arc::new(tokio::sync::Semaphore::new(limits.requests)),
-            limits,
         })
     }
 
@@ -127,12 +110,7 @@ impl Authority {
     ) -> Result<Caller, AuthError> {
         let token = token.ok_or(AuthError::NoToken)?;
         let key = self.keys.verify(token).ok_or(AuthError::BadKey)?;
-        if self
-            .banned
-            .lock()
-            .expect("ban lock")
-            .contains(&key.principal)
-        {
+        if self.is_banned(&key.principal) {
             return Err(AuthError::Revoked(key.principal.to_string()));
         }
         if self
@@ -185,79 +163,11 @@ impl Authority {
     }
 }
 
-/// Bounds on the agent API's requests. A request past any of them is dropped, and a
-/// client sends it again: every write is idempotent.
-#[derive(Debug, Clone, Copy)]
-pub struct Limits {
-    /// Requests served at once; one more is answered 503.
-    pub requests: usize,
-    /// Longest a request may take, body included; past it, 408. A blob upload must
-    /// move at least `MAX_BLOB_BYTES` in this time.
-    pub deadline: std::time::Duration,
-    /// Longest an upload's body may go without a byte; past it, 408.
-    pub body_idle: std::time::Duration,
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            requests: 64,
-            deadline: std::time::Duration::from_secs(600),
-            body_idle: std::time::Duration::from_secs(30),
-        }
-    }
-}
-
-/// Free space agent writes (uploads, drafts, forks, intents) leave on the state's
-/// filesystem by default, for the owner's acts and the log's own small writes.
-pub const DEFAULT_MIN_FREE: u64 = 2 * 1024 * 1024 * 1024;
-
 /// Most blobs remembered per principal; past it the record starts over, and the client
 /// sends the bytes again when a draft is refused for a missing blob.
 const MAX_POSSESSED: usize = 1 << 20;
 
 impl Authority {
-    /// The free space agent writes must leave.
-    pub fn min_free(&self) -> u64 {
-        self.min_free.load(Ordering::Relaxed)
-    }
-
-    /// Set the free space an upload must leave ([`DEFAULT_MIN_FREE`]).
-    pub fn set_min_free(&self, bytes: u64) {
-        self.min_free.store(bytes, Ordering::Relaxed);
-    }
-
-    /// Bytes free on the state's filesystem, to an unprivileged writer.
-    pub fn free_bytes(&self) -> std::io::Result<u64> {
-        let fs = rustix::fs::statvfs(&self.staging)?;
-        Ok(fs.f_bavail.saturating_mul(fs.f_frsize))
-    }
-
-    /// Reserve room for an upload of `size` bytes, or `None` if it would dip into the
-    /// free-space reserve. An upload takes up to twice its size while it is ingested
-    /// (the staged file and the store's copy), and every upload in flight holds its
-    /// reservation until it ends, so concurrent uploads cannot all pass on the same
-    /// free space. Uploads are not counted per principal; this keeps uploads from
-    /// stopping the log (and every principal's publishes).
-    pub(crate) fn reserve(self: &Arc<Self>, size: u64) -> std::io::Result<Option<Reservation>> {
-        let need = size.saturating_mul(2);
-        let mut in_flight = self.in_flight.lock().expect("reservation lock");
-        let free = self.free_bytes()?;
-        if !fits(
-            free,
-            *in_flight,
-            need,
-            self.min_free.load(Ordering::Relaxed),
-        ) {
-            return Ok(None);
-        }
-        *in_flight += need;
-        Ok(Some(Reservation {
-            authority: self.clone(),
-            bytes: need,
-        }))
-    }
-
     /// Refuse `principal` from now on, in this process: the part of revocation that
     /// needs no write, so it holds even when the disk is full. The admin socket's
     /// `key_revoke` does this first, then records the revocation in the log.
@@ -266,6 +176,11 @@ impl Authority {
             .lock()
             .expect("ban lock")
             .insert(principal.clone());
+    }
+
+    /// Whether this process has refused `principal` ([`Authority::ban`]).
+    pub fn is_banned(&self, principal: &PrincipalName) -> bool {
+        self.banned.lock().expect("ban lock").contains(principal)
     }
 
     /// Remember that `principal` sent the bytes of `oid`, verified.
@@ -321,27 +236,6 @@ impl Authority {
     }
 }
 
-/// Room held for one upload in flight, given back when it is dropped.
-pub(crate) struct Reservation {
-    authority: Arc<Authority>,
-    bytes: u64,
-}
-
-impl Drop for Reservation {
-    fn drop(&mut self) {
-        let mut in_flight = self.authority.in_flight.lock().expect("reservation lock");
-        *in_flight = in_flight.saturating_sub(self.bytes);
-    }
-}
-
-/// Whether `need` more bytes fit in `free` with `in_flight` already promised and
-/// `min_free` kept.
-fn fits(free: u64, in_flight: u64, need: u64, min_free: u64) -> bool {
-    free.checked_sub(in_flight)
-        .and_then(|left| left.checked_sub(need))
-        .is_some_and(|left| left >= min_free)
-}
-
 /// An IPv4 address that arrived as IPv4-mapped IPv6 is the IPv4 address.
 fn canonical(ip: IpAddr) -> IpAddr {
     match ip {
@@ -389,16 +283,6 @@ impl Caller {
 mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
-
-    #[test]
-    fn room_counts_what_is_in_flight() {
-        assert!(fits(100, 0, 50, 50));
-        assert!(!fits(100, 0, 51, 50));
-        assert!(!fits(100, 10, 50, 50));
-        assert!(fits(100, 10, 40, 50));
-        assert!(!fits(100, 101, 0, 0));
-        assert!(!fits(10, 0, 11, 0));
-    }
 
     #[test]
     fn mapped_v4_is_v4() {
