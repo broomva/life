@@ -9,9 +9,7 @@ no-default-features = false
 
 [advisories]
 version = 2
-ignore = [
-    "RUSTSEC-2026-0049",  # rustls-webpki CRL issue — low impact, patched upstream
-]
+ignore = []
 
 [licenses]
 version = 2

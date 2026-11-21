@@ -19,7 +19,6 @@
 #   webpki-roots 1.x. Remove when tonic / google-cloud-kms stop requiring webpki-roots 0.26.
 [advisories]
 ignore = [
-    "RUSTSEC-2026-0381",
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0384",
     "RUSTSEC-2024-0436",
